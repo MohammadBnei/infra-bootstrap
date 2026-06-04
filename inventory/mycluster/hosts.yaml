@@ -1,0 +1,44 @@
+all:
+  hosts:
+    node1:
+      ansible_host: 192.168.1.181
+      ansible_user: vagrant
+      ansible_password: vagrant
+      ansible_become: true
+      ansible_become_method: sudo
+      ip: 192.168.1.181
+      access_ip: 192.168.1.181
+    node4:
+      ansible_host: 192.168.1.191
+      ansible_user: vagrant
+      ansible_password: vagrant
+      ansible_become: true
+      ansible_become_method: sudo
+      ip: 192.168.1.191
+      access_ip: 192.168.1.191
+    node6:
+      ansible_host: 192.168.1.198
+      ansible_user: root
+      ansible_ssh_private_key_file: ~/.ssh/id_flatcar
+      ip: 192.168.1.198
+      access_ip: 192.168.1.198
+  children:
+    kube_control_plane:
+      hosts:
+        node1:
+        node4:
+        node6:
+    kube_node:
+      hosts:
+        node1:
+        node4:
+        node6:
+    etcd:
+      hosts:
+        node1:
+        node4:
+        node6:
+    k8s_cluster:
+      children:
+        kube_control_plane:
+        kube_node:
