@@ -1,0 +1,48 @@
+# Secrets — must NEVER be committed. Use Infisical 'infra-bootstrap' project.
+*.env
+*.secret
+secrets.yml
+secrets.local.yml
+.envrc
+
+# Ansible
+*.retry
+.ansible/
+roles/*/tests/
+inventory/*/host_vars/*/vault
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+.python-version
+.mypy_cache/
+
+# K8s
+.kube/
+
+# kubespray runtime artifacts (submodule owns these, but just in case)
+kubespray/cluster.yml
+kubespray/inventory/*.retry
+kubespray/inventory/artifacts/
+kubespray/.vagrant/
+
+# Pigsty runtime
+pigsty/dist/
+pigsty/files/pg_id*
+
+# Terraform / state
+*.tfstate
+*.tfstate.backup
+.terraform/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Editors
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
