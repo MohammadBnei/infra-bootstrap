@@ -1,7 +1,7 @@
 # Infrastructure — Actual State
 
 > **Source of truth** for what is currently running.
-> Last updated: 2026-06-04
+> Last updated: 2026-06-05
 > Owner: hermesagent (this AI)
 
 This document describes the **current, as-is** state of the homelab infrastructure.
@@ -34,6 +34,12 @@ For the target architecture, see [`infrastructure-desired.md`](./infrastructure-
 - Running LXCs:
   - VMID 101 `hermesagent` (2 vCPU / 4GB / 19GB) — this AI
   - VMID 102 `postgresql` (1 vCPU / 1GB / 3GB) — **EMPTY, just created**
+  - VMID 300 `postgres-data-1` (2 vCPU / 4GB / 40GB) — Pigsty primary/replica
+  - VMID 301 `garage-storage` (2 vCPU / 2GB / 200GB)
+- Running VMs (New K8s nodes):
+  - VMID 200 `k8s-cp-01` (2 vCPU / 4GB / 40GB) — Ubuntu 24.04, IP: 192.168.1.201
+  - VMID 202 `k8s-worker-01` (4 vCPU / 8GB / 60GB) — Ubuntu 24.04, IP: 192.168.1.202
+- Template: VMID 9000 `ubuntu-24.04-ci-template` (Golden cloud-init template)
 - ceph-fuse 19.2.3-pve4 (client only, no active cluster)
 
 ### Pi 4 (raspberry) details
@@ -91,10 +97,12 @@ For the target architecture, see [`infrastructure-desired.md`](./infrastructure-
 ### Nodes (current)
 | Node | Role | IP | OS | Where it runs |
 |---|---|---|---|---|
-| node1 | control-plane | 192.168.1.181 | Debian 12 | libvirt VM on server1 |
-| node4 | control-plane | 192.168.1.191 | Debian 12 | libvirt VM on ex-laptop |
+| node1 | control-plane | 192.168.1.181 | Debian 12 | libvirt VM on server1 *(legacy, migrating away)* |
+| node4 | control-plane | 192.168.1.191 | Debian 12 | libvirt VM on ex-laptop *(legacy, migrating away)* |
+| **k8s-cp-01** | **control-plane** | **192.168.1.201** | **Ubuntu 24.04** | **QEMU VM on proxmox PVE (NEW)** |
+| **k8s-worker-01** | **worker** | **192.168.1.202** | **Ubuntu 24.04** | **QEMU VM on proxmox PVE (NEW)** |
 
-**No dedicated workers** — both control planes carry the full workload.
+**Workload distribution:** Legacy nodes (node1, node4) carry most pods, many in `CrashLoopBackOff`. New nodes (k8s-cp-01, k8s-worker-01) are ready for workload migration via Kubespray.
 
 ### Workloads
 - **GitOps:** ArgoCD (multiple pods)
@@ -242,6 +250,7 @@ Standard set: pg_stat_statements, pg_trgm, pg_repack, postgres_fdw, etc. (17 tot
 - Access from LXC 101 (hermesagent) to:
   - server1: `mohammad@192.168.1.200:2222`
   - ex-laptop: `mohammad@192.168.1.161:2222`
+- K8s VMs SSH key: `~/.ssh/id_k8s_vm` (user: `ubuntu`)
 - SSH on LXC 101: standard port 22
 
 ### K8s
