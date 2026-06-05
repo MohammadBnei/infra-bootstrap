@@ -1,0 +1,51 @@
+---
+# Cilium-specific deltas for `ukubi` (new build on proxmox PVE).
+#
+# Note on the kubespray v2.23.0-1497 submodule: the variables
+# `cilium_chaining_mode` and `kube_proxy_replace` (used in newer kubespray
+# releases like v2.24+) do NOT exist in v2.23. Chaining mode + kube-proxy
+# retention is achieved here by setting:
+#   - cilium_kube_proxy_replacement: false  (kube-proxy keeps doing the
+#     service-IP routing; Cilium does BPF policy + Hubble observability)
+#   - cilium_enable_portmap: true            (enables hostPort support
+#     and emits chainingMode: portmap in the Cilium values.yaml template)
+# This produces the same end state as `cilium_chaining_mode: portmap` +
+# `kube_proxy_replace: disabled` on a newer kubespray. See the README
+# "Open questions" for the v2.31 submodule bump plan.
+
+# --- Identity allocation -----------------------------------------------------
+# `crd` stores identities as Kubernetes CRDs (queryable via
+# `kubectl get ciliumid`). Required for External Workloads support.
+# Overrides kubespray's default of `kvstore`.
+cilium_identity_allocation_mode: crd
+
+# --- Overlay -----------------------------------------------------------------
+# VXLAN overlay (kubespray default). Routes are advertised per-node via the
+# pod CIDR; the homelab is a single flat /24 with no L3 boundary to cross.
+cilium_tunnel_mode: vxlan
+
+# --- Masquerade --------------------------------------------------------------
+# Homelab LAN — no SNAT needed. Pod traffic to the LAN (or to the LAN's
+# gateway, the Freebox) should keep its pod source IP for L2 visibility
+# and to make MetalLB / Hubble flows readable. kubespray default.
+cilium_enable_bpf_masquerade: false
+
+# --- Chaining / hostPort -----------------------------------------------------
+# When `cilium_kube_proxy_replacement: false` and `cilium_enable_portmap: true`,
+# the Cilium chart sets chainingMode: portmap. kube-proxy handles service
+# routing; Cilium handles hostPort mapping. This is the pattern that
+# unifies eBPF-capable (proxmox PVE) and non-eBPF (future server1) workers.
+cilium_kube_proxy_replacement: false
+cilium_enable_portmap: true
+
+# --- L2 announcements --------------------------------------------------------
+# Disabled — MetalLB owns the L2 broadcast domain for LoadBalancer Services.
+# Don't enable this without first disabling `metallb_enabled` in addons.yml;
+# the two will fight over the same address pool.
+cilium_l2announcements: false
+
+# --- Hubble ------------------------------------------------------------------
+cilium_enable_hubble: true
+cilium_enable_hubble_ui: true
+cilium_enable_hubble_metrics: false
+cilium_hubble_tls_generate: false

@@ -1,0 +1,45 @@
+---
+# kubespray inventory — `ukubi` (new build on proxmox PVE; supersedes the
+# libvirt build on server1).
+#
+# 3 QEMU VMs on proxmox PVE (node `bnei`):
+#   - k8s-cp-01       VMID 201  control plane + etcd (stacked, single member)
+#   - k8s-worker-01   VMID 202  worker
+#   - k8s-worker-gpu  VMID 203  worker (RTX 2070 SUPER passthrough)
+#
+# The apiserver endpoint (`k8s-proxmox-gpu.bnei.lan`) and node IPs
+# (`.201-.203`) are distinct from the libvirt cluster (`k8s.bnei.lan`,
+# `.151-.153`) so the two can coexist during the migration window. Both
+# share the `~/.ssh/id_k8s_vms` key.
+
+all:
+  hosts:
+    k8s-cp-01:
+      ansible_host: 192.168.1.201
+      ip: 192.168.1.201
+      access_ip: 192.168.1.201
+      etcd_member_name: etcd-k8s-cp-01
+    k8s-worker-01:
+      ansible_host: 192.168.1.202
+      ip: 192.168.1.202
+      access_ip: 192.168.1.202
+    k8s-worker-gpu:
+      ansible_host: 192.168.1.203
+      ip: 192.168.1.203
+      access_ip: 192.168.1.203
+  children:
+    kube_control_plane:
+      hosts:
+        k8s-cp-01:
+    etcd:
+      hosts:
+        k8s-cp-01:
+    kube_node:
+      hosts:
+        k8s-cp-01:        # schedulable too — single-CP clusters need this for workloads
+        k8s-worker-01:
+        k8s-worker-gpu:
+    k8s_cluster:
+      children:
+        kube_control_plane:
+        kube_node:
