@@ -1,0 +1,44 @@
+---
+# kubespray inventory — `proxmox-gpu` (test cluster, greenfield bootstrap).
+#
+# 3 QEMU VMs on proxmox PVE (node `bnei`):
+#   - k8s-cp-01       VMID 201  control plane + etcd (stacked, single member)
+#   - k8s-worker-01   VMID 202  worker
+#   - k8s-worker-gpu  VMID 203  worker (RTX 2070 SUPER passthrough)
+#
+# Distinct from `ukubi-cluster` (live, on libvirt VMs on server1) to avoid
+# cert / DNS collision while both clusters coexist. Both share the
+# `~/.ssh/id_k8s_vms` key, but the inventory points at a different cert
+# directory and a different apiserver loadbalancer address.
+
+all:
+  hosts:
+    k8s-cp-01:
+      ansible_host: 192.168.1.201
+      ip: 192.168.1.201
+      access_ip: 192.168.1.201
+      etcd_member_name: etcd-k8s-cp-01
+    k8s-worker-01:
+      ansible_host: 192.168.1.202
+      ip: 192.168.1.202
+      access_ip: 192.168.1.202
+    k8s-worker-gpu:
+      ansible_host: 192.168.1.203
+      ip: 192.168.1.203
+      access_ip: 192.168.1.203
+  children:
+    kube_control_plane:
+      hosts:
+        k8s-cp-01:
+    etcd:
+      hosts:
+        k8s-cp-01:
+    kube_node:
+      hosts:
+        k8s-cp-01:        # schedulable too — single-CP clusters need this for workloads
+        k8s-worker-01:
+        k8s-worker-gpu:
+    k8s_cluster:
+      children:
+        kube_control_plane:
+        kube_node:

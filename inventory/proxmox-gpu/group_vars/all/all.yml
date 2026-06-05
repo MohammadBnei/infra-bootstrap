@@ -1,0 +1,54 @@
+---
+# Cluster-wide overrides for `proxmox-gpu` (test cluster).
+# Patterned after inventory/mycluster/group_vars/{all,k8s_cluster}/* and
+# the homelab-infra-workflow locked choices. Only the deltas from
+# kubespray defaults are listed — kubespray's sample group_vars provide
+# the rest.
+
+# --- Cluster identity --------------------------------------------------------
+# NOTE: the kubernetes DNS domain stays `cluster.local` (kubespray default)
+# regardless of the inventory folder name. The folder name `proxmox-gpu` is
+# the human label, not a DNS domain. Keeping `cluster.local` preserves
+# kubelet join compatibility with the live `ukubi-cluster` and lets
+# `kubectl` from any context resolve Services identically.
+cluster_name: cluster.local
+
+# --- Container runtime -------------------------------------------------------
+container_manager: containerd
+
+# --- DNS / NTP ---------------------------------------------------------------
+dns_mode: coredns
+enable_nodelocaldns: true
+resolvconf_mode: host_resolvconf
+upstream_dns_servers:
+  - 8.8.8.8
+  - 1.1.1.1
+ntp_servers:
+  - 0.fr.pool.ntp.org
+  - 1.fr.pool.ntp.org
+
+# --- Kubelet -----------------------------------------------------------------
+# VMs have no swap, so kubelet's `fail-on-swap` check would be a false alarm.
+kubelet_fail_swap_on: false
+
+# --- Certificates ------------------------------------------------------------
+auto_renew_certificates: true
+credentials_dir: "{{ inventory_dir }}/credentials"
+
+# --- Ansible connection ------------------------------------------------------
+# Proxmox cloud-init template bakes the user as `core` (NOT `ubuntu`).
+# Key is shared across all K8s VMs (idempotent with ukubi-cluster).
+# The K8S_VM_SSH_KEY_FILE env var override is for the bin/run-kubespray.sh
+# wrapper (in development on the source branch — not part of this PR), which
+# injects a per-run key from Infisical. Falls back to ~/.ssh/id_k8s_vms so
+# the inventory works without the wrapper too.
+ansible_user: core
+ansible_ssh_private_key_file: "{{ lookup('env', 'K8S_VM_SSH_KEY_FILE') | default(lookup('env', 'HOME') ~ '/.ssh/id_k8s_vms', true) }}"
+ansible_become: true
+ansible_become_method: sudo
+
+# --- Download cache ----------------------------------------------------------
+# Run the playbook from the hermes agent (hermesagent LXC) so the
+# release tarballs are cached locally and re-applied on reruns.
+download_run_once: true
+download_localhost: true
