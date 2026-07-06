@@ -33,17 +33,15 @@ If two docs disagree, this file wins.
 
 ## 2. Physical topology (greenfield)
 
-- **2 Proxmox PVE nodes (post greenfield reinstall):**
-  - `192.168.1.200` — server1, full PC (reinstall).
-  - `192.168.1.161` — ex-laptop (PVE reinstall, sleep-risk acknowledged).
-- **Off-host witness + DNS:** `192.168.1.55` — Pi 4 (Debian 13).
-  Runs etcd witness for Postgres quorum + Pi-hole for `*.bnei.lan`.
-- **`192.168.1.165` lifecycle:** TBD (see §Q-A). Was the previous
-  Proxmox PVE host hosting the libvirt-built ukubi cluster.
-- **Quorum risk:** Postgres quorum = 2 PVE data LXC + Pi 4 etcd witness
-  = 3 votes (survives one PVE down). K8s etcd = 1 stacked member on
-  `k8s-cp-01`; if that VM or host dies, control plane is gone. No
-  external witness for K8s in current design.
+- **3 Proxmox PVE nodes in the target layout:**
+  - `192.168.1.165` — proxmox/bnei, existing primary PVE host.
+  - `192.168.1.200` — server1, full PC (PVE reinstall pending).
+  - `192.168.1.161` — ex-laptop (PVE reinstall pending, sleep-risk acknowledged).
+- **DNS helper host:** `192.168.1.55` — Pi 4 (Debian 13).
+  Reserved for Pi-hole / local DNS duties only. It is **not** part of the
+  Postgres replication topology.
+- **Resolved 2026-07-05:** `.165` stays in service as the primary PVE host;
+  `.200` and `.161` are added after reinstall.
 
 ## 3. Cluster topology (K8s)
 
@@ -51,11 +49,13 @@ If two docs disagree, this file wins.
   `cluster.local` (kubespray default; preserves kubelet join
   compatibility).
 - **3 nodes, all QEMU VMs on the active PVE node:**
+
   | Hostname         | IP            | VMID | vCPU | RAM  | Disk | Role                          |
   |------------------|---------------|------|------|------|------|-------------------------------|
   | `k8s-cp-01`      | 192.168.1.201 | 201  | 2    | 4GB  | 40GB | control plane + etcd + worker |
   | `k8s-worker-01`  | 192.168.1.202 | 202  | 4    | 8GB  | 60GB | worker                        |
   | `k8s-worker-gpu` | 192.168.1.203 | 203  | 6    | 15GB | 100GB| worker + RTX 2070 SUPER PT    |
+
 - **Single CP + single etcd, stacked** (`etcd_deployment_type: kubeadm`,
   static pod managed by kubelet). Adding a second etcd/CPlater means
   re-running `cluster.yml` (NOT `scale.yml`).
@@ -68,8 +68,9 @@ If two docs disagree, this file wins.
 
 - **Version:** v1.35.4. Submodule pinned at the version the inventory is
   authored against — inventory yamls are still authored against
-  kubespray v2.23 variable names (despite the submodule being v2.31).
-  Until the inventory is ported to v2.31 vars, **do NOT run
+  kubespray v2.23 variable names (despite the submodule being v2.31.0,
+  the current latest stable release).
+  Until the inventory is ported to v2.31.0 vars, **do NOT run
   `cluster.yml`**. See §Q-D.
 - **Container runtime:** containerd.
 - **CNI:** Cilium in **chaining mode with kube-proxy retained**.
@@ -110,7 +111,7 @@ If two docs disagree, this file wins.
 ## 6. MetalLB
 
 - **Mode:** L2 only (Freebox blocks BGP).
-- **IP range:** `192.168.1.230–192.168.1.250`.
+- **IP range:** `192.168.1.230-192.168.1.250`.
 - **Reserved ingress VIP:** `192.168.1.230`.
 - **Speaker:** tolerates `node-role.kubernetes.io/control-plane:NoSchedule`.
 - **Controller:** 2 replicas with `podAntiAffinity
@@ -164,15 +165,20 @@ If two docs disagree, this file wins.
 
 ## 9. PostgreSQL (Pigsty)
 
-- **2 data LXC + 1 Pi 4 etcd witness** = 3-node Patroni quorum.
-- **Source PG 16.4 at `.193`** is the migration source. Briefly read-only
-  after cutover; kept on disk 7 days before decommission.
+- **2 data VM in primary/replica mode.** No Pi 4 etcd witness. No 3-node
+  Patroni quorum in the current design.
+- **Source PG 16.4 at `.193`** was the migration source. Cutover is
+  complete and the source VM is decommissioned.
 - **Cutover:** bootstrap Pigsty with source as initial primary, then
   add replicas. Brief `<5 min` read-only window.
-- **Backups:** pgBackRest, local on each LXC + off-host 149GB HDD on
+- **Backups:** pgBackRest, local on each VM + off-host 149GB HDD on
   server1. 7 daily / 4 weekly / 3 monthly. PITR 7 days.
 - **Observability built-in:** pg_exporter, Grafana dashboard, PgBouncer,
   HAProxy stats.
+- **Current state (2026-07-05):** `pg01` (`192.168.1.205`, VMID 205)
+  and `pg02` (`192.168.1.207`, VMID 207) both run on `.165` as QEMU VMs
+  with primary/replica replication. Automatic failover is **not** part of
+  the current design. Redis is currently co-located on `pg02`.
 
 ## 10. Storage
 
@@ -250,9 +256,9 @@ These items in working-tree files contradict MISSION.md. The agent
   `cert_manager_enabled: true`** → flip to `false`. Traefik ACME is
   the cert engine.
 - **`inventory/ukubi/README.md` "Open questions / risks" mentions
-  `v2.31 submodule bump`** — pending. Until inventory is ported to
-  v2.31 vars, running `cluster.yml` will silently use v2.23 vars on a
-  v2.31 submodule and may apply the wrong default values. Pin a
+  `v2.31.0 submodule bump`** — pending. Until inventory is ported to
+  v2.31.0 vars, running `cluster.yml` will silently use v2.23 vars on a
+  v2.31.0 submodule and may apply the wrong default values. Pin a
   consistent pair.
 - **`inventory/ukubi/README.md`** still references the "libvirt ukubi
   cluster on `server1`" as a coexisting cluster. Under greenfield that
@@ -262,8 +268,6 @@ These items in working-tree files contradict MISSION.md. The agent
 
 ## 15. Open questions (under decision; do not commit without explicit greenlight)
 
-- **Q-A. `.165` lifecycle** — keep as 3rd Proxmox node (better quorum +
-  retained workload VMs) or fully decommission (cleaner 2-node)?
 - **Q-B. `.161` laptop as a PVE node** — confirmed by user intent, but
   laptop-sleep risk on quorum is open. Mitigations: forced-wake timer,
   suspend-disabler systemd unit. Decide before first `kubespray
@@ -272,7 +276,7 @@ These items in working-tree files contradict MISSION.md. The agent
   cloning) vs `local-zfs` directory (simpler initial; harder to
   snapshot/clone VM disks). Affects VM provisioning.
 - **Q-D. Kubespray inventory ↔ submodule version alignment** —
-  inventory is on v2.23 var names; submodule is v2.31. Pick a
+  inventory is on v2.23 var names; submodule is v2.31.0. Pick a
   consistent pair before running cluster.yml.
 - **Q-E. Endpoint naming** — `k8s-proxmox-gpu.bnei.lan` (current) vs
   `k8s.bnei.lan` (legacy/libvirt). Decide when promoting from test
