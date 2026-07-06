@@ -1,0 +1,74 @@
+---
+#--------------------------------------------------------------#
+# Create DNS Dir                                       [dns_dir]
+#--------------------------------------------------------------#
+# dnsmasq runs as dnsmasq:dnsmasq, owns this directory to read it
+- name: create dns records dir
+  tags: dns_dir
+  file: path={{ infra_data }}/hosts state=directory mode=0755 owner=dnsmasq group=dnsmasq
+
+
+#--------------------------------------------------------------#
+# Config DNS                                        [dns_config]
+#--------------------------------------------------------------#
+- name: copy dnsmasq systemd service
+  tags: dns_config
+  template: src=dns/{{ item.src }} dest={{ item.dest }} owner=root group=root mode=0644
+  with_items:
+    - { src: dnsmasq.svc  ,dest: "{{ systemd_dir }}/dnsmasq.service" }
+    - { src: dnsmasq.conf ,dest: "/etc/dnsmasq.conf"                 }
+
+
+#--------------------------------------------------------------#
+# Write DNS Records                                 [dns_record]
+#--------------------------------------------------------------#
+# render to temp file first, then atomic mv to avoid dnsmasq inotify race
+- name: render default dns records
+  tags: dns_record
+  copy:
+    dest: /infra/hosts/.default.tmp
+    owner: root
+    group: root
+    mode: 0644
+    content: |
+      {% for rec in dns_records|default([]) %}
+      {{ rec|replace('${admin_ip}', admin_ip) }}
+      {% endfor %}
+
+- name: activate default dns records
+  tags: dns_record
+  shell: chcon -t dnsmasq_etc_t /infra/hosts/.default.tmp 2>/dev/null; mv /infra/hosts/.default.tmp /infra/hosts/default || true
+  args: { executable: /bin/bash } 
+
+#--------------------------------------------------------------#
+# Setup SELinux for Dnsmasq                        [dns_selinux]
+#--------------------------------------------------------------#
+# dnsmasq needs to read hostsdir, set proper SELinux context
+- name: setup selinux for dnsmasq
+  tags: [ dns_selinux ]
+  ignore_errors: true
+  shell: |
+    command -v semanage &>/dev/null || exit 0
+    semanage fcontext -m -t dnsmasq_etc_t "{{ infra_data }}/hosts(/.*)?" 2>/dev/null || \
+    semanage fcontext -a -t dnsmasq_etc_t "{{ infra_data }}/hosts(/.*)?" 2>/dev/null
+    semanage fcontext -a -t dnsmasq_etc_t "/data/infra/hosts" 2>/dev/null
+    semanage permissive -a dnsmasq_t 2>/dev/null
+    restorecon -Rv {{ infra_data }}/hosts 2>/dev/null
+    /bin/true
+  args: { executable: /bin/bash }
+
+
+#--------------------------------------------------------------#
+# Write DNS Records                                 [dns_launch]
+#--------------------------------------------------------------#
+- name: launch dnsmasq systemd service
+  tags: dns_launch
+  when: dns_enabled|bool
+  ignore_errors: true
+  block:
+    - name: launch dnsmasq systemd service
+      systemd: name=dnsmasq state=restarted enabled=yes daemon_reload=yes
+    - name: wait for dnsmasq service online
+      wait_for: host=127.0.0.1 port={{ dns_port }} state=started
+
+...

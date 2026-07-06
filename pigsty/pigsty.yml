@@ -1,0 +1,396 @@
+---
+#==============================================================#
+# File      :   meta.yml
+# Desc      :   Pigsty default 1-node online install config
+# Ctime     :   2020-05-22
+# Mtime     :   2026-02-04
+# Docs      :   https://pigsty.io/docs/conf/meta
+# License   :   Apache-2.0 @ https://pigsty.io/docs/about/license/
+# Copyright :   2018-2026  Ruohang Feng / Vonng (rh@vonng.com)
+#==============================================================#
+
+# This is the default 1-node configuration template, with:
+# INFRA, NODE, PGSQL, ETCD, MINIO, DOCKER, APP (pgadmin)
+# with basic pg extensions: postgis, pgvector
+#
+# Work with PostgreSQL 14-18 on all supported platform
+# Usage:
+#   curl https://repo.pigsty.io/get | bash
+#   ./configure
+#   ./deploy.yml
+
+all:
+
+  #==============================================================#
+  # Clusters, Nodes, and Modules
+  #==============================================================#
+  children:
+
+    #----------------------------------------------#
+    # PGSQL : https://pigsty.io/docs/pgsql
+    #----------------------------------------------#
+    # this is an example single-node postgres cluster with pgvector installed, with one biz database & two biz users
+    pg-proxmox:
+      hosts:
+        192.168.1.205: { pg_seq: 1, pg_role: primary } # <---- primary instance with read-write capability
+        192.168.1.207: { pg_seq: 2, pg_role: replica } # <---- read only replica for read-only online traffic
+      vars:
+        pg_cluster: pg-proxmox
+
+        # install, load, create pg extensions: https://pigsty.io/docs/pgsql/ext/
+        # NOTE: timescaledb is installed manually from Timescale's official apt repo (see migration notes),
+        # since Pigsty's own postgresql-18-timescaledb-tsl build 404s on their CDN as of pg18.
+        pg_extensions: [ postgis, pgvector ]
+
+        # define business users/roles : https://pigsty.io/docs/pgsql/config/user
+        pg_users:
+          - { name: dbuser_meta ,password: DBUser.Meta   ,pgbouncer: true ,roles: [dbrole_admin   ] ,comment: pigsty admin user }
+          - { name: dbuser_view ,password: DBUser.Viewer ,pgbouncer: true ,roles: [dbrole_readonly] ,comment: read-only viewer  }
+          - name: dbuser_infisical # REQUIRED, `name` is the only mandatory field of a user definition
+            password: dbInfiPass # optional, password, can be a scram-sha-256 hash string or plain text
+            createdb: true # optional, can create database? false by default
+            pgbouncer: true # optional, add this user to pgbouncer user-list? false by default (production user should be true explicitly)
+            connlimit: -1 # optional, user connection limit, default -1 disable limit
+            expire_in: 3650 # optional, now + n days when this role is expired (OVERWRITE expire_at)
+            comment: infisical secret store user # optional, comment string for this user/role
+            roles: [dbrole_readwrite] # optional, belonged roles. default roles are: dbrole_{admin,readonly,readwrite,offline}
+            pool_connlimit: -1 # optional, max database connections at user level, default -1 disable limit
+
+          - name: dbuser_n8n # REQUIRED, `name` is the only mandatory field of a user definition
+            password: dbN8nPass # optional, password, can be a scram-sha-256 hash string or plain text
+            pgbouncer: true # optional, add this user to pgbouncer user-list? false by default (production user should be true explicitly)
+            connlimit: -1 # optional, user connection limit, default -1 disable limit
+            expire_in: 3650 # optional, now + n days when this role is expired (OVERWRITE expire_at)
+            comment: n8n database # optional, comment string for this user/role
+            roles: [dbrole_readwrite] # optional, belonged roles. default roles are: dbrole_{admin,readonly,readwrite,offline}
+            pool_connlimit: -1 # optional, max database connections at user level, default -1 disable limit
+
+          - name: dbuser_openwebui # REQUIRED, `name` is the only mandatory field of a user definition
+            password: dbOpenWebPass # optional, password, can be a scram-sha-256 hash string or plain text
+            pgbouncer: true # optional, add this user to pgbouncer user-list? false by default (production user should be true explicitly)
+            connlimit: -1 # optional, user connection limit, default -1 disable limit
+            expire_in: 3650 # optional, now + n days when this role is expired (OVERWRITE expire_at)
+            comment: Open Web database # optional, comment string for this user/role
+            roles: [dbrole_readwrite] # optional, belonged roles. default roles are: dbrole_{admin,readonly,readwrite,offline}
+            pool_connlimit: -1 # optional, max database connections at user level, default -1 disable limit
+
+          - name: dbuser_vocon # REQUIRED, `name` is the only mandatory field of a user definition
+            password: dbvocOnPass # optional, password, can be a scram-sha-256 hash string or plain text
+            pgbouncer: true # optional, add this user to pgbouncer user-list? false by default (production user should be true explicitly)
+            connlimit: -1 # optional, user connection limit, default -1 disable limit
+            expire_in: 3650 # optional, now + n days when this role is expired (OVERWRITE expire_at)
+            roles: [dbrole_readwrite] # optional, belonged roles. default roles are: dbrole_{admin,readonly,readwrite,offline}
+            pool_connlimit: -1 # optional, max database connections at user level, default -1 disable limit
+
+          - name: dbuser_blog # REQUIRED, `name` is the only mandatory field of a user definition
+            password: dbblogPass # optional, password, can be a scram-sha-256 hash string or plain text
+            pgbouncer: true # optional, add this user to pgbouncer user-list? false by default (production user should be true explicitly)
+            connlimit: -1 # optional, user connection limit, default -1 disable limit
+            expire_in: 3650 # optional, now + n days when this role is expired (OVERWRITE expire_at)
+            roles: [dbrole_readwrite] # optional, belonged roles. default roles are: dbrole_{admin,readonly,readwrite,offline}
+            pool_connlimit: -1 # optional, max database connections at user level, default -1 disable limit
+
+          - name: dbuser_dreamanalyst # REQUIRED, `name` is the only mandatory field of a user definition
+            password: dbDreamAnalystPass # optional, password, can be a scram-sha-256 hash string or plain text
+            pgbouncer: true # optional, add this user to pgbouncer user-list? false by default (production user should be true explicitly)
+            connlimit: -1 # optional, user connection limit, default -1 disable limit
+            expire_in: 3650 # optional, now + n days when this role is expired (OVERWRITE expire_at)
+            roles: [dbrole_readwrite] # optional, belonged roles. default roles are: dbrole_{admin,readonly,readwrite,offline}
+            pool_connlimit: -1 # optional, max database connections at user level, default -1 disable limit
+
+          - name: dbuser_whodb # REQUIRED, `name` is the only mandatory field of a user definition
+            password: IM0MA8OZiDlErMp3g1YOjl # optional, password, can be a scram-sha-256 hash string or plain text
+            pgbouncer: true # optional, add this user to pgbouncer user-list? false by default (production user should be true explicitly)
+            connlimit: -1 # optional, user connection limit, default -1 disable limit
+            expire_in: 3650 # optional, now + n days when this role is expired (OVERWRITE expire_at)
+            comment: whodb database # optional, comment string for this user/role
+            roles: [dbrole_readwrite] # optional, belonged roles. default roles are: dbrole_{admin,readonly,readwrite,offline}
+            pool_connlimit: -1 # optional, max database connections at user level, default -1 disable limit
+
+        # define business databases : https://pigsty.io/docs/pgsql/config/db
+        pg_databases:
+          - name: meta
+            baseline: cmdb.sql
+            comment: "pigsty meta database"
+            schemas: [pigsty]
+            # define extensions in database : https://pigsty.io/docs/pgsql/ext/create
+            extensions: [ postgis, vector ]
+          - name: infisicaldb # REQUIRED, `name` is the only mandatory field of a database definition
+            comment: infisical DB # optional, comment string for this database
+            owner: dbuser_infisical # optional, database owner, postgres by default
+          - name: vos-monolith # REQUIRED, `name` is the only mandatory field of a database definition
+            owner: dbuser_vocon # optional, database owner, postgres by default
+            extensions:
+              - { name: timescaledb, schema: public }
+          - name: vos-monolith-dev # REQUIRED, `name` is the only mandatory field of a database definition
+            owner: dbuser_vocon # optional, database owner, postgres by default
+            extensions:
+              - { name: timescaledb, schema: public }
+          - name: n8ndb # REQUIRED, `name` is the only mandatory field of a database definition
+            comment: n8n db # optional, comment string for this database
+            owner: dbuser_n8n # optional, database owner, postgres by default
+            extensions: # optional, additional extensions to be installed: array of `{name[,schema]}`
+              - { name: vector, schema: public }
+          - name: n8nuserdb # REQUIRED, `name` is the only mandatory field of a database definition
+            comment: n8n user db # optional, comment string for this database
+            owner: dbuser_n8n # optional, database owner, postgres by default
+            extensions: # optional, additional extensions to be installed: array of `{name[,schema]}`
+              - { name: vector, schema: public }
+            pool_auth_user: dbuser_n8n
+          - name: openwebdb # REQUIRED, `name` is the only mandatory field of a database definition
+            owner: dbuser_openwebui # optional, database owner, postgres by default
+            extensions: # optional, additional extensions to be installed: array of `{name[,schema]}`
+              - { name: vector, schema: public }
+            pool_auth_user: dbuser_openwebui
+          - name: editableblogdb # REQUIRED, `name` is the only mandatory field of a database definition
+            owner: dbuser_blog # optional, database owner, postgres by default
+
+          - name: dream_analyst_db # REQUIRED, `name` is the only mandatory field of a database definition
+            owner: dbuser_dreamanalyst # optional, database owner, postgres by default
+            extensions: # optional, additional extensions to be installed: array of `{name[,schema]}`
+              - { name: vector, schema: public }
+
+          - name: whododb # REQUIRED, `name` is the only mandatory field of a database definition
+            comment: whodb database # optional, comment string for this database
+            owner: dbuser_whodb # optional, database owner, postgres by default
+
+        pg_hba_rules:   # https://pigsty.io/docs/pgsql/config/hba
+          - { user: all ,db: all ,addr: intra ,auth: pwd ,title: 'everyone intranet access with password' ,order: 800 }
+        pg_crontab:     # https://pigsty.io/docs/pgsql/admin/crontab
+          - '00 01 * * * /pg/bin/pg-backup full'
+
+        # define (OPTIONAL) L2 VIP that bind to primary
+        pg_vip_enabled: true
+        pg_vip_address: 192.168.1.232/24
+        pg_vip_interface: eth0
+
+        pg_libs: 'timescaledb, pg_stat_statements, auto_explain' # timescaledb must be first in shared_preload_libraries
+
+    #----------------------------------------------#
+    # INFRA : https://pigsty.io/docs/infra
+    #----------------------------------------------#
+    infra:
+      hosts:
+        192.168.1.205: { infra_seq: 1 }
+      vars:
+        repo_enabled: true   # disable in 1-node mode :  https://pigsty.io/docs/infra/admin/repo
+        #repo_extra_packages: [ pg18-main ,pg18-time ,pg18-gis ,pg18-rag ,pg18-fts ,pg18-olap ,pg18-feat ,pg18-lang ,pg18-type ,pg18-util ,pg18-func ,pg18-admin ,pg18-stat ,pg18-sec ,pg18-fdw ,pg18-sim ,pg18-etl]
+
+    #----------------------------------------------#
+    # ETCD : https://pigsty.io/docs/etcd
+    #----------------------------------------------#
+    etcd:
+      hosts:
+        192.168.1.207: { etcd_seq: 1 }
+      vars:
+        etcd_cluster: etcd
+        etcd_safeguard: false             # prevent purging running etcd instance?
+
+    #----------------------------------------------#
+    # MINIO : https://pigsty.io/docs/minio
+    #----------------------------------------------#
+    #minio:
+    #  hosts:
+    #    192.168.1.205: { minio_seq: 1 }
+    #  vars:
+    #    minio_cluster: minio
+    #    minio_users:                      # list of minio user to be created
+    #      - { access_key: pgbackrest  ,secret_key: S3User.Backup ,policy: pgsql }
+    #      - { access_key: s3user_meta ,secret_key: S3User.Meta   ,policy: meta  }
+    #      - { access_key: s3user_data ,secret_key: S3User.Data   ,policy: data  }
+
+    #----------------------------------------------#
+    # REDIS : https://pigsty.io/docs/redis
+    #----------------------------------------------#
+    redis-main:
+      hosts:
+        192.168.1.207: { redis_node: 1, redis_instances: { 6379: {} } }
+      vars:
+        redis_cluster: redis-main
+        redis_password: 'Redis.Main'
+        redis_max_memory: 256MB
+
+
+  #==============================================================#
+  # Global Parameters
+  #==============================================================#
+  vars:
+
+    #----------------------------------------------#
+    # INFRA : https://pigsty.io/docs/infra
+    #----------------------------------------------#
+    version: v4.3.0                   # pigsty version string
+    admin_ip: 192.168.1.205             # admin node ip address
+    region: default                   # upstream mirror region: default|china|europe
+    proxy_env:                        # global proxy env when downloading packages
+      no_proxy: "localhost,127.0.0.1,10.0.0.0/8,192.168.0.0/16,*.pigsty,*.aliyun.com,mirrors.*,*.myqcloud.com,*.tsinghua.edu.cn"
+      # http_proxy:  # set your proxy here: e.g http://user:pass@proxy.xxx.com
+      # https_proxy: # set your proxy here: e.g http://user:pass@proxy.xxx.com
+      # all_proxy:   # set your proxy here: e.g http://user:pass@proxy.xxx.com
+    infra_portal:                     # infra services exposed via portal
+      home : { domain: i.pigsty }     # default domain name
+      #minio  : { domain: m.pigsty ,endpoint: "${admin_ip}:9001" ,scheme: https ,websocket: true }
+
+    # override default repo_upstream: Ubuntu base/updates/backports/security now point at the
+    # official Canonical archive instead of mirrors.edge.kernel.org, which lagged behind the
+    # point-release versions baked into our VM images and broke `apt-get download` during repo build.
+    repo_upstream:
+      - { name: pigsty-local   ,description: 'Pigsty Local'       ,module: local   ,releases: [11,12,13,22,24,26] ,arch: [x86_64, aarch64] ,baseurl: { default: 'http://${admin_ip}/pigsty ./' }}
+      - { name: pigsty-pgsql   ,description: 'Pigsty PgSQL'       ,module: pgsql   ,releases: [11,12,13,22,24,26] ,arch: [x86_64, aarch64] ,baseurl: { default: 'https://repo.pigsty.io/apt/pgsql/${distro_codename} ${distro_codename} main', china: 'https://repo.pigsty.cc/apt/pgsql/${distro_codename} ${distro_codename} main' }}
+      - { name: pigsty-infra   ,description: 'Pigsty Infra'       ,module: infra   ,releases: [11,12,13,22,24,26] ,arch: [x86_64, aarch64] ,baseurl: { default: 'https://repo.pigsty.io/apt/infra/ generic main' ,china: 'https://repo.pigsty.cc/apt/infra/ generic main' }}
+      - { name: nginx          ,description: 'Nginx'              ,module: nginx   ,releases: [11,12,13,22,24,26] ,arch: [x86_64, aarch64] ,baseurl: { default: 'http://nginx.org/packages/${distro_name} ${distro_codename} nginx' }}
+      - { name: docker-ce      ,description: 'Docker'             ,module: infra   ,releases: [11,12,13,22,24,26] ,arch: [x86_64, aarch64] ,baseurl: { default: 'https://download.docker.com/linux/${distro_name} ${distro_codename} stable'                               ,china: 'https://mirrors.aliyun.com/docker-ce/linux/${distro_name} ${distro_codename} stable' }}
+      - { name: base           ,description: 'Debian Basic'       ,module: node    ,releases: [11,12,13         ] ,arch: [x86_64, aarch64] ,baseurl: { default: 'http://deb.debian.org/debian/ ${distro_codename} main non-free-firmware'                                  ,china: 'https://mirrors.aliyun.com/debian/ ${distro_codename} main non-free-firmware' }}
+      - { name: updates        ,description: 'Debian Updates'     ,module: node    ,releases: [11,12,13         ] ,arch: [x86_64, aarch64] ,baseurl: { default: 'http://deb.debian.org/debian/ ${distro_codename}-updates main non-free-firmware'                          ,china: 'https://mirrors.aliyun.com/debian/ ${distro_codename}-updates main non-free-firmware' }}
+      - { name: security       ,description: 'Debian Securitcy'   ,module: node    ,releases: [11,12,13         ] ,arch: [x86_64, aarch64] ,baseurl: { default: 'http://security.debian.org/debian-security ${distro_codename}-security main non-free-firmware'            ,china: 'https://mirrors.aliyun.com/debian-security/ ${distro_codename}-security main non-free-firmware' }}
+      - { name: base           ,description: 'Ubuntu Basic'       ,module: node    ,releases: [         22,24,26] ,arch: [x86_64         ] ,baseurl: { default: 'http://archive.ubuntu.com/ubuntu/ ${distro_codename}            main universe multiverse restricted' ,china: 'https://mirrors.aliyun.com/ubuntu/ ${distro_codename}           main restricted universe multiverse' }}
+      - { name: updates        ,description: 'Ubuntu Updates'     ,module: node    ,releases: [         22,24,26] ,arch: [x86_64         ] ,baseurl: { default: 'http://archive.ubuntu.com/ubuntu/ ${distro_codename}-updates    main restricted universe multiverse' ,china: 'https://mirrors.aliyun.com/ubuntu/ ${distro_codename}-updates   main restricted universe multiverse' }}
+      - { name: backports      ,description: 'Ubuntu Backports'   ,module: node    ,releases: [         22,24,26] ,arch: [x86_64         ] ,baseurl: { default: 'http://archive.ubuntu.com/ubuntu/ ${distro_codename}-backports  main restricted universe multiverse' ,china: 'https://mirrors.aliyun.com/ubuntu/ ${distro_codename}-backports main restricted universe multiverse' }}
+      - { name: security       ,description: 'Ubuntu Security'    ,module: node    ,releases: [         22,24,26] ,arch: [x86_64         ] ,baseurl: { default: 'http://security.ubuntu.com/ubuntu/ ${distro_codename}-security   main restricted universe multiverse' ,china: 'https://mirrors.aliyun.com/ubuntu/ ${distro_codename}-security  main restricted universe multiverse' }}
+      - { name: base           ,description: 'Ubuntu Basic'       ,module: node    ,releases: [         22,24,26] ,arch: [        aarch64] ,baseurl: { default: 'http://ports.ubuntu.com/ubuntu-ports/ ${distro_codename}             main universe multiverse restricted' ,china: 'https://mirrors.aliyun.com/ubuntu-ports/ ${distro_codename}           main restricted universe multiverse' }}
+      - { name: updates        ,description: 'Ubuntu Updates'     ,module: node    ,releases: [         22,24,26] ,arch: [        aarch64] ,baseurl: { default: 'http://ports.ubuntu.com/ubuntu-ports/ ${distro_codename}-updates     main restricted universe multiverse' ,china: 'https://mirrors.aliyun.com/ubuntu-ports/ ${distro_codename}-updates   main restricted universe multiverse' }}
+      - { name: backports      ,description: 'Ubuntu Backports'   ,module: node    ,releases: [         22,24,26] ,arch: [        aarch64] ,baseurl: { default: 'http://ports.ubuntu.com/ubuntu-ports/ ${distro_codename}-backports   main restricted universe multiverse' ,china: 'https://mirrors.aliyun.com/ubuntu-ports/ ${distro_codename}-backports main restricted universe multiverse' }}
+      - { name: security       ,description: 'Ubuntu Security'    ,module: node    ,releases: [         22,24,26] ,arch: [        aarch64] ,baseurl: { default: 'http://ports.ubuntu.com/ubuntu-ports/ ${distro_codename}-security    main restricted universe multiverse' ,china: 'https://mirrors.aliyun.com/ubuntu-ports/ ${distro_codename}-security  main restricted universe multiverse' }}
+      - { name: pgdg           ,description: 'PGDG'               ,module: pgsql   ,releases: [11,12,13,22,24,26] ,arch: [x86_64, aarch64] ,baseurl: { default: 'http://apt.postgresql.org/pub/repos/apt/ ${distro_codename}-pgdg main' ,china: 'https://mirrors.aliyun.com/postgresql/repos/apt/ ${distro_codename}-pgdg main' }}
+      - { name: pgdg-beta      ,description: 'PGDG Beta'          ,module: beta    ,releases: [11,12,13,22,24,26] ,arch: [x86_64, aarch64] ,baseurl: { default: 'http://apt.postgresql.org/pub/repos/apt/ ${distro_codename}-pgdg-testing main 19' ,china: 'https://mirrors.aliyun.com/postgresql/repos/apt/ ${distro_codename}-pgdg-testing main 19' }}
+      - { name: timescaledb    ,description: 'TimescaleDB'        ,module: extra   ,releases: [11,12,13,22,24   ] ,arch: [x86_64, aarch64] ,baseurl: { default: 'https://packagecloud.io/timescale/timescaledb/${distro_name}/ ${distro_codename} main' }}
+      - { name: citus          ,description: 'Citus'              ,module: extra   ,releases: [11,12,   22      ] ,arch: [x86_64, aarch64] ,baseurl: { default: 'https://packagecloud.io/citusdata/community/${distro_name}/ ${distro_codename} main' } }
+      - { name: percona        ,description: 'Percona TDE'        ,module: percona ,releases: [   12,13,22,24   ] ,arch: [x86_64, aarch64] ,baseurl: { default: 'https://repo.pigsty.io/apt/percona ${distro_codename} main' ,china: 'https://repo.pigsty.cc/apt/percona ${distro_codename} main' }}
+      - { name: groonga        ,description: 'Groonga Debian'     ,module: groonga ,releases: [11,12,13         ] ,arch: [x86_64, aarch64] ,baseurl: { default: 'https://packages.groonga.org/debian/ ${distro_codename} main' }}
+      - { name: groonga        ,description: 'Groonga Ubuntu'     ,module: groonga ,releases: [         22,24   ] ,arch: [x86_64, aarch64] ,baseurl: { default: 'https://ppa.launchpadcontent.net/groonga/ppa/ubuntu/ ${distro_codename} main' }}
+      - { name: mysql          ,description: 'MySQL'              ,module: mysql   ,releases: [11,12,   22,24   ] ,arch: [x86_64         ] ,baseurl: { default: 'https://repo.mysql.com/apt/${distro_name} ${distro_codename} mysql-8.0 mysql-tools'        ,china: 'https://mirrors.tuna.tsinghua.edu.cn/mysql/apt/${distro_name} ${distro_codename} mysql-8.0 mysql-tools' }}
+      - { name: mongo          ,description: 'MongoDB'            ,module: mongo   ,releases: [   12,   22,24   ] ,arch: [x86_64, aarch64] ,baseurl: { default: 'https://repo.mongodb.org/apt/${distro_name} ${distro_codename}/mongodb-org/8.0 multiverse' ,china: 'https://mirrors.aliyun.com/mongodb/apt/${distro_name} ${distro_codename}/mongodb-org/8.0 multiverse' }}
+      - { name: redis          ,description: 'Redis'              ,module: redis   ,releases: [11,12,   22,24   ] ,arch: [x86_64, aarch64] ,baseurl: { default: 'https://packages.redis.io/deb ${distro_codename} main' }}
+      - { name: llvm           ,description: 'LLVM'               ,module: llvm    ,releases: [11,12,13,22,24   ] ,arch: [x86_64, aarch64] ,baseurl: { default: 'http://apt.llvm.org/${distro_codename}/ llvm-toolchain-${distro_codename} main' ,china: 'https://mirrors.tuna.tsinghua.edu.cn/llvm-apt/${distro_codename}/ llvm-toolchain-${distro_codename} main' }}
+      - { name: haproxyd       ,description: 'Haproxy Debian'     ,module: haproxy ,releases: [   12            ] ,arch: [x86_64, aarch64] ,baseurl: { default: 'http://haproxy.debian.net/ ${distro_codename}-backports-3.2 main' }}
+      - { name: haproxyu       ,description: 'Haproxy Ubuntu'     ,module: haproxy ,releases: [            24,26] ,arch: [x86_64, aarch64] ,baseurl: { default: 'https://ppa.launchpadcontent.net/vbernat/haproxy-3.2/ubuntu/ ${distro_codename} main' }}
+      - { name: grafana        ,description: 'Grafana'            ,module: grafana ,releases: [11,12,13,22,24,26] ,arch: [x86_64, aarch64] ,baseurl: { default: 'https://apt.grafana.com stable main' ,china: 'https://mirrors.aliyun.com/grafana/apt/ stable main' }}
+      - { name: kubernetes     ,description: 'Kubernetes'         ,module: kube    ,releases: [11,12,13,22,24,26] ,arch: [x86_64, aarch64] ,baseurl: { default: 'https://pkgs.k8s.io/core:/stable:/v1.33/deb/ /', china: 'https://mirrors.aliyun.com/kubernetes-new/core/stable/v1.33/deb/ /' }}
+      - { name: gitlab-ee      ,description: 'Gitlab EE'          ,module: gitlab  ,releases: [11,12,13,22,24   ] ,arch: [x86_64, aarch64] ,baseurl: { default: 'https://packages.gitlab.com/gitlab/gitlab-ee/${distro_name}/ ${distro_codename} main' }}
+      - { name: gitlab-ce      ,description: 'Gitlab CE'          ,module: gitlab  ,releases: [11,12,13,22,24   ] ,arch: [x86_64, aarch64] ,baseurl: { default: 'https://packages.gitlab.com/gitlab/gitlab-ce/${distro_name}/ ${distro_codename} main' }}
+      - { name: clickhouse     ,description: 'ClickHouse'         ,module: click   ,releases: [11,12,13,22,24,26] ,arch: [x86_64, aarch64] ,baseurl: { default: 'https://packages.clickhouse.com/deb/ stable main', china: 'https://mirrors.aliyun.com/clickhouse/deb/ stable main' }}
+
+    #----------------------------------------------#
+    # NODE : https://pigsty.io/docs/node/param
+    #----------------------------------------------#
+    nodename_overwrite: false             # do not overwrite node hostname on single node mode
+    node_tune: oltp                       # node tuning specs: oltp,olap,tiny,crit
+    node_etc_hosts: [ '${admin_ip} i.pigsty sss.pigsty' ]
+    node_repo_modules: 'node,infra,pgsql' # add these repos directly to the singleton node
+    #node_repo_modules: local             # use this if you want to build & user local repo
+    node_repo_remove: true                # remove existing node repo for node managed by pigsty
+    #node_packages: [openssh-server]      # packages to be installed current nodes with the latest version
+    node_firewall_public_port: [22, 80, 443, 5432]    # expose 5432 for demo convenience, remove in production!
+
+    #----------------------------------------------#
+    # PGSQL : https://pigsty.io/docs/pgsql/param
+    #----------------------------------------------#
+    pg_version: 18                      # default postgres version
+    pg_locale: C.UTF-8                  # overwrite default C local
+    pg_lc_collate: C.UTF-8              # overwrite default C lc_collate
+    pg_lc_ctype: C.UTF-8                # overwrite default C lc_ctype
+
+    pg_conf: oltp.yml                   # pgsql tuning specs: {oltp,olap,tiny,crit}.yml
+    pg_safeguard: false                 # prevent purging running postgres instance?
+    pg_packages: [ pgsql-main, pgsql-common ]                 # pg kernel and common utils
+    #pg_extensions: [ pg18-time ,pg18-gis ,pg18-rag ,pg18-fts ,pg18-olap ,pg18-feat ,pg18-lang ,pg18-type ,pg18-util ,pg18-func ,pg18-admin ,pg18-stat ,pg18-sec ,pg18-fdw ,pg18-sim ,pg18-etl]
+
+    #----------------------------------------------#
+    # BACKUP : https://pigsty.io/docs/pgsql/backup
+    #----------------------------------------------#
+    # if you want to use minio as backup repo instead of 'local' fs, uncomment this, and configure `pgbackrest_repo`
+    # you can also use external object storage as backup repo
+    #pgbackrest_method: minio          # if you want to use minio as backup repo instead of 'local' fs, uncomment this
+    #pgbackrest_repo:                  # pgbackrest repo: https://pgbackrest.org/configuration.html#section-repository
+    #  local:                          # default pgbackrest repo with local posix fs
+    #    path: /pg/backup              # local backup directory, `/pg/backup` by default
+    #    retention_full_type: count    # retention full backups by count
+    #    retention_full: 2             # keep 2, at most 3 full backup when using local fs repo
+    #  minio:                          # optional minio repo for pgbackrest
+    #    type: s3                      # minio is s3-compatible, so s3 is used
+    #    s3_endpoint: sss.pigsty       # minio endpoint domain name, `sss.pigsty` by default
+    #    s3_region: us-east-1          # minio region, us-east-1 by default, useless for minio
+    #    s3_bucket: pgsql              # minio bucket name, `pgsql` by default
+    #    s3_key: pgbackrest            # minio user access key for pgbackrest
+    #    s3_key_secret: S3User.Backup  # minio user secret key for pgbackrest
+    #    s3_uri_style: path            # use path style uri for minio rather than host style
+    #    path: /pgbackrest             # minio backup path, default is `/pgbackrest`
+    #    storage_port: 9000            # minio port, 9000 by default
+    #    storage_ca_file: /etc/pki/ca.crt  # minio ca file path, `/etc/pki/ca.crt` by default
+    #    block: y                      # Enable block incremental backup
+    #    bundle: y                     # bundle small files into a single file
+    #    bundle_limit: 20MiB           # Limit for file bundles, 20MiB for object storage
+    #    bundle_size: 128MiB           # Target size for file bundles, 128MiB for object storage
+    #    cipher_type: aes-256-cbc      # enable AES encryption for remote backup repo
+    #    cipher_pass: pgBackRest       # AES encryption password, default is 'pgBackRest'
+    #    retention_full_type: time     # retention full backup by time on minio repo
+    #    retention_full: 14            # keep full backup for last 14 days
+    #  s3: # any s3 compatible service is fine
+    #    type: s3
+    #    s3_endpoint: oss-cn-beijing-internal.aliyuncs.com
+    #    s3_region: oss-cn-beijing
+    #    s3_bucket: <your_bucket_name>
+    #    s3_key: <your_access_key>
+    #    s3_key_secret: <your_secret_key>
+    #    s3_uri_style: host
+    #    path: /pgbackrest
+    #    bundle: y                     # bundle small files into a single file
+    #    bundle_limit: 20MiB           # Limit for file bundles, 20MiB for object storage
+    #    bundle_size: 128MiB           # Target size for file bundles, 128MiB for object storage
+    #    cipher_type: aes-256-cbc      # enable AES encryption for remote backup repo
+    #    cipher_pass: pgBackRest       # AES encryption password, default is 'pgBackRest'
+    #    retention_full_type: time     # retention full backup by time on minio repo
+    #    retention_full: 14            # keep full backup for last 14 days
+
+    #----------------------------------------------#
+    # PASSWORD : https://pigsty.io/docs/setup/security/
+    #----------------------------------------------#
+    grafana_admin_password: pigsty
+    grafana_view_password: DBUser.Viewer
+    pg_admin_password: DBUser.DBA
+    pg_monitor_password: DBUser.Monitor
+    pg_replication_password: DBUser.Replicator
+    patroni_password: Patroni.API
+    haproxy_admin_password: pigsty
+    minio_secret_key: S3User.MinIO
+    etcd_root_password: Etcd.Root
+
+
+    repo_remove: true                 # remove existing upstream repo
+    pg_dbsu: postgres                 # os dbsu name, postgres by default, better not change it
+    pg_dbsu_sudo: limit               # dbsu sudo privilege, none,limit,all,nopass. limit by default
+    pg_dbsu_home: /var/lib/pgsql      # postgresql home directory, `/var/lib/pgsql` by default
+    pg_dbsu_ssh_exchange: true        # exchange postgres dbsu ssh key among same pgsql cluster
+    pg_bin_dir: /usr/pgsql/bin        # postgres binary dir, `/usr/pgsql/bin` by default
+    pg_log_dir: /pg/log/postgres      # postgres log dir, `/pg/log/postgres` by default
+    pg_extensions: []  
+    pg_data: /pg/data                 # postgres data directory, `/pg/data` by default
+    pg_fs_main: /data/postgres        # postgres main data directory, `/data/postgres` by default
+    pg_fs_backup: /data/backups       # postgres backup data directory, `/data/backups` by default
+    pg_storage_type: SSD              # storage type for pg main data, SSD,HDD, SSD by default
+    pg_dummy_filesize: 64MiB          # size of `/pg/dummy`, hold 64MB disk space for emergency use
+    pg_listen: '0.0.0.0'              # postgres/pgbouncer listen addresses, comma separated list
+    pg_port: 5432                     # postgres listen port, 5432 by default
+    pg_localhost: /var/run/postgresql # postgres unix socket dir for localhost connection
+    patroni_enabled: true             # if disabled, no postgres cluster will be created during init
+    patroni_mode: default             # patroni working mode: default,pause,remove
+    pg_namespace: /pg                 # top level key namespace in etcd, used by patroni & vip
+    patroni_port: 8008                # patroni listen port, 8008 by default
+    patroni_log_dir: /pg/log/patroni  # patroni log dir, `/pg/log/patroni` by default
+    patroni_ssl_enabled: false        # secure patroni RestAPI communications with SSL?
+    patroni_watchdog_mode: 'off'      # patroni watchdog mode: automatic,required,off. off by default
+    patroni_username: postgres        # patroni restapi username, `postgres` by default
+    pg_etcd_password: ''              # etcd password for this pg cluster, '' to use pg_cluster
+    pg_primary_db: postgres           # primary database name, used by citus,etc... ,postgres by default
+    pg_parameters: {}                 # extra parameters in postgresql.auto.conf
+    pg_files: []                      # extra files to be copied to postgres data directory (e.g. license)
+    pg_max_conn: auto                 # postgres max connections, `auto` will use recommended value
+    pg_shared_buffer_ratio: 0.25      # postgres shared buffers ratio, 0.25 by default, 0.1~0.4
+    pg_io_method: worker              # io method for postgres, auto,fsync,worker,io_uring, worker by default
+    pg_rto: norm                      # shared rto mode for patroni & haproxy: fast,norm,safe,wide
+    pg_rpo: 1048576                   # recovery point objective in bytes, `1MiB` at most by default
+    pg_libs: 'pg_stat_statements, auto_explain'  # preloaded libraries, `pg_stat_statements,auto_explain` by default
+    pg_delay: 0                       # replication apply delay for standby cluster leader
+    pg_checksum: true                 # enable data checksum for postgres cluster?
+    pg_encoding: UTF8                 # database cluster encoding, `UTF8` by default
+...
