@@ -2,9 +2,11 @@
 # Chart: https://traefik.github.io/charts  name: traefik
 #
 # Key requirements (MISSION.md §5):
-#   - Gateway named "external-ingress" (not "traefik")
 #   - Listeners on port 80 (web) and 443 (websecure)
 #   - ACME HTTP-01 cert resolver, acme.json on PVC (never emptyDir)
+#   - Per-app routing via Traefik IngressRoute, not Gateway API — Traefik's
+#     ACME resolver can't issue certs for Gateway API listeners without
+#     cert-manager as a Secret bridge (banned), so IngressRoute is the lock.
 #   - MetalLB VIP: 192.168.1.230 (annotation or pool label)
 #   - kube-proxy retained (cilium chaining mode — do NOT enable kube-proxy replacement)
 
@@ -18,25 +20,15 @@ ports:
     port: 80
   websecure:
     port: 443
-
-gateway:
-  enabled: true
-  name: external-ingress
-  listeners:
-    web:
-      port: 80
-      protocol: HTTP
-      namespacePolicy: All
-    websecure:
-      port: 443
-      protocol: HTTPS
-      namespacePolicy: All
-      # TLS config — Traefik ACME manages the cert; certificateRefs not needed here
-      mode: Terminate
+    # Entrypoint-level ACME wiring — every IngressRoute router using this
+    # entrypoint gets the "le" cert resolver automatically.
+    tls:
+      enabled: true
+      certResolver: le
 
 providers:
   kubernetesGateway:
-    enabled: true
+    enabled: false
   kubernetesCRD:
     enabled: true
     allowCrossNamespace: true
@@ -60,7 +52,7 @@ certificatesResolvers:
       httpChallenge:
         entryPoint: web
 
-# Dashboard via IngressRoute is disabled — expose via HTTPRoute if needed
+# Dashboard via IngressRoute is disabled — expose via IngressRoute if needed
 ingressRoute:
   dashboard:
     enabled: false

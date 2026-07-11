@@ -87,19 +87,26 @@ If two docs disagree, this file wins.
 - **Ingress: Traefik in-cluster.** Deployment, Service `LoadBalancer`
   (MetalLB). Installed via Helm + ArgoCD. Single binary. NO cert
   controller beside it.
-- **Routing API: Gateway API only.** No plain Ingress, no
-  IngressRoute, no Ingress-NGINX.
-  - `GatewayClass`: `traefik`.
-  - `Gateway`: `external-ingress`, listeners `web:80` (`HTTP`) +
-    `websecure:443` (`HTTPS, Terminate`).
-  - Per-app `HTTPRoute` with `parentRefs`, `hostnames`, `rules.matches`,
-    `backendRefs`.
-  - Middlewares via `extensionRef` on HTTPRoute (Traefik-native).
+- **Routing API: Traefik `IngressRoute` for app HTTPS traffic.**
+  Reversed 2026-07-11 (was Gateway API only) — Traefik's ACME resolver
+  cannot issue certs for Gateway API listeners at all: Gateway API's
+  spec requires a pre-existing `certificateRefs` Secret, and Traefik has
+  no built-in bridge from `acme.json` to a Secret. Only cert-manager (or
+  an equivalent controller) can produce that Secret, and cert-manager is
+  banned below — so `IngressRoute` is the only way to keep native ACME
+  HTTP-01 working. No plain Ingress, no Ingress-NGINX.
+  - Per-app `IngressRoute`: `entryPoints: [websecure]`,
+    `routes[].match: Host(...)`, `tls.certResolver: le`.
+  - `ports.websecure.tls.certResolver: le` at the Traefik entrypoint
+    level so every IngressRoute router on that port gets ACME
+    automatically.
+  - Middlewares via `middlewares:` on the `IngressRoute` route
+    (Traefik-native).
 - **Cert engine: Traefik built-in ACME, HTTP-01.**
-  - `certResolvers.le.acme.email: TBD`.
-  - `certResolvers.le.acme.storage: /data/acme.json` — **PVC-backed,
+  - `certificatesResolvers.le.acme.email: account@bnei.dev`.
+  - `certificatesResolvers.le.acme.storage: /data/acme.json` — **PVC-backed,
     mandatory**.
-  - `certResolvers.le.acme.httpChallenge.entryPoint: web`.
+  - `certificatesResolvers.le.acme.httpChallenge.entryPoint: web`.
 - **Cert-manager: NEVER ADD.** Don't propose it. Traefik's HTTP-01 is
   sufficient.
 - **DNS-01 / OVH plugin: NEVER ADD.** Wildcard `*.bnei.dev` via DNS-01
@@ -129,7 +136,7 @@ If two docs disagree, this file wins.
 - **ApplicationSet shape:** Pattern C — no exceptions.
   - Cluster repo (`infra-bootstrap` or whichever is the chosen runtime
     repo): `platform/common-app-chart/` (Helm chart with templates for
-    Deployment, Service, HTTPRoute).
+    Deployment, Service, IngressRoute).
   - Cluster repo: `apps/registry.yaml` (flat list of apps with
     `name/repoURL/valuesPath/namespace/hostname`).
   - Per-app repos: only `values.yaml` (~5 fields).
@@ -219,7 +226,9 @@ If two docs disagree, this file wins.
 
 - ❌ **cert-manager** as a secondary cert engine for this cluster.
 - ❌ **DNS-01 / OVH plugin** as the cert engine.
-- ❌ **IngressRoute CRDs** (vendor-locked; Gateway API is the lock).
+- ❌ **Gateway API for app HTTPS routing** (reversed 2026-07-11 — Traefik's
+  ACME resolver can't serve certs to Gateway API listeners without
+  cert-manager as a Secret bridge; `IngressRoute` is the lock now).
 - ❌ **Plain K8s Ingress or Ingress-NGINX** (Traefik-only).
 - ❌ **Cilium Gateway API** (Freebox blocks BGP; Traefik is the lock).
 - ❌ **`cilium_l2announcements: true` while MetalLB owns L2** (race over

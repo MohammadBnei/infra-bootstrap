@@ -11,8 +11,8 @@ gitops/
 ├── bootstrap/                             # Applied once to bring the cluster up
 │   ├── register-repos.sh                  # Creates manual K8s Secrets before ArgoCD starts
 │   ├── argocd-application.yaml            # ArgoCD self-manages its own Helm chart
-│   ├── argocd-httproute.yaml              # Gateway API HTTPRoute → argocd.bnei.dev
-│   ├── infisical-httproute.yaml           # Gateway API HTTPRoute → infisical.bnei.dev
+│   ├── argocd-ingressroute.yaml           # Traefik IngressRoute → argocd.bnei.dev
+│   ├── infisical-ingressroute.yaml       # Traefik IngressRoute → infisical.bnei.dev
 │   ├── argocd-github-apps-creds.yaml      # InfisicalSecret → ArgoCD repo-creds for user apps
 │   ├── platform.applicationset.yaml       # ApplicationSet for all platform apps
 │   └── apps.applicationset.yaml           # ApplicationSet for all user apps
@@ -23,7 +23,7 @@ gitops/
 │   │   └── templates/
 │   │       ├── deployment.yaml            # Supports HTTP + TCP health probes
 │   │       ├── service.yaml
-│   │       ├── httproute.yaml             # Gateway API HTTPRoute (no IngressRoute, no Ingress)
+│   │       ├── ingressroute.yaml         # Traefik IngressRoute (no Gateway API, no Ingress)
 │   │       └── pvc.yaml
 │   └── values/                            # Helm values for platform apps
 │       ├── traefik/values.yaml
@@ -46,9 +46,9 @@ Everything is sequenced so each layer is ready before the next depends on it:
 | Wave | App(s) | Why first |
 |------|--------|-----------|
 | 1 | **Infisical** | Serves SSH keys to ArgoCD via `InfisicalSecret` CRDs — must be ready before any app that needs a private values repo |
-| 2 | **Traefik** | Gateway + Ingress — must be up before HTTPRoutes resolve |
+| 2 | **Traefik** | Ingress — must be up before IngressRoutes resolve |
 | 5 | Prometheus, Grafana, metrics-server | Observability, no hard ordering constraint |
-| 10 | All user apps | Depend on Infisical (secrets) + Traefik (HTTPRoutes) |
+| 10 | All user apps | Depend on Infisical (secrets) + Traefik (IngressRoutes) |
 
 ### Bootstrap credential chain
 
@@ -96,7 +96,7 @@ Image updates are handled by each app's own CD pipeline — ArgoCD just syncs wh
 A minimal Helm chart for standard web apps. Renders:
 - `Deployment` — image, env, envFrom, resources, optional health probes (HTTP or TCP), optional PVC mount
 - `Service` — ClusterIP on `service.port`
-- `HTTPRoute` — Gateway API only, parent `external-ingress` in `traefik` namespace
+- `IngressRoute` — Traefik CRD, `entryPoints: [websecure]`, native ACME via `tls.certResolver`
 - `PersistentVolumeClaim` — optional, gated by `persistence.enabled`
 
 Key values a per-app `values.yaml` must set:
@@ -225,7 +225,7 @@ To bump a chart version: update `chartRevision` in `platform.applicationset.yaml
 
 ## Hard constraints (from MISSION.md)
 
-- **No IngressRoute, no plain Ingress** — Gateway API `HTTPRoute` only
+- **No Gateway API for app routing, no plain Ingress** — Traefik `IngressRoute` only (Gateway API can't get certs from Traefik's ACME resolver without cert-manager)
 - **No cert-manager** — TLS via Traefik ACME (HTTP-01), `acme.json` on a PVC
 - **No secrets in git** — all secrets via Infisical; `.env.*` files are gitignored
 - **MetalLB and Cilium are not in ArgoCD** — kubespray owns them

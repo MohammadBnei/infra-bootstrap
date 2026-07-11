@@ -11,10 +11,9 @@ service:
 ingress:
   enabled: true
   hostname: ""
-  # Gateway and listener created by Traefik (external-ingress in traefik namespace, per MISSION.md §5)
-  gatewayName: external-ingress
-  gatewayNamespace: traefik
-  listenerHTTPS: websecure
+  # Traefik IngressRoute + native ACME (per MISSION.md §5) — Gateway API
+  # can't get certs from Traefik's ACME resolver without cert-manager.
+  certResolver: le
 
 resources: {}
 # requests:

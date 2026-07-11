@@ -1,24 +1,20 @@
 {{- if and .Values.ingress.enabled .Values.ingress.hostname }}
-apiVersion: gateway.networking.k8s.io/v1
-kind: HTTPRoute
+apiVersion: traefik.io/v1alpha1
+kind: IngressRoute
 metadata:
   name: {{ .Release.Name }}
   namespace: {{ .Release.Namespace }}
   labels:
     {{- include "common-app-chart.labels" . | nindent 4 }}
 spec:
-  parentRefs:
-  - name: {{ .Values.ingress.gatewayName }}
-    namespace: {{ .Values.ingress.gatewayNamespace }}
-    sectionName: {{ .Values.ingress.listenerHTTPS }}
-  hostnames:
-  - {{ .Values.ingress.hostname | quote }}
-  rules:
-  - matches:
-    - path:
-        type: PathPrefix
-        value: /
-    backendRefs:
+  entryPoints:
+  - websecure
+  routes:
+  - kind: Rule
+    match: Host(`{{ .Values.ingress.hostname }}`)
+    services:
     - name: {{ .Release.Name }}
       port: {{ .Values.service.port }}
+  tls:
+    certResolver: {{ .Values.ingress.certResolver }}
 {{- end }}
