@@ -11,8 +11,11 @@ spec:
     repoURL: https://argoproj.github.io/argo-helm
     chart: argo-cd
     # Pin to a specific version; bump here (not UI) for ArgoCD self-upgrades.
-    # Helm chart 7.x == ArgoCD app 2.14.x
-    targetRevision: "7.8.1"
+    # Helm chart 10.x == ArgoCD app 3.4.x. Bumped from 7.8.1/2.14.2 because
+    # that version predates K8s 1.33's Deployment.status.terminatingReplicas
+    # field, which broke structured-merge-diff for every app managing a
+    # Deployment on this cluster's kube_version (1.35.4).
+    targetRevision: "10.1.3"
     helm:
       values: |
         global:
