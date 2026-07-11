@@ -26,6 +26,12 @@ infisical:
 postgresql:
   enabled: false
 
+# Chart defaults this to true (bundled Bitnami MongoDB subchart) — legacy
+# Infisical only. This install uses external Postgres (Pigsty) via
+# DB_CONNECTION_URI in the infisical-secrets kubeSecretRef, so disable it.
+mongodb:
+  enabled: false
+
 redis:
   enabled: false
 
