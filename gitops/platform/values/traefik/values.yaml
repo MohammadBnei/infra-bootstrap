@@ -26,13 +26,11 @@ gateway:
     web:
       port: 80
       protocol: HTTP
-      namespacePolicy:
-        from: All
+      namespacePolicy: All
     websecure:
       port: 443
       protocol: HTTPS
-      namespacePolicy:
-        from: All
+      namespacePolicy: All
       # TLS config — Traefik ACME manages the cert; certificateRefs not needed here
       mode: Terminate
 
