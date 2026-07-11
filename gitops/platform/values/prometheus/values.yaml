@@ -1,0 +1,31 @@
+# kube-prometheus-stack Helm values for ukubi-cluster
+# Chart: https://prometheus-community.github.io/helm-charts  name: kube-prometheus-stack
+#
+# Migrated from k8s-cluster/prometheus/values.yml — trim to what's actually needed.
+
+# Disable components managed elsewhere or not needed
+alertmanager:
+  enabled: false
+
+# Grafana is deployed as a separate platform app
+grafana:
+  enabled: false
+
+prometheus:
+  prometheusSpec:
+    retention: 7d
+    storageSpec:
+      volumeClaimTemplate:
+        spec:
+          accessModes: ["ReadWriteOnce"]
+          resources:
+            requests:
+              storage: 20Gi
+
+# node-exporter on every node
+nodeExporter:
+  enabled: true
+
+# kube-state-metrics
+kubeStateMetrics:
+  enabled: true

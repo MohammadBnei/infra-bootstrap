@@ -233,6 +233,13 @@ If two docs disagree, this file wins.
 - ❌ **Wireguard / Tailscale** for this cluster (existing remote-access
   pattern unchanged).
 - ❌ **Multi-region / DR / multi-tenancy GPU / service mesh.**
+- ❌ **Infisical as SSH CA for VM access / as TLS CA for intra-cluster
+  encryption.** [REJECTED 2026-07-11: single-operator homelab has no
+  multi-admin credential churn to justify a CA; Infisical would become
+  a circular dependency (it runs inside the cluster it'd gate SSH
+  access to); no concrete TLS need was named — Cilium's built-in
+  encryption (currently off) is the lazy fix if plaintext pod traffic
+  is the actual concern.]
 - ❌ **Vagrant for Proxmox provisioning.** Manual `qm importdisk` +
   `qm clone` + `qm set --ipconfig0 --sshkeys`.
 - ❌ **Flatcar as VM OS.** Debian/Ubuntu + GitOps gives adequate

@@ -1,0 +1,28 @@
+# Grafana Helm values for ukubi-cluster
+# Chart: https://grafana.github.io/helm-charts  name: grafana
+#
+# Migrated from k8s-cluster/grafana/values.yml — trim to essentials.
+
+persistence:
+  enabled: true
+  size: 5Gi
+
+# Admin credentials from K8s Secret (created via ExternalSecret → Infisical)
+admin:
+  existingSecret: grafana-admin
+  userKey: username
+  passwordKey: password
+
+datasources:
+  datasources.yaml:
+    apiVersion: 1
+    datasources:
+    - name: Prometheus
+      type: prometheus
+      url: http://prometheus-kube-prometheus-prometheus.monitoring.svc.cluster.local:9090
+      isDefault: true
+
+# Ingress disabled — HTTPRoute managed via an HTTPRoute manifest or added here
+grafana.ini:
+  server:
+    root_url: https://grafana.bnei.dev

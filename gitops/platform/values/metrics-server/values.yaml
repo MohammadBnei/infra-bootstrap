@@ -1,0 +1,5 @@
+# Metrics Server Helm values for ukubi-cluster
+# Chart: https://kubernetes-sigs.github.io/metrics-server/  name: metrics-server
+
+args:
+  - --kubelet-insecure-tls

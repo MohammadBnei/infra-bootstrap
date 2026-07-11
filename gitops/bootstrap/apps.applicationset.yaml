@@ -1,0 +1,103 @@
+apiVersion: argoproj.io/v1alpha1
+kind: ApplicationSet
+metadata:
+  name: apps
+  namespace: argocd
+spec:
+  goTemplate: true
+  goTemplateOptions: ["missingkey=zero"]
+  generators:
+  - list:
+      # Keep in sync with gitops/apps/registry.yaml (human source of truth).
+      # Add an app: update registry.yaml first, then mirror the entry here.
+      elements:
+
+      - name: n8n
+        namespace: n8n
+        syncWave: "10"
+        repoURL: git@github.com:MohammadBnei/n8n.git
+        valuesPath: values.yaml
+        hostname: n8n.bnei.dev
+
+      - name: openweb-ui
+        namespace: openweb-ui
+        syncWave: "10"
+        repoURL: git@github.com:MohammadBnei/openweb-ui.git
+        valuesPath: values.yaml
+        hostname: open-webui.bnei.dev
+
+      - name: openweb-ui-pipelines
+        namespace: openweb-ui
+        syncWave: "10"
+        repoURL: git@github.com:MohammadBnei/openweb-ui.git
+        valuesPath: pipelines-values.yaml
+        hostname: ""
+
+      - name: searxng
+        namespace: searxng
+        syncWave: "10"
+        repoURL: git@github.com:MohammadBnei/searxng.git
+        valuesPath: values.yaml
+        hostname: searxng.bnei.dev
+
+      - name: whodb
+        namespace: whodb
+        syncWave: "10"
+        repoURL: git@github.com:MohammadBnei/whodb.git
+        valuesPath: values.yaml
+        hostname: whodb.bnei.dev
+
+      - name: api
+        namespace: api
+        syncWave: "10"
+        repoURL: git@github.com:MohammadBnei/api.git
+        valuesPath: values.yaml
+        hostname: api.bnei.dev
+
+      - name: ukubi-ai
+        namespace: ukubi-ai
+        syncWave: "10"
+        repoURL: git@github.com:MohammadBnei/ukubi-ai.git
+        valuesPath: values.yaml
+        hostname: ukubi-ai.bnei.dev
+
+  template:
+    metadata:
+      name: '{{.name}}'
+      annotations:
+        argocd.argoproj.io/sync-wave: '{{.syncWave}}'
+      finalizers:
+      - resources-finalizer.argocd.argoproj.io
+    spec:
+      project: default
+      sources:
+      # Source 1: shared Helm chart from infra-bootstrap
+      - repoURL: git@github.com:MohammadBnei/infra-bootstrap.git
+        path: gitops/platform/common-app-chart
+        targetRevision: HEAD
+        helm:
+          valueFiles:
+          - $values/{{.valuesPath}}
+          parameters:
+          - name: ingress.hostname
+            value: '{{.hostname}}'
+      # Source 2: per-app values repo (private, SSH deploy key required)
+      - repoURL: '{{.repoURL}}'
+        targetRevision: HEAD
+        ref: values
+      destination:
+        server: https://kubernetes.default.svc
+        namespace: '{{.namespace}}'
+      syncPolicy:
+        automated:
+          prune: true
+          selfHeal: true
+        syncOptions:
+        - CreateNamespace=true
+        - ServerSideApply=true
+        retry:
+          limit: 5
+          backoff:
+            duration: 5s
+            factor: 2
+            maxDuration: 3m

@@ -1,0 +1,6 @@
+apiVersion: v2
+name: common-app-chart
+description: Shared Helm chart for ukubi-cluster web apps — Deployment + Service + Gateway API HTTPRoute
+type: application
+version: 0.1.0
+appVersion: "1.0"

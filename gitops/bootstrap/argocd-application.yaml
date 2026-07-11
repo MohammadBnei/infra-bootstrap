@@ -1,0 +1,64 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: argocd
+  namespace: argocd
+  finalizers:
+  - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: https://argoproj.github.io/argo-helm
+    chart: argo-cd
+    # Pin to a specific version; bump here (not UI) for ArgoCD self-upgrades.
+    # Helm chart 7.x == ArgoCD app 2.14.x
+    targetRevision: "7.8.1"
+    helm:
+      values: |
+        global:
+          domain: argocd.bnei.dev
+
+        configs:
+          params:
+            # TLS terminated at Traefik — ArgoCD serves plain HTTP inside the cluster
+            "server.insecure": "true"
+
+        server:
+          service:
+            type: ClusterIP
+          # Disable built-in Ingress — we use a Gateway API HTTPRoute (argocd-httproute.yaml)
+          ingress:
+            enabled: false
+          ingressGrpc:
+            enabled: false
+
+        applicationSet:
+          enabled: true
+
+        notifications:
+          enabled: false
+
+        repoServer:
+          env:
+            # infra-bootstrap has a private k8s-cluster git submodule that repo-server
+            # doesn't need (only plain files under gitops/ are referenced as values
+            # sources) and has no credentials for. Skip submodule init entirely rather
+            # than granting the deploy key access to a repo it doesn't use.
+            - name: ARGOCD_GIT_MODULES_ENABLED
+              value: "false"
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: argocd
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+    - CreateNamespace=true
+    - ServerSideApply=true
+    retry:
+      limit: 5
+      backoff:
+        duration: 5s
+        factor: 2
+        maxDuration: 3m

@@ -1,0 +1,38 @@
+# InfisicalSecret that materialises the ArgoCD repo-creds template for all
+# MohammadBnei/* user-app repos. Applied at bootstrap time but only becomes
+# active once Infisical (wave 1) is running.
+#
+# Required secrets in your Infisical project (projectSlug below):
+#   GITHUB_APPS_SSH_KEY  — full PEM private key (read access to all MohammadBnei/* repos)
+#
+# The template block sets the ArgoCD label so ArgoCD auto-discovers the secret
+# as a credential template (requires Infisical operator >= 0.6.0).
+apiVersion: secrets.infisical.com/v1alpha1
+kind: InfisicalSecret
+metadata:
+  name: argocd-github-apps-creds
+  namespace: argocd
+spec:
+  hostAPI: http://infisical.infisical.svc.cluster.local:8080/api
+  resyncInterval: 60
+  authentication:
+    universalAuth:
+      secretsScope:
+        projectSlug: "argocd-github-creds-2-os5"
+        envSlug: prod
+        secretsPath: "/"
+      credentialsRef:
+        secretName: universal-auth-credentials
+        secretNamespace: infisical
+  managedSecretReference:
+    secretName: repo-creds-github-bnei
+    secretNamespace: argocd
+    creationPolicy: Orphan
+    template:
+      metadata:
+        labels:
+          argocd.argoproj.io/secret-type: repo-creds
+      data:
+        type: "git"
+        url: "git@github.com:MohammadBnei"
+        sshPrivateKey: "{{ .GITHUB_APPS_SSH_KEY }}"

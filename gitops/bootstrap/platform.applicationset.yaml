@@ -1,0 +1,92 @@
+apiVersion: argoproj.io/v1alpha1
+kind: ApplicationSet
+metadata:
+  name: platform
+  namespace: argocd
+spec:
+  goTemplate: true
+  goTemplateOptions: ["missingkey=zero"]
+  generators:
+  - list:
+      elements:
+
+      # wave 1 — Secrets engine (must be first; serves SSH keys to ArgoCD for all other apps)
+      - name: infisical
+        namespace: infisical
+        syncWave: "1"
+        chartRepoURL: https://dl.cloudsmith.io/public/infisical/helm-charts/helm/charts/
+        chartRevision: "0.4.2"
+        chartName: infisical
+        valuesPath: gitops/platform/values/infisical/values.yaml
+
+      # wave 2 — Gateway + Ingress (after Infisical so SSH keys are available)
+      - name: traefik
+        namespace: traefik
+        syncWave: "2"
+        chartRepoURL: https://traefik.github.io/charts
+        chartRevision: "34.0.0"
+        chartName: traefik
+        valuesPath: gitops/platform/values/traefik/values.yaml
+
+      # wave 5 — observability
+      - name: prometheus
+        namespace: monitoring
+        syncWave: "5"
+        chartRepoURL: https://prometheus-community.github.io/helm-charts
+        chartRevision: "66.3.1"
+        chartName: kube-prometheus-stack
+        valuesPath: gitops/platform/values/prometheus/values.yaml
+
+      - name: grafana
+        namespace: monitoring
+        syncWave: "5"
+        chartRepoURL: https://grafana.github.io/helm-charts
+        chartRevision: "8.8.4"
+        chartName: grafana
+        valuesPath: gitops/platform/values/grafana/values.yaml
+
+      - name: metrics-server
+        namespace: kube-system
+        syncWave: "5"
+        chartRepoURL: https://kubernetes-sigs.github.io/metrics-server/
+        chartRevision: "3.12.2"
+        chartName: metrics-server
+        valuesPath: gitops/platform/values/metrics-server/values.yaml
+
+  template:
+    metadata:
+      name: 'platform-{{.name}}'
+      annotations:
+        argocd.argoproj.io/sync-wave: '{{.syncWave}}'
+      finalizers:
+      - resources-finalizer.argocd.argoproj.io
+    spec:
+      project: default
+      sources:
+      # Source 1: public Helm chart — no credentials needed
+      - repoURL: '{{.chartRepoURL}}'
+        chart: '{{.chartName}}'
+        targetRevision: '{{.chartRevision}}'
+        helm:
+          valueFiles:
+          - $values/{{.valuesPath}}
+      # Source 2: values from infra-bootstrap — single SSH key covers all platform apps
+      - repoURL: git@github.com:MohammadBnei/infra-bootstrap.git
+        targetRevision: HEAD
+        ref: values
+      destination:
+        server: https://kubernetes.default.svc
+        namespace: '{{.namespace}}'
+      syncPolicy:
+        automated:
+          prune: true
+          selfHeal: true
+        syncOptions:
+        - CreateNamespace=true
+        - ServerSideApply=true
+        retry:
+          limit: 5
+          backoff:
+            duration: 5s
+            factor: 2
+            maxDuration: 3m

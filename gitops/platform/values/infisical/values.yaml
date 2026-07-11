@@ -1,0 +1,33 @@
+# Infisical Helm values for ukubi-cluster
+# Chart: https://dl.cloudsmith.io/public/infisical/helm-charts/helm/charts/  name: infisical
+#
+# infisical-secrets K8s Secret (kubeSecretRef below) must exist before this syncs.
+# Created by gitops/bootstrap/register-repos.sh from k8s-cluster/infisical/.env.secret.
+#
+# fullnameOverride keeps the service name stable at "infisical" so all InfisicalSecret
+# CRDs across the cluster can use a predictable hostAPI URL:
+#   http://infisical.infisical.svc.cluster.local:8080/api
+
+infisical:
+  enabled: true
+  fullnameOverride: infisical
+  replicaCount: 1
+  image:
+    repository: infisical/infisical
+    tag: "v0.159.28"
+    pullPolicy: IfNotPresent
+  kubeSecretRef: infisical-secrets
+  service:
+    type: ClusterIP
+  resources:
+    requests:
+      cpu: 350m
+
+postgresql:
+  enabled: false
+
+redis:
+  enabled: false
+
+ingress:
+  enabled: false

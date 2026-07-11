@@ -1,0 +1,23 @@
+# Copy to terraform.tfvars and fill in — that file is gitignored (matches
+# *.tfvars not being committed for anything with real values; only this
+# .example file is tracked). No secrets belong here: PROXMOX_VE_API_TOKEN
+# and PROXMOX_VE_SSH_PRIVATE_KEY / TF_VAR_pve_ssh_private_key come from
+# Infisical via the `infisical run` wrapper in README.md, never from a file.
+
+pve_node_name        = "" # confirm via `pvesh get /nodes` — likely "bnei" but not guaranteed identical to the DNS hostname
+template_storage_id  = "" # PVE storage pool for the template + K8s VM disks, e.g. "local-lvm" or a ZFS pool — check `pvesm status`
+garage_container_storage = "" # NVMe-backed pool for garage-storage's disk — check `pvesm status`
+garage_ip             = "" # static IP for the recreated garage-storage container — none locked in MISSION.md yet, pick one and treat as provisional
+
+# Only needed once imported.tf's placeholder variables are filled from live
+# `qm config` / `pct config` capture (see imported.tf's header comment):
+# pg01_disk_datastore_id        = ""
+# pg01_network_bridge           = ""
+# pg01_mac_address              = ""
+# pg02_disk_datastore_id        = ""
+# pg02_network_bridge           = ""
+# pg02_mac_address              = ""
+# hermesagent_disk_datastore_id = ""
+# hermesagent_network_bridge    = ""
+# hermesagent_mac_address       = ""
+# hermesagent_unprivileged      = true

@@ -1,0 +1,15 @@
+---
+# Cilium in chaining mode — kube-proxy retained (MISSION §4)
+# kube-proxy replace is disabled because not all PVE nodes may have full eBPF support
+cilium_kube_proxy_replacement: false
+cilium_enable_portmap: true
+
+# MetalLB owns L2 announcements — never enable both simultaneously (MISSION §13)
+cilium_l2announcements: false
+
+# Hubble enabled for observability (MISSION §4)
+cilium_enable_hubble: true
+cilium_enable_hubble_ui: true
+cilium_enable_hubble_metrics: false
+cilium_hubble_install: true
+cilium_hubble_tls_generate: true

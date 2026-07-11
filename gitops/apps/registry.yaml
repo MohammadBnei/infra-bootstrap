@@ -1,0 +1,67 @@
+# User app registry — single source of truth for apps.applicationset.yaml
+#
+# IMPORTANT: when you add or remove an entry here, mirror the change in
+# bootstrap/apps.applicationset.yaml (spec.generators[0].list.elements).
+#
+# Schema:
+#   name        ArgoCD Application name (lowercase, dashes only)
+#   namespace   Target namespace (created automatically)
+#   syncWave    All user apps at wave 10 (after platform is ready)
+#   repoURL     Per-app private git repo with values.yaml (SSH deploy key required)
+#   valuesPath  Path to values file inside repoURL
+#   hostname    Public hostname — passed as ingress.hostname to common-app-chart
+#
+# Per-app repo must have at minimum:
+#   image.repository, image.tag, service.port
+
+- name: n8n
+  namespace: n8n
+  syncWave: "10"
+  repoURL: git@github.com:MohammadBnei/n8n.git
+  valuesPath: values.yaml
+  hostname: n8n.bnei.dev
+
+- name: openweb-ui
+  namespace: openweb-ui
+  syncWave: "10"
+  repoURL: git@github.com:MohammadBnei/openweb-ui.git
+  valuesPath: values.yaml
+  hostname: open-webui.bnei.dev
+
+# Pipelines sidecar for openweb-ui — separate workload, no external ingress.
+# The openweb-ui app's private repo must have a pipelines-values.yaml with
+# image.repository, service.port: 9099, persistence settings, ingress.enabled: false.
+- name: openweb-ui-pipelines
+  namespace: openweb-ui
+  syncWave: "10"
+  repoURL: git@github.com:MohammadBnei/openweb-ui.git
+  valuesPath: pipelines-values.yaml
+  hostname: ""
+
+- name: searxng
+  namespace: searxng
+  syncWave: "10"
+  repoURL: git@github.com:MohammadBnei/searxng.git
+  valuesPath: values.yaml
+  hostname: searxng.bnei.dev
+
+- name: whodb
+  namespace: whodb
+  syncWave: "10"
+  repoURL: git@github.com:MohammadBnei/whodb.git
+  valuesPath: values.yaml
+  hostname: whodb.bnei.dev
+
+- name: api
+  namespace: api
+  syncWave: "10"
+  repoURL: git@github.com:MohammadBnei/api.git
+  valuesPath: values.yaml
+  hostname: api.bnei.dev
+
+- name: ukubi-ai
+  namespace: ukubi-ai
+  syncWave: "10"
+  repoURL: git@github.com:MohammadBnei/ukubi-ai.git
+  valuesPath: values.yaml
+  hostname: ukubi-ai.bnei.dev

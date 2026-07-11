@@ -1,0 +1,22 @@
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: argocd
+  namespace: argocd
+spec:
+  parentRefs:
+  # external-ingress is created by the Traefik Helm chart (wave 1).
+  # This route may show as "invalid" briefly until Traefik finishes syncing — it will self-heal.
+  - name: external-ingress
+    namespace: traefik
+    sectionName: websecure
+  hostnames:
+  - argocd.bnei.dev
+  rules:
+  - matches:
+    - path:
+        type: PathPrefix
+        value: /
+    backendRefs:
+    - name: argocd-server
+      port: 80

@@ -1,0 +1,33 @@
+all:
+  hosts:
+    k8s-cp-01:
+      ansible_host: 192.168.1.241
+      ansible_user: core
+      ansible_ssh_private_key_file: ~/.ssh/id_k8s_vms
+      ansible_become: true
+      ansible_become_method: sudo
+      ip: 192.168.1.241
+      access_ip: 192.168.1.241
+    k8s-worker-01:
+      ansible_host: 192.168.1.242
+      ansible_user: core
+      ansible_ssh_private_key_file: ~/.ssh/id_k8s_vms
+      ansible_become: true
+      ansible_become_method: sudo
+      ip: 192.168.1.242
+      access_ip: 192.168.1.242
+  children:
+    kube_control_plane:
+      hosts:
+        k8s-cp-01:
+    kube_node:
+      hosts:
+        k8s-cp-01:
+        k8s-worker-01:
+    etcd:
+      hosts:
+        k8s-cp-01:
+    k8s_cluster:
+      children:
+        kube_control_plane:
+        kube_node:

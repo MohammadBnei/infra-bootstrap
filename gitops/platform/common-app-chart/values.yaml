@@ -1,0 +1,62 @@
+replicaCount: 1
+
+image:
+  repository: ""
+  tag: "latest"
+  pullPolicy: IfNotPresent
+
+service:
+  port: 80
+
+ingress:
+  enabled: true
+  hostname: ""
+  # Gateway and listener created by Traefik (external-ingress in traefik namespace, per MISSION.md §5)
+  gatewayName: external-ingress
+  gatewayNamespace: traefik
+  listenerHTTPS: websecure
+
+resources: {}
+# requests:
+#   cpu: 100m
+#   memory: 128Mi
+# limits:
+#   memory: 256Mi
+
+# Raw env vars: [{name, value}] or [{name, valueFrom: {secretKeyRef: {name, key}}}]
+env: []
+
+# Inject whole Secrets or ConfigMaps: [{secretRef: {name}}, {configMapRef: {name}}]
+envFrom: []
+
+persistence:
+  enabled: false
+  size: 1Gi
+  storageClass: ""
+  mountPath: /data
+  accessMode: ReadWriteOnce
+
+livenessProbe:
+  enabled: false
+  type: http   # http | tcp
+  path: /healthz
+  port: ""     # defaults to service.port
+  initialDelaySeconds: 10
+  periodSeconds: 10
+  timeoutSeconds: 5
+  failureThreshold: 3
+
+readinessProbe:
+  enabled: false
+  type: http
+  path: /healthz
+  port: ""
+  initialDelaySeconds: 5
+  periodSeconds: 5
+  timeoutSeconds: 2
+  failureThreshold: 3
+
+podAnnotations: {}
+nodeSelector: {}
+tolerations: []
+affinity: {}
