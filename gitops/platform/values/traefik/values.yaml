@@ -51,12 +51,14 @@ persistence:
   size: 128Mi
   path: /data
 
-certResolvers:
+# chart >=33.0.0 renamed this key from certResolvers and nested config under .acme
+certificatesResolvers:
   le:
-    email: account@bnei.dev
-    storage: /data/acme.json
-    httpChallenge:
-      entryPoint: web
+    acme:
+      email: account@bnei.dev
+      storage: /data/acme.json
+      httpChallenge:
+        entryPoint: web
 
 # Dashboard via IngressRoute is disabled — expose via HTTPRoute if needed
 ingressRoute:
