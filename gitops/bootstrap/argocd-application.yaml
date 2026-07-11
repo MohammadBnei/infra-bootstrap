@@ -25,6 +25,11 @@ spec:
           params:
             # TLS terminated at Traefik — ArgoCD serves plain HTTP inside the cluster
             "server.insecure": "true"
+            # infra-bootstrap has a private k8s-cluster git submodule that repo-server
+            # doesn't need (only plain files under gitops/ are referenced as values
+            # sources) and has no credentials for. Skip submodule init entirely rather
+            # than granting the deploy key access to a repo it doesn't use.
+            "reposerver.enable.git.submodule": "false"
 
         server:
           service:
@@ -40,15 +45,6 @@ spec:
 
         notifications:
           enabled: false
-
-        repoServer:
-          env:
-            # infra-bootstrap has a private k8s-cluster git submodule that repo-server
-            # doesn't need (only plain files under gitops/ are referenced as values
-            # sources) and has no credentials for. Skip submodule init entirely rather
-            # than granting the deploy key access to a repo it doesn't use.
-            - name: ARGOCD_GIT_MODULES_ENABLED
-              value: "false"
   destination:
     server: https://kubernetes.default.svc
     namespace: argocd
