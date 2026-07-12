@@ -197,6 +197,51 @@ production version, sidestepping the untested migration. Follow-up (not
 done here): fix the `certificate_requests` ownership on `pg01` before
 production is ever upgraded past v0.159.28.
 
+## Final verification summary
+
+**Fully healthy**: `argocd` self-app, `platform-longhorn` (health-wise;
+`.status.sync` stays OutOfSync on 7 of its own CRDs — cosmetic, no
+functional impact observed), `platform-traefik` (LB IP `.231` confirmed),
+`platform-local-path-provisioner`, `platform-metrics-server`,
+`platform-infisical` (after the version pin).
+
+**Expected/documented limitations, not bugs**:
+- Longhorn volumes report `degraded` robustness (Traefik's, Grafana's) —
+  `defaultReplicaCount: 3` vs. only 2 schedulable nodes in this smoke
+  test; matches the values.yaml's own documented ADR-0002 limitation.
+- Prometheus's PVC (20Gi) volume is `faulted`
+  (`insufficient storage;precheck new replica failed`) — `terraform.tfvars`
+  sets `longhorn_disk_size_gb = 20` for this smoke test only (explicitly
+  commented "test sizing, not the real production value"); a 20Gi request
+  doesn't fit a 20GB disk once Longhorn's reserved-capacity overhead and
+  the other PVCs are accounted for. Not a config bug — production sizing
+  would use a much larger disk.
+
+**Real, separate gap found (pre-existing, not caused by this session)**:
+the **Infisical Kubernetes Operator** (provides the `InfisicalSecret`
+CRD — a different component from the Infisical *server* fixed above, with
+its own independent versioning, `docs/bootstrap-test-notes.md` already
+noted "requires Infisical operator ≥ 0.6.0") is not registered anywhere
+in `gitops/` at all. Confirmed via `grep -rl InfisicalSecret gitops/` —
+only `argocd-github-apps-creds.yaml` (a CRD *instance*) and
+`grafana/values.yaml` (references a secret name) exist; nothing installs
+the CRD itself. Consequences, all downstream of this one gap:
+- `gitops/bootstrap/argocd-github-apps-creds.yaml` can't apply →
+  `repo-creds-github-bnei` never gets created → every wave-10 user app
+  (`n8n`, `whodb`, `openweb-ui`, `openweb-ui-pipelines`, `searxng`, `api`,
+  `ukubi-ai`) stays stuck `Unknown` sync status forever, confirmed via
+  repo-server logs: `failed to list refs: error creating SSH agent: SSH
+  agent requested but SSH_AUTH_SOCK not-specified`.
+- Grafana's `admin.existingSecret: grafana-admin` (meant to come "via
+  ExternalSecret → Infisical" per its values.yaml comment) never
+  materializes → `CreateContainerConfigError: secret "grafana-admin" not
+  found`.
+
+Did not add the operator during this smoke test — registering a new
+platform component is a real feature addition beyond this run's declared
+scope (terraform → kubespray → GitOps validation for cp01/worker01), not
+a bug fix. Flagging for a follow-up PR.
+
 ## Kubespray cluster.yml — clean run
 
 After fixing the invocation gotcha above: `failed=0` on both nodes,
