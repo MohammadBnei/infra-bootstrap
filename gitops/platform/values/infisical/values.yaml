@@ -4,18 +4,24 @@
 # infisical-secrets K8s Secret (kubeSecretRef below) must exist before this syncs.
 # Created by gitops/bootstrap/register-repos.sh from k8s-cluster/infisical/.env.secret.
 #
-# fullnameOverride keeps the service name stable at "infisical" so all InfisicalSecret
-# CRDs across the cluster can use a predictable hostAPI URL:
-#   http://infisical.infisical.svc.cluster.local:8080/api
+# IMPORTANT: this chart's values schema is FLAT (backend:, mongodb:, redis:,
+# ingress: are all top-level keys) — there is no top-level "infisical:"
+# wrapper key. An earlier version of this file nested everything under
+# "infisical:", which Helm silently accepted as an unused extra key: none of
+# it ever applied, and the backend ran on pure chart defaults (including
+# kubeSecretRef: "" — its own auto-generated Mongo-flavored secret, never our
+# infisical-secrets) for the entire test. Confirmed via the actual failure:
+# "Boot up migration failed... postgresql://undefined:undefined@undefined:undefined/undefined".
 
-infisical:
-  enabled: true
-  fullnameOverride: infisical
+backend:
   replicaCount: 1
   image:
     repository: infisical/infisical
-    tag: "v0.159.28"
+    tag: "v0.162.3"
     pullPolicy: IfNotPresent
+  # Points envFrom directly at our secret (DB_CONNECTION_URI, DB_ROOT_CERT,
+  # AUTH_SECRET, ENCRYPTION_KEY, REDIS_URL, SITE_URL, SMTP_*) instead of the
+  # chart's own auto-generated (Mongo-flavored) secret.
   kubeSecretRef: infisical-secrets
   service:
     type: ClusterIP
@@ -23,11 +29,8 @@ infisical:
     requests:
       cpu: 350m
 
-postgresql:
-  enabled: false
-
-# Chart defaults this to true (bundled Bitnami MongoDB subchart) — legacy
-# Infisical only. This install uses external Postgres (Pigsty) via
+# Chart bundles a Bitnami MongoDB subchart, enabled by default (legacy
+# Infisical only). This install uses external Postgres (Pigsty) via
 # DB_CONNECTION_URI in the infisical-secrets kubeSecretRef, so disable it.
 mongodb:
   enabled: false
