@@ -1,0 +1,54 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: platform-traefik
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "2"
+  finalizers:
+  - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  sources:
+  # Source 1: public Helm chart — no credentials needed
+  - repoURL: https://traefik.github.io/charts
+    chart: traefik
+    targetRevision: "34.0.0"
+    helm:
+      # traefik's chart bundles the full Gateway API CRD set
+      # (crds/gateway-standard-install.yaml, bundle-version v1.2.1) alongside
+      # its own traefik.io/* CRDs in the same crds/ directory. kubespray
+      # already has newer Gateway API CRDs, and a cluster
+      # ValidatingAdmissionPolicy (safe-upgrades.gateway.networking.k8s.io)
+      # unconditionally rejects installing any gateway.networking.k8s.io CRD
+      # below v1.5.0 — so ArgoCD can never sync this chart's crds/ dir as-is.
+      # We don't use Gateway API (IngressRoute is the lock, MISSION.md §5), so
+      # skip the whole crds/ dir here; traefik.io/* CRDs are installed once,
+      # out-of-band (see docs/bootstrap-test-notes.md). This is exactly why
+      # traefik is a standalone Application rather than part of
+      # platform.applicationset.yaml's shared list template: skipCrds is a
+      # bool field the ApplicationSet CRD validates strictly, so it can't be
+      # a per-element Go-template conditional there.
+      skipCrds: true
+      valueFiles:
+      - $values/gitops/platform/values/traefik/values.yaml
+  # Source 2: values from infra-bootstrap — same SSH key as other platform apps
+  - repoURL: git@github.com:MohammadBnei/infra-bootstrap.git
+    targetRevision: HEAD
+    ref: values
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: traefik
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+    - CreateNamespace=true
+    - ServerSideApply=true
+    retry:
+      limit: 5
+      backoff:
+        duration: 5s
+        factor: 2
+        maxDuration: 3m

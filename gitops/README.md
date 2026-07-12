@@ -11,10 +11,11 @@ gitops/
 ├── bootstrap/                             # Applied once to bring the cluster up
 │   ├── register-repos.sh                  # Creates manual K8s Secrets before ArgoCD starts
 │   ├── argocd-application.yaml            # ArgoCD self-manages its own Helm chart
+│   ├── traefik-application.yaml           # Standalone Application (needs helm.skipCrds, can't live in the shared ApplicationSet template — see file comment)
 │   ├── argocd-ingressroute.yaml           # Traefik IngressRoute → argocd.bnei.dev
 │   ├── infisical-ingressroute.yaml       # Traefik IngressRoute → infisical.bnei.dev
 │   ├── argocd-github-apps-creds.yaml      # InfisicalSecret → ArgoCD repo-creds for user apps
-│   ├── platform.applicationset.yaml       # ApplicationSet for all platform apps
+│   ├── platform.applicationset.yaml       # ApplicationSet for remaining platform apps (not traefik)
 │   └── apps.applicationset.yaml           # ApplicationSet for all user apps
 ├── platform/
 │   ├── common-app-chart/                  # Shared Helm chart used by every user app
@@ -46,7 +47,7 @@ Everything is sequenced so each layer is ready before the next depends on it:
 | Wave | App(s) | Why first |
 |------|--------|-----------|
 | 1 | **Infisical** | Serves SSH keys to ArgoCD via `InfisicalSecret` CRDs — must be ready before any app that needs a private values repo |
-| 2 | **Traefik** | Ingress — must be up before IngressRoutes resolve |
+| 2 | **Traefik** (standalone `traefik-application.yaml`, not in the ApplicationSet) | Ingress — must be up before IngressRoutes resolve |
 | 5 | Prometheus, Grafana, metrics-server | Observability, no hard ordering constraint |
 | 10 | All user apps | Depend on Infisical (secrets) + Traefik (IngressRoutes) |
 
@@ -69,19 +70,20 @@ Wave 10: User apps sync (SSH keys for per-app repos now in ArgoCD cred store)
 
 Only the infra-bootstrap SSH key and Infisical's own server credentials are injected manually. Everything else flows from Infisical once it's running.
 
-### Two ApplicationSets
+### Two ApplicationSets, plus one standalone Application
 
 **`platform.applicationset.yaml`** — platform infrastructure:
 
 | Wave | App | Chart |
 |------|-----|-------|
 | 1 | infisical | infisical/infisical |
-| 2 | traefik | traefik/traefik |
 | 5 | prometheus | prometheus-community/kube-prometheus-stack |
 | 5 | grafana | grafana/grafana |
 | 5 | metrics-server | metrics-server/metrics-server |
 
 Each platform app: public Helm chart + values from `infra-bootstrap` via the manually-injected SSH key.
+
+**`traefik-application.yaml`** (wave 2) is deliberately a standalone `Application`, not part of the ApplicationSet above: it needs `helm.skipCrds: true` (the chart bundles an outdated Gateway API CRD set that a cluster `ValidatingAdmissionPolicy` rejects), and `skipCrds` is a `bool` field the ApplicationSet CRD validates strictly — it can't be produced by a per-element Go-template conditional in the shared list template. See the comment in the file for the full story.
 
 **`apps.applicationset.yaml`** — user apps, all at wave 10:
 

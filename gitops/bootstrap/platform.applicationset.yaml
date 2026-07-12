@@ -19,14 +19,11 @@ spec:
         chartName: infisical
         valuesPath: gitops/platform/values/infisical/values.yaml
 
-      # wave 2 — Gateway + Ingress (after Infisical so SSH keys are available)
-      - name: traefik
-        namespace: traefik
-        syncWave: "2"
-        chartRepoURL: https://traefik.github.io/charts
-        chartRevision: "34.0.0"
-        chartName: traefik
-        valuesPath: gitops/platform/values/traefik/values.yaml
+      # wave 2 — Traefik is NOT in this shared list: it needs helm.skipCrds
+      # (its chart bundles Gateway API CRDs a cluster policy rejects — see
+      # traefik-application.yaml), which is a bool field the ApplicationSet
+      # CRD validates strictly, so it can't be a per-element Go-template
+      # conditional in this shared template. Standalone Application instead.
 
       # wave 5 — observability
       - name: prometheus
@@ -68,15 +65,6 @@ spec:
         chart: '{{.chartName}}'
         targetRevision: '{{.chartRevision}}'
         helm:
-          # traefik's chart bundles the full Gateway API CRD set (crds/gateway-standard-install.yaml,
-          # bundle-version v1.2.1) alongside its own traefik.io/* CRDs in the same crds/ directory.
-          # kubespray already has newer Gateway API CRDs, and a cluster ValidatingAdmissionPolicy
-          # (safe-upgrades.gateway.networking.k8s.io) unconditionally rejects installing any
-          # gateway.networking.k8s.io CRD below v1.5.0 — so ArgoCD can never sync this chart's
-          # crds/ dir. We don't use Gateway API (IngressRoute is the lock, MISSION.md §5), so skip
-          # the whole crds/ dir here; traefik.io/* CRDs are installed once, out-of-band (see
-          # docs/bootstrap-test-notes.md).
-          skipCrds: {{ if eq .name "traefik" }}true{{ else }}false{{ end }}
           valueFiles:
           - $values/{{.valuesPath}}
       # Source 2: values from infra-bootstrap — single SSH key covers all platform apps
