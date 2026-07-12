@@ -16,10 +16,13 @@ service:
     metallb.universe.tf/loadBalancerIPs: 192.168.1.230
 
 ports:
-  web:
-    port: 80
+  # Don't override `port:` here — that's the container's own listen port,
+  # and the chart's default securityContext runs as non-root (UID 65532,
+  # capabilities dropped, no NET_BIND_SERVICE) so binding <1024 fails with
+  # "permission denied". Chart defaults already give us what we want: web
+  # listens on 8000 internally, exposed externally as 80 (exposedPort);
+  # websecure listens on 8443 internally, exposed externally as 443.
   websecure:
-    port: 443
     # Entrypoint-level ACME wiring — every IngressRoute router using this
     # entrypoint gets the "le" cert resolver automatically.
     tls:
