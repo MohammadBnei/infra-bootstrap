@@ -68,6 +68,15 @@ spec:
         chart: '{{.chartName}}'
         targetRevision: '{{.chartRevision}}'
         helm:
+          # traefik's chart bundles the full Gateway API CRD set (crds/gateway-standard-install.yaml,
+          # bundle-version v1.2.1) alongside its own traefik.io/* CRDs in the same crds/ directory.
+          # kubespray already has newer Gateway API CRDs, and a cluster ValidatingAdmissionPolicy
+          # (safe-upgrades.gateway.networking.k8s.io) unconditionally rejects installing any
+          # gateway.networking.k8s.io CRD below v1.5.0 — so ArgoCD can never sync this chart's
+          # crds/ dir. We don't use Gateway API (IngressRoute is the lock, MISSION.md §5), so skip
+          # the whole crds/ dir here; traefik.io/* CRDs are installed once, out-of-band (see
+          # docs/bootstrap-test-notes.md).
+          skipCrds: {{ if eq .name "traefik" }}true{{ else }}false{{ end }}
           valueFiles:
           - $values/{{.valuesPath}}
       # Source 2: values from infra-bootstrap — single SSH key covers all platform apps
