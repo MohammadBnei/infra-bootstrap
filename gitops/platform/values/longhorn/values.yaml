@@ -7,10 +7,10 @@
 # local-path-provisioner is left installed but non-default for now;
 # whether to remove it outright is still open (ADR-0019).
 #
-# Prerequisite this repo doesn't yet automate: each k8s VM's second disk
-# (scsi1, provisioned in terraform/k8s-vms.tf) ships raw/unformatted —
-# it must be partitioned and mounted at defaultSettings.defaultDataPath
-# below (ansible, not terraform/gitops) before this syncs cleanly.
+# Each k8s VM's second disk (scsi1, provisioned in terraform/k8s-vms.tf)
+# ships raw/unformatted — terraform/cloud-init.tf's vendor-data formats and
+# mounts it at defaultSettings.defaultDataPath below on first boot, so no
+# separate ansible/manual step is needed before this syncs.
 #
 # Replica count 3 assumes 3 schedulable nodes. All 3 k8s VMs currently run
 # on the single active PVE host (.165) — this protects against VM/node
@@ -26,3 +26,13 @@ persistence:
 defaultSettings:
   defaultDataPath: /var/lib/longhorn
   defaultReplicaCount: 3
+
+# The chart's own docs: "Disable this setting when installing Longhorn
+# using Argo CD or other GitOps solutions." The pre-upgrade check Job is a
+# PreSync hook that references longhorn-service-account — a normal
+# (non-hook) chart resource that only syncs in the main phase, which runs
+# *after* PreSync hooks. On a fresh install (not an upgrade) there's
+# nothing to check anyway, and leaving this enabled deadlocks the sync:
+# `FailedCreate ... serviceaccount "longhorn-service-account" not found`.
+preUpgradeChecker:
+  jobEnabled: false
