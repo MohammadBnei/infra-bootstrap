@@ -75,7 +75,7 @@ Format per entry: what broke, root cause, what fixed it.
 `helm install argocd` (chart `10.1.3`, matching `argocd-application.yaml`'s
 pin) went clean on the first try, run via SSH on `k8s-cp-01` per the
 `k8s-ops` skill's "never materialize the kubeconfig locally" rule.
-
+****
 `gitops/bootstrap/register-repos.sh` assumes a bare `kubectl` on `PATH`
 configured against the live cluster — which conflicts with that same
 rule. Fixed by writing a thin `kubectl` wrapper script (scratch dir, first
@@ -241,6 +241,21 @@ Did not add the operator during this smoke test — registering a new
 platform component is a real feature addition beyond this run's declared
 scope (terraform → kubespray → GitOps validation for cp01/worker01), not
 a bug fix. Flagging for a follow-up PR.
+
+## Teardown
+
+`terraform destroy -target=k8s_cp_01 -target=k8s_worker_01` — clean,
+2 destroyed. Also cleaned up an orphaned state entry:
+`proxmox_virtual_environment_file.qemu_guest_agent_vendor_data` (the
+pre-rename resource address) stayed in state after being renamed to
+`k8s_vm_vendor_data` in `cloud-init.tf` — the scoped `-target` apply
+earlier only created the new address, it never implicitly removed the
+old one. Destroyed it separately. Final state: only
+`proxmox_download_file.ubuntu_2404_cloudimg`,
+`proxmox_virtual_environment_file.k8s_vm_vendor_data`, and
+`proxmox_virtual_environment_vm.ubuntu_2404_template` remain, matching
+the intended "leave template/cloud-init resources, destroy the VMs"
+pattern.
 
 ## Kubespray cluster.yml — clean run
 
