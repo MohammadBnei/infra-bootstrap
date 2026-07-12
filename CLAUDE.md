@@ -22,7 +22,7 @@ then here. When in doubt, open those files.
 | LB | MetalLB, L2 only, pool `192.168.1.230-250` |
 | Ingress | Traefik + `IngressRoute` only — no cert-manager, no Gateway API, no plain Ingress |
 | GitOps | ArgoCD, Pattern C (registry + `list`-generator ApplicationSets) |
-| Secrets | Infisical (project `infra-bootstrap`, env `dev`) |
+| Secrets | Infisical (project `infra-bootstrap-1-ge1`, id `8a3fa54f-be22-488a-bf51-55158f65c0f2`, domain `https://infisical.bnei.dev`, env `dev` — see `docs/secrets.md`) |
 | Database | Pigsty (vendored in `pigsty/`, has its **own** `pigsty/CLAUDE.md` — don't edit it, it's upstream) |
 
 ## Directory map
