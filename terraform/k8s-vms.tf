@@ -6,10 +6,10 @@
 # carry no data worth protecting.
 #
 # Each VM also carries a second disk (scsi1, var.longhorn_disk_size_gb)
-# reserved for Longhorn's data path — MISSION.md §10. Terraform only
-# allocates the block device; it ships raw/unformatted to the guest, so
-# it still needs partitioning + mounting (ansible, not terraform) before
-# Longhorn is deployed via gitops.
+# reserved for Longhorn's data path — ARCHITECTURE.md storage section.
+# Terraform allocates the raw block device; cloud-init.tf's vendor-data
+# formats + mounts it at /var/lib/longhorn on first boot before Longhorn
+# is deployed via gitops.
 
 resource "proxmox_virtual_environment_vm" "k8s_cp_01" {
   name      = "k8s-cp-01"
@@ -57,7 +57,7 @@ resource "proxmox_virtual_environment_vm" "k8s_cp_01" {
       }
     }
 
-    vendor_data_file_id = proxmox_virtual_environment_file.qemu_guest_agent_vendor_data.id
+    vendor_data_file_id = proxmox_virtual_environment_file.k8s_vm_vendor_data.id
   }
 
   network_device {
@@ -119,7 +119,7 @@ resource "proxmox_virtual_environment_vm" "k8s_worker_01" {
       }
     }
 
-    vendor_data_file_id = proxmox_virtual_environment_file.qemu_guest_agent_vendor_data.id
+    vendor_data_file_id = proxmox_virtual_environment_file.k8s_vm_vendor_data.id
   }
 
   network_device {
@@ -191,7 +191,7 @@ resource "proxmox_virtual_environment_vm" "k8s_worker_gpu" {
       }
     }
 
-    vendor_data_file_id = proxmox_virtual_environment_file.qemu_guest_agent_vendor_data.id
+    vendor_data_file_id = proxmox_virtual_environment_file.k8s_vm_vendor_data.id
   }
 
   network_device {

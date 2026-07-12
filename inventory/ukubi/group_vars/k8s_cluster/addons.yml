@@ -1,5 +1,5 @@
 ---
-helm_enabled: false
+helm_enabled: true
 
 # Disabled: GitOps (platform ApplicationSet) is the single source of truth
 # for metrics-server. Having kubespray also install it caused both to fight
