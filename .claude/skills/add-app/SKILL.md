@@ -79,6 +79,6 @@ needs a PVC or health probes.
 
 - Doesn't touch `gitops/platform/common-app-chart` — that chart is shared
   across all apps; a per-app Helm chart is a forbidden pattern
-  (MISSION.md §13).
+  ([ADR-0004](../../../docs/adr/0004-gitops-pattern-c-registry-applicationset.md)).
 - Doesn't create the app's private repo or push secrets — Infisical and
   GitHub repo creation are out of scope.

@@ -10,11 +10,20 @@ spec:
   - list:
       elements:
 
-      # wave 0 — Storage (no NFS/Proxmox-backed storage yet; this is the
-      # stopgap default StorageClass so any PVC in the cluster can bind at
-      # all — Traefik's acme.json PVC and every common-app-chart PVC depend
-      # on a default StorageClass existing, none of them set
-      # storageClassName explicitly)
+      # wave 0 — Storage. Longhorn is the default StorageClass (ADR-0002,
+      # docs/adr/0002-storage-longhorn-over-ceph-nfs.md) — Traefik's acme.json PVC and every common-app-chart PVC
+      # depend on a default StorageClass existing, none of them set
+      # storageClassName explicitly. Needs each k8s VM's scsi1 disk
+      # formatted+mounted first (see values file). local-path-provisioner
+      # stays installed alongside as a non-default fallback (§15 Q-H).
+      - name: longhorn
+        namespace: longhorn-system
+        syncWave: "0"
+        chartRepoURL: https://charts.longhorn.io
+        chartRevision: "1.7.2" # confirm against `helm search repo longhorn/longhorn` before first apply
+        chartName: longhorn
+        valuesPath: gitops/platform/values/longhorn/values.yaml
+
       - name: local-path-provisioner
         namespace: local-path-storage
         syncWave: "0"

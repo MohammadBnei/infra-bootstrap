@@ -5,7 +5,7 @@
 > Owner: hermesagent (this AI)
 
 This document describes the **current, as-is** state of the homelab infrastructure.
-For the target architecture, see [`infrastructure-desired.md`](./infrastructure-desired.md).
+For the target architecture, see [`../ARCHITECTURE.md`](../ARCHITECTURE.md).
 
 ---
 
@@ -39,7 +39,10 @@ For the target architecture, see [`infrastructure-desired.md`](./infrastructure-
 - Running VMs (Postgres):
   - VMID 205 `pg01` (2 vCPU / 4GB / 40GB) — IP: 192.168.1.205 — Pigsty PG 18 primary
   - VMID 207 `pg02` (2 vCPU / 4GB / 40GB) — IP: 192.168.1.207 — Pigsty PG 18 replica + Redis
-- Template: VMID 9000 `ubuntu-24.04-ci-template` (Golden cloud-init template)
+- Template: VMID 9001 `ubuntu-24.04-ci-template` (Golden cloud-init
+  template, rebuilt 2026-07-12 with qemu-guest-agent fix — see
+  docs/bootstrap-test-notes.md). VMID 9000 is the original hand-created
+  template, now an unmanaged spare, not deleted.
 - ceph-fuse 19.2.3-pve4 (client only, no active cluster)
 
 ### Pi 4 (raspberry) details

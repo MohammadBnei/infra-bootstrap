@@ -28,7 +28,7 @@ created first. On `.165` (PVE shell or SSH as an existing admin):
 
 ```bash
 pveum user add terraform@pve
-pveum role add Terraform -privs "VM.Allocate,VM.Audit,VM.Clone,VM.Config.CDROM,VM.Config.Cloudinit,VM.Config.CPU,VM.Config.Disk,VM.Config.HWType,VM.Config.Memory,VM.Config.Network,VM.Config.Options,VM.Console,VM.Migrate,VM.Monitor,VM.PowerMgmt,VM.GuestAgent.Audit,VM.GuestAgent.Unrestricted,VM.Snapshot,VM.Snapshot.Rollback,VM.Backup,Datastore.Allocate,Datastore.AllocateSpace,Datastore.AllocateTemplate,Datastore.Audit,Pool.Allocate,Pool.Audit,Sys.Audit,Sys.Console,Sys.Modify,Sys.PowerMgmt,Sys.AccessNetwork,Mapping.Audit,Mapping.Use,SDN.Audit,SDN.Use"
+pveum role add Terraform -privs "VM.Allocate,VM.Audit,VM.Clone,VM.Config.CDROM,VM.Config.Cloudinit,VM.Config.CPU,VM.Config.Disk,VM.Config.HWType,VM.Config.Memory,VM.Config.Network,VM.Config.Options,VM.Console,VM.Migrate,VM.PowerMgmt,VM.GuestAgent.Audit,VM.GuestAgent.Unrestricted,VM.Snapshot,VM.Snapshot.Rollback,VM.Backup,Datastore.Allocate,Datastore.AllocateSpace,Datastore.AllocateTemplate,Datastore.Audit,Pool.Allocate,Pool.Audit,Sys.Audit,Sys.Console,Sys.Modify,Sys.PowerMgmt,Sys.AccessNetwork,Mapping.Audit,Mapping.Use,SDN.Audit,SDN.Use"
 pveum aclmod / -user terraform@pve -role Terraform
 pveum user token add terraform@pve provider --privsep=0
 ```
@@ -40,7 +40,9 @@ This privilege list is a starting point (adapted from the bpg provider's
 own example, which they flag as "likely too permissive — review and
 adjust"; identity/access-management privileges like `Realm.Allocate` and
 `User.Modify` were dropped since they're irrelevant to VM/LXC
-provisioning). If `plan`/`apply` ever fails with `Permission check failed`,
+provisioning; `VM.Monitor` was dropped too — it doesn't exist as a
+privilege name and `pveum role add` rejects it outright). If
+`plan`/`apply` ever fails with `Permission check failed`,
 that error names the exact missing privilege — add it and move on.
 
 **Known limitation** (documented by bpg, not a bug in this setup): some
@@ -67,13 +69,13 @@ different purpose — and add the public half to `.165`'s
 
 ### C. Store both in Infisical
 
-Extend the existing `/cluster-bootstrap/pve` path (`docs/secrets.md`) —
-reuse it, don't create a parallel structure:
+Write both at the project root, per the schema in `docs/secrets.md` (no
+folders — everything lives at root):
 
-| Secret | Path | Value |
-|---|---|---|
-| `PVE_API_TOKEN` | `/cluster-bootstrap/pve` | `terraform@pve!provider=<secret>` from step A |
-| `PVE_SSH_PRIVATE_KEY` | `/cluster-bootstrap/pve` | private half of the keypair from step B |
+| Secret | Value |
+|---|---|
+| `PVE_API_TOKEN` | `terraform@pve!provider=<secret>` from step A |
+| `PVE_SSH_PRIVATE_KEY` | private half of the keypair from step B |
 
 ## Running Terraform
 
@@ -140,15 +142,26 @@ secrets by design, but don't commit your filled-in copy — keep it local.
    root password auth and is incompatible with API-token auth. Re-verify
    the RTX 2070 SUPER's PCI address with `lspci -nn | grep -i nvidia`
    before creating the mapping — addressing can shift between boots.
-8. Once VMs boot: `ssh -i ~/.ssh/id_k8s_vms core@192.168.1.201` (etc.) to
+8. `cloud-init.tf`'s `qemu_guest_agent_vendor_data` snippet (installs and
+   starts `qemu-guest-agent` on every K8s VM clone — see
+   `docs/bootstrap-test-notes.md`'s 2026-07-12 entry for why this matters:
+   without it, every clone's `apply` eats a 15-minute non-fatal wait)
+   needs the `snippets` content type enabled once by hand on whichever
+   storage `template_download_storage_id` points at (default `"local"`):
+   ```bash
+   pvesm set local --content vztmpl,import,iso,backup,snippets
+   ```
+   Metadata-only, reversible, doesn't touch existing files on that
+   storage. Same one-time-prereq pattern as the GPU mapping above.
+9. Once VMs boot: `ssh -i ~/.ssh/id_k8s_vms core@192.168.1.201` (etc.) to
    confirm cloud-init actually worked before handing off to kubespray.
 
 ## Out of scope here
 
-- `inventory/ukubi/hosts.yaml`, `MISSION.md`, `CLAUDE.md`,
-  `ansible/README.md`, and skill files are **not** touched by this work —
-  update them separately if/when this setup is adopted as the new locked
-  provisioning method.
+- `inventory/ukubi/hosts.yaml`, `ARCHITECTURE.md`, `DECISION.md`,
+  `CLAUDE.md`, `ansible/README.md`, and skill files are **not** touched
+  by this work — update them separately if/when this setup is adopted as
+  the new locked provisioning method.
 - `.200`/`.161` — no multi-host abstraction until those hosts actually run
   PVE.
 - Installing kubespray/Pigsty on top of the VMs this creates — that's the

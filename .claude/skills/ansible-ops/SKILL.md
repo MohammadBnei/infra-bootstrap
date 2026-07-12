@@ -16,12 +16,12 @@ This repo's own `README.md` is explicit: "You run the actual tool
 (`ansible-playbook`, `kubespray`, `pigsty`) on your Mac against this
 repo." This skill **builds and explains commands, it does not execute
 anything that mutates real infrastructure.** It is not the "Hermes agent"
-described in MISSION.md §12.
+described in `DECISION.md` §2.
 
 ## Which tool, which playbook
 
 - **Kubespray** — `kubespray/cluster.yml` (submodule). Greenfield bootstrap
-  always uses `cluster.yml`, **never `scale.yml`** (MISSION.md §12 —
+  always uses `cluster.yml`, **never `scale.yml`** (`DECISION.md` §2 —
   `scale.yml` skips the control-plane join role). Invoked against
   `inventory/ukubi/hosts.yaml`.
 - **Pigsty** — vendored in `pigsty/`, its own playbooks (`deploy.yml`,
@@ -66,5 +66,5 @@ Anything that mutates real infra:
 - Proxmox VM/LXC provisioning (`vm-provision.yml`, once it exists)
 
 For these: print the exact command (with the Infisical wrapper), explain
-what it will do and what MISSION.md constraint it touches, and stop. Only
+what it will do and what `DECISION.md` constraint it touches, and stop. Only
 proceed if the user explicitly says to run it now in this session.

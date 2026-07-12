@@ -11,7 +11,8 @@ service:
 ingress:
   enabled: true
   hostname: ""
-  # Traefik IngressRoute + native ACME (per MISSION.md §5) — Gateway API
+  # Traefik IngressRoute + native ACME (per ADR-0001,
+  # docs/adr/0001-ingress-traefik-ingressroute-over-gateway-api.md) — Gateway API
   # can't get certs from Traefik's ACME resolver without cert-manager.
   certResolver: le
 

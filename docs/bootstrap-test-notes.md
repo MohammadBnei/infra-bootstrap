@@ -1,5 +1,64 @@
 # ukubi-cluster bootstrap test — manual steps & findings (2026-07-11)
 
+## 2026-07-12 — terraform module smoke test (k8s-cp-01 + k8s-worker-01)
+
+Scoped `-target` apply of `proxmox_download_file.ubuntu_2404_cloudimg` +
+`proxmox_virtual_environment_vm.ubuntu_2404_template` (test VMID, not the
+real 9000) + `k8s_cp_01` + `k8s_worker_01` on `.165`. `pg01`/`pg02`/
+`hermesagent`/garage untouched. Two real bugs found and fixed, one
+non-fatal gotcha to keep in mind for the real bootstrap:
+
+- **Real bug, fixed**: `template.tf`'s `proxmox_download_file` reused
+  `var.template_storage_id` (`local-lvm`, LVM-thin) for the cloud-image
+  download. LVM-thin only supports content types `images`/`rootdir`, not
+  `import` — the download failed with `HTTP 500 ... can't upload to
+  storage type 'lvmthin', not a file based storage!`. Fixed by adding
+  `var.template_download_storage_id` (default `"local"`, a dir storage —
+  confirmed via `pvesh get /storage` on `.165` that `local` supports
+  `import,backup,vztmpl,iso`) and pointing the download resource at it,
+  separate from `template_storage_id` (where the VM disk itself lands).
+- **Environmental, not a module bug**: `192.168.1.201` was already
+  claimed by the `garage-storage` LXC's static IP, so the new `k8s-cp-01`
+  VM lost ARP resolution to it (SSH landed on the wrong host, gave
+  `Permission denied` even though cloud-init had succeeded). Not caught by
+  `k8s-vms.tf`'s own VMID pre-flight warning since that only covers VMID
+  reuse, not IP reuse — worth a similar warning for IP collisions if this
+  keeps happening. Resolved by removing the stray `garage`/`wireguard`
+  LXCs (the latter is also a forbidden pattern per `DECISION.md` §3).
+- **Fixed**: both VMs' `agent { enabled = true }` block made the provider
+  wait (up to `agent.timeout`, 15m default) for `qemu-guest-agent` to
+  respond and publish network interfaces on first apply — Ubuntu's stock
+  24.04 cloud image doesn't ship the agent pre-installed/started, so every
+  fresh clone hit the full 15-minute wait before finishing with a
+  non-fatal `Warning: error waiting for network interfaces from QEMU
+  agent`. Fixed by adding `cloud-init.tf`
+  (`proxmox_virtual_environment_file.qemu_guest_agent_vendor_data`, a
+  `#cloud-config` snippet with `packages: [qemu-guest-agent]` +
+  `runcmd: [systemctl enable --now qemu-guest-agent]`) referenced via each
+  VM's `initialization.vendor_data_file_id` in `k8s-vms.tf`.
+  `vendor_data_file_id` layers on top of the auto-generated
+  `user_account`/`ip_config` cloud-init rather than replacing it (unlike
+  `user_data_file_id`, which would). Confirmed fix: re-created
+  `k8s-cp-01`/`k8s-worker-01` (destroy+recreate was required —
+  `vendor_data_file_id` forces replacement, and cloud-init wouldn't
+  re-run on an in-place change anyway due to instance-id caching) —
+  create time dropped from 15m+ to ~1m20s, `qm agent <vmid> ping` returns
+  clean on both, `systemctl is-active qemu-guest-agent` reports `active`.
+  Prerequisite: the target storage (`template_download_storage_id`,
+  default `"local"`) needs `snippets` added to its content-type list —
+  confirmed `.165`'s `local` didn't have it by default
+  (`vztmpl,import,iso,backup`); enabled via `pvesm set local --content
+  vztmpl,import,iso,backup,snippets`. Same one-time-by-hand-prereq pattern
+  as `gpu_mapping_name`, documented in `cloud-init.tf`'s header comment.
+- **Gotcha to expect again (unrelated to the above)**: `terraform plan`/
+  `apply` refreshes *every* resource in state by default, not just
+  `-target`ed ones. If any existing VM in state has a stuck/non-running
+  guest agent, that refresh alone re-triggers the same 15-minute wait —
+  independent of whatever you're actually planning to change. Use
+  `-refresh=false` to skip it when you know nothing changed outside
+  Terraform (safe for iterative work in a single session; not a
+  substitute for a real `terraform plan` before trusting the result).
+
 Notes from the first end-to-end test of kubespray + GitOps bootstrap against
 the 2-node test cluster (`k8s-cp-01` 192.168.1.241, `k8s-worker-01`
 192.168.1.242). Captures what had to be done by hand so it can be folded into

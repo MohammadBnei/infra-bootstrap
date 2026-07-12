@@ -1,7 +1,7 @@
 # Traefik Helm values for ukubi-cluster
 # Chart: https://traefik.github.io/charts  name: traefik
 #
-# Key requirements (MISSION.md §5):
+# Key requirements (ADR-0001, docs/adr/0001-ingress-traefik-ingressroute-over-gateway-api.md):
 #   - Listeners on port 80 (web) and 443 (websecure)
 #   - ACME HTTP-01 cert resolver, acme.json on PVC (never emptyDir)
 #   - Per-app routing via Traefik IngressRoute, not Gateway API — Traefik's
@@ -13,7 +13,7 @@
 service:
   type: LoadBalancer
   annotations:
-    metallb.universe.tf/loadBalancerIPs: 192.168.1.230
+    metallb.universe.tf/loadBalancerIPs: 192.168.1.231
 
 ports:
   # Don't override `port:` here — that's the container's own listen port,
@@ -38,7 +38,7 @@ providers:
   kubernetesIngress:
     enabled: false
 
-# ACME HTTP-01 — acme.json must be on a PVC, never emptyDir (MISSION.md §5)
+# ACME HTTP-01 — acme.json must be on a PVC, never emptyDir (ADR-0001)
 persistence:
   enabled: true
   name: data

@@ -1,16 +1,16 @@
 # local-path-provisioner Helm values for ukubi-cluster
 # Chart: https://charts.containeroo.ch  name: local-path-provisioner
 #
-# No shared storage yet (NFS/Proxmox-backed is deferred). This is the
-# stopgap default StorageClass so PVCs (Traefik's acme.json, common-app-chart
-# PVCs) can bind at all: hostPath-backed, per-node, not shared across nodes.
-# Swap for an NFS-backed StorageClass later without changing any app's PVC
-# template (none of them set storageClassName, so whichever class is marked
-# defaultClass here is what they bind to).
+# No longer the default StorageClass — Longhorn took that role over
+# (ADR-0002, gitops/platform/values/longhorn/values.yaml). Left
+# installed, non-default, as a fallback: whether to remove it outright
+# once Longhorn is verified healthy is still open (ADR-0019,
+# docs/adr/0019-longhorn-rollout-specifics.md).
+# hostPath-backed, per-node, not shared across nodes.
 
 storageClass:
   create: true
-  defaultClass: true
+  defaultClass: false
   name: local-path
   reclaimPolicy: Delete
 

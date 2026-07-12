@@ -4,6 +4,12 @@
 # test-only and out of scope here. If VMID 201/202/203 are already occupied
 # by leftover test VMs, destroy those manually before first apply — they
 # carry no data worth protecting.
+#
+# Each VM also carries a second disk (scsi1, var.longhorn_disk_size_gb)
+# reserved for Longhorn's data path — MISSION.md §10. Terraform only
+# allocates the block device; it ships raw/unformatted to the guest, so
+# it still needs partitioning + mounting (ansible, not terraform) before
+# Longhorn is deployed via gitops.
 
 resource "proxmox_virtual_environment_vm" "k8s_cp_01" {
   name      = "k8s-cp-01"
@@ -30,6 +36,12 @@ resource "proxmox_virtual_environment_vm" "k8s_cp_01" {
     size         = 40
   }
 
+  disk {
+    datastore_id = var.template_storage_id
+    interface    = "scsi1"
+    size         = var.longhorn_disk_size_gb
+  }
+
   initialization {
     datastore_id = var.template_storage_id
 
@@ -44,6 +56,8 @@ resource "proxmox_virtual_environment_vm" "k8s_cp_01" {
         gateway = var.gateway_ipv4
       }
     }
+
+    vendor_data_file_id = proxmox_virtual_environment_file.qemu_guest_agent_vendor_data.id
   }
 
   network_device {
@@ -84,6 +98,12 @@ resource "proxmox_virtual_environment_vm" "k8s_worker_01" {
     size         = 60
   }
 
+  disk {
+    datastore_id = var.template_storage_id
+    interface    = "scsi1"
+    size         = var.longhorn_disk_size_gb
+  }
+
   initialization {
     datastore_id = var.template_storage_id
 
@@ -98,6 +118,8 @@ resource "proxmox_virtual_environment_vm" "k8s_worker_01" {
         gateway = var.gateway_ipv4
       }
     }
+
+    vendor_data_file_id = proxmox_virtual_environment_file.qemu_guest_agent_vendor_data.id
   }
 
   network_device {
@@ -138,6 +160,12 @@ resource "proxmox_virtual_environment_vm" "k8s_worker_gpu" {
     size         = 100
   }
 
+  disk {
+    datastore_id = var.template_storage_id
+    interface    = "scsi1"
+    size         = var.longhorn_disk_size_gb
+  }
+
   # RTX 2070 SUPER passthrough via a pre-created PCI Resource Mapping (see
   # variables.tf gpu_mapping_name) — hostpci's raw `id` attribute needs root
   # password auth, incompatible with the api_token this provider uses.
@@ -162,6 +190,8 @@ resource "proxmox_virtual_environment_vm" "k8s_worker_gpu" {
         gateway = var.gateway_ipv4
       }
     }
+
+    vendor_data_file_id = proxmox_virtual_environment_file.qemu_guest_agent_vendor_data.id
   }
 
   network_device {

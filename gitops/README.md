@@ -53,7 +53,7 @@ Everything is sequenced so each layer is ready before the next depends on it:
 | 5 | Prometheus, Grafana, metrics-server | Observability, no hard ordering constraint |
 | 10 | All user apps | Depend on Infisical (secrets) + Traefik (IngressRoutes) |
 
-Note: sync-wave ordering across independent top-level Applications isn't strictly enforced by ArgoCD without an App-of-Apps parent (which MISSION.md forbids here) — these numbers are the intended/documented order. In practice each Application's own `retry`/`selfHeal` policy converges regardless of exact creation order.
+Note: sync-wave ordering across independent top-level Applications isn't strictly enforced by ArgoCD without an App-of-Apps parent (which `DECISION.md` forbids here — see [ADR-0004](../docs/adr/0004-gitops-pattern-c-registry-applicationset.md)) — these numbers are the intended/documented order. In practice each Application's own `retry`/`selfHeal` policy converges regardless of exact creation order.
 
 ### Bootstrap credential chain
 
@@ -230,10 +230,10 @@ To bump a chart version: update `chartRevision` in `platform.applicationset.yaml
 
 ---
 
-## Hard constraints (from MISSION.md)
+## Hard constraints (from `DECISION.md` / `docs/adr/`)
 
-- **No Gateway API for app routing, no plain Ingress** — Traefik `IngressRoute` only (Gateway API can't get certs from Traefik's ACME resolver without cert-manager)
-- **No cert-manager** — TLS via Traefik ACME (HTTP-01), `acme.json` on a PVC
+- **No Gateway API for app routing, no plain Ingress** — Traefik `IngressRoute` only (Gateway API can't get certs from Traefik's ACME resolver without cert-manager) — [ADR-0001](../docs/adr/0001-ingress-traefik-ingressroute-over-gateway-api.md)
+- **No cert-manager** — TLS via Traefik ACME (HTTP-01), `acme.json` on a PVC — [ADR-0001](../docs/adr/0001-ingress-traefik-ingressroute-over-gateway-api.md)
 - **No secrets in git** — all secrets via Infisical; `.env.*` files are gitignored
 - **MetalLB and Cilium are not in ArgoCD** — kubespray owns them
-- **No App-of-Apps root.yaml** — the ApplicationSet list IS the registry
+- **No App-of-Apps root.yaml** — the ApplicationSet list IS the registry — [ADR-0004](../docs/adr/0004-gitops-pattern-c-registry-applicationset.md)

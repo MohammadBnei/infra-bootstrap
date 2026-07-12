@@ -41,10 +41,10 @@ ArgoCD bootstrap → Pigsty. If unsure, ask.
   itself doesn't exist yet. Don't reference a playbook path that isn't
   there.
 
-## Step 3 — cross-check against MISSION.md before suggesting a step
+## Step 3 — cross-check against DECISION.md before suggesting a step
 
 Before telling the user to run something, check it doesn't hit a
-MISSION.md §12/§13 rule — most importantly: **`cluster.yml`, never
+`DECISION.md` §2/§3 rule — most importantly: **`cluster.yml`, never
 `scale.yml`**, on a greenfield bootstrap. If a suggested step would touch
 real infra, hand off to the `ansible-ops` skill to build the actual
 command rather than executing anything here.

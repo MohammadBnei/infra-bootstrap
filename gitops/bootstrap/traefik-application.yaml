@@ -22,7 +22,8 @@ spec:
       # ValidatingAdmissionPolicy (safe-upgrades.gateway.networking.k8s.io)
       # unconditionally rejects installing any gateway.networking.k8s.io CRD
       # below v1.5.0 — so ArgoCD can never sync this chart's crds/ dir as-is.
-      # We don't use Gateway API (IngressRoute is the lock, MISSION.md §5), so
+      # We don't use Gateway API (IngressRoute is the lock, ADR-0001:
+      # docs/adr/0001-ingress-traefik-ingressroute-over-gateway-api.md), so
       # skip the whole crds/ dir here; traefik.io/* CRDs are installed once,
       # out-of-band (see docs/bootstrap-test-notes.md). This is exactly why
       # traefik is a standalone Application rather than part of

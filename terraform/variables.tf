@@ -22,14 +22,43 @@ variable "k8s_vm_ssh_public_key_file" {
 }
 
 variable "template_vm_id" {
-  description = "VMID of the golden Ubuntu 24.04 cloud-init template that K8s VMs clone from."
+  description = <<-EOT
+    VMID of the golden Ubuntu 24.04 cloud-init template that K8s VMs clone
+    from. Set to 9001, not the original 9000 — the 2026-07-12 smoke test
+    (docs/bootstrap-test-notes.md) built 9001 fresh with the
+    qemu-guest-agent vendor-data fix already wired in via cloud-init.tf,
+    and it's now the one actually tracked in Terraform state. The original
+    9000 (created by hand, pre-Terraform, no guest-agent fix) still exists
+    on .165, stopped, unmanaged by this state — left in place as a spare,
+    not deleted. Safe to remove by hand once 9001 is confirmed good for
+    the real bootstrap.
+  EOT
   type        = number
-  default     = 9000
+  default     = 9001
 }
 
 variable "template_storage_id" {
   description = "PVE storage pool the template's disk and cloud-init drive live on."
   type        = string
+}
+
+variable "template_download_storage_id" {
+  description = <<-EOT
+    PVE storage pool for file-based content: proxmox_download_file's cloud
+    image staging (content type "import") and the cloud-init vendor-data
+    snippet in cloud-init.tf (content type "snippets"). Must be file-based
+    (e.g. a "dir" storage) — LVM-thin pools like local-lvm only support
+    "images"/"rootdir" and reject both "import" and "snippets". Confirmed
+    via `pvesh get /storage` on .165 that "local" (dir) supports
+    import,backup,vztmpl,iso — "snippets" must be added once by hand
+    (`pvesm set local --content <existing-list>,snippets`) before first
+    apply of cloud-init.tf, same one-time-prereq pattern as
+    gpu_mapping_name. Separate from template_storage_id, which is where
+    the VM disk itself (block storage, e.g. local-lvm) ends up after
+    import.
+  EOT
+  type        = string
+  default     = "local"
 }
 
 variable "gateway_ipv4" {
@@ -77,6 +106,17 @@ variable "garage_template_file_id" {
     exact version substring.
   EOT
   type        = string
+}
+
+variable "longhorn_disk_size_gb" {
+  description = <<-EOT
+    GB size for each k8s VM's dedicated Longhorn data disk (scsi1),
+    separate from the OS root disk. No default on purpose: real sizing
+    depends on inventorying the legacy NFS export's data volume first
+    (MISSION.md §10 / §15 Q-H) — an unconfirmed apply should fail loud
+    rather than silently under/over-provision.
+  EOT
+  type        = number
 }
 
 variable "gpu_mapping_name" {

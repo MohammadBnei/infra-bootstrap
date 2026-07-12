@@ -1,0 +1,28 @@
+# Longhorn Helm values for ukubi-cluster
+# Chart: https://charts.longhorn.io  name: longhorn
+#
+# Replaces local-path-provisioner as the cluster's default StorageClass —
+# ADR-0002, docs/adr/0002-storage-longhorn-over-ceph-nfs.md (decided
+# 2026-07-12, supersedes the earlier NFS-server plan).
+# local-path-provisioner is left installed but non-default for now;
+# whether to remove it outright is still open (ADR-0019).
+#
+# Prerequisite this repo doesn't yet automate: each k8s VM's second disk
+# (scsi1, provisioned in terraform/k8s-vms.tf) ships raw/unformatted —
+# it must be partitioned and mounted at defaultSettings.defaultDataPath
+# below (ansible, not terraform/gitops) before this syncs cleanly.
+#
+# Replica count 3 assumes 3 schedulable nodes. All 3 k8s VMs currently run
+# on the single active PVE host (.165) — this protects against VM/node
+# failure only, not physical-host failure, until .200/.161 join
+# (ADR-0002 known limitation). Also unconfirmed: whether k8s-cp-01
+# is actually schedulable for replicas (ADR-0019).
+
+persistence:
+  defaultClass: true
+  defaultClassReplicaCount: 3
+  defaultFsType: ext4
+
+defaultSettings:
+  defaultDataPath: /var/lib/longhorn
+  defaultReplicaCount: 3

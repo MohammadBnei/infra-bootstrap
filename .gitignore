@@ -36,6 +36,8 @@ pigsty/files/pg_id*
 *.tfstate
 *.tfstate.backup
 .terraform/
+*.tfvars
+!*.tfvars.example
 
 # OS
 .DS_Store

@@ -6,8 +6,12 @@
 
 pve_node_name        = "" # confirm via `pvesh get /nodes` — likely "bnei" but not guaranteed identical to the DNS hostname
 template_storage_id  = "" # PVE storage pool for the template + K8s VM disks, e.g. "local-lvm" or a ZFS pool — check `pvesm status`
+# template_download_storage_id defaults to "local" — only override if that
+# storage doesn't support content type "import" on your host (`pvesh get
+# /storage`, look for "import" in the content list; LVM-thin pools never do)
 garage_container_storage = "" # NVMe-backed pool for garage-storage's disk — check `pvesm status`
 garage_ip             = "" # static IP for the recreated garage-storage container — none locked in MISSION.md yet, pick one and treat as provisional
+longhorn_disk_size_gb = 0  # GB size of each k8s VM's dedicated Longhorn disk (scsi1) — size after inventorying the legacy NFS export's data volume, see MISSION.md §15 Q-H
 
 # Only needed once imported.tf's placeholder variables are filled from live
 # `qm config` / `pct config` capture (see imported.tf's header comment):
