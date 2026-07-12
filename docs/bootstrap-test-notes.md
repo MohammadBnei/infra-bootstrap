@@ -93,3 +93,60 @@ even commit `47aed35` isn't pushed to `origin/main`). Every platform app
 sync failure back to `platform-infisical`'s "no such file or directory" for
 its values path traces back to this. **Nothing past kubespray verification
 can be meaningfully tested until this is committed and pushed.**
+
+## 2026-07-12 — continued
+
+- **`gitops/bootstrap/*.yaml` is NOT self-syncing from git.** This tripped
+  us up twice: `argocd-application.yaml` and `platform.applicationset.yaml`
+  are only ever `kubectl apply -f`'d once, at bootstrap time. There's no
+  App-of-Apps watching that directory (intentionally — MISSION.md forbids
+  one), so any later edit to a file under `gitops/bootstrap/` needs a manual
+  `kubectl apply -f <file>` re-run on the live cluster before it takes
+  effect, even after the edit is committed and pushed. Only
+  `gitops/platform/values/*` (referenced as a separate git `ref: values`
+  source by the Applications/ApplicationSet) auto-syncs normally.
+- **ArgoCD self-app fixed**: bumped to chart `10.1.3`/app `v3.4.5` (see
+  `MISSION.md` / `argocd-application.yaml` history). Confirmed `Synced` +
+  `Healthy` after the bump — the `terminatingReplicas` issue above is fully
+  resolved, not just cosmetic.
+- **Gateway API → IngressRoute reversal fallout**: after moving all app
+  routing to Traefik `IngressRoute` (MISSION.md §5, dated 2026-07-11),
+  `platform-traefik` couldn't sync at all. Root cause chain:
+  1. Traefik's chart bundles a full Gateway API CRD set
+     (`crds/gateway-standard-install.yaml`, bundle-version `v1.2.1`).
+  2. kubespray had already installed newer Gateway API CRDs, which ship
+     their own `ValidatingAdmissionPolicy`
+     (`safe-upgrades.gateway.networking.k8s.io`) that unconditionally
+     rejects installing/reinstalling *any* CRD in that group below
+     `v1.5.0` — this is not just a downgrade check, it blocks fresh
+     `CREATE`s too, regardless of whether an existing CRD is present.
+  3. Deleting the old (now-unused, confirmed no live `Gateway`/`HTTPRoute`
+     objects anywhere) Gateway API CRDs — done with explicit user
+     authorization — did **not** fix it: ArgoCD's own sync attempt to
+     recreate them from the chart hit the same policy on `CREATE`.
+  4. `resource.exclusions` in `argocd-cm` was tried first and doesn't work
+     for this: the rejected objects are `CustomResourceDefinition`
+     (group `apiextensions.k8s.io`), not objects in the
+     `gateway.networking.k8s.io` group itself.
+  5. `helm.skipCrds: true` is the actual fix, but it's a `bool` field the
+     ApplicationSet CRD validates strictly — a per-element Go-template
+     conditional (`{{ if eq .name "traefik" }}true{{ else }}false{{ end }}`)
+     in the shared list-generator template gets rejected by the API server
+     before the ApplicationSet controller ever renders it. Traefik had to
+     be pulled out into its own standalone `Application`
+     (`gitops/bootstrap/traefik-application.yaml`) with a literal
+     `skipCrds: true`.
+  6. Traefik's own needed CRDs (`traefik.io_*`, `hub.traefik.io_*` — NOT
+     the Gateway API bundle) were installed once, out-of-band, by
+     `helm pull`ing the chart locally and `kubectl apply`ing just those
+     files (excluding `gateway-standard-install.yaml`) directly on the
+     control-plane node.
+- **No StorageClass existed anywhere** — every PVC (Traefik's `acme.json`,
+  every future `common-app-chart` PVC) was stuck `Pending` with "no
+  persistent volumes available... and no storage class is set". NFS/
+  Proxmox-backed shared storage is still deferred; added
+  `containeroo/local-path-provisioner` (chart `0.0.37`) as a wave-0
+  platform app (`gitops/platform/values/local-path-provisioner/values.yaml`,
+  `defaultClass: true`) as a hostPath-backed stopgap default StorageClass.
+  Swappable later without touching any app's PVC template, since none of
+  them set `storageClassName` explicitly.

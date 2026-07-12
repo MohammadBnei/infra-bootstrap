@@ -1,0 +1,20 @@
+# local-path-provisioner Helm values for ukubi-cluster
+# Chart: https://charts.containeroo.ch  name: local-path-provisioner
+#
+# No shared storage yet (NFS/Proxmox-backed is deferred). This is the
+# stopgap default StorageClass so PVCs (Traefik's acme.json, common-app-chart
+# PVCs) can bind at all: hostPath-backed, per-node, not shared across nodes.
+# Swap for an NFS-backed StorageClass later without changing any app's PVC
+# template (none of them set storageClassName, so whichever class is marked
+# defaultClass here is what they bind to).
+
+storageClass:
+  create: true
+  defaultClass: true
+  name: local-path
+  reclaimPolicy: Delete
+
+nodePathMap:
+  - node: DEFAULT_PATH_FOR_NON_LISTED_NODES
+    paths:
+      - /opt/local-path-provisioner

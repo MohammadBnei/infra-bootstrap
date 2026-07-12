@@ -31,7 +31,8 @@ gitops/
 │       ├── infisical/values.yaml
 │       ├── prometheus/values.yaml
 │       ├── grafana/values.yaml
-│       └── metrics-server/values.yaml
+│       ├── metrics-server/values.yaml
+│       └── local-path-provisioner/values.yaml
 └── apps/
     └── registry.yaml                      # Human source of truth for user apps
 ```
@@ -46,10 +47,13 @@ Everything is sequenced so each layer is ready before the next depends on it:
 
 | Wave | App(s) | Why first |
 |------|--------|-----------|
+| 0 | **local-path-provisioner** | Default StorageClass — stopgap until NFS/Proxmox-backed storage exists; every PVC in the cluster (Traefik's acme.json, common-app-chart PVCs) needs a default StorageClass to bind at all |
 | 1 | **Infisical** | Serves SSH keys to ArgoCD via `InfisicalSecret` CRDs — must be ready before any app that needs a private values repo |
 | 2 | **Traefik** (standalone `traefik-application.yaml`, not in the ApplicationSet) | Ingress — must be up before IngressRoutes resolve |
 | 5 | Prometheus, Grafana, metrics-server | Observability, no hard ordering constraint |
 | 10 | All user apps | Depend on Infisical (secrets) + Traefik (IngressRoutes) |
+
+Note: sync-wave ordering across independent top-level Applications isn't strictly enforced by ArgoCD without an App-of-Apps parent (which MISSION.md forbids here) — these numbers are the intended/documented order. In practice each Application's own `retry`/`selfHeal` policy converges regardless of exact creation order.
 
 ### Bootstrap credential chain
 
@@ -76,6 +80,7 @@ Only the infra-bootstrap SSH key and Infisical's own server credentials are inje
 
 | Wave | App | Chart |
 |------|-----|-------|
+| 0 | local-path-provisioner | containeroo/local-path-provisioner |
 | 1 | infisical | infisical/infisical |
 | 5 | prometheus | prometheus-community/kube-prometheus-stack |
 | 5 | grafana | grafana/grafana |

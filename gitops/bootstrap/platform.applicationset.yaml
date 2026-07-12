@@ -10,6 +10,19 @@ spec:
   - list:
       elements:
 
+      # wave 0 — Storage (no NFS/Proxmox-backed storage yet; this is the
+      # stopgap default StorageClass so any PVC in the cluster can bind at
+      # all — Traefik's acme.json PVC and every common-app-chart PVC depend
+      # on a default StorageClass existing, none of them set
+      # storageClassName explicitly)
+      - name: local-path-provisioner
+        namespace: local-path-storage
+        syncWave: "0"
+        chartRepoURL: https://charts.containeroo.ch
+        chartRevision: "0.0.37"
+        chartName: local-path-provisioner
+        valuesPath: gitops/platform/values/local-path-provisioner/values.yaml
+
       # wave 1 — Secrets engine (must be first; serves SSH keys to ArgoCD for all other apps)
       - name: infisical
         namespace: infisical
