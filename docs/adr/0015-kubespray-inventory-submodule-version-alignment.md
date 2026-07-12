@@ -1,23 +1,25 @@
 # ADR-0015: Kubespray inventory ↔ submodule version alignment
 
-**Status:** Proposed — **hard blocker on running `cluster.yml`**
+**Status:** Accepted
 
 ## Context
 
-`inventory/ukubi/` is authored against kubespray **v2.23** variable
-names, while the `kubespray/` submodule is pinned at **v2.31.0** (the
-current latest stable release). Running `cluster.yml` today would
-silently use v2.23 variable names against a v2.31.0 submodule and may
-apply the wrong default values with no error.
+`inventory/ukubi/` was authored against kubespray **v2.23** variable
+names, while the `kubespray/` submodule is pinned at **v2.31.0**. Running
+`cluster.yml` risked silently using v2.23 variable names against a
+v2.31.0 submodule and applying the wrong default values with no error.
 
 ## Decision
 
-Not yet decided which direction to resolve in — most likely, port the
-inventory to v2.31.0 variable names (submodule bumps are a PR of their
-own, never combined with inventory edits, per `DECISION.md`).
+Ported the inventory to v2.31.0 variable names. Confirmed by the
+2026-07-12 full smoke test (`docs/bootstrap-test-notes-full-run-2026-07-12.md`):
+`cluster.yml` ran clean against `cp01`/`worker01` — `failed=0`,
+`unreachable=0` on both nodes, correct `v1.35.4` kube version, no
+version-mismatch symptoms. The only issue hit during that run was an
+unrelated execution mistake (invoking `ansible-playbook` from the repo
+root instead of `kubespray/`), not an inventory/submodule alignment
+problem.
 
 ## Consequences
 
-**Do NOT run `cluster.yml` until this is resolved.** This is the
-highest-priority open item blocking the next real cluster bootstrap
-attempt. See `DECISION.md` Known Drift and `inventory/ukubi/README.md`.
+`cluster.yml` is safe to run against `inventory/ukubi/` as-is.

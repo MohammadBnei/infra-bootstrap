@@ -106,12 +106,6 @@ These items in working-tree files contradict this decision log. The
 agent **must** reconcile them before invoking anything that consumes
 them:
 
-- **`inventory/ukubi/group_vars/k8s_cluster/addons.yml` line
-  `cert_manager_enabled: true`** → flip to `false`. Traefik ACME is the
-  cert engine (ADR-0001).
-- **Kubespray inventory ↔ submodule version mismatch** — see
-  [ADR-0015](docs/adr/0015-kubespray-inventory-submodule-version-alignment.md),
-  a hard blocker on running `cluster.yml`.
 - **`inventory/ukubi/README.md`** still references the "libvirt ukubi
   cluster on `server1`" as a coexisting cluster. Under greenfield that
   cluster is gone.
