@@ -12,12 +12,24 @@
 # kubeSecretRef: "" — its own auto-generated Mongo-flavored secret, never our
 # infisical-secrets) for the entire test. Confirmed via the actual failure:
 # "Boot up migration failed... postgresql://undefined:undefined@undefined:undefined/undefined".
+#
+# image.tag pinned to match production's k8s-cluster/infisical/values.yml
+# (v0.159.28), not the latest available tag. This shares the same live
+# Postgres (Pigsty) as production via DB_CONNECTION_URI in infisical-secrets
+# — a newer tag here is the first Infisical version ever to run its own new
+# migrations against that DB, and v0.162.3's
+# 20260429021227_add-pending-message-to-certificate-requests migration hit a
+# pre-existing table-ownership issue on `certificate_requests` unrelated to
+# this repo (`must be owner of table certificate_requests`). Matching
+# production's proven version sidesteps untested migrations; bump only once
+# that ownership issue is fixed at the DB level (see
+# docs/bootstrap-test-notes-full-run-2026-07-12.md).
 
 backend:
   replicaCount: 1
   image:
     repository: infisical/infisical
-    tag: "v0.162.3"
+    tag: "v0.159.28"
     pullPolicy: IfNotPresent
   # Points envFrom directly at our secret (DB_CONNECTION_URI, DB_ROOT_CERT,
   # AUTH_SECRET, ENCRYPTION_KEY, REDIS_URL, SITE_URL, SMTP_*) instead of the

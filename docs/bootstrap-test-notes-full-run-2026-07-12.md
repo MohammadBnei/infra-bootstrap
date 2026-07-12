@@ -114,6 +114,89 @@ Note also: `gitops/platform/values/*` auto-syncs from the **pushed**
 remote (ArgoCD clones from GitHub, not the local working tree) — this fix
 needs a `git push`, not just a local commit, before ArgoCD picks it up.
 
+## ArgoCD stuck-sync deadlock chain — real bug, three-layer finalizer/cache issue
+
+After the `preUpgradeChecker.jobEnabled: false` fix was pushed, `platform-longhorn`
+stayed stuck recreating the exact same hook Job for ~35 minutes despite the
+fix being live on `origin/main` (verified via `git ls-remote` and `git
+fetch` — not a push problem). Root cause was a chain of three separate
+ArgoCD staleness/deadlock issues, not one:
+
+1. **In-flight operation doesn't re-render on retry.** An `automated`
+   sync's `retry.backoff` loop reuses the manifest/revision resolved at
+   the *start* of that operation — it does not re-fetch git or re-render
+   Helm on each retry. A `kubectl annotate .../refresh=hard` updates
+   `.status.sync` (the comparison view) but does **not** interrupt an
+   already-running operation's in-memory retry loop.
+2. **Job hook-finalizer deadlock.** The stuck Job carries
+   `argocd.argoproj.io/hook-finalizer`, normally removed by the
+   application-controller once it decides the hook is done — which never
+   happens here, since the hook can never succeed (no ServiceAccount).
+   `kubectl delete` on the Job hangs; had to strip the finalizer directly
+   (`kubectl patch job ... -p '{"metadata":{"finalizers":null}}'
+   --type=merge`) to actually remove it.
+3. **Application resources-finalizer deadlock, same shape one level up.**
+   Once the Job was cleared, clearing `.status.operationState` (via a
+   normal, non-subresource `kubectl patch` — this CRD does **not** expose
+   a `/status` subresource, `--subresource=status` 404s) and restarting
+   `argocd-application-controller` still weren't enough: the *new*
+   operation kept resolving the OLD pre-fix git revision
+   (`155e93e3`) instead of the pushed fix (`0a1906ca`) — confirmed via
+   `.status.operationState.syncResult.revisions`. Restarting
+   `argocd-repo-server` (Helm render) and `argocd-redis` (the actual
+   manifest-cache backend — a separate component from repo-server, this
+   is the one that matters for cache staleness) did not fix it either.
+   What finally worked: `kubectl delete application platform-longhorn`
+   (which hangs on the Application's own
+   `resources-finalizer.argocd.argoproj.io`), then strip *that*
+   finalizer too (`kubectl patch application platform-longhorn -p
+   '{"metadata":{"finalizers":null}}' --type=merge`). Kubernetes then
+   actually deletes the object, and since it's still declared in
+   `platform.applicationset.yaml`'s list generator, the ApplicationSet
+   controller immediately recreates it from scratch — genuinely fresh,
+   with no operation history to resume. That recreation finally resolved
+   `0a1906ca` correctly and moved past the hook.
+
+Never fully root-caused *why* the resolved revision stayed pinned to the
+pre-fix commit across an application-controller restart with a cleared
+`operationState` — possibly a 4th cache layer (repo revision cache inside
+the app controller itself, distinct from repo-server/redis) that only a
+full Application object recreation bypasses. Worth a documented recovery
+runbook entry in the `k8s-ops` skill: **when a values-file fix doesn't
+take effect after a push, don't trust `refresh=hard` or component
+restarts alone — if the Application has a stuck/retrying operation,
+delete-and-let-the-ApplicationSet-recreate is the reliable unstick.**
+
+## Infisical backend CrashLoopBackOff — version mismatch vs production, real finding
+
+`platform-infisical` synced fine but the backend pod crash-looped:
+`Boot up migration failed: alter table "certificate_requests" add column
+"pendingMessage" text null - must be owner of table certificate_requests`
+(migration `20260429021227_add-pending-message-to-certificate-requests.mjs`).
+
+Diagnosed **without touching the live cluster or production DB** — purely
+by comparing local config: `k8s-cluster/infisical/values.yml` (the actual
+manifests deployed on the legacy production cluster at `.181`, per
+`docs/infrastructure-actual.md` §3) pins `image.tag: "v0.159.28"`, while
+`gitops/platform/values/infisical/values.yaml` (this test's config) had
+`v0.162.3`. Both point at the **same shared production Postgres**
+(`pg01`, `.205`) via the same `.env.secret`-derived `DB_CONNECTION_URI` —
+this test's newer Infisical version was the first ever to attempt a
+migration production has never run, and it hit a pre-existing
+table-ownership inconsistency on that one table (likely from some earlier
+out-of-band `psql` session, unrelated to this repo). This is a real,
+latent production issue — production will hit the exact same failure
+whenever it's eventually upgraded past v0.159.28.
+
+Did **not** touch production Postgres to fix the ownership (out of this
+smoke test's `cp01`/`worker01` scope — would need explicit user
+authorization + a `REASSIGN OWNED BY` on live infra). Fixed for this
+smoke test by pinning `gitops/platform/values/infisical/values.yaml`'s
+`backend.image.tag` back to `v0.159.28` to match the proven-working
+production version, sidestepping the untested migration. Follow-up (not
+done here): fix the `certificate_requests` ownership on `pg01` before
+production is ever upgraded past v0.159.28.
+
 ## Kubespray cluster.yml — clean run
 
 After fixing the invocation gotcha above: `failed=0` on both nodes,
