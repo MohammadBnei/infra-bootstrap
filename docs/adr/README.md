@@ -25,7 +25,7 @@ ADR-000N` (replaced by a later decision).
 | [0012](0012-reject-gitops-for-proxmox.md) | GitOps-managed Proxmox | Rejected |
 | [0013](0013-pve-node-161-sleep-risk-mitigation.md) | `.161` sleep-risk mitigation | Proposed |
 | [0014](0014-pve-storage-layout-zfs-vs-local-zfs.md) | PVE storage layout: ZFS pool vs `local-zfs` | Proposed |
-| [0015](0015-kubespray-inventory-submodule-version-alignment.md) | Kubespray inventory ↔ submodule version alignment | Proposed — blocks `cluster.yml` |
+| [0015](0015-kubespray-inventory-submodule-version-alignment.md) | Kubespray inventory ↔ submodule version alignment | Accepted |
 | [0016](0016-k8s-endpoint-naming.md) | K8s API endpoint naming | Proposed |
 | [0017](0017-second-control-plane-member.md) | Second control-plane / etcd member | Proposed |
 | [0018](0018-cilium-ebpf-offload-flip.md) | Cilium eBPF offload flip | Proposed |
