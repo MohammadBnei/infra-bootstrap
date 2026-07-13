@@ -82,7 +82,7 @@ extraManifests:
       name: searxng-settings
       namespace: {{ .Release.Namespace }}
     spec:
-      hostAPI: http://infisical.infisical.svc.cluster.local:8080/api
+      hostAPI: http://platform-infisical-backend.infisical.svc.cluster.local:8080/api
       resyncInterval: 60
       authentication:
         universalAuth:
