@@ -15,20 +15,11 @@ spec:
       # n8n, openweb-ui(+pipelines), whodb, api, ukubi-ai are deferred —
       # no working per-app repo yet (see docs/bootstrap-test-notes.md).
       # Re-add once each has a real values.yaml.
-
-      - name: searxng
-        namespace: searxng
-        syncWave: "10"
-        repoURL: git@github.com:MohammadBnei/searxng.git
-        valuesPath: values.yaml
-        hostname: searxng.bnei.dev
-
-      - name: pgweb
-        namespace: pgweb
-        syncWave: "10"
-        repoURL: git@github.com:MohammadBnei/pgweb.git
-        valuesPath: values.yaml
-        hostname: pgweb.bnei.dev
+      #
+      # searxng/pgweb are NOT here — public-image, no app-specific code,
+      # driven as platform apps instead (see platform-common-apps.applicationset.yaml).
+      # This ApplicationSet is intentionally empty until a real user-app
+      # repo exists.
 
   template:
     metadata:

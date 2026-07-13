@@ -1,0 +1,74 @@
+# Simple containerized platform tools (public image, no app-specific code)
+# driven directly from infra-bootstrap via gitops/platform/common-app-chart.
+# Distinct from gitops/apps/registry.yaml's user apps: those live in their
+# own private repo (per-app SSH deploy key, own release cadence). These
+# don't — chart and values both live in this repo, single Application
+# source, no external repo/key needed.
+#
+# Add an app: append a list element here + create
+# gitops/platform/values/<name>/values.yaml.
+apiVersion: argoproj.io/v1alpha1
+kind: ApplicationSet
+metadata:
+  name: platform-common-apps
+  namespace: argocd
+spec:
+  goTemplate: true
+  goTemplateOptions: ["missingkey=zero"]
+  generators:
+  - list:
+      elements:
+
+      - name: searxng
+        namespace: searxng
+        hostname: searxng.bnei.dev
+
+      - name: pgweb
+        namespace: pgweb
+        hostname: pgweb.bnei.dev
+
+  template:
+    metadata:
+      name: '{{.name}}'
+      annotations:
+        # Same wave as gitops/apps/registry.yaml's user apps — depends on
+        # Infisical (secrets) + Traefik (ingress) from earlier waves.
+        argocd.argoproj.io/sync-wave: "10"
+      finalizers:
+      - resources-finalizer.argocd.argoproj.io
+    spec:
+      project: default
+      source:
+        repoURL: git@github.com:MohammadBnei/infra-bootstrap.git
+        path: gitops/platform/common-app-chart
+        targetRevision: HEAD
+        helm:
+          valueFiles:
+          - ../values/{{.name}}/values.yaml
+          parameters:
+          - name: ingress.hostname
+            value: '{{.hostname}}'
+      destination:
+        server: https://kubernetes.default.svc
+        namespace: '{{.namespace}}'
+      # See apps.applicationset.yaml's identical rule: the Infisical
+      # operator writes InfisicalSecret's .status on every resync, which
+      # would otherwise flag the Application perpetually OutOfSync.
+      ignoreDifferences:
+      - group: secrets.infisical.com
+        kind: InfisicalSecret
+        jsonPointers:
+        - /status
+      syncPolicy:
+        automated:
+          prune: true
+          selfHeal: true
+        syncOptions:
+        - CreateNamespace=true
+        - ServerSideApply=true
+        retry:
+          limit: 5
+          backoff:
+            duration: 5s
+            factor: 2
+            maxDuration: 3m

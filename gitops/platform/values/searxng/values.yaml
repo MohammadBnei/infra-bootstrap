@@ -1,0 +1,129 @@
+# searxng — driven directly from infra-bootstrap via common-app-chart
+# (public image, no app-specific code — not a gitops/apps/registry.yaml
+# "user app"). Migrated from the k8s-cluster submodule's kustomize config,
+# reusing its real settings rather than inventing new ones.
+
+image:
+  repository: docker.io/searxng/searxng
+  tag: "2026.7.12-c19d86faa"
+
+service:
+  port: 8080
+
+ingress:
+  hostname: searxng.bnei.dev
+
+resources:
+  requests:
+    cpu: 128m
+    memory: 256Mi
+  limits:
+    cpu: 500m
+    memory: 512Mi
+
+env:
+  - name: SEARXNG_PORT
+    value: "8080"
+  - name: SEARXNG_BASE_URL
+    value: "https://searxng.bnei.dev/"
+  - name: FORCE_OWNERSHIP
+    value: "true"
+
+livenessProbe:
+  enabled: true
+  type: http
+  path: /healthz
+  port: 8080
+  initialDelaySeconds: 15
+  periodSeconds: 30
+  timeoutSeconds: 5
+  failureThreshold: 3
+
+# ponytail: securityContext (capabilities drop ALL / add CHOWN,SETGID,SETUID
+# in the old manifest) isn't reproduced — common-app-chart has no
+# securityContext field yet. Not a regression vs. container defaults, just
+# skipped hardening. Add a generic `securityContext` passthrough to the
+# chart if this needs to come back.
+extraVolumes:
+  # settings.yml comes from a Secret, not a ConfigMap: it embeds
+  # secret_key, which searxng's own docker entrypoint only auto-patches
+  # for its *own* template-copy flow, not for a file we bind-mount
+  # directly — so the real value has to already be in the rendered file,
+  # sourced from Infisical rather than committed here.
+  - name: searxng-settings
+    secret:
+      secretName: searxng-settings
+  - name: searxng-limiter
+    configMap:
+      name: searxng-limiter
+  - name: searxng-cache
+    emptyDir: {}
+
+extraVolumeMounts:
+  - name: searxng-settings
+    mountPath: /etc/searxng/settings.yml
+    subPath: settings.yml
+  - name: searxng-limiter
+    mountPath: /etc/searxng/limiter.toml
+    subPath: limiter.toml
+  - name: searxng-cache
+    mountPath: /var/cache/searxng
+
+# Required secret in the infra-bootstrap Infisical project (see
+# docs/secrets.md): SEARXNG_SECRET_KEY — reusing the real value already
+# live in k8s-cluster/searxng/ rather than rotating it during migration.
+extraManifests:
+  - |
+    apiVersion: secrets.infisical.com/v1alpha1
+    kind: InfisicalSecret
+    metadata:
+      name: searxng-settings
+      namespace: {{ .Release.Namespace }}
+    spec:
+      hostAPI: http://infisical.infisical.svc.cluster.local:8080/api
+      resyncInterval: 60
+      authentication:
+        universalAuth:
+          secretsScope:
+            projectSlug: "infra-bootstrap-1-ge1"
+            envSlug: dev
+            secretsPath: "/"
+          credentialsRef:
+            secretName: universal-auth-credentials
+            secretNamespace: infisical
+      managedSecretReference:
+        secretName: searxng-settings
+        secretNamespace: {{ .Release.Namespace }}
+        creationPolicy: Orphan
+        template:
+          data:
+            settings.yml: |
+              use_default_settings: true
+
+              server:
+                base_url: "https://searxng.bnei.dev/"
+                secret_key: "{{ "{{" }} .SEARXNG_SECRET_KEY {{ "}}" }}"
+                limiter: false
+                image_proxy: true
+
+              ui:
+                default_theme: simple
+                default_locale: ""
+
+              search:
+                safe_search: 0
+                default_lang: ""
+                autocomplete: "google"
+                formats:
+                    - html
+                    - json
+  - |
+    apiVersion: v1
+    kind: ConfigMap
+    metadata:
+      name: searxng-limiter
+      namespace: {{ .Release.Namespace }}
+    data:
+      limiter.toml: |
+        [botdetection.ip_limit]
+        link_token = true

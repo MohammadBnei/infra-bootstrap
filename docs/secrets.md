@@ -41,6 +41,8 @@ everything.
 | `PGADMIN_PASSWORD` | pgAdmin console login | agent (random 32B) | pigsty `pgadmin` |
 | `GARAGE_ROOT_TOKEN` | Garage S3 root token — the one-time bootstrap credential everything else's S3 access derives from | user (Garage CLI, first deploy, one-time) | everything that provisions S3 buckets |
 | `GITHUB_APPS_SSH_KEY` | Read-only deploy key (full PEM private key), public half added to every `MohammadBnei/*` user-app repo — lets ArgoCD clone their private `values.yaml` | user (fresh keypair, one public half per app repo) | `gitops/bootstrap/argocd-github-apps-creds.yaml` (InfisicalSecret) → ArgoCD repo-creds |
+| `SEARXNG_SECRET_KEY` | searxng's session-signing key, embedded in its mounted `settings.yml` | reused from the existing value in `k8s-cluster/searxng/` (not rotated during migration) | `gitops/platform/values/searxng/values.yaml` (InfisicalSecret, `template:`-rendered) |
+| `BASIC_AUTH_HTPASSWD` | Shared Traefik BasicAuth credential (`user:apr1-hash` line) gating admin-only tools (pgweb, etc.) | reused from the existing value in `k8s-cluster/traefik/middlewares/basicauth.yml` (not rotated during migration) | `gitops/bootstrap/basic-admin-auth-secret.yaml` (InfisicalSecret) → shared `basic-admin-auth` Middleware |
 
 ## SSH access (per-host)
 

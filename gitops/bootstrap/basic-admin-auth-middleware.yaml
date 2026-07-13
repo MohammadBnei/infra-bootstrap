@@ -1,0 +1,14 @@
+# Shared Traefik BasicAuth middleware for admin-only tools (pgweb, and
+# whatever else needs it later) — ported from
+# k8s-cluster/traefik/middlewares/basicauth.yml, same name/namespace
+# (`default`) for continuity. One middleware + one secret, referenced by
+# any app's `ingress.middlewares: [{name: basic-admin-auth, namespace: default}]`
+# rather than a per-app copy.
+apiVersion: traefik.io/v1alpha1
+kind: Middleware
+metadata:
+  name: basic-admin-auth
+  namespace: default
+spec:
+  basicAuth:
+    secret: authsecret

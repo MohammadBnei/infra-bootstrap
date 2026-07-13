@@ -18,17 +18,9 @@
 # working per-app repo yet (see docs/bootstrap-test-notes.md). Re-add once
 # each has a real values.yaml; don't list a repo that doesn't exist, ArgoCD
 # will just fail to clone it.
-
-- name: searxng
-  namespace: searxng
-  syncWave: "10"
-  repoURL: git@github.com:MohammadBnei/searxng.git
-  valuesPath: values.yaml
-  hostname: searxng.bnei.dev
-
-- name: pgweb
-  namespace: pgweb
-  syncWave: "10"
-  repoURL: git@github.com:MohammadBnei/pgweb.git
-  valuesPath: values.yaml
-  hostname: pgweb.bnei.dev
+#
+# searxng and pgweb are NOT here: they're public-image tools with no
+# app-specific code, so they're driven as platform apps instead — see
+# gitops/bootstrap/platform-common-apps.applicationset.yaml and
+# gitops/platform/values/{searxng,pgweb}/values.yaml. This registry is
+# only for apps that genuinely need their own repo.
