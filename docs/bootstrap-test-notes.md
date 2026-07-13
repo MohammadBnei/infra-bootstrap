@@ -209,3 +209,187 @@ can be meaningfully tested until this is committed and pushed.**
   `defaultClass: true`) as a hostPath-backed stopgap default StorageClass.
   Swappable later without touching any app's PVC template, since none of
   them set `storageClassName` explicitly.
+
+## 2026-07-13 — full smoke test: terraform → kubespray → ArgoCD → platform-common-apps
+
+Repeat of the chain end to end, this time also trying to get real apps
+syncing at wave 10 — the previous test (above) never got past platform
+apps. Scope: 2-node Terraform apply (no GPU worker), Garage included in
+scope but ultimately deferred (see below), fresh kubespray run, ArgoCD
+bootstrap, and migrating `searxng` + `pgweb` off the `k8s-cluster`
+submodule's old kustomize manifests. Two real, previously-undiscovered
+bugs found and fixed (both merged: PR #5, PR #6); one open networking bug
+found and *not* resolved this session.
+
+### Pre-work: two architecture findings before touching infra
+
+- **The registry's app repos don't exist on GitHub.** None of `n8n`,
+  `openweb-ui`, `searxng`, `whodb`, `api`, `ukubi-ai` exist under
+  `MohammadBnei/*` — confirmed via `gh repo list` (154 repos, no matches).
+  `gitops/apps/registry.yaml` had been carrying aspirational entries.
+- **The real deployments live inside the `k8s-cluster` submodule** as
+  kustomize manifests (`k8s-cluster/n8n/`, `k8s-cluster/searxng/`,
+  `k8s-cluster/archive/pgweb/`, etc.), not as standalone repos. Of those,
+  only `n8n`, `openweb-ui`(+pipelines), `searxng`, and `pgweb` (in
+  `archive/`, not one of the 6 "active" dirs) have real, complete
+  configs — `api/` is cert-only, `ukubi-ai/` is just Grafana dashboard
+  ConfigMaps, neither is an actual app.
+- **Decision: `searxng`/`pgweb` are platform apps, not user apps.**
+  Both are public-image tools with no app-specific code, so a private
+  per-app repo + deploy key is unnecessary ceremony. Added
+  `gitops/bootstrap/platform-common-apps.applicationset.yaml`: a third
+  ApplicationSet where `common-app-chart` and the values file both live
+  in `infra-bootstrap` itself (single Application source, no external
+  repo). `gitops/apps/registry.yaml` stays reserved for apps that
+  genuinely need their own repo (currently empty — `n8n`,
+  `openweb-ui`(+pipelines), `whodb`, `api`, `ukubi-ai` deferred).
+- **Reused real secret values instead of inventing new ones.** searxng's
+  `SEARXNG_SECRET_KEY` and the shared `basic-admin-auth` htpasswd
+  credential (used by `pgweb`/`jaeger`/`prometheus` in the old cluster,
+  from `k8s-cluster/traefik/middlewares/basicauth.yml`) were copied from
+  their existing real values into Infisical rather than rotated —
+  `docs/secrets.md` documents both, plus the two new small per-app
+  Infisical projects (`pgweb-p9-hy`, `searxng-l-dwt`) this pattern uses.
+
+### `common-app-chart` additions (needed for the migration)
+
+Added four generic, additive fields — same idiom as Bitnami's
+`extraDeploy`, not per-app special-casing: `extraVolumes` /
+`extraVolumeMounts` (raw passthrough into the pod/container spec — needed
+for searxng's Secret-mounted `settings.yml`), `extraManifests` (list of
+raw YAML strings, `tpl`'d and rendered as separate objects — needed for
+searxng's `limiter.toml` ConfigMap and pgweb's `InfisicalSecret`), and
+`ingress.middlewares` (Traefik Middleware refs on the IngressRoute —
+needed for pgweb's BasicAuth gate). All four verified via `helm
+lint`/`helm template` before touching the cluster, including the
+double-templating escape trick (`{{ "{{" }} .KEY {{ "}}" }}`) needed so
+Helm's own `tpl` doesn't eat the `InfisicalSecret` operator's Go-template
+syntax inside a `template:` block.
+
+### Terraform: 2-node + Garage
+
+`k8s-cp-01`/`k8s-worker-01` applied cleanly and fast (~a few minutes,
+guest-agent fix from the last test still holds) — zero drift on a
+follow-up `-target` plan.
+
+- **Real bug, unresolved**: `null_resource.garage_bootstrap`'s
+  community-scripts.org installer script dropped into an **interactive
+  `whiptail` menu** ("1 Default Install / 2 Advanced Install / ...")
+  instead of running non-interactively, over Terraform's non-interactive
+  SSH provisioner — it hangs forever, not just "runs long". The `var_*`
+  env vars `garage.tf` sets are supposed to make community-scripts'
+  `build.func` skip that menu; something in how the provisioner invokes
+  the script isn't triggering that. Confirmed via SSH onto `.165`: the
+  script and a `whiptail` process were still alive and blocked after 37+
+  minutes. Killed cleanly (nothing was actually created — `pct list`
+  never showed a new LXC) and **deferred Garage from this run's scope**.
+- **State hygiene gotcha**: even though the provisioner never completed,
+  `terraform state list` showed `null_resource.garage_bootstrap` as a
+  normal (non-tainted) resource — a future `plan` would've treated it as
+  "already applied" and hidden that Garage was never actually installed.
+  `terraform state rm null_resource.garage_bootstrap` was needed to make
+  state honestly reflect reality before moving on.
+- `garage_ip` (`terraform.tfvars`) had only ever been a placeholder
+  (`192.168.1.199`, marked "untouched by this test" in a comment) —
+  verified free via ping before treating it as real for this run.
+
+### Kubespray
+
+Clean run, `cluster.yml`, both nodes `ok`, `failed=0`, `unreachable=0`,
+9m06s total. Inventory (`inventory/ukubi/hosts.yaml`) was already correct
+from the last test (`.201`/`.202`, matching Terraform's real topology),
+`kube_version` fix already in place, Python 3.12 venv already built — no
+prep needed this time, unlike the first test.
+
+### ArgoCD bootstrap: credential handling without touching VM disk
+
+Per user preference, the three `register-repos.sh` bootstrap Secrets
+(`repo-infra-bootstrap`, `infisical-secrets`, `universal-auth-credentials`)
+were created **without copying any credential files onto the VM or
+printing them anywhere** — built locally with `kubectl create secret
+--dry-run=client -o yaml` (reads local files directly, renders YAML
+in-process) and piped straight into `ssh ... kubectl apply -f -`. Only
+`kubectl`'s own confirmation output ("secret/X created") ever left the
+pipe. Same technique used later to patch `infisical-secrets` twice
+(captcha/telemetry fix, below) and to test the login endpoint safely
+(extracting only a `jq`-filtered `.message`/`.error` field, or checking
+response byte-size before ever printing a body, to guarantee no live
+token could leak into the transcript).
+
+`gitops/bootstrap/` and `traefik-crds/` were `tar`'d and copied to the VM
+for `kubectl apply -f` (no secrets in those files, so a plain copy is
+fine) — macOS's `tar` adds `._*` AppleDouble sidecar files that `kubectl
+apply -f <dir>/` chokes on (`yaml: control characters are not allowed`);
+harmless, just `find ... -name '._*' -delete` before applying.
+
+### Real bugs found and fixed (both merged)
+
+- **`InfisicalSecret.spec.hostAPI` pointed at a Service that never
+  existed.** Every `InfisicalSecret` in the repo (`grafana-admin-secret`,
+  `argocd-github-apps-creds`, plus the new `basic-admin-auth-secret`,
+  `pgweb`, `searxng`) and the operator's own safety-net default used
+  `http://infisical.infisical.svc.cluster.local:8080/api`. Confirmed via
+  `nslookup` inside the cluster: `infisical.infisical.svc.cluster.local`
+  is NXDOMAIN — the Infisical Helm chart names its backend Service
+  `<release-name>-backend`, and ArgoCD's release name for the platform
+  Infisical Application is `platform-infisical`, so the real Service is
+  `platform-infisical-backend`. All 5 `InfisicalSecret`s were failing
+  universal-auth login identically. This is the **first time any of
+  these were exercised end-to-end** since being written — fixed in PR #6.
+- **Infisical's captcha/telemetry defaults**: the running pod had
+  `CAPTCHA_SITE_KEY=captcha-site-key` (an obvious non-functional
+  placeholder) and `TELEMETRY_ENABLED=true` with a real `POSTHOG_API_KEY`
+  — neither came from our Helm values or `.env.secret` (confirmed via
+  `kubectl get secret -o json | jq keys`, and grepping the pulled chart
+  source for "captcha" found nothing), so both are baked into the
+  `infisical/infisical` Docker image itself as defaults. Overrode both to
+  disabled (`CAPTCHA_SITE_KEY=`, `TELEMETRY_ENABLED=false`) by appending
+  to the local `k8s-cluster/infisical/.env.secret` — good hygiene for a
+  private homelab regardless, but **did not fix the actual login
+  failure** (see below); this was a red herring investigated in parallel.
+
+### Open issue — not yet resolved: ClusterIP Service routing broken cluster-wide
+
+After the `hostAPI` fix, every `InfisicalSecret` still failed
+universal-auth login with a real (not DNS-failure) `409` whose body was a
+literal Cloudflare DNS-resolution error page (`error code: 1001`, 16
+bytes) — clearly not an Infisical application error. Isolated with a few
+basic checks:
+
+- Direct pod-IP access (`curl http://<pod-ip>:8080/api/status`) returns a
+  clean `200` with real JSON, every time.
+- The exact same request through the ClusterIP Service
+  (`platform-infisical-backend.infisical.svc.cluster.local`) returns the
+  bogus `409` — for **every** endpoint tried, including the trivially
+  simple `/api/status` health check.
+- **Not specific to Infisical**: `argocd-server.argocd.svc.cluster.local`
+  (a completely unrelated Service) returns the identical `409` +
+  Cloudflare page. This is a **systemic ClusterIP-routing bug**, not
+  anything in this repo's gitops config.
+- `sudo ipvsadm -Ln` on `k8s-cp-01` shows the IPVS virtual server rule is
+  programmed correctly (`10.233.53.71:8080 -> 10.233.64.109:8080 Masq`,
+  pointing at the right pod). `kube-proxy` logs are clean (IPVS proxier
+  running, no errors beyond the standard "ipvs is deprecated, consider
+  nftables" notice).
+
+**Not resolved**: the IPVS rule being correct but Service-routed traffic
+still failing points at something lower in the datapath — masquerade/SNAT
+handling, or an interaction with Cilium running in chaining mode
+(kube-proxy retained per `ARCHITECTURE.md`) — that needs packet-capture-
+level debugging (iptables NAT table dump, `cilium monitor`, or similar) to
+actually pin down. Next session should start here before anything else;
+until this is fixed, **no ClusterIP-routed traffic works on this
+cluster**, which blocks not just `InfisicalSecret` sync but likely
+Traefik→backend routing for every app once real traffic starts flowing
+(IngressRoutes route to Services, same broken path).
+
+### Status at end of session
+
+Terraform (2-node), kubespray, and the whole ArgoCD platform stack
+(Longhorn, Infisical, infisical-operator, Traefik, Prometheus, Grafana,
+metrics-server) are up and `Healthy`. `platform-common-apps` (searxng,
+pgweb) synced and pods started, proving the new ApplicationSet mechanism
+itself works — but neither app can finish going `Healthy` until the
+ClusterIP routing bug above is fixed, since both depend on
+`InfisicalSecret` (in turn blocked on Service-routed calls to the
+Infisical backend).
