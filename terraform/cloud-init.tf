@@ -1,6 +1,5 @@
-# Three concerns bundled into one vendor-data snippet, shared by all three
-# k8s VMs (cp01/worker01/worker-gpu each set vendor_data_file_id to this
-# resource):
+# Two concerns bundled into one vendor-data snippet, shared by both k8s VMs
+# (cp01/worker01 each set vendor_data_file_id to this resource):
 #
 # 1. qemu-guest-agent isn't in Ubuntu's stock 24.04 cloud image. Without
 #    it, every VM clone's agent { enabled = true } block makes apply wait
@@ -10,20 +9,6 @@
 #    raw/unformatted — format + mount it at /var/lib/longhorn on every
 #    boot (idempotent) so Longhorn's wave-0 GitOps sync has a disk to use
 #    without a separate ansible step.
-# 3. The LAN's DHCP server hands out a bogus DNS search domain ("dev") on
-#    eth0. systemd-resolved merges that into every pod's resolv.conf
-#    (kubelet's own kube_resolv_conf just points at
-#    /run/systemd/resolve/resolv.conf — kubespray never manages that
-#    file's content, so this can only be fixed here or on the router).
-#    With ndots:5, any in-cluster FQDN (4 dots) tries appending search
-#    suffixes — including bare "dev" — before the absolute name. ".dev" is
-#    a real public TLD, so that lookup gets a live (non-NXDOMAIN) answer
-#    and resolution stops there instead of ever reaching the correct
-#    ClusterIP: every Service-by-DNS-name call in the cluster resolves to
-#    a public Cloudflare-fronted IP instead. Disabling DHCP domain-search
-#    acceptance on eth0 stops the domain from ever entering
-#    systemd-resolved. See docs/bootstrap-test-notes.md's ClusterIP
-#    routing section for the original symptom.
 #
 # This layers on top of each VM's auto-generated user_account/ip_config
 # cloud-init (vendor_data_file_id doesn't replace them, unlike
@@ -44,19 +29,8 @@ resource "proxmox_virtual_environment_file" "k8s_vm_vendor_data" {
       #cloud-config
       packages:
         - qemu-guest-agent
-      write_files:
-        - path: /etc/netplan/60-disable-dhcp-domains.yaml
-          permissions: '0600'
-          content: |
-            network:
-              version: 2
-              ethernets:
-                eth0:
-                  dhcp4-overrides:
-                    use-domains: false
       runcmd:
         - systemctl enable --now qemu-guest-agent
-        - netplan apply
       bootcmd:
         - |
           if [ -b /dev/sdb ]; then

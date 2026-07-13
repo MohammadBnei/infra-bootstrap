@@ -1,9 +1,10 @@
-# k8s-cp-01 / k8s-worker-01 / k8s-worker-gpu — MISSION.md §3 locked
-# IDs/IPs. Pure new-create, no import: whatever currently sits at the old
-# test-run IPs (.241/.242 in inventory/ukubi/hosts.yaml) is confirmed
-# test-only and out of scope here. If VMID 201/202/203 are already occupied
-# by leftover test VMs, destroy those manually before first apply — they
-# carry no data worth protecting.
+# k8s-cp-01 / k8s-worker-01 — MISSION.md §3 locked IDs/IPs. 2-node
+# cluster: k8s-worker-01 carries the GPU passthrough directly, no separate
+# k8s-worker-gpu VM (ARCHITECTURE.md §2). Pure new-create, no import:
+# whatever currently sits at the old test-run IPs (.241/.242 in
+# inventory/ukubi/hosts.yaml) is confirmed test-only and out of scope here.
+# If VMID 201/202 are already occupied by leftover test VMs, destroy those
+# manually before first apply — they carry no data worth protecting.
 #
 # Each VM also carries a second disk (scsi1, var.longhorn_disk_size_gb)
 # reserved for Longhorn's data path — ARCHITECTURE.md storage section.
@@ -45,6 +46,18 @@ resource "proxmox_virtual_environment_vm" "k8s_cp_01" {
   initialization {
     datastore_id = var.template_storage_id
 
+    # PVE's cloud-init generator otherwise defaults this VM's DNS search
+    # domain to "dev" (a real public TLD) — with ndots:5, every in-cluster
+    # FQDN tries appending it before the absolute name, gets a live
+    # non-NXDOMAIN answer from a public Cloudflare-fronted IP, and never
+    # reaches the correct ClusterIP. Root cause of the 2026-07-13 smoke
+    # test's Infisical/ArgoCD 409 findings (docs/bootstrap-test-notes.md).
+    # "localdomain" isn't a real TLD, so a failed lookup against it
+    # correctly NXDOMAINs and falls through to the real name.
+    dns {
+      domain = "localdomain"
+    }
+
     user_account {
       username = "core"
       keys     = [trimspace(file(var.k8s_vm_ssh_public_key_file))]
@@ -85,68 +98,6 @@ resource "proxmox_virtual_environment_vm" "k8s_worker_01" {
   }
 
   cpu {
-    cores = 4
-  }
-
-  memory {
-    dedicated = 8192
-  }
-
-  disk {
-    datastore_id = var.template_storage_id
-    interface    = "scsi0"
-    size         = 60
-  }
-
-  disk {
-    datastore_id = var.template_storage_id
-    interface    = "scsi1"
-    size         = var.longhorn_disk_size_gb
-  }
-
-  initialization {
-    datastore_id = var.template_storage_id
-
-    user_account {
-      username = "core"
-      keys     = [trimspace(file(var.k8s_vm_ssh_public_key_file))]
-    }
-
-    ip_config {
-      ipv4 {
-        address = "192.168.1.202/24"
-        gateway = var.gateway_ipv4
-      }
-    }
-
-    vendor_data_file_id = proxmox_virtual_environment_file.k8s_vm_vendor_data.id
-  }
-
-  network_device {
-    bridge = "vmbr0"
-  }
-
-  operating_system {
-    type = "l26"
-  }
-
-  agent {
-    enabled = true
-  }
-}
-
-resource "proxmox_virtual_environment_vm" "k8s_worker_gpu" {
-  name      = "k8s-worker-gpu"
-  node_name = var.pve_node_name
-  vm_id     = 203
-  started   = true
-
-  clone {
-    vm_id = proxmox_virtual_environment_vm.ubuntu_2404_template.vm_id
-    full  = true
-  }
-
-  cpu {
     cores = 6
   }
 
@@ -170,14 +121,26 @@ resource "proxmox_virtual_environment_vm" "k8s_worker_gpu" {
   # variables.tf gpu_mapping_name) — hostpci's raw `id` attribute needs root
   # password auth, incompatible with the api_token this provider uses.
   # IOMMU/vfio-pci binding on the host is a prerequisite this doesn't manage.
-  hostpci {
-    device  = "hostpci0"
-    mapping = var.gpu_mapping_name
-    pcie    = true
-  }
+  #
+  # TEMPORARILY DISABLED for the 2026-07-13 DNS-fix smoke test: the "gpu"
+  # PCI Resource Mapping doesn't exist yet on .165 (VM start failed with
+  # "PCI device mapping not found for 'gpu'") — it's a one-time manual step
+  # in the Proxmox UI (Datacenter -> Resource Mappings) requiring root, out
+  # of reach of the API-token provider. Re-enable this block once that
+  # mapping is created.
+  # hostpci {
+  #   device  = "hostpci0"
+  #   mapping = var.gpu_mapping_name
+  #   pcie    = true
+  # }
 
   initialization {
     datastore_id = var.template_storage_id
+
+    # See k8s_cp_01's initialization.dns comment — same fix, same reason.
+    dns {
+      domain = "localdomain"
+    }
 
     user_account {
       username = "core"
@@ -186,7 +149,7 @@ resource "proxmox_virtual_environment_vm" "k8s_worker_gpu" {
 
     ip_config {
       ipv4 {
-        address = "192.168.1.203/24"
+        address = "192.168.1.202/24"
         gateway = var.gateway_ipv4
       }
     }
