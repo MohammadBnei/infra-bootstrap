@@ -14,29 +14,10 @@
 # Per-app repo must have at minimum:
 #   image.repository, image.tag, service.port
 
-- name: n8n
-  namespace: n8n
-  syncWave: "10"
-  repoURL: git@github.com:MohammadBnei/n8n.git
-  valuesPath: values.yaml
-  hostname: n8n.bnei.dev
-
-- name: openweb-ui
-  namespace: openweb-ui
-  syncWave: "10"
-  repoURL: git@github.com:MohammadBnei/openweb-ui.git
-  valuesPath: values.yaml
-  hostname: open-webui.bnei.dev
-
-# Pipelines sidecar for openweb-ui — separate workload, no external ingress.
-# The openweb-ui app's private repo must have a pipelines-values.yaml with
-# image.repository, service.port: 9099, persistence settings, ingress.enabled: false.
-- name: openweb-ui-pipelines
-  namespace: openweb-ui
-  syncWave: "10"
-  repoURL: git@github.com:MohammadBnei/openweb-ui.git
-  valuesPath: pipelines-values.yaml
-  hostname: ""
+# n8n, openweb-ui(+pipelines), whodb, api, ukubi-ai are deferred — no
+# working per-app repo yet (see docs/bootstrap-test-notes.md). Re-add once
+# each has a real values.yaml; don't list a repo that doesn't exist, ArgoCD
+# will just fail to clone it.
 
 - name: searxng
   namespace: searxng
@@ -45,23 +26,9 @@
   valuesPath: values.yaml
   hostname: searxng.bnei.dev
 
-- name: whodb
-  namespace: whodb
+- name: pgweb
+  namespace: pgweb
   syncWave: "10"
-  repoURL: git@github.com:MohammadBnei/whodb.git
+  repoURL: git@github.com:MohammadBnei/pgweb.git
   valuesPath: values.yaml
-  hostname: whodb.bnei.dev
-
-- name: api
-  namespace: api
-  syncWave: "10"
-  repoURL: git@github.com:MohammadBnei/api.git
-  valuesPath: values.yaml
-  hostname: api.bnei.dev
-
-- name: ukubi-ai
-  namespace: ukubi-ai
-  syncWave: "10"
-  repoURL: git@github.com:MohammadBnei/ukubi-ai.git
-  valuesPath: values.yaml
-  hostname: ukubi-ai.bnei.dev
+  hostname: pgweb.bnei.dev
