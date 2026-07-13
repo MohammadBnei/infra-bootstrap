@@ -17,26 +17,35 @@ gitops/
 │   ├── infisical-ingressroute.yaml       # Traefik IngressRoute → infisical.bnei.dev
 │   ├── argocd-github-apps-creds.yaml      # InfisicalSecret → ArgoCD repo-creds for user apps
 │   ├── grafana-admin-secret.yaml          # InfisicalSecret → Grafana admin credentials
+│   ├── basic-admin-auth-middleware.yaml   # Shared Traefik BasicAuth Middleware (ns default), for admin-only tools
+│   ├── basic-admin-auth-secret.yaml       # InfisicalSecret → the above Middleware's htpasswd credential
 │   ├── platform.applicationset.yaml       # ApplicationSet for remaining platform apps (not traefik)
-│   └── apps.applicationset.yaml           # ApplicationSet for all user apps
+│   ├── platform-common-apps.applicationset.yaml  # ApplicationSet for common-app-chart-based platform tools (public image, no app-specific code)
+│   └── apps.applicationset.yaml           # ApplicationSet for user apps with their own private repo
 ├── platform/
-│   ├── common-app-chart/                  # Shared Helm chart used by every user app
+│   ├── common-app-chart/                  # Shared Helm chart used by every simple app (user app or platform-common-app)
 │   │   ├── Chart.yaml
-│   │   ├── values.yaml                    # Defaults (override per-app in the app's repo)
+│   │   ├── values.yaml                    # Defaults (override per-app)
 │   │   └── templates/
-│   │       ├── deployment.yaml            # Supports HTTP + TCP health probes
+│   │       ├── deployment.yaml            # Supports HTTP + TCP health probes, extraVolumes/extraVolumeMounts
 │   │       ├── service.yaml
-│   │       ├── ingressroute.yaml         # Traefik IngressRoute (no Gateway API, no Ingress)
-│   │       └── pvc.yaml
-│   └── values/                            # Helm values for platform apps
+│   │       ├── ingressroute.yaml         # Traefik IngressRoute (no Gateway API, no Ingress), optional middlewares
+│   │       ├── pvc.yaml
+│   │       ├── infisicalsecret.yaml      # Optional Infisical-backed secret, auto-wired into envFrom
+│   │       └── extra-manifests.yaml      # Raw extra objects (ConfigMaps, Middlewares, ...) via values.extraManifests
+│   └── values/                            # Helm values for platform apps (including platform-common-apps)
 │       ├── traefik/values.yaml
 │       ├── infisical/values.yaml
+│       ├── infisical-operator/values.yaml
+│       ├── longhorn/values.yaml
 │       ├── prometheus/values.yaml
 │       ├── grafana/values.yaml
 │       ├── metrics-server/values.yaml
-│       └── local-path-provisioner/values.yaml
+│       ├── local-path-provisioner/values.yaml
+│       ├── searxng/values.yaml            # common-app-chart values, driven by platform-common-apps.applicationset.yaml
+│       └── pgweb/values.yaml              # ditto
 └── apps/
-    └── registry.yaml                      # Human source of truth for user apps
+    └── registry.yaml                      # Human source of truth for user apps (apps needing their own repo)
 ```
 
 ---
@@ -49,11 +58,11 @@ Everything is sequenced so each layer is ready before the next depends on it:
 
 | Wave | App(s) | Why first |
 |------|--------|-----------|
-| 0 | **local-path-provisioner** | Default StorageClass — stopgap until NFS/Proxmox-backed storage exists; every PVC in the cluster (Traefik's acme.json, common-app-chart PVCs) needs a default StorageClass to bind at all |
-| 1 | **Infisical** | Serves SSH keys to ArgoCD via `InfisicalSecret` CRDs — must be ready before any app that needs a private values repo |
+| 0 | **Longhorn**, **local-path-provisioner** | Longhorn is the default StorageClass (ADR-0002); local-path-provisioner stays installed as a non-default fallback. Every PVC in the cluster (Traefik's acme.json, common-app-chart PVCs) needs a default StorageClass to bind at all |
+| 1 | **Infisical**, **infisical-operator** | Serves secrets to ArgoCD/apps via `InfisicalSecret` CRDs (the operator provides the CRD itself) — must be ready before any app that needs a private values repo or Infisical-backed secret |
 | 2 | **Traefik** (standalone `traefik-application.yaml`, not in the ApplicationSet) | Ingress — must be up before IngressRoutes resolve |
 | 5 | Prometheus, Grafana, metrics-server | Observability, no hard ordering constraint |
-| 10 | All user apps | Depend on Infisical (secrets) + Traefik (IngressRoutes) |
+| 10 | User apps (`apps.applicationset.yaml`), platform-common-apps (`platform-common-apps.applicationset.yaml`) | Depend on Infisical (secrets) + Traefik (IngressRoutes) |
 
 Note: sync-wave ordering across independent top-level Applications isn't strictly enforced by ArgoCD without an App-of-Apps parent (which `DECISION.md` forbids here — see [ADR-0004](../docs/adr/0004-gitops-pattern-c-registry-applicationset.md)) — these numbers are the intended/documented order. In practice each Application's own `retry`/`selfHeal` policy converges regardless of exact creation order.
 
@@ -76,27 +85,33 @@ Wave 10: User apps sync (SSH keys for per-app repos now in ArgoCD cred store)
 
 Only the infra-bootstrap SSH key and Infisical's own server credentials are injected manually. Everything else flows from Infisical once it's running.
 
-### Two ApplicationSets, plus one standalone Application
+### Three ApplicationSets, plus one standalone Application
 
-**`platform.applicationset.yaml`** — platform infrastructure:
+**`platform.applicationset.yaml`** — platform infrastructure, external public Helm charts:
 
 | Wave | App | Chart |
 |------|-----|-------|
+| 0 | longhorn | longhorn.io/longhorn |
 | 0 | local-path-provisioner | containeroo/local-path-provisioner |
 | 1 | infisical | infisical/infisical |
+| 1 | infisical-operator | infisical/secrets-operator |
 | 5 | prometheus | prometheus-community/kube-prometheus-stack |
 | 5 | grafana | grafana/grafana |
 | 5 | metrics-server | metrics-server/metrics-server |
 
-Each platform app: public Helm chart + values from `infra-bootstrap` via the manually-injected SSH key.
+Each platform app: public Helm chart + values from `infra-bootstrap` via the manually-injected SSH key (two Application sources: the external chart repo, plus infra-bootstrap for the values file).
 
 **`traefik-application.yaml`** (wave 2) is deliberately a standalone `Application`, not part of the ApplicationSet above: it needs `helm.skipCrds: true` (the chart bundles an outdated Gateway API CRD set that a cluster `ValidatingAdmissionPolicy` rejects), and `skipCrds` is a `bool` field the ApplicationSet CRD validates strictly — it can't be produced by a per-element Go-template conditional in the shared list template. See the comment in the file for the full story.
 
-**`apps.applicationset.yaml`** — user apps, all at wave 10:
+**`platform-common-apps.applicationset.yaml`** — simple containerized tools with no app-specific code (public image, no CI/CD of their own), all at wave 10:
 
-n8n · openweb-ui · openweb-ui-pipelines · searxng · whodb · api · ukubi-ai
+searxng · pgweb
 
-Each user app: `common-app-chart` from infra-bootstrap + per-app `values.yaml` from the app's private repo.
+Unlike the two ApplicationSets above, both the chart (`common-app-chart`) and the values file live in `infra-bootstrap` itself — a single Application source, no external repo or SSH key needed. Add one: append a list element + `gitops/platform/values/<name>/values.yaml`.
+
+**`apps.applicationset.yaml`** — user apps that need their own private repo (app-specific code/CI, own release cadence), all at wave 10. Currently empty — n8n, openweb-ui(+pipelines), whodb, api, and ukubi-ai are deferred until each has a real per-app repo (see `docs/bootstrap-test-notes.md`).
+
+Each user app: `common-app-chart` from infra-bootstrap + per-app `values.yaml` from the app's own private repo (two Application sources, `GITHUB_APPS_SSH_KEY` required).
 
 Image updates are handled by each app's own CD pipeline — ArgoCD just syncs whatever `image.tag` is in `values.yaml`.
 
@@ -137,7 +152,7 @@ Annotations: `annotations` (Deployment), `podAnnotations` (pod template), `servi
 
 The chart can template its own `InfisicalSecret` CR — set `infisical.enabled: true` and `infisical.projectSlug` in the app's `values.yaml` and the resulting K8s Secret is auto-wired into the Deployment's `envFrom` (no manual `secretRef` needed). It reuses the cluster's shared `universal-auth-credentials` machine identity (ns `infisical`) — grant that identity access to your app's Infisical project in the Infisical UI, don't mint new K8s credentials per app. Defaults: `envSlug: dev`, `secretsPath: "/"`, in-cluster `hostAPI`. Apps that need a manually-authored `InfisicalSecret` (e.g. field remapping via `template:`) can still define one in their private repo and reference it manually via `envFrom`.
 
-`apps.applicationset.yaml` sets `ignoreDifferences` for `InfisicalSecret`'s `.status` so the operator's periodic resync doesn't leave the Application permanently `OutOfSync`.
+`apps.applicationset.yaml` and `platform-common-apps.applicationset.yaml` both set `ignoreDifferences` for `InfisicalSecret`'s `.status` so the operator's periodic resync doesn't leave the Application permanently `OutOfSync`.
 
 ---
 

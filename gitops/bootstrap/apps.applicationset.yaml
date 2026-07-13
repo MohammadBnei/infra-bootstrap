@@ -12,54 +12,14 @@ spec:
       # Add an app: update registry.yaml first, then mirror the entry here.
       elements:
 
-      - name: n8n
-        namespace: n8n
-        syncWave: "10"
-        repoURL: git@github.com:MohammadBnei/n8n.git
-        valuesPath: values.yaml
-        hostname: n8n.bnei.dev
-
-      - name: openweb-ui
-        namespace: openweb-ui
-        syncWave: "10"
-        repoURL: git@github.com:MohammadBnei/openweb-ui.git
-        valuesPath: values.yaml
-        hostname: open-webui.bnei.dev
-
-      - name: openweb-ui-pipelines
-        namespace: openweb-ui
-        syncWave: "10"
-        repoURL: git@github.com:MohammadBnei/openweb-ui.git
-        valuesPath: pipelines-values.yaml
-        hostname: ""
-
-      - name: searxng
-        namespace: searxng
-        syncWave: "10"
-        repoURL: git@github.com:MohammadBnei/searxng.git
-        valuesPath: values.yaml
-        hostname: searxng.bnei.dev
-
-      - name: whodb
-        namespace: whodb
-        syncWave: "10"
-        repoURL: git@github.com:MohammadBnei/whodb.git
-        valuesPath: values.yaml
-        hostname: whodb.bnei.dev
-
-      - name: api
-        namespace: api
-        syncWave: "10"
-        repoURL: git@github.com:MohammadBnei/api.git
-        valuesPath: values.yaml
-        hostname: api.bnei.dev
-
-      - name: ukubi-ai
-        namespace: ukubi-ai
-        syncWave: "10"
-        repoURL: git@github.com:MohammadBnei/ukubi-ai.git
-        valuesPath: values.yaml
-        hostname: ukubi-ai.bnei.dev
+      # n8n, openweb-ui(+pipelines), whodb, api, ukubi-ai are deferred —
+      # no working per-app repo yet (see docs/bootstrap-test-notes.md).
+      # Re-add once each has a real values.yaml.
+      #
+      # searxng/pgweb are NOT here — public-image, no app-specific code,
+      # driven as platform apps instead (see platform-common-apps.applicationset.yaml).
+      # This ApplicationSet is intentionally empty until a real user-app
+      # repo exists.
 
   template:
     metadata:

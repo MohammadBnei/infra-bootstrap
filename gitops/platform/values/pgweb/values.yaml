@@ -1,0 +1,32 @@
+# pgweb — driven directly from infra-bootstrap via common-app-chart
+# (public image, no app-specific code — not a gitops/apps/registry.yaml
+# "user app"). Migrated from k8s-cluster/archive/pgweb/.
+#
+# Raw Postgres admin UI — gated behind the shared basic-admin-auth Traefik
+# Middleware (gitops/bootstrap/basic-admin-auth-middleware.yaml + -secret.yaml,
+# same shared credential k8s-cluster/traefik/middlewares/basicauth.yml
+# already uses for pgweb/jaeger/prometheus/etc there). Do not remove
+# ingress.middlewares without replacing the protection some other way.
+
+image:
+  repository: sosedoff/pgweb
+  tag: "0.17.0"
+
+service:
+  port: 8081
+
+ingress:
+  hostname: pgweb.bnei.dev
+  middlewares:
+    - name: basic-admin-auth
+      namespace: default
+
+# DB connection string comes from the existing pgweb-p9-hy Infisical
+# project (same one the archived deployment used) via managed-secret's
+# DATABASE_URL — reuses the cluster's shared universal-auth-credentials
+# identity. That identity must be granted access to pgweb-p9-hy in the
+# Infisical UI (separate grant from the main infra-bootstrap project).
+infisical:
+  enabled: true
+  projectSlug: "pgweb-p9-hy"
+  envSlug: dev
