@@ -12,9 +12,11 @@ gitops/
 │   ├── register-repos.sh                  # Creates manual K8s Secrets before ArgoCD starts
 │   ├── argocd-application.yaml            # ArgoCD self-manages its own Helm chart
 │   ├── traefik-application.yaml           # Standalone Application (needs helm.skipCrds, can't live in the shared ApplicationSet template — see file comment)
+│   ├── traefik-crds/                      # Traefik's own CRDs (traefik.io_*/hub.traefik.io_*), vendored — see file comment in traefik-application.yaml
 │   ├── argocd-ingressroute.yaml           # Traefik IngressRoute → argocd.bnei.dev
 │   ├── infisical-ingressroute.yaml       # Traefik IngressRoute → infisical.bnei.dev
 │   ├── argocd-github-apps-creds.yaml      # InfisicalSecret → ArgoCD repo-creds for user apps
+│   ├── grafana-admin-secret.yaml          # InfisicalSecret → Grafana admin credentials
 │   ├── platform.applicationset.yaml       # ApplicationSet for remaining platform apps (not traefik)
 │   └── apps.applicationset.yaml           # ApplicationSet for all user apps
 ├── platform/
@@ -175,8 +177,15 @@ The script requires no network connection to Infisical. It reads two local files
 ### Step 3 — Apply bootstrap manifests
 
 ```bash
+kubectl apply -f gitops/bootstrap/traefik-crds/
 kubectl apply -f gitops/bootstrap/
 ```
+
+`traefik-crds/` is applied first and separately: it's Traefik's own CRDs
+(`traefik.io_*`, `hub.traefik.io_*`), vendored from the chart because
+`traefik-application.yaml` sets `helm.skipCrds: true` (see that file's
+comment) and so never installs them itself. Not ArgoCD-managed — same
+reasoning as `skipCrds` itself, see `traefik-application.yaml`.
 
 ArgoCD becomes self-managing. Wave 1 (Infisical) syncs immediately using the manually-injected infra-bootstrap SSH key. Once Infisical is healthy, `argocd-github-apps-creds.yaml` resolves and injects the user-app SSH credential into ArgoCD automatically.
 

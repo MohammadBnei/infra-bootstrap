@@ -24,9 +24,14 @@ spec:
       # below v1.5.0 — so ArgoCD can never sync this chart's crds/ dir as-is.
       # We don't use Gateway API (IngressRoute is the lock, ADR-0001:
       # docs/adr/0001-ingress-traefik-ingressroute-over-gateway-api.md), so
-      # skip the whole crds/ dir here; traefik.io/* CRDs are installed once,
-      # out-of-band (see docs/bootstrap-test-notes.md). This is exactly why
-      # traefik is a standalone Application rather than part of
+      # skip the whole crds/ dir here; traefik.io/* and hub.traefik.io/*
+      # CRDs are instead vendored into gitops/bootstrap/traefik-crds/ and
+      # applied once, out-of-band, in bootstrap Step 3 (gitops/README.md) —
+      # not ArgoCD-managed, same reasoning as skipCrds above. Bumping
+      # targetRevision below requires re-vendoring: `helm pull
+      # traefik/traefik --version <new> --untar`, diff crds/, replace the
+      # files in traefik-crds/ (excluding gateway-standard-install.yaml).
+      # This is exactly why traefik is a standalone Application rather than part of
       # platform.applicationset.yaml's shared list template: skipCrds is a
       # bool field the ApplicationSet CRD validates strictly, so it can't be
       # a per-element Go-template conditional there.
