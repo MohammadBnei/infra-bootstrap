@@ -41,8 +41,21 @@ everything.
 | `PGADMIN_PASSWORD` | pgAdmin console login | agent (random 32B) | pigsty `pgadmin` |
 | `GARAGE_ROOT_TOKEN` | Garage S3 root token — the one-time bootstrap credential everything else's S3 access derives from | user (Garage CLI, first deploy, one-time) | everything that provisions S3 buckets |
 | `GITHUB_APPS_SSH_KEY` | Read-only deploy key (full PEM private key), public half added to every `MohammadBnei/*` user-app repo — lets ArgoCD clone their private `values.yaml` | user (fresh keypair, one public half per app repo) | `gitops/bootstrap/argocd-github-apps-creds.yaml` (InfisicalSecret) → ArgoCD repo-creds |
-| `SEARXNG_SECRET_KEY` | searxng's session-signing key, embedded in its mounted `settings.yml` | reused from the existing value in `k8s-cluster/searxng/` (not rotated during migration) | `gitops/platform/values/searxng/values.yaml` (InfisicalSecret, `template:`-rendered) |
 | `BASIC_AUTH_HTPASSWD` | Shared Traefik BasicAuth credential (`user:apr1-hash` line) gating admin-only tools (pgweb, etc.) | reused from the existing value in `k8s-cluster/traefik/middlewares/basicauth.yml` (not rotated during migration) | `gitops/bootstrap/basic-admin-auth-secret.yaml` (InfisicalSecret) → shared `basic-admin-auth` Middleware |
+
+## Per-app Infisical projects
+
+Some `platform-common-apps` (see `gitops/README.md`) get their own small,
+narrowly-scoped Infisical project instead of living at the `infra-bootstrap`
+project root — same reasoning as `GITHUB_APPS_SSH_KEY`'s original placement:
+keeps a compromised per-app grant from reaching PVE tokens/DB passwords.
+`universal-auth-credentials` needs a separate access grant per project
+below (Infisical UI), on top of its `infra-bootstrap-1-ge1` grant.
+
+| Project | Slug / ID | Secrets | Consumed by |
+| --- | --- | --- | --- |
+| pgweb | `pgweb-p9-hy` | `DATABASE_URL` (pre-existing) | `gitops/platform/values/pgweb/values.yaml` (`infisical.enabled`) |
+| searxng | `searxng-l-dwt` / `5af3f87b-6d31-4c67-a8f2-435653a57412` | `SEARXNG_SECRET_KEY` | `gitops/platform/values/searxng/values.yaml` (InfisicalSecret, `template:`-rendered) |
 
 ## SSH access (per-host)
 

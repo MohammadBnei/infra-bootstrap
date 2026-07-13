@@ -69,9 +69,11 @@ extraVolumeMounts:
   - name: searxng-cache
     mountPath: /var/cache/searxng
 
-# Required secret in the infra-bootstrap Infisical project (see
-# docs/secrets.md): SEARXNG_SECRET_KEY — reusing the real value already
+# Required secret in the dedicated searxng Infisical project (searxng-l-dwt,
+# see docs/secrets.md): SEARXNG_SECRET_KEY — reusing the real value already
 # live in k8s-cluster/searxng/ rather than rotating it during migration.
+# universal-auth-credentials must be granted access to searxng-l-dwt in the
+# Infisical UI (separate grant from the main infra-bootstrap project).
 extraManifests:
   - |
     apiVersion: secrets.infisical.com/v1alpha1
@@ -85,7 +87,7 @@ extraManifests:
       authentication:
         universalAuth:
           secretsScope:
-            projectSlug: "infra-bootstrap-1-ge1"
+            projectSlug: "searxng-l-dwt"
             envSlug: dev
             secretsPath: "/"
           credentialsRef:
