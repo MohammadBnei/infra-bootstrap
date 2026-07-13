@@ -21,6 +21,9 @@ ingress:
   # can't get certs from Traefik's ACME resolver without cert-manager.
   certResolver: le
   annotations: {}
+  # Traefik Middleware refs: [{name, namespace}]. Define the Middleware
+  # itself via extraManifests below (e.g. BasicAuth for an admin-only app).
+  middlewares: []
 
 resources: {}
 # requests:
@@ -86,3 +89,16 @@ podAnnotations: {}
 nodeSelector: {}
 tolerations: []
 affinity: {}
+
+# Raw volume/volumeMount specs, toYaml'd as-is into the pod spec and the
+# app container — escape hatch for anything the schema above doesn't cover
+# (e.g. mounting a ConfigMap as files). Define the backing object itself
+# via extraManifests below.
+extraVolumes: []
+extraVolumeMounts: []
+
+# Raw extra K8s objects (ConfigMaps, a Middleware, a Secret, ...), each a
+# YAML string rendered as its own document. `tpl`'d, so release/values
+# templating works inside. Same idiom as Bitnami's `extraDeploy` — keeps
+# common-app-chart generic instead of growing per-app special cases.
+extraManifests: []

@@ -19,6 +19,10 @@ spec:
     services:
     - name: {{ .Release.Name }}
       port: {{ .Values.service.port }}
+    {{- with .Values.ingress.middlewares }}
+    middlewares:
+      {{- toYaml . | nindent 4 }}
+    {{- end }}
   tls:
     certResolver: {{ .Values.ingress.certResolver }}
 {{- end }}
