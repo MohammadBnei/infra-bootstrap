@@ -5,8 +5,13 @@ image:
   tag: "latest"
   pullPolicy: IfNotPresent
 
+# Deployment metadata annotations. For pod-template annotations use
+# podAnnotations below.
+annotations: {}
+
 service:
   port: 80
+  annotations: {}
 
 ingress:
   enabled: true
@@ -15,6 +20,7 @@ ingress:
   # docs/adr/0001-ingress-traefik-ingressroute-over-gateway-api.md) — Gateway API
   # can't get certs from Traefik's ACME resolver without cert-manager.
   certResolver: le
+  annotations: {}
 
 resources: {}
 # requests:
@@ -27,7 +33,27 @@ resources: {}
 env: []
 
 # Inject whole Secrets or ConfigMaps: [{secretRef: {name}}, {configMapRef: {name}}]
+# When infisical.enabled is true, the chart appends a secretRef for the
+# InfisicalSecret-managed Secret automatically — no need to list it here.
+# Use this for anything *in addition* to that.
 envFrom: []
+
+# Infisical-backed secrets: renders an InfisicalSecret CR that syncs a
+# project's secrets into a K8s Secret, auto-wired into envFrom above.
+# Reuses the cluster's shared machine identity (universal-auth-credentials/
+# infisical) — grant that identity access to your project in the Infisical
+# UI, don't mint new K8s credentials per app.
+infisical:
+  enabled: false
+  projectSlug: ""
+  envSlug: dev
+  secretsPath: "/"
+  hostAPI: http://infisical.infisical.svc.cluster.local:8080/api
+  resyncInterval: 60
+  secretName: ""   # defaults to "<release-name>-infisical"
+  credentialsRef:
+    secretName: universal-auth-credentials
+    secretNamespace: infisical
 
 persistence:
   enabled: false

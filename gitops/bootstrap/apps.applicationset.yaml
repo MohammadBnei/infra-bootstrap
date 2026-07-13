@@ -88,6 +88,16 @@ spec:
       destination:
         server: https://kubernetes.default.svc
         namespace: '{{.namespace}}'
+      # Infisical operator writes to InfisicalSecret's .status on every
+      # resync (spec.infisical.resyncInterval in common-app-chart) — without
+      # this, ArgoCD flags the resource (and the whole Application) as
+      # perpetually OutOfSync even when nothing changed. Static rule, safe
+      # for apps that don't set infisical.enabled (the CR just won't exist).
+      ignoreDifferences:
+      - group: secrets.infisical.com
+        kind: InfisicalSecret
+        jsonPointers:
+        - /status
       syncPolicy:
         automated:
           prune: true

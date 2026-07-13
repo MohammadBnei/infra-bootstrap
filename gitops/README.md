@@ -107,6 +107,7 @@ A minimal Helm chart for standard web apps. Renders:
 - `Service` — ClusterIP on `service.port`
 - `IngressRoute` — Traefik CRD, `entryPoints: [websecure]`, native ACME via `tls.certResolver`
 - `PersistentVolumeClaim` — optional, gated by `persistence.enabled`
+- `InfisicalSecret` — optional, gated by `infisical.enabled`, auto-wired into the Deployment's `envFrom`
 
 Key values a per-app `values.yaml` must set:
 
@@ -132,11 +133,11 @@ readinessProbe:
   initialDelaySeconds: 15
 ```
 
-`InfisicalSecret` CRDs live in each app's private repo, not in this chart. The chart's `envFrom` picks up the resulting K8s Secret by name. In-cluster Infisical URL for app repos:
-```
-http://infisical.infisical.svc.cluster.local:8080/api
-```
-Credentials namespace: `infisical` (was `vault` on old cluster).
+Annotations: `annotations` (Deployment), `podAnnotations` (pod template), `service.annotations` (Service), `ingress.annotations` (IngressRoute) — plain key/value maps, rendered as-is.
+
+The chart can template its own `InfisicalSecret` CR — set `infisical.enabled: true` and `infisical.projectSlug` in the app's `values.yaml` and the resulting K8s Secret is auto-wired into the Deployment's `envFrom` (no manual `secretRef` needed). It reuses the cluster's shared `universal-auth-credentials` machine identity (ns `infisical`) — grant that identity access to your app's Infisical project in the Infisical UI, don't mint new K8s credentials per app. Defaults: `envSlug: dev`, `secretsPath: "/"`, in-cluster `hostAPI`. Apps that need a manually-authored `InfisicalSecret` (e.g. field remapping via `template:`) can still define one in their private repo and reference it manually via `envFrom`.
+
+`apps.applicationset.yaml` sets `ignoreDifferences` for `InfisicalSecret`'s `.status` so the operator's periodic resync doesn't leave the Application permanently `OutOfSync`.
 
 ---
 

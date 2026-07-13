@@ -9,3 +9,7 @@ app.kubernetes.io/managed-by: {{ .Release.Service }}
 app.kubernetes.io/name: {{ .Release.Name }}
 app.kubernetes.io/instance: {{ .Release.Name }}
 {{- end }}
+
+{{- define "common-app-chart.infisicalSecretName" -}}
+{{- default (printf "%s-infisical" .Release.Name) .Values.infisical.secretName -}}
+{{- end }}
