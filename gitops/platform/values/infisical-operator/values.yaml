@@ -1,0 +1,17 @@
+# Infisical Kubernetes Operator (secrets-operator) Helm values for ukubi-cluster
+# Chart: https://dl.cloudsmith.io/public/infisical/helm-charts/helm/charts/  name: secrets-operator
+#
+# Provides the InfisicalSecret CRD (secrets.infisical.com/v1alpha1) already
+# used by gitops/bootstrap/argocd-github-apps-creds.yaml and
+# gitops/bootstrap/grafana-admin-secret.yaml.
+#
+# hostAPI below is a safety-net default only — every InfisicalSecret CR in
+# this repo already sets its own spec.hostAPI explicitly (pointing at the
+# in-cluster Infisical server). The chart's own default is
+# https://app.infisical.com/api (Infisical Cloud), which is wrong for a
+# self-hosted instance, so override it here in case a future CR omits it.
+hostAPI: http://infisical.infisical.svc.cluster.local:8080/api
+
+# scopedNamespaces left at chart default ([], cluster-scoped) — InfisicalSecret
+# instances live across many namespaces (argocd, monitoring, and eventually
+# every user-app namespace), not just infisical.

@@ -25,7 +25,7 @@ everything.
 | `KUBE_VAULT_PASSWORD` | kubespray cluster-vault passphrase — decrypts encrypted group_vars on every subsequent kubespray run | user (manual, offline, before any tool runs) | kubespray |
 | `KUBESPRAY_ETCD_INITIAL_CLUSTER_TOKEN` | etcd cluster bootstrap token | kubespray (auto-generates on first run) | kubespray (etcd member bring-up) |
 | `KUBESPRAY_ETCD_PEER_CERT` / `KUBESPRAY_ETCD_PEER_CERT_KEY` | etcd peer TLS cert/key pair | kubespray (auto-generates on first run) | kubespray (etcd peer auth) |
-| `ARGOCD_INFISICAL_CLIENT_ID` / `ARGOCD_INFISICAL_CLIENT_SECRET` | Machine Identity credentials, scoped to `infra-bootstrap` only — lets in-cluster External Secrets Operator pull other secrets from this project | user (separate Machine Identity, Infisical UI) | External Secrets Operator in K8s |
+| `ARGOCD_INFISICAL_CLIENT_ID` / `ARGOCD_INFISICAL_CLIENT_SECRET` | Machine Identity credentials, scoped to `infra-bootstrap` only — lets the in-cluster Infisical Kubernetes Operator pull other secrets from this project | user (separate Machine Identity, Infisical UI) | Infisical Kubernetes Operator in K8s (`InfisicalSecret` CRD) |
 | `K8S_BREAK_GLASS_TOKEN` | cluster-admin ServiceAccount token for emergency recovery if ArgoCD/RBAC breaks | agent (creates SA + token, writes here) | humans, on demand |
 | `PG_SUPERUSER_PASSWORD` | Postgres superuser — one value for the whole `pg-proxmox` cluster (pg01 primary + pg02 streaming replica, not two separate credentials) | agent (random 32B) | pigsty `pg_users` |
 | `PG_REPLICATION_PASSWORD` | Streaming replication user, pg02 → pg01 | agent (random 32B) | pigsty `pg_replication` |
@@ -36,6 +36,7 @@ everything.
 | `DBUSER_INFISICAL_PASSWORD` | `dbuser_infisical` — the live in-cluster Infisical server's own database user | agent (random 32B) | pigsty `pg_users` block |
 | `DBUSER_ORY_PASSWORD` | `dbuser_ory` — Ory Kratos (identity platform) database user | agent (random 32B) | pigsty `pg_users` block |
 | `GRAFANA_ADMIN_PASSWORD` | Grafana admin login | agent (random 32B) | pigsty `grafana_admin_password` |
+| `K8S_GRAFANA_ADMIN_PASSWORD` | k8s cluster's own Grafana (kube-prometheus-stack, `monitoring` ns) admin login — separate from `GRAFANA_ADMIN_PASSWORD` above, which is Pigsty's unrelated Grafana instance | agent (random 32B) | `gitops/bootstrap/grafana-admin-secret.yaml` (InfisicalSecret) |
 | `HAPROXY_ADMIN_PASSWORD` | HAProxy stats page admin login | agent (random 32B) | pigsty `haproxy_stats` |
 | `PGADMIN_PASSWORD` | pgAdmin console login | agent (random 32B) | pigsty `pgadmin` |
 | `GARAGE_ROOT_TOKEN` | Garage S3 root token — the one-time bootstrap credential everything else's S3 access derives from | user (Garage CLI, first deploy, one-time) | everything that provisions S3 buckets |

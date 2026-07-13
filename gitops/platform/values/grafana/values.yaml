@@ -7,7 +7,8 @@ persistence:
   enabled: true
   size: 5Gi
 
-# Admin credentials from K8s Secret (created via ExternalSecret → Infisical)
+# Admin credentials from K8s Secret (created via InfisicalSecret CR, see
+# gitops/bootstrap/grafana-admin-secret.yaml)
 admin:
   existingSecret: grafana-admin
   userKey: username
@@ -22,7 +23,10 @@ datasources:
       url: http://prometheus-kube-prometheus-prometheus.monitoring.svc.cluster.local:9090
       isDefault: true
 
-# Ingress disabled — HTTPRoute managed via an HTTPRoute manifest or added here
+# No IngressRoute wired up for Grafana yet (only argocd and infisical have
+# one — see gitops/bootstrap/*-ingressroute.yaml). root_url below is set in
+# anticipation of a future gitops/bootstrap/grafana-ingressroute.yaml
+# (Traefik IngressRoute, ADR-0001 — not Gateway API/HTTPRoute).
 grafana.ini:
   server:
     root_url: https://grafana.bnei.dev

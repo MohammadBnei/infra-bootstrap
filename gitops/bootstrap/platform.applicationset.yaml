@@ -41,6 +41,20 @@ spec:
         chartName: infisical
         valuesPath: gitops/platform/values/infisical/values.yaml
 
+      # wave 1 — Provides the InfisicalSecret CRD (secrets.infisical.com/v1alpha1)
+      # that argocd-github-apps-creds.yaml and grafana-admin-secret.yaml (both
+      # in gitops/bootstrap/) already assume exists. Same wave as the Infisical
+      # server above — ArgoCD doesn't strictly order same-wave siblings, but
+      # each Application's own retry/selfHeal converges regardless (see
+      # gitops/README.md's wave-ordering note).
+      - name: infisical-operator
+        namespace: infisical
+        syncWave: "1"
+        chartRepoURL: https://dl.cloudsmith.io/public/infisical/helm-charts/helm/charts/
+        chartRevision: "0.11.3"
+        chartName: secrets-operator
+        valuesPath: gitops/platform/values/infisical-operator/values.yaml
+
       # wave 2 — Traefik is NOT in this shared list: it needs helm.skipCrds
       # (its chart bundles Gateway API CRDs a cluster policy rejects — see
       # traefik-application.yaml), which is a bool field the ApplicationSet
