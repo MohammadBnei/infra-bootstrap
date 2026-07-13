@@ -19,7 +19,7 @@ then here. When in doubt, open those files.
 | IaC (Proxmox) | Terraform, `bpg/proxmox` provider, local state — see `terraform/README.md`, scoped to `.165` only |
 | Kubernetes | kubespray v2.31.0 (`kubespray/` submodule) → K8s v1.35.4 |
 | CNI | Cilium, **chaining mode**, kube-proxy retained (IPVS, strict ARP) |
-| LB | MetalLB, L2 only, pool `192.168.1.230-250` |
+| LB | MetalLB, L2 only, pool `192.168.1.233-250` |
 | Ingress | Traefik + `IngressRoute` only — no cert-manager, no Gateway API, no plain Ingress |
 | GitOps | ArgoCD, Pattern C (registry + `list`-generator ApplicationSets) |
 | Secrets | Infisical (project `infra-bootstrap-1-ge1`, id `8a3fa54f-be22-488a-bf51-55158f65c0f2`, domain `https://infisical.bnei.dev`, env `dev` — see `docs/secrets.md`) |
@@ -46,8 +46,9 @@ then here. When in doubt, open those files.
 
 - Ingress: Traefik + Gateway API `HTTPRoute` only. Cert engine: Traefik
   built-in ACME HTTP-01, `acme.json` on a PVC (never `emptyDir`).
-- MetalLB L2 only (Freebox blocks BGP), pool `192.168.1.230-250`, `.230`
-  reserved for the Traefik VIP.
+- MetalLB L2 only (Freebox blocks BGP), pool `192.168.1.233-250`, `.233`
+  reserved for the Traefik VIP — `.232` is Pigsty's HA floating VIP,
+  `.230`/`.231` excluded alongside it.
 - ArgoCD Pattern C: `gitops/apps/registry.yaml` (human source of truth) +
   `gitops/bootstrap/apps.applicationset.yaml` (`list` generator) must stay
   in sync. Always reuse `gitops/platform/common-app-chart` — never a

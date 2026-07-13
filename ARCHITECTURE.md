@@ -70,8 +70,7 @@ graph TD
 | --- | --- | --- | --- | --- | --- |
 | pg01 | VM (Q35, OVMF) | 2 | 4GB | 40GB | Pigsty PG primary, `192.168.1.205` |
 | k8s-cp-01 | VM (Q35, OVMF) | 2 | 4GB | 40GB | Control plane + etcd + worker, Ubuntu 24.04 |
-| k8s-worker-gpu | VM (Q35, OVMF) | 6 | 15GB | 100GB | RTX 2070 SUPER PCIe passthrough |
-| k8s-worker-01 | VM (Q35, OVMF) | 4 | 8GB | 60GB | Ubuntu 24.04 |
+| k8s-worker-01 | VM (Q35, OVMF) | 6 | 15GB | 100GB | Ubuntu 24.04, RTX 2070 SUPER PCIe passthrough |
 | garage-storage | LXC | 2 | 2GB | 200GB | S3-compatible, NVMe-backed |
 
 Full eBPF hardware support (AMD Ryzen). ~3GB PVE overhead reserved.
@@ -109,9 +108,10 @@ install on this Pi 4 held no data).
 ## 2. Kubernetes Cluster
 
 - **Cluster name:** `ukubi-cluster`. DNS domain: `cluster.local`.
-- **Topology:** 1 control plane + 2 workers (single CP accepted for
+- **Topology:** 1 control plane + 1 worker (single CP accepted for
   homelab scale; see [ADR-0017](docs/adr/0017-second-control-plane-member.md)
-  for the open question on adding a 2nd).
+  for the open question on adding a 2nd). The worker carries the GPU
+  passthrough directly — no separate `k8s-worker-gpu` VM.
 - **K8s version:** v1.35.4. **Container runtime:** containerd.
 - **CNI:** Cilium, chaining mode, kube-proxy retained (`ipvs`,
   `kube_proxy_strict_arp: true`) — see [ADR-0003](docs/adr/0003-cni-cilium-chaining-over-kube-proxy-replacement.md).
@@ -122,8 +122,7 @@ install on this Pi 4 held no data).
 | Node | Host | IP | Resources | Notes |
 | --- | --- | --- | --- | --- |
 | k8s-cp-01 | proxmox | 192.168.1.201 | 2 vCPU / 4GB | Control plane (sole) |
-| k8s-worker-01 | proxmox | 192.168.1.202 | 4 vCPU / 8GB | Standard workloads |
-| k8s-worker-gpu | proxmox | 192.168.1.203 | 6 vCPU / 15GB | GPU passthrough, NVIDIA device plugin |
+| k8s-worker-01 | proxmox | 192.168.1.202 | 6 vCPU / 15GB | Standard workloads + GPU passthrough, NVIDIA device plugin |
 
 ### GPU passthrough
 
@@ -163,7 +162,10 @@ graph LR
 ### MetalLB
 
 - **Mode:** L2 only (Freebox blocks BGP — see `DECISION.md` §2).
-- **IP range:** `192.168.1.230-192.168.1.250`. **Reserved ingress VIP:** `.230`.
+- **IP range:** `192.168.1.233-192.168.1.250`. **Reserved ingress VIP:**
+  `.233` (pinned via `metallb.universe.tf/loadBalancerIPs` on Traefik's
+  Service). `.230-.232` excluded from the pool — `.232` is Pigsty's HA
+  floating VIP (vip-manager), `.230`/`.231` kept clear alongside it.
 - **Speaker:** tolerates `node-role.kubernetes.io/control-plane:NoSchedule`.
 - **Controller:** 2 replicas, pod anti-affinity keyed on
   `app=metallb,component=controller` / `topologyKey=kubernetes.io/hostname`.
@@ -199,7 +201,7 @@ Why (Gateway API reversal, cert-manager/DNS-01 rejections): see
 sequenceDiagram
     participant C as Client
     participant FB as Freebox (port-forward)
-    participant MLB as MetalLB VIP (.230)
+    participant MLB as MetalLB VIP (.233)
     participant TR as Traefik (IngressRoute + ACME)
     participant SVC as K8s Service
     participant POD as App Pod

@@ -15,7 +15,9 @@ argocd_enabled: false
 cert_manager_enabled: false
 cert_manager_namespace: "cert-manager"
 
-# MetalLB L2 mode — 192.168.1.230-250 reserved, .230 is Traefik ingress VIP (MISSION §6)
+# MetalLB L2 mode — 192.168.1.233-250 reserved (MISSION §6). .232 is
+# Pigsty's HA floating VIP (vip-manager); .230/.231 excluded too to keep
+# clear of that block.
 metallb_enabled: true
 metallb_speaker_enabled: "{{ metallb_enabled }}"
 metallb_namespace: "metallb-system"
@@ -49,7 +51,7 @@ metallb_config:
   address_pools:
     primary:
       ip_range:
-        - 192.168.1.230-192.168.1.250
+        - 192.168.1.233-192.168.1.250
       auto_assign: true
   layer2:
     - primary

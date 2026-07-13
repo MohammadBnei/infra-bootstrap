@@ -7,13 +7,14 @@
 #   - Per-app routing via Traefik IngressRoute, not Gateway API — Traefik's
 #     ACME resolver can't issue certs for Gateway API listeners without
 #     cert-manager as a Secret bridge (banned), so IngressRoute is the lock.
-#   - MetalLB VIP: 192.168.1.230 (annotation or pool label)
+#   - MetalLB VIP: 192.168.1.233 (annotation, pinned) — pool is
+#     192.168.1.233-250; .230-.232 excluded (.232 is Pigsty's HA VIP)
 #   - kube-proxy retained (cilium chaining mode — do NOT enable kube-proxy replacement)
 
 service:
   type: LoadBalancer
   annotations:
-    metallb.universe.tf/loadBalancerIPs: 192.168.1.231
+    metallb.universe.tf/loadBalancerIPs: 192.168.1.233
 
 ports:
   # Don't override `port:` here — that's the container's own listen port,
