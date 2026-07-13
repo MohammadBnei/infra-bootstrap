@@ -10,7 +10,7 @@
 # in-cluster Infisical server). The chart's own default is
 # https://app.infisical.com/api (Infisical Cloud), which is wrong for a
 # self-hosted instance, so override it here in case a future CR omits it.
-hostAPI: http://infisical.infisical.svc.cluster.local:8080/api
+hostAPI: http://platform-infisical-backend.infisical.svc.cluster.local:8080/api
 
 # scopedNamespaces left at chart default ([], cluster-scoped) — InfisicalSecret
 # instances live across many namespaces (argocd, monitoring, and eventually

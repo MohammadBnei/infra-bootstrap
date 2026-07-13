@@ -51,7 +51,7 @@ infisical:
   projectSlug: ""
   envSlug: dev
   secretsPath: "/"
-  hostAPI: http://infisical.infisical.svc.cluster.local:8080/api
+  hostAPI: http://platform-infisical-backend.infisical.svc.cluster.local:8080/api
   resyncInterval: 60
   secretName: ""   # defaults to "<release-name>-infisical"
   credentialsRef:
