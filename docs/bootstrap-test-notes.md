@@ -393,3 +393,152 @@ itself works — but neither app can finish going `Healthy` until the
 ClusterIP routing bug above is fixed, since both depend on
 `InfisicalSecret` (in turn blocked on Service-routed calls to the
 Infisical backend).
+
+## 2026-07-13 — round 2: root cause found, fixed, full re-bootstrap
+
+Picking up exactly where the session above left off. The "systemic
+ClusterIP-routing bug" hypothesis (masquerade/SNAT, Cilium chaining vs.
+kube-proxy) turned out to be a red herring on a **different** axis — a
+live `curl` from a debug pod straight to
+`platform-infisical-backend.infisical.svc.cluster.local:8080` showed the
+hostname itself resolving to public Cloudflare IPs
+(`172.67.128.160`/`104.21.1.56`), not a routing failure at all.
+
+### Actual root cause: DNS search-domain poisoning, not routing
+
+- Every pod's `/etc/resolv.conf` carried a bare `dev` search domain
+  alongside the normal Kubernetes ones. With `ndots:5`, any in-cluster FQDN
+  (4 dots) tries appending search suffixes — including `dev` — before the
+  absolute name. `.dev` is a real public TLD, so
+  `...cluster.local.dev` gets a live (non-NXDOMAIN) answer from a
+  Cloudflare-fronted address, and resolution stops there. Confirmed
+  identically for `argocd-server` — never Infisical-specific.
+- Traced to the source with direct root SSH to the Proxmox host itself
+  (`192.168.1.165`): `pvesh get /nodes/bnei/dns` showed `search: "dev"`.
+  The PVE node's own hostname is `bnei` with domain `bnei.dev` — during
+  the original Proxmox installer FQDN prompt, entering `bnei.dev` as a
+  single field gets mechanically split into hostname=`bnei` +
+  domain=`dev` (everything before the first dot vs. everything after). A
+  3+ label FQDN (e.g. `pve.bnei.dev`) wouldn't have hit this. PVE's
+  cloud-init generator uses that node-level domain as the default DNS
+  search domain baked into every guest's netplan — this is why it hit
+  every VM on the host, not just the k8s ones.
+- First fix attempt (netplan `dhcp4-overrides: use-domains: false` in the
+  shared cloud-init vendor-data) **did not work** — `netplan get` showed
+  the "dev" search domain is statically written into PVE's own generated
+  `50-cloud-init.yaml`, not DHCP-negotiated, so DHCP-domain suppression
+  was the wrong lever entirely.
+- Real fix: the `bpg/proxmox` Terraform provider's
+  `initialization.dns.domain` attribute overrides PVE's cloud-init DNS
+  domain generation directly, per-VM. Set to `"localdomain"` (not a real
+  TLD, so a failed lookup correctly NXDOMAINs and falls through) on both
+  `k8s_cp_01` and `k8s_worker_01` in `terraform/k8s-vms.tf`. Verified live
+  post-recreate: `resolvectl status` on both nodes shows `DNS Domain:
+  localdomain`.
+- User also fixed the PVE-level default afterward
+  (`pvesh set /nodes/bnei/dns --search bnei.dev`) — since `bnei.dev` is a
+  zone they actually own, this is safe unlike bare `dev`. The Terraform
+  per-VM override is kept anyway as defense in depth, independent of
+  whatever the shared host defaults to.
+
+### Topology correction (discovered mid-fix)
+
+`k8s-worker-gpu` was never actually deployed (only `k8s-cp-01` +
+`k8s-worker-01` exist, matching `inventory/ukubi/hosts.yaml`) — the
+intended final topology is 2 VMs, not 3: the worker carries GPU
+passthrough directly. `terraform/k8s-vms.tf` and `ARCHITECTURE.md` updated
+accordingly. First apply attempt with `hostpci` on `k8s_worker_01` failed:
+`PCI device mapping not found for 'gpu'` — the PVE PCI Resource Mapping
+was never created by hand on `.165` (root-only, out of reach of the
+API-token Terraform provider). `hostpci` block temporarily commented out
+to unblock this smoke test; re-enable once the mapping exists.
+
+### MetalLB pool collision (discovered mid-verification)
+
+Traefik's pinned LoadBalancer IP (`192.168.1.231`) and the MetalLB pool
+(`192.168.1.230-250`) overlapped with `192.168.1.232`, which the user
+already uses as Pigsty's HA floating VIP (vip-manager). Pool shrunk to
+`192.168.1.233-250`; Traefik's pin moved to `192.168.1.233`.
+`inventory/ukubi/group_vars/k8s_cluster/addons.yml`,
+`gitops/platform/values/traefik/values.yaml`, `ARCHITECTURE.md`, and
+`CLAUDE.md` updated. Live `IPAddressPool` patched directly and the
+`metallb-system/controller` deployment restarted (it had cached the old
+pool and kept re-offering `.231` even after the CR was patched and the
+Service recreated — a live `kubectl patch` on the pool isn't enough by
+itself, the controller needs a restart to stop re-issuing stale
+addresses). The Traefik values-file fix landed on a still-open PR
+(`fix/dhcp-dns-search-domain`, #8) — since ArgoCD tracks `HEAD` on the
+default branch, the live Service annotation didn't update until merge, so
+`platform-traefik`'s Service sat `<pending>` (rejecting `.231`, no valid
+IP to fall back to) until the PR merged.
+
+### Full re-bootstrap results (terraform + kubespray + ArgoCD)
+
+- **kubespray `cluster.yml`**: clean run, `failed=0 unreachable=0` both
+  nodes, ~11 minutes (vs. a much longer original bootstrap) — image/module
+  caching from the first run made this pass much faster, as expected.
+  Gotcha re-hit and re-fixed in the same session: invoking
+  `ansible-playbook -i inventory/ukubi/hosts.yaml kubespray/cluster.yml`
+  from the repo root (not `cd kubespray && ansible-playbook -i
+  ../inventory/ukubi/hosts.yaml cluster.yml`) breaks kubespray's own
+  `ansible.cfg` roles_path resolution (`role 'dynamic_groups' was not
+  found`) — this exact mistake and its fix were already documented in
+  `docs/bootstrap-test-notes.md` §"gotchas" from the 07-12 run; worth
+  re-emphasizing since it's easy to make again reflexively.
+- **ArgoCD bootstrap**: Helm install, `register-repos.sh`'s three secrets
+  (recreated manually via `kubectl create secret --dry-run=client -o yaml`
+  piped over SSH, per this repo's "never materialize credentials locally"
+  convention), `gitops/bootstrap/traefik-crds/` + `gitops/bootstrap/`
+  applied. The 3 `InfisicalSecret` CRs in `gitops/bootstrap/` failed on
+  first apply (`no matches for kind "InfisicalSecret"` — expected
+  chicken-and-egg, since the CRD only exists once `infisical-operator`
+  itself has synced) and were cleanly re-applied once wave 1 finished.
+- **Infisical**: `platform-infisical` + `platform-infisical-operator`
+  `Healthy`. `pgweb-infisical` and `searxng-settings` `InfisicalSecret`s
+  resolved immediately — **this is the direct end-to-end proof the DNS
+  fix works**, since these are exactly the universal-auth calls that were
+  failing before.
+- **Separate, unrelated finding**: `argocd-github-apps-creds`,
+  `grafana-admin-secret`, `basic-admin-auth-secret` initially failed with
+  `403 Forbidden` (`"You are not a member of this project"` for
+  `infra-bootstrap-1-ge1`) — the universal-auth machine identity had only
+  ever been granted access to the dedicated `pgweb-p9-hy`/`searxng-l-dwt`
+  projects, not the main one. Fixed by the user granting project access
+  in the Infisical UI; all 3 resolved cleanly afterward, unblocking
+  Grafana (`Healthy`) and the ArgoCD repo credentials.
+- **searxng**: alive — `1/1 Running`, serving on 8080, only non-fatal
+  plugin warnings (a couple of search engines fail to register, a tracker
+  pattern list fetch fails — cosmetic).
+- **pgweb**: still not alive. Crash-loops on `Error: authentication
+  failed` against Postgres. Confirmed this is a credential/DB-state issue,
+  not networking — `PGWEB_DATABASE_URL`'s host (`192.168.1.232:5432`,
+  Pigsty's HA VIP) accepts the TCP connection and responds; it just
+  rejects the current credentials. Not investigated further this session
+  (out of scope — touches live Postgres/Pigsty auth state, needs the
+  user's call per this repo's own Pigsty guardrails). Worth checking
+  whether the `pgweb-p9-hy` project's `DATABASE_URL` secret is stale.
+- **platform-prometheus**: `Degraded` — its Longhorn volume
+  (`pvc-...-db-prometheus-...-0`) ended up `detached`/`faulted`, likely
+  from the same early race as the `CSINode ... does not contain driver
+  drin.longhorn.io` event (PVC tried to attach before Longhorn's CSI
+  plugin had registered on the node). Not remediated — the VMs are being
+  torn down at the end of this session anyway, so the volume goes with
+  them; if this cluster becomes longer-lived, revisit Longhorn's startup
+  ordering relative to PVC creation.
+- **platform-longhorn**: `Healthy` but `OutOfSync` — not investigated
+  further, likely a benign Helm-hook/drift artifact.
+
+### Status at end of session
+
+Root cause of the previous session's blocker is fixed and proven live:
+Infisical, ArgoCD, and Grafana all resolve `InfisicalSecret`s through
+ClusterIP DNS names now. searxng is fully healthy. pgweb and Prometheus
+have their own separate, unrelated issues (Postgres credentials; a faulted
+Longhorn volume) that are explicitly out of scope for this DNS fix. PR #8
+carries all of this session's fixes (Terraform `dns.domain` override,
+2-node topology correction, MetalLB pool move) and needs merging before
+`platform-traefik`'s Service can get a valid IP. VMs are being torn down
+at the end of this session (ephemeral test infra, no data worth
+protecting) — the next bootstrap should be materially faster and cleaner
+than either of the last two, now that all three real bugs found across
+both sessions are fixed in the repo itself.
