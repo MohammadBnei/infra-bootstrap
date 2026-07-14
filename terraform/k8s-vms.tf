@@ -120,19 +120,19 @@ resource "proxmox_virtual_environment_vm" "k8s_worker_01" {
   # RTX 2070 SUPER passthrough via a pre-created PCI Resource Mapping (see
   # variables.tf gpu_mapping_name) — hostpci's raw `id` attribute needs root
   # password auth, incompatible with the api_token this provider uses.
-  # IOMMU/vfio-pci binding on the host is a prerequisite this doesn't manage.
-  #
-  # TEMPORARILY DISABLED for the 2026-07-13 DNS-fix smoke test: the "gpu"
-  # PCI Resource Mapping doesn't exist yet on .165 (VM start failed with
-  # "PCI device mapping not found for 'gpu'") — it's a one-time manual step
-  # in the Proxmox UI (Datacenter -> Resource Mappings) requiring root, out
-  # of reach of the API-token provider. Re-enable this block once that
-  # mapping is created.
-  # hostpci {
-  #   device  = "hostpci0"
-  #   mapping = var.gpu_mapping_name
-  #   pcie    = true
-  # }
+  # IOMMU/vfio-pci binding on the host is a prerequisite this doesn't manage
+  # (host needs AMD-Vi enabled in BIOS — AMD CBS -> NBIO Common Options —
+  # plus vfio-pci bound to all 4 functions of 0b:00; see
+  # /usr/local/bin/vfio-pci-bind-gpu.sh + vfio-pci-bind-gpu.service on .165,
+  # which force-bind at boot since the modprobe.d ids= option alone loses
+  # the race against xhci_hcd/snd_hda_intel/i2c_nvidia_gpu on some boots).
+  # The "gpu" PCI Resource Mapping now exists on .165 (node bnei, all 4
+  # functions of 0000:0b:00, iommu group 2).
+  hostpci {
+    device  = "hostpci0"
+    mapping = var.gpu_mapping_name
+    pcie    = true
+  }
 
   initialization {
     datastore_id = var.template_storage_id
