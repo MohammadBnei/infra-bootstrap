@@ -11,8 +11,7 @@ build against — expect it to change:
 | Resource | Type | VMID | Status |
 |---|---|---|---|
 | `k8s-cp-01` | VM | 201 | new-create, test-phase, no import needed |
-| `k8s-worker-01` | VM | 202 | new-create, test-phase, no import needed |
-| `k8s-worker-gpu` | VM | 203 | new-create, test-phase, GPU passthrough |
+| `k8s-worker-01` | VM | 202 | new-create, test-phase, no import needed — carries GPU passthrough directly (`hostpci0`), no separate `k8s-worker-gpu` VM |
 | `ubuntu-24.04-ci-template` | VM (template) | 9000 | recreated fresh (see `template.tf`) |
 | `garage-storage` | LXC | 301 | test artifact, destroyed + rebuilt via community script, then imported |
 | `pg01` | VM | 205 | **real, production — imported, `prevent_destroy`** |
@@ -126,7 +125,6 @@ secrets by design, but don't commit your filled-in copy — keep it local.
      -target=proxmox_virtual_environment_vm.ubuntu_2404_template \
      -target=proxmox_virtual_environment_vm.k8s_cp_01 \
      -target=proxmox_virtual_environment_vm.k8s_worker_01 \
-     -target=proxmox_virtual_environment_vm.k8s_worker_gpu \
      -target=null_resource.garage_bootstrap \
      -target=proxmox_virtual_environment_container.garage_storage
    ```
@@ -135,13 +133,18 @@ secrets by design, but don't commit your filled-in copy — keep it local.
 6. After that, a full `terraform plan` (no `-target`) should show `No
    changes.` on pg01/pg02/hermesagent/garage every time — that's the
    ongoing steady-state health check.
-7. `k8s-worker-gpu` additionally needs a PCI Resource Mapping named per
-   `gpu_mapping_name` (default `"gpu"`) created once by hand — Datacenter
-   → Resource Mappings → PCI Devices in the PVE UI, or `pvesh create`. The
-   `hostpci` block uses `mapping`, not a raw PCI `id`, because `id` requires
-   root password auth and is incompatible with API-token auth. Re-verify
-   the RTX 2070 SUPER's PCI address with `lspci -nn | grep -i nvidia`
-   before creating the mapping — addressing can shift between boots.
+7. `k8s-worker-01`'s `hostpci0` block needs a PCI Resource Mapping named
+   per `gpu_mapping_name` (default `"gpu"`) — **done** as of 2026-07-14:
+   `node=bnei,path=0000:0b:00,id=10de:1e84,iommugroup=2`, covering all 4
+   functions of the RTX 2070 SUPER. Created via `pvesh create
+   /cluster/mapping/pci` (Datacenter → Resource Mappings → PCI Devices in
+   the PVE UI works too). The `hostpci` block uses `mapping`, not a raw
+   PCI `id`, because `id` requires root password auth and is incompatible
+   with API-token auth. This also required the host to actually have
+   `vfio-pci` bound to the device — see `docs/infrastructure-actual.md`'s
+   "GPU passthrough" section and `docs/bootstrap-test-notes.md`'s
+   2026-07-14 entry for what that took (AMD-Vi was disabled in BIOS, plus
+   a systemd unit to force the binding reliably).
 8. `cloud-init.tf`'s `qemu_guest_agent_vendor_data` snippet (installs and
    starts `qemu-guest-agent` on every K8s VM clone — see
    `docs/bootstrap-test-notes.md`'s 2026-07-12 entry for why this matters:

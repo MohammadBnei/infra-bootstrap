@@ -1,7 +1,7 @@
 # Infrastructure — Actual State
 
 > **Source of truth** for what is currently running.
-> Last updated: 2026-07-05
+> Last updated: 2026-07-14
 > Owner: hermesagent (this AI)
 
 This document describes the **current, as-is** state of the homelab infrastructure.
@@ -31,7 +31,10 @@ For the target architecture, see [`../ARCHITECTURE.md`](../ARCHITECTURE.md).
 - Hostname: `bnei`
 - Bridge: `vmbr0` (192.168.1.165/24, gateway .254)
 - NIC renamed: `nic0` (physical), `nic1` (unused)
-- IOMMU: AMD IOMMU available (PCI 1022:1481) — passthrough capable
+- IOMMU: AMD-Vi **enabled and working** (verified 2026-07-14: 16 IOMMU
+  groups exist; before this date it was disabled in BIOS and `lspci`'s
+  "IOMMU available" claim was actually false — 0 groups existed). Enabled
+  under AMD CBS → NBIO Common Options.
 - Storage: LVM with `pve` volume group, `local-lvm` thinpool
 - Running LXCs:
   - VMID 101 `hermesagent` (2 vCPU / 4GB / 19GB) — this AI
@@ -44,6 +47,36 @@ For the target architecture, see [`../ARCHITECTURE.md`](../ARCHITECTURE.md).
   docs/bootstrap-test-notes.md). VMID 9000 is the original hand-created
   template, now an unmanaged spare, not deleted.
 - ceph-fuse 19.2.3-pve4 (client only, no active cluster)
+
+#### GPU passthrough (2026-07-14)
+
+RTX 2070 SUPER, PCI `0b:00`, all 4 functions (VGA `.0`, Audio `.1`, USB
+`.2`, USB-C `.3`) bound to `vfio-pci`, sharing IOMMU group 2 along with
+their upstream PCIe bridge. Enforced on every boot by
+`vfio-pci-bind-gpu.service` (`/usr/local/bin/vfio-pci-bind-gpu.sh`) — the
+plain `options vfio-pci ids=...` in `/etc/modprobe.d/vfio.conf` alone
+only wins the driver-claim race for some of the 4 functions on a given
+boot, so the service force-unbinds/rebinds all 4 via `driver_override`
+after boot. The host runs **no NVIDIA driver at all** — a prior attempt
+installed one directly on the host (plus `pve-nvidia-vgpu-helper`, a
+vGPU/mediated-device helper) which was the wrong approach for this
+design and has been purged; see
+[ADR-0011](../docs/adr/0011-reject-multi-region-dr-service-mesh.md) for
+why GPU multi-tenancy (vGPU) is rejected here. Secure Boot is enabled and
+untouched — it was never the actual blocker (see
+`docs/bootstrap-test-notes.md`'s 2026-07-14 entry for the full story).
+
+The PVE PCI Resource Mapping `gpu` exists
+(`node=bnei,path=0000:0b:00,id=10de:1e84,iommugroup=2`), and
+`terraform/k8s-vms.tf`'s `hostpci0` block on `k8s-worker-01` is
+re-enabled (not yet merged/applied). **Not yet attached to any VM** —
+`k8s-worker-01` doesn't exist yet, so the GPU is passthrough-ready but
+idle.
+
+Raw PCI/VFIO passthrough is exclusive by construction: the GPU can be
+attached to only one VM at a time. Once `k8s-worker-01` holds it,
+Proxmox refuses to start any other VM/LXC against the same mapping — this
+is deliberately not vGPU-style sharing across multiple VMs.
 
 ### Pi 4 (raspberry) details
 
@@ -125,7 +158,9 @@ For the target architecture, see [`../ARCHITECTURE.md`](../ARCHITECTURE.md).
 ### Known issues
 
 - **No dedicated workers** — workloads run on control-plane nodes (libvirt VMs acting as both CP + worker)
-- **No GPU support** — k8s-worker-gpu VM does not exist yet
+- **No GPU support yet** — `k8s-worker-01` (the new cluster's GPU
+  passthrough target, see "GPU passthrough" under Proxmox host details
+  above) doesn't exist yet; the host side is passthrough-ready
 - **Legacy runtime** — K8s nodes are libvirt VMs on .200/.161; new cluster will use QEMU VMs on PVE
 - **New cluster blocked** — kubespray v2.23 vars / v2.31 submodule mismatch (Q-D, unresolved)
 
