@@ -6,10 +6,6 @@ output "k8s_worker_01_ip" {
   value = "192.168.1.202"
 }
 
-output "k8s_worker_gpu_ip" {
-  value = "192.168.1.203"
-}
-
 output "garage_storage_ip" {
   value = var.garage_ip
 }

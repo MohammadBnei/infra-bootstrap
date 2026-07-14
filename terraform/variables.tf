@@ -122,7 +122,7 @@ variable "longhorn_disk_size_gb" {
 variable "gpu_mapping_name" {
   description = <<-EOT
     Name of the PVE PCI Resource Mapping (Datacenter -> Resource Mappings)
-    pointing at the RTX 2070 SUPER, used by k8s-worker-gpu's hostpci block.
+    pointing at the RTX 2070 SUPER, used by k8s-worker-01's hostpci block.
     Must be created once by hand on .165 before this VM's first apply —
     hostpci's raw `id` attribute requires root password auth and is
     incompatible with API-token auth, so `mapping` is used instead.

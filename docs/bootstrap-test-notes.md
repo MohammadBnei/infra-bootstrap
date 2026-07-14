@@ -542,3 +542,98 @@ at the end of this session (ephemeral test infra, no data worth
 protecting) — the next bootstrap should be materially faster and cleaner
 than either of the last two, now that all three real bugs found across
 both sessions are fixed in the repo itself.
+
+## 2026-07-14 — GPU passthrough fixed (Secure Boot was a red herring)
+
+Starting symptom: "GPU drivers not valid and can't start since enabling
+Secure Boot" on `.165`. Audited the live host (read-only SSH first, via
+the same `PVE_SSH_PRIVATE_KEY` Infisical secret Terraform uses) before
+touching anything, since some earlier work had already failed here.
+
+**What was actually broken:** a previous attempt had installed the
+proprietary NVIDIA driver (`nvidia-kernel-dkms`, `nvidia-driver-cuda`,
+~15 related `libnvidia-*`/`libcuda*` packages) plus
+`pve-nvidia-vgpu-helper` **directly on the Proxmox host itself**.
+`pve-nvidia-vgpu-helper` is Proxmox's tooling for NVIDIA vGPU
+(mediated-device) passthrough — a GPU-multi-tenancy pattern explicitly
+rejected by
+[ADR-0011](adr/0011-reject-multi-region-dr-service-mesh.md) for this
+single-site, one-GPU homelab. Wrong approach entirely: this repo's design
+is raw whole-GPU PCI passthrough of all 4 functions to one VM
+(`k8s-worker-01`), with the driver living inside the guest, not on the
+host. `nvidia-kernel-dkms` was stuck `iU` in `dpkg -l` (postinst's
+DKMS build/sign step never completed) — Secure Boot blocking that
+unsigned module was a real symptom, but not the actual problem, since the
+host should never have been running this driver at all.
+
+Fix, step by step:
+1. Purged the entire host-side NVIDIA stack + `pve-nvidia-vgpu-helper`
+   (`apt-get purge`/`dpkg --purge --force-remove-reinstreq` for the
+   packages `apt` couldn't resolve cleanly on its own, due to the
+   half-configured state). `apt autoremove` incidentally also dropped
+   `sudo`/`dkms` as no-longer-needed — reinstalled `sudo` immediately
+   since removing it was an unintended side effect, not part of the fix.
+   `pg01`/`pg02` (production Postgres, same host) stayed up throughout.
+2. Configured `vfio-pci` to claim the GPU's 4 PCI IDs
+   (`10de:1e84`/`10de:10f8`/`10de:1ad8`/`10de:1ad9`) via
+   `/etc/modprobe.d/vfio.conf`, blacklisted `nouveau`, and made sure
+   `vfio`/`vfio_pci`/`vfio_iommu_type1` actually load early via
+   `/etc/modules-load.d/vfio.conf` (the `modprobe.d ids=` option alone
+   doesn't force early loading — needed both).
+3. Rebooted (twice — see gotcha below). Every reboot of `.165` briefly
+   restarts `pg01`/`pg02` along with it; confirmed both came back healthy
+   each time.
+4. **Real root cause, found only after step 3 still didn't bind
+   `vfio-pci` to anything**: `/sys/kernel/iommu_groups/` was completely
+   empty — AMD-Vi was fully disabled at the BIOS level (ASRock B450
+   Gaming K4, no IPMI/BMC, so this needed physical keyboard+monitor
+   access — not something fixable over SSH). The kernel's generic
+   `iommu: Default domain type: Translated` dmesg line is printed
+   regardless of whether real hardware IOMMU groups exist, and was a
+   misleading signal during the first diagnosis pass. User enabled it
+   under AMD CBS → NBIO Common Options; after that reboot, 16 IOMMU
+   groups appeared and the GPU's 4 functions landed in group 2 together
+   with their upstream PCIe bridge, as expected for a clean multi-function
+   passthrough candidate.
+5. Even with IOMMU working, `vfio-pci` only auto-claimed 2 of the 4
+   functions on boot (`.0`/`.1`) — `.2`/`.3` still got grabbed first by
+   `xhci_hcd`/`i2c_nvidia_gpu` (a mainline in-kernel driver for the
+   USB-C UCSI controller, unrelated to the purged proprietary NVIDIA
+   stack). `options vfio-pci ids=...` is a boot-order race, not a
+   guarantee. Fixed by force-binding all 4 via `driver_override` +
+   unbind/bind (worked live, no reboot needed to test), then persisted
+   as a boot-time systemd oneshot so it's deterministic going forward:
+   `/usr/local/bin/vfio-pci-bind-gpu.sh` +
+   `vfio-pci-bind-gpu.service` (`WantedBy=sysinit.target`,
+   `Before=pve-guests.service`).
+6. Created the PCI Resource Mapping (`pvesh create /cluster/mapping/pci
+   --id gpu --map node=bnei,path=0000:0b:00,id=10de:1e84,iommugroup=2`) —
+   the one-time root-only step Terraform's API-token provider can't do,
+   flagged in `terraform/k8s-vms.tf`'s own comments since the 2026-07-13
+   session.
+7. Re-enabled the `hostpci0` block in `terraform/k8s-vms.tf` for
+   `k8s_worker_01` (commit `c99efa7c`, branch
+   `fix/gpu-passthrough-secureboot`). `terraform validate` passes.
+
+**End state (2026-07-14):** host is fully passthrough-ready — all 4 GPU
+functions on `vfio-pci`, mapping exists, Terraform config re-enabled —
+but **not yet attached to a VM**, since `k8s-worker-01` doesn't currently
+exist (`qm list` only shows `pg01`/`pg02`/templates; last smoke test's
+VMs were torn down). The next full bootstrap's `terraform apply` creates
+it with the GPU attached. Secure Boot itself was left enabled throughout
+— it was never disabled, and didn't need to be, once the host stopped
+trying to load an unsigned third-party driver.
+
+**Single-VM note:** raw PCI/VFIO passthrough is exclusive by
+construction — Proxmox refuses to start a second VM against a PCI
+Resource Mapping already claimed by a running VM. This is deliberately
+not vGPU-style sharing across multiple VMs/tenants (see ADR-0011 above).
+
+Also fixed two pre-existing stale doc references found while writing
+this up (not caused by this session, just never cleaned up after the
+2026-07-12 topology correction below): `terraform/README.md`'s topology
+table and `-target` example both still referenced a separate
+`k8s-worker-gpu` VM that was abandoned in favor of GPU-passthrough-on-
+`k8s-worker-01` — removed. See `docs/infrastructure-actual.md`'s
+"GPU passthrough" subsection under Proxmox host details for the
+consolidated current-state summary.
