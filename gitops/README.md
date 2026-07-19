@@ -9,7 +9,7 @@ ArgoCD-driven GitOps for the ukubi-cluster (QEMU VMs on Proxmox). Everything in 
 ```
 gitops/
 ├── bootstrap/                             # Applied once to bring the cluster up
-│   ├── register-repos.sh                  # Creates manual K8s Secrets before ArgoCD starts
+│   ├── (secrets created by ansible/playbooks/register-repos.yml, not a file here — see ansible/README.md)
 │   ├── argocd-application.yaml            # ArgoCD self-manages its own Helm chart
 │   ├── traefik-application.yaml           # Standalone Application (needs helm.skipCrds, can't live in the shared ApplicationSet template — see file comment)
 │   ├── traefik-crds/                      # Traefik's own CRDs (traefik.io_*/hub.traefik.io_*), vendored — see file comment in traefik-application.yaml
@@ -69,10 +69,10 @@ Note: sync-wave ordering across independent top-level Applications isn't strictl
 ### Bootstrap credential chain
 
 ```
-register-repos.sh (manual, one-time):
-  ├─ infisical-secrets          (ns: infisical) ← k8s-cluster/infisical/.env.secret
-  ├─ universal-auth-credentials (ns: infisical) ← k8s-cluster/infisical/.env.client
-  └─ repo-infra-bootstrap       (ns: argocd)    ← $INFRA_BOOTSTRAP_KEY_FILE (local SSH key)
+ansible/playbooks/register-repos.yml (manual, one-time):
+  ├─ infisical-secrets          (ns: infisical) ← register-repos.env (ENCRYPTION_KEY, DB_CONNECTION_URI, ...)
+  ├─ universal-auth-credentials (ns: infisical) ← register-repos.env (ARGOCD_INFISICAL_CLIENT_ID/SECRET)
+  └─ repo-infra-bootstrap       (ns: argocd)    ← register-repos.env (INFRA_BOOTSTRAP_SSH_KEY_FILE)
 
 Wave 1: Infisical starts
   └─ argocd-github-apps-creds.yaml (InfisicalSecret) resolves →
@@ -175,20 +175,25 @@ helm install argocd argo/argo-cd \
 ### Step 2 — Create bootstrap secrets
 
 ```bash
-export INFRA_BOOTSTRAP_KEY_FILE=~/.ssh/infra_bootstrap_id_ed25519
+cp ansible/playbooks/register-repos.env.example ansible/playbooks/register-repos.env
+# ...fill in register-repos.env...
 
-./gitops/bootstrap/register-repos.sh
+set -a && source ansible/playbooks/register-repos.env && set +a
+ansible-playbook -i inventory/ukubi/hosts.yaml ansible/playbooks/register-repos.yml
 ```
 
-The script requires no network connection to Infisical. It reads two local files:
+Full details (prerequisites, where each value comes from, how to extend) are
+in [ansible/README.md](../ansible/README.md#playbooksregister-reposyml). No
+network connection to Infisical is required — see that doc for why these
+three inputs deliberately stay local instead of flowing through Infisical.
 
-| Source | K8s Secret created |
+| Source (in `register-repos.env`) | K8s Secret created |
 |---|---|
-| `k8s-cluster/infisical/.env.secret` | `infisical-secrets` in ns `infisical` |
-| `k8s-cluster/infisical/.env.client` | `universal-auth-credentials` in ns `infisical` |
-| `$INFRA_BOOTSTRAP_KEY_FILE` | `repo-infra-bootstrap` in ns `argocd` |
+| `ENCRYPTION_KEY`, `AUTH_SECRET`, `DB_CONNECTION_URI`, `REDIS_URL`, `SMTP_*`, ... | `infisical-secrets` in ns `infisical` |
+| `ARGOCD_INFISICAL_CLIENT_ID` / `ARGOCD_INFISICAL_CLIENT_SECRET` | `universal-auth-credentials` in ns `infisical` |
+| `INFRA_BOOTSTRAP_SSH_KEY_FILE` | `repo-infra-bootstrap` in ns `argocd` |
 
-> **Never commit SSH keys or secrets to this repo.** The `.env.*` files are gitignored.
+> **Never commit SSH keys or secrets to this repo.** `register-repos.env` is gitignored (`*.env`).
 
 ### Step 3 — Apply bootstrap manifests
 

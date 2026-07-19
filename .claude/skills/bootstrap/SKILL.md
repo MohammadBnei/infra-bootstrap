@@ -28,10 +28,10 @@ ArgoCD bootstrap → Pigsty. If unsure, ask.
   ping` passing? `cluster.yml` run?). Report the first unchecked item as
   "next step."
 - **ArgoCD**: read `gitops/README.md` "Bootstrap sequence" (Step 1–4:
-  install ArgoCD via Helm → `register-repos.sh` → `kubectl apply -f
-  gitops/bootstrap/` → watch rollout). Walk in order, checking whether
-  each precondition looks met (e.g. don't suggest Step 3 if Step 2's
-  secrets aren't confirmed created).
+  install ArgoCD via Helm → `ansible/playbooks/register-repos.yml` →
+  `kubectl apply -f gitops/bootstrap/` → watch rollout). Walk in order,
+  checking whether each precondition looks met (e.g. don't suggest Step 3
+  if Step 2's secrets aren't confirmed created).
 - **Pigsty**: no runbook exists yet and `docs/README.md` only lists it as
   TODO (`runbook-pg-bootstrap.md`, `runbook-migration-pg.md`). Say so
   plainly rather than inventing steps; offer to draft the runbook (Step 4)

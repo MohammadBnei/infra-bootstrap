@@ -1,0 +1,264 @@
+---
+# Bootstrap playbook — create all manual K8s Secrets required before ArgoCD
+# can sync the cluster. Safe to re-run (every kubectl call is `apply`).
+#
+# WHY THIS PLAYBOOK EXISTS
+# ArgoCD installs Infisical at wave 1. Infisical needs its own credentials
+# before it can start (DB connection, encryption key). These, plus the
+# infra-bootstrap SSH deploy key, are pre-Infisical bootstrap material — they
+# can't come from Infisical itself, since infisical.bnei.dev *is* the
+# instance being bootstrapped here. See register-repos.env.example.
+#
+# Once Infisical is up, it serves the user-app SSH keys to ArgoCD via
+# InfisicalSecret CRDs (see gitops/bootstrap/argocd-github-apps-creds.yaml).
+# Only the infra-bootstrap SSH key is injected manually here — the minimum
+# required to pull Infisical's own platform values from infra-bootstrap.
+#
+# Manifests are rendered locally (kubectl --dry-run=client never contacts
+# the API server) and applied on k8s-cp-01 over the existing SSH connection
+# — no kubeconfig is ever materialized on the operator's machine.
+#
+# Prerequisites: fill in register-repos.env (see register-repos.env.example)
+# and source it before running this playbook.
+- name: Register ArgoCD/Infisical bootstrap secrets
+  hosts: k8s-cp-01
+  gather_facts: false
+  vars:
+    argocd_namespace: "{{ lookup('env', 'ARGOCD_NAMESPACE') | default('argocd', true) }}"
+    infisical_namespace: "{{ lookup('env', 'INFISICAL_NAMESPACE') | default('infisical', true) }}"
+    infra_bootstrap_repo: "git@github.com:MohammadBnei/infra-bootstrap.git"
+    infra_bootstrap_ssh_key_file: "{{ lookup('env', 'INFRA_BOOTSTRAP_SSH_KEY_FILE') | expanduser }}"
+
+  tasks:
+    - name: Assert required env vars are set
+      ansible.builtin.assert:
+        that: lookup('env', item) | length > 0
+        fail_msg: "{{ item }} is not set — copy register-repos.env.example to register-repos.env, fill it in, and source it"
+      loop:
+        - INFRA_BOOTSTRAP_SSH_KEY_FILE
+        - ENCRYPTION_KEY
+        - AUTH_SECRET
+        - SITE_URL
+        - DB_CONNECTION_URI
+        - REDIS_URL
+        - SMTP_HOST
+        - SMTP_USERNAME
+        - SMTP_PASSWORD
+        - ARGOCD_INFISICAL_CLIENT_ID
+        - ARGOCD_INFISICAL_CLIENT_SECRET
+      loop_control:
+        label: "{{ item }}"
+
+    - name: Assert infra-bootstrap SSH key file exists
+      delegate_to: localhost
+      become: false
+      ansible.builtin.stat:
+        path: "{{ infra_bootstrap_ssh_key_file }}"
+      register: infra_bootstrap_key_stat
+
+    - name: Fail if SSH key file is missing
+      ansible.builtin.assert:
+        that: infra_bootstrap_key_stat.stat.exists
+        fail_msg: "SSH key not found: {{ infra_bootstrap_ssh_key_file }}"
+
+    # -------------------------------------------------------------------
+    # 1. Namespaces
+    # -------------------------------------------------------------------
+    - name: Render namespace manifests (local, no cluster contact)
+      delegate_to: localhost
+      become: false
+      ansible.builtin.command:
+        argv: [kubectl, create, namespace, "{{ item }}", --dry-run=client, -o, yaml]
+      loop: "{{ [argocd_namespace, infisical_namespace] | unique }}"
+      register: namespace_manifests
+      changed_when: false
+
+    - name: Apply namespaces
+      become: true
+      ansible.builtin.command:
+        argv: [kubectl, apply, -f, "-"]
+        stdin: "{{ item.stdout }}"
+      loop: "{{ namespace_manifests.results }}"
+      loop_control:
+        label: "{{ item.item }}"
+      changed_when: true
+
+    # -------------------------------------------------------------------
+    # 2. ArgoCD repo credential — the ONLY SSH key injected manually. Lets
+    #    ArgoCD pull Infisical's platform values from infra-bootstrap (wave
+    #    1 sync). All other repo SSH keys come from Infisical via
+    #    InfisicalSecret CRDs.
+    # -------------------------------------------------------------------
+    - name: Render repo-infra-bootstrap secret (local, no cluster contact)
+      delegate_to: localhost
+      become: false
+      no_log: true
+      ansible.builtin.shell:
+        cmd: >
+          kubectl create secret generic repo-infra-bootstrap
+          --namespace {{ argocd_namespace }}
+          --from-literal=type=git
+          --from-literal=url={{ infra_bootstrap_repo }}
+          --from-file=sshPrivateKey={{ infra_bootstrap_ssh_key_file }}
+          --dry-run=client -o yaml
+          | kubectl label --local -f -
+          argocd.argoproj.io/secret-type=repository
+          --dry-run=client -o yaml
+      register: repo_secret_manifest
+      changed_when: false
+
+    - name: Apply repo-infra-bootstrap secret
+      become: true
+      no_log: true
+      ansible.builtin.command:
+        argv: [kubectl, apply, -f, "-"]
+        stdin: "{{ repo_secret_manifest.stdout }}"
+      changed_when: true
+
+    # -------------------------------------------------------------------
+    # 3. Infisical server credentials — feeds kubeSecretRef in the
+    #    Infisical Helm chart (ENCRYPTION_KEY, AUTH_SECRET, DB_CONNECTION_URI,
+    #    REDIS_URL, SMTP_*).
+    # -------------------------------------------------------------------
+    - name: Manage infisical-secrets Secret
+      block:
+        - name: Create temp env file for infisical-secrets
+          delegate_to: localhost
+          become: false
+          ansible.builtin.tempfile:
+            state: file
+            suffix: .infisical-secrets.env
+          register: infisical_secrets_tmp
+
+        - name: Write infisical-secrets env file
+          delegate_to: localhost
+          become: false
+          no_log: true
+          ansible.builtin.copy:
+            dest: "{{ infisical_secrets_tmp.path }}"
+            mode: "0600"
+            content: |
+              ENCRYPTION_KEY={{ lookup('env', 'ENCRYPTION_KEY') }}
+              AUTH_SECRET={{ lookup('env', 'AUTH_SECRET') }}
+              SITE_URL={{ lookup('env', 'SITE_URL') }}
+              DB_CONNECTION_URI={{ lookup('env', 'DB_CONNECTION_URI') }}
+              REDIS_URL={{ lookup('env', 'REDIS_URL') }}
+              DB_ROOT_CERT={{ lookup('env', 'DB_ROOT_CERT') }}
+              SMTP_HOST={{ lookup('env', 'SMTP_HOST') }}
+              SMTP_USERNAME={{ lookup('env', 'SMTP_USERNAME') }}
+              SMTP_PASSWORD={{ lookup('env', 'SMTP_PASSWORD') }}
+              CAPTCHA_SITE_KEY={{ lookup('env', 'CAPTCHA_SITE_KEY') }}
+              TELEMETRY_ENABLED={{ lookup('env', 'TELEMETRY_ENABLED') }}
+
+        - name: Render infisical-secrets manifest (local, no cluster contact)
+          delegate_to: localhost
+          become: false
+          no_log: true
+          ansible.builtin.command:
+            argv:
+              - kubectl
+              - create
+              - secret
+              - generic
+              - infisical-secrets
+              - --namespace={{ infisical_namespace }}
+              - --from-env-file={{ infisical_secrets_tmp.path }}
+              - --dry-run=client
+              - -o
+              - yaml
+          register: infisical_secrets_manifest
+          changed_when: false
+
+        - name: Apply infisical-secrets
+          become: true
+          no_log: true
+          ansible.builtin.command:
+            argv: [kubectl, apply, -f, "-"]
+            stdin: "{{ infisical_secrets_manifest.stdout }}"
+          changed_when: true
+      always:
+        - name: Remove temp env file for infisical-secrets
+          delegate_to: localhost
+          become: false
+          ansible.builtin.file:
+            path: "{{ infisical_secrets_tmp.path }}"
+            state: absent
+          when: infisical_secrets_tmp.path is defined
+
+    # -------------------------------------------------------------------
+    # 4. Machine-identity credentials for the Infisical K8s operator —
+    #    InfisicalSecret CRDs reference this secret to authenticate against
+    #    the Infisical server and materialize K8s Secrets for other apps.
+    # -------------------------------------------------------------------
+    - name: Manage universal-auth-credentials Secret
+      block:
+        - name: Create temp env file for universal-auth-credentials
+          delegate_to: localhost
+          become: false
+          ansible.builtin.tempfile:
+            state: file
+            suffix: .universal-auth-credentials.env
+          register: universal_auth_tmp
+
+        - name: Write universal-auth-credentials env file
+          delegate_to: localhost
+          become: false
+          no_log: true
+          ansible.builtin.copy:
+            dest: "{{ universal_auth_tmp.path }}"
+            mode: "0600"
+            content: |
+              clientId={{ lookup('env', 'ARGOCD_INFISICAL_CLIENT_ID') }}
+              clientSecret={{ lookup('env', 'ARGOCD_INFISICAL_CLIENT_SECRET') }}
+
+        - name: Render universal-auth-credentials manifest (local, no cluster contact)
+          delegate_to: localhost
+          become: false
+          no_log: true
+          ansible.builtin.command:
+            argv:
+              - kubectl
+              - create
+              - secret
+              - generic
+              - universal-auth-credentials
+              - --namespace={{ infisical_namespace }}
+              - --from-env-file={{ universal_auth_tmp.path }}
+              - --dry-run=client
+              - -o
+              - yaml
+          register: universal_auth_manifest
+          changed_when: false
+
+        - name: Apply universal-auth-credentials
+          become: true
+          no_log: true
+          ansible.builtin.command:
+            argv: [kubectl, apply, -f, "-"]
+            stdin: "{{ universal_auth_manifest.stdout }}"
+          changed_when: true
+      always:
+        - name: Remove temp env file for universal-auth-credentials
+          delegate_to: localhost
+          become: false
+          ansible.builtin.file:
+            path: "{{ universal_auth_tmp.path }}"
+            state: absent
+          when: universal_auth_tmp.path is defined
+
+    # -------------------------------------------------------------------
+    # Done
+    # -------------------------------------------------------------------
+    - name: Bootstrap secrets created
+      ansible.builtin.debug:
+        msg:
+          - "Bootstrap secrets created. Apply the GitOps manifests:"
+          - ""
+          - "  kubectl apply -f gitops/bootstrap/traefik-crds/"
+          - "  kubectl apply -f gitops/bootstrap/"
+          - ""
+          - "Wave order: Infisical(1) -> Traefik(2) -> Observability(5) -> User apps(10)"
+          - "After wave 1, ArgoCD will receive user-app SSH keys via InfisicalSecret."
+          - ""
+          - "Watch ArgoCD come up:"
+          - "  kubectl -n argocd rollout status deploy/argocd-server"
