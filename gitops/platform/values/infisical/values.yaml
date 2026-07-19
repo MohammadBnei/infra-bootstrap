@@ -2,7 +2,7 @@
 # Chart: https://dl.cloudsmith.io/public/infisical/helm-charts/helm/charts/  name: infisical
 #
 # infisical-secrets K8s Secret (kubeSecretRef below) must exist before this syncs.
-# Created by gitops/bootstrap/register-repos.sh from k8s-cluster/infisical/.env.secret.
+# Created by ansible/playbooks/register-repos.yml from register-repos.env.
 #
 # IMPORTANT: this chart's values schema is FLAT (backend:, mongodb:, redis:,
 # ingress: are all top-level keys) — there is no top-level "infisical:"

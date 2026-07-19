@@ -42,7 +42,7 @@ How to actually run a layer day-to-day: that layer's own README below.
 | `inventory/ukubi/` | our kubespray inventory (hosts, group_vars, addons) |
 | `pigsty/` | Pigsty config (`pigsty.yml` + files) |
 | `gitops/` | ArgoCD source of truth — Pattern C registry + ApplicationSet |
-| `ansible/playbooks/` | PVE post-install, VM provisioning, K8s node prereqs |
+| `ansible/playbooks/` | K8s bootstrap secrets (drafted); PVE post-install, VM provisioning, K8s node prereqs (pending — see `ansible/README.md`) |
 | `ansible/inventories/` | Ansible inventories (PVE hosts) |
 | `terraform/` | Proxmox VM/LXC provisioning (`.165`) |
 | `docs/` | runbooks (k8s bootstrap, pg bootstrap, pve post-install), ADRs |
@@ -69,7 +69,7 @@ infisical login                           # auth against Infisical
 
 - [docs/runbook-k8s-bootstrap.md](docs/runbook-k8s-bootstrap.md) — `kubespray` against `inventory/ukubi/`
 - [docs/runbook-pg-bootstrap.md](docs/runbook-pg-bootstrap.md) — `pigsty` against `pigsty/pigsty.yml`
-- [docs/runbook-pve-postinstall.md](docs/runbook-pve-postinstall.md) — `ansible-playbook ansible/playbooks/pve-postinstall.yml`
+- `docs/runbook-pve-postinstall.md` — `ansible-playbook ansible/playbooks/pve-postinstall.yml` (not yet drafted)
 
 ## Branch strategy
 

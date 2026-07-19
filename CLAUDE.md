@@ -36,7 +36,7 @@ then here. When in doubt, open those files.
 | `kubespray/` | Submodule, pinned v2.31.0 |
 | `inventory/ukubi/` | Active kubespray inventory |
 | `inventory/mycluster/` | Legacy, flagged for deletion (MISSION §14) — don't extend it |
-| `ansible/` | Only `ansible/README.md` exists; the playbooks it describes are **not written yet** |
+| `ansible/` | `register-repos.yml` drafted; `pve-postinstall.yml`/`vm-provision.yml`/`k8s-node-prereqs.yml` still pending — see `ansible/README.md` status table |
 | `pigsty/` | Vendored Pigsty deployment (own docs/CLAUDE.md) |
 | `gitops/` | ArgoCD source of truth — see `gitops/README.md` |
 | `k8s-cluster/` | Submodule, separate repo, the GitOps *runtime target* (not managed from here) |
@@ -44,8 +44,9 @@ then here. When in doubt, open those files.
 
 ## Locked decisions (condensed — full detail + rationale in `DECISION.md` and `docs/adr/`)
 
-- Ingress: Traefik + Gateway API `HTTPRoute` only. Cert engine: Traefik
-  built-in ACME HTTP-01, `acme.json` on a PVC (never `emptyDir`).
+- Ingress: Traefik + `IngressRoute` only (Gateway API rejected — see
+  ADR-0001). Cert engine: Traefik built-in ACME HTTP-01, `acme.json` on a
+  PVC (never `emptyDir`).
 - MetalLB L2 only (Freebox blocks BGP), pool `192.168.1.233-250`, `.233`
   reserved for the Traefik VIP — `.232` is Pigsty's HA floating VIP,
   `.230`/`.231` excluded alongside it.
@@ -73,9 +74,11 @@ rejected, linked from `DECISION.md` §3.
 
 This repo is mid-bootstrap, not finished:
 
-- `ansible/playbooks/*.yml` and `docs/runbook-*.md` are referenced by
-  `README.md` but **don't exist yet** — don't assume their contents, check
-  `ansible/README.md` / `docs/README.md` for the TODO checklist instead.
+- `ansible/playbooks/register-repos.yml` and both bootstrap runbooks now
+  exist (still untracked pending PR); `pve-postinstall.yml`/
+  `vm-provision.yml`/`k8s-node-prereqs.yml` and their runbooks are still
+  TODO — check `ansible/README.md` / `docs/README.md` for the current
+  checklist rather than assuming.
 - `inventory/mycluster/` is legacy and should eventually be deleted.
 - `DECISION.md`'s own §4 "known drift" list can itself go stale — don't
   trust it blindly — run the `mission-drift` skill before relying on

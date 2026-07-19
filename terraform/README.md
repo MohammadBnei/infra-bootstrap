@@ -123,8 +123,8 @@ secrets by design, but don't commit your filled-in copy — keep it local.
    terraform apply \
      -target=proxmox_download_file.ubuntu_2404_cloudimg \
      -target=proxmox_virtual_environment_vm.ubuntu_2404_template \
-     -target=proxmox_virtual_environment_vm.k8s_cp_01 \
-     -target=proxmox_virtual_environment_vm.k8s_worker_01 \
+     -target='proxmox_virtual_environment_vm.k8s_node["k8s-cp-01"]' \
+     -target='proxmox_virtual_environment_vm.k8s_node["k8s-worker-01"]' \
      -target=null_resource.garage_bootstrap \
      -target=proxmox_virtual_environment_container.garage_storage
    ```
@@ -161,10 +161,11 @@ secrets by design, but don't commit your filled-in copy — keep it local.
 
 ## Out of scope here
 
-- `inventory/ukubi/hosts.yaml`, `ARCHITECTURE.md`, `DECISION.md`,
-  `CLAUDE.md`, `ansible/README.md`, and skill files are **not** touched
-  by this work — update them separately if/when this setup is adopted as
-  the new locked provisioning method.
+- `ARCHITECTURE.md`, `DECISION.md`, `CLAUDE.md`, `ansible/README.md`, and
+  skill files are **not** touched by this work — update them separately
+  if/when this setup is adopted as the new locked provisioning method.
+  (`inventory/ukubi/hosts.yaml` *is* touched — `hosts-inventory.tf`
+  generates it from `var.k8s_nodes` via `templatefile()`.)
 - `.200`/`.161` — no multi-host abstraction until those hosts actually run
   PVE.
 - Installing kubespray/Pigsty on top of the VMs this creates — that's the

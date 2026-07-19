@@ -1,9 +1,5 @@
-output "k8s_cp_01_ip" {
-  value = "192.168.1.201"
-}
-
-output "k8s_worker_01_ip" {
-  value = "192.168.1.202"
+output "k8s_node_ips" {
+  value = { for k, v in var.k8s_nodes : k => v.ip }
 }
 
 output "garage_storage_ip" {

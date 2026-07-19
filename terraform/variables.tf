@@ -130,3 +130,77 @@ variable "gpu_mapping_name" {
   type        = string
   default     = "gpu"
 }
+
+variable "k8s_nodes" {
+  description = <<-EOT
+    K8s VM topology, keyed by node name. This is the one place to change
+    a node's CPU/memory/disk, add/remove a node, or flip its
+    control-plane/etcd/worker/gpu role — k8s-vms.tf and the generated
+    kubespray inventory (hosts-inventory.tf) both derive from this map.
+    Default reproduces the current 2-node topology exactly
+    (ARCHITECTURE.md §2) so `terraform plan` shows zero diff right after
+    this variable is introduced.
+  EOT
+  type = map(object({
+    vm_id                 = number
+    ip                    = string
+    cpu_cores             = number
+    memory_dedicated_mb   = number
+    os_disk_size_gb       = number
+    longhorn_disk_size_gb = optional(number)
+    control_plane         = bool
+    etcd                  = bool
+    worker                = bool
+    gpu                   = bool
+  }))
+  default = {
+    "k8s-cp-01" = {
+      vm_id                 = 201
+      ip                    = "192.168.1.201"
+      cpu_cores             = 2
+      memory_dedicated_mb   = 4096
+      os_disk_size_gb       = 40
+      longhorn_disk_size_gb = null
+      control_plane         = true
+      etcd                  = true
+      worker                = true
+      gpu                   = false
+    }
+    "k8s-worker-01" = {
+      vm_id                 = 202
+      ip                    = "192.168.1.202"
+      cpu_cores             = 6
+      memory_dedicated_mb   = 15360
+      os_disk_size_gb       = 100
+      longhorn_disk_size_gb = null
+      control_plane         = false
+      etcd                  = false
+      worker                = true
+      gpu                   = true
+    }
+  }
+}
+
+variable "network_bridge" {
+  description = "PVE bridge for k8s VM network_device — single flat LAN today (ARCHITECTURE.md §3), one bridge for all nodes."
+  type        = string
+  default     = "vmbr0"
+}
+
+variable "network_cidr_prefix" {
+  description = "CIDR prefix for k8s VM static IPs (gateway_ipv4 above supplies the gateway)."
+  type        = number
+  default     = 24
+}
+
+variable "k8s_vm_ssh_private_key_file" {
+  description = <<-EOT
+    Path to the private half of the K8s VM cloud-init SSH key — used only
+    to render `ansible_ssh_private_key_file` into the generated kubespray
+    inventory (hosts-inventory.tf); never read by Terraform itself (no
+    `file()` call). Sibling of k8s_vm_ssh_public_key_file, which IS read
+    by Terraform to seed each VM's authorized key.
+  EOT
+  type        = string
+  default     = "~/.ssh/id_k8s_vms"
+}
