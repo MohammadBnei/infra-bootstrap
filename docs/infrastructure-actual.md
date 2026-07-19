@@ -141,7 +141,7 @@ is deliberately not vGPU-style sharing across multiple VMs.
 | node1 | control-plane + worker | 192.168.1.181 | Debian 12 | libvirt VM on server1 *(legacy — will be decommissioned after PVE reinstall)* |
 | node4 | control-plane + worker | 192.168.1.191 | Debian 12 | libvirt VM on ex-laptop *(legacy — will be decommissioned after PVE reinstall)* |
 
-**Status:** Legacy cluster is the only running cluster — all apps healthy. No new QEMU K8s VMs created yet. New cluster provisioning blocked pending Q-D (kubespray v2.23 vars / v2.31 submodule mismatch).
+**Status:** Legacy cluster is the only running cluster — all apps healthy. No new QEMU K8s VMs created yet (persistently). The kubespray v2.23/v2.31 mismatch (Q-D) that previously blocked new-cluster provisioning was fixed 2026-07-12 — see `docs/bootstrap-test-notes.md`; multiple full `cluster.yml` smoke-test bootstraps (07-12 through 07-14) have since run clean end-to-end, but each was test/teardown, not a permanent cutover.
 
 ### Workloads
 
@@ -162,7 +162,7 @@ is deliberately not vGPU-style sharing across multiple VMs.
   passthrough target, see "GPU passthrough" under Proxmox host details
   above) doesn't exist yet; the host side is passthrough-ready
 - **Legacy runtime** — K8s nodes are libvirt VMs on .200/.161; new cluster will use QEMU VMs on PVE
-- **New cluster blocked** — kubespray v2.23 vars / v2.31 submodule mismatch (Q-D, unresolved)
+- **New cluster not yet cut over** — kubespray v2.23/v2.31 mismatch (Q-D) fixed 2026-07-12; smoke tests pass but no permanent cluster exists yet
 
 ### Access (current)
 
