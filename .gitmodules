@@ -4,3 +4,6 @@
 [submodule "k8s-cluster"]
 	path = k8s-cluster
 	url = git@github.com:MohammadBnei/k8s-cluster.git
+[submodule "agent-fleet"]
+	path = agent-fleet
+	url = git@github.com:MohammadBnei/agent-fleet.git
