@@ -1,66 +1,39 @@
-# garage-storage (VMID 301) — confirmed test artifact, no data. Rebuilt via
-# the community-scripts.org LXC installer (creates the container AND
-# installs/configures Garage in one step — a hand-rolled Terraform LXC
-# resource alone would only give a bare container), then adopted into
-# Terraform state so it's tracked like everything else going forward.
+# garage-storage (VMID 301) — confirmed test artifact, no data. Direct
+# new-create: download a plain Debian 12 LXC OS template, then create the
+# container from it in one pass. No community-script installer, no
+# null_resource/remote-exec, no terraform import dance — the previous
+# two-phase design relied on the community-scripts.org `ct/garage.sh`
+# installer to create+configure the container in one step, but that script
+# drops into an interactive whiptail menu instead of honoring its own
+# non-interactive var_* settings and hangs forever under Terraform's
+# non-interactive SSH provisioner (docs/bootstrap-test-notes.md,
+# docs/runbook-k8s-bootstrap.md's old step 4). Garage's actual
+# install/config (binary, systemd unit, layout, buckets, keys) now happens
+# entirely via ansible/playbooks/garage-configure.yml, once this bare,
+# SSH-reachable container exists — Terraform's job stops there.
 #
-# Two-phase, by necessity: the script itself must run once (phase 1) before
-# the resulting container's exact live config is knowable, which is what
-# phase 2's resource block needs to mirror for a clean `terraform import`.
-# The `proxmox_virtual_environment_container` block below is a STARTING
-# POINT — before running `terraform import`, verify every value against
-# `pct config <ctid>` on .165 per the plan's "read for safe sync" step, and
-# fix any mismatch first (a bad match here isn't dangerous the way
-# pg/hermes are, since there's no data on it, but a spurious diff still
-# wastes an apply cycle or risks an unwanted recreate).
-
-# Phase 1: destroy the old test container, then bootstrap fresh via the
-# community-scripts.org installer with pinned, non-interactive settings.
-# Use https://community-scripts.org/generator to produce/verify the exact
-# var_* set for garage.sh before filling in the inline script below — the
-# values here are the plan's starting point, not guaranteed final.
-resource "null_resource" "garage_bootstrap" {
-  connection {
-    type        = "ssh"
-    host        = var.pve_host
-    user        = "root"
-    private_key = var.pve_ssh_private_key
-  }
-
-  provisioner "remote-exec" {
-    inline = [
-      "pct status ${var.garage_ct_id} >/dev/null 2>&1 && pct stop ${var.garage_ct_id} --force || true",
-      "pct status ${var.garage_ct_id} >/dev/null 2>&1 && pct destroy ${var.garage_ct_id} || true",
-      join(" ", [
-        "var_ctid=${var.garage_ct_id}",
-        "var_hostname=garage-storage",
-        "var_cpu=2",
-        "var_ram=2048",
-        "var_disk=200",
-        "var_container_storage=${var.garage_container_storage}",
-        "var_brg=vmbr0",
-        "var_net=${var.garage_ip}/24",
-        "var_gateway=${var.gateway_ipv4}",
-        "var_unprivileged=1",
-        "bash -c \"$(curl -fsSL https://raw.githubusercontent.com/community-scripts/ProxmoxVE/main/ct/garage.sh)\"",
-      ]),
-    ]
-  }
-
-  triggers = {
-    ct_id = var.garage_ct_id # one-shot; taint manually to force a rerun
-  }
+# Debian 13, matching what's already current on the official Proxmox
+# template mirror (confirmed via `pveam available` on .165 — 13.6-1 is the
+# live "system" section entry as of this writing; .165 also already has a
+# 13.1-2 vztmpl cached locally from earlier testing, but this resource
+# manages its own download rather than depending on that out-of-band
+# artifact, so a from-scratch rebuild on a fresh host still works). Re-run
+# `pveam available` before applying if this has gone stale.
+resource "proxmox_download_file" "garage_lxc_template" {
+  content_type = "vztmpl"
+  datastore_id = var.template_download_storage_id
+  node_name    = var.pve_node_name
+  url          = "http://download.proxmox.com/images/system/debian-13-standard_13.6-1_amd64.tar.zst"
+  file_name    = "debian-13-standard_13.6-1_amd64.tar.zst"
+  overwrite    = false
 }
 
-# Phase 2: adopt the container the script created. `terraform import
-# proxmox_virtual_environment_container.garage_storage <node>/<ctid>` after
-# verifying this block matches live `pct config` output, then confirm
-# `terraform plan` is zero-diff before this is trusted.
 resource "proxmox_virtual_environment_container" "garage_storage" {
   node_name    = var.pve_node_name
   vm_id        = var.garage_ct_id
   unprivileged = true
   started      = true
+  tags         = ["storage", "s3", "garage"]
 
   cpu {
     cores = 2
@@ -83,6 +56,12 @@ resource "proxmox_virtual_environment_container" "garage_storage" {
   initialization {
     hostname = "garage-storage"
 
+    # LXC user_account has no `username` — it always configures root, unlike
+    # the VM cloud-init user_account block in k8s-vms.tf which sets one.
+    user_account {
+      keys = [trimspace(file(var.garage_ssh_public_key_file))]
+    }
+
     ip_config {
       ipv4 {
         address = "${var.garage_ip}/24"
@@ -93,8 +72,6 @@ resource "proxmox_virtual_environment_container" "garage_storage" {
 
   operating_system {
     type             = "debian"
-    template_file_id = var.garage_template_file_id
+    template_file_id = proxmox_download_file.garage_lxc_template.id
   }
-
-  depends_on = [null_resource.garage_bootstrap]
 }

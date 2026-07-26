@@ -1,8 +1,8 @@
 # Copy to terraform.tfvars and fill in — that file is gitignored (matches
 # *.tfvars not being committed for anything with real values; only this
 # .example file is tracked). No secrets belong here: PROXMOX_VE_API_TOKEN
-# and PROXMOX_VE_SSH_PRIVATE_KEY / TF_VAR_pve_ssh_private_key come from
-# Infisical via the `infisical run` wrapper in README.md, never from a file.
+# and PROXMOX_VE_SSH_PRIVATE_KEY come from Infisical via the `infisical run`
+# wrapper in README.md, never from a file.
 
 pve_node_name        = "" # confirm via `pvesh get /nodes` — likely "bnei" but not guaranteed identical to the DNS hostname
 template_storage_id  = "" # PVE storage pool for the template + K8s VM disks, e.g. "local-lvm" or a ZFS pool — check `pvesm status`
@@ -11,7 +11,9 @@ template_storage_id  = "" # PVE storage pool for the template + K8s VM disks, e.
 # /storage`, look for "import" in the content list; LVM-thin pools never do)
 garage_container_storage = "" # NVMe-backed pool for garage-storage's disk — check `pvesm status`
 garage_ip             = "" # static IP for the recreated garage-storage container — none locked in MISSION.md yet, pick one and treat as provisional
-longhorn_disk_size_gb = 0  # GB size of each k8s VM's dedicated Longhorn disk (scsi1) — size after inventorying the legacy NFS export's data volume, see MISSION.md §15 Q-H
+# longhorn_disk_size_gb: fallback only, defaults to 50 (ADR-0019) — k8s_nodes
+# entries in variables.tf already set their own per-node size; only override
+# here if you want a different fallback for future entries that omit it.
 
 # Only needed once .200/.161 have joined the PVE cluster (see
 # docs/adr/0020-pve-corosync-cluster.md, docs/runbook-pve-postinstall.md):
@@ -29,7 +31,7 @@ longhorn_disk_size_gb = 0  # GB size of each k8s VM's dedicated Longhorn disk (s
 #     cpu_cores             = 4
 #     memory_dedicated_mb   = 8192
 #     os_disk_size_gb       = 60
-#     longhorn_disk_size_gb = null
+#     longhorn_disk_size_gb = 60
 #     control_plane         = false
 #     etcd                  = false
 #     worker                = true

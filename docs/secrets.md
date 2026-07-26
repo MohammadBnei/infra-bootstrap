@@ -30,7 +30,8 @@ everything.
 | `PG_SUPERUSER_PASSWORD` | Postgres superuser — one value for the whole `pg-proxmox` cluster (pg01 primary + pg02 streaming replica, not two separate credentials) | agent (random 32B) | pigsty `pg_users` |
 | `PG_REPLICATION_PASSWORD` | Streaming replication user, pg02 → pg01 | agent (random 32B) | pigsty `pg_replication` |
 | `PG_BACKREST_REPO_PASSWORD` | pgBackRest repository encryption passphrase | agent (random 32B) | pigsty `pgbackrest_method` |
-| `PGBACKREST_S3_ACCESS_KEY` / `PGBACKREST_S3_SECRET` | Garage S3 credentials pgBackRest uses as its backup target | agent (provisions Garage bucket + keys) | pigsty `pgbackrest_repo` |
+| `PGBACKREST_S3_ACCESS_KEY` / `PGBACKREST_S3_SECRET` | Garage S3 credentials pgBackRest uses as its backup target (bucket: `pg-backup`, provisional pending pigsty `pgbackrest_repo` config) | agent (`ansible/playbooks/garage-configure.yml`) | pigsty `pgbackrest_repo` |
+| `LONGHORN_S3_ACCESS_KEY` / `LONGHORN_S3_SECRET` | Garage S3 credentials Longhorn uses as its snapshot backup target (ADR-0019) | agent (provisions Garage bucket + keys, same Garage instance as pgBackRest's) | `gitops/bootstrap/longhorn-backup-secret.yaml` (InfisicalSecret) → Longhorn `backupTargetCredentialSecret` |
 | `DBUSER_META_PASSWORD` | `dbuser_meta` — pigsty's own admin DB user | agent (random 32B) | pigsty `pg_users` block |
 | `DBUSER_VIEW_PASSWORD` | `dbuser_view` — read-only viewer, dashboards/monitoring | agent (random 32B) | pigsty `pg_users` block |
 | `DBUSER_INFISICAL_PASSWORD` | `dbuser_infisical` — the live in-cluster Infisical server's own database user | agent (random 32B) | pigsty `pg_users` block |
@@ -39,7 +40,7 @@ everything.
 | `K8S_GRAFANA_ADMIN_PASSWORD` | k8s cluster's own Grafana (kube-prometheus-stack, `monitoring` ns) admin login — separate from `GRAFANA_ADMIN_PASSWORD` above, which is Pigsty's unrelated Grafana instance | agent (random 32B) | `gitops/bootstrap/grafana-admin-secret.yaml` (InfisicalSecret) |
 | `HAPROXY_ADMIN_PASSWORD` | HAProxy stats page admin login | agent (random 32B) | pigsty `haproxy_stats` |
 | `PGADMIN_PASSWORD` | pgAdmin console login | agent (random 32B) | pigsty `pgadmin` |
-| `GARAGE_ROOT_TOKEN` | Garage S3 root token — the one-time bootstrap credential everything else's S3 access derives from | user (Garage CLI, first deploy, one-time) | everything that provisions S3 buckets |
+| `GARAGE_ROOT_TOKEN` | Garage S3 root token (maps to Garage's `rpc_secret` — gates cluster admin/layout/node operations) | agent (`ansible/playbooks/garage-configure.yml`, generated on first boot) | everything that provisions S3 buckets |
 | `GITHUB_APPS_SSH_KEY` | Read-only deploy key (full PEM private key), public half added to every `MohammadBnei/*` user-app repo — lets ArgoCD clone their private `values.yaml` | user (fresh keypair, one public half per app repo) | `gitops/bootstrap/argocd-github-apps-creds.yaml` (InfisicalSecret) → ArgoCD repo-creds |
 | `BASIC_AUTH_HTPASSWD` | Shared Traefik BasicAuth credential (`user:apr1-hash` line) gating admin-only tools (pgweb, etc.) | reused from the existing value in `k8s-cluster/traefik/middlewares/basicauth.yml` (not rotated during migration) | `gitops/bootstrap/basic-admin-auth-secret.yaml` (InfisicalSecret) → shared `basic-admin-auth` Middleware |
 
@@ -81,12 +82,12 @@ unlike `PVE_SSH_PRIVATE_KEY` which is Terraform-specific.
 
 - **Agent-generates-random** (32 bytes, base64): all `*_PASSWORD` and `*_TOKEN` rows above
   - Generator: `openssl rand -base64 32` or `head -c 32 /dev/urandom | base64`
+  - Exception: `GARAGE_ROOT_TOKEN` — generated via `openssl rand -hex 32` instead, since Garage's `rpc_secret` requires hex, not base64
   - Written via `infisical secrets set --projectId="$PROJ" --env=dev --type=shared`
   - Pushed to git ONLY as a reference name (e.g. in `pigsty.yml.j2`), never the value
 - **User-generated-manual**: anything that can't be rotated from a fresh install
   - `KUBE_VAULT_PASSWORD` — kubespray cluster-vault, used to decrypt subsequent kubespray runs
   - `PVE_API_TOKEN` — must be created in the PVE UI, scoped to a per-purpose user
-  - `GARAGE_ROOT_TOKEN` — issued by `garage` CLI on first deploy, one-time
   - `ARGOCD_INFISICAL_CLIENT_ID/SECRET` — separate Machine Identity in Infisical, scoped to `infra-bootstrap` project only
 - **Tool-generated-and-captured**: anything kubespray/pigsty/Garage generates during install
   - We capture the output and write it to Infisical in a post-install hook (manual, scripted)
@@ -108,11 +109,16 @@ unlike `PVE_SSH_PRIVATE_KEY` which is Terraform-specific.
 ## Bootstrap order (what gets created when)
 
 1. User creates `KUBE_VAULT_PASSWORD` + `PVE_API_TOKEN` (offline, before any tool runs)
-2. User creates `GARAGE_ROOT_TOKEN` (after Garage LXC first boot)
-3. User creates `ARGOCD_INFISICAL_CLIENT_ID/SECRET` (after ArgoCD install)
-4. Agent generates all DB passwords and writes to Infisical
-5. Kubespray runs → agent captures etcd certs/tokens from stdout, writes to Infisical
-6. Pigsty runs → reads via `infisical export`
+2. User creates `ARGOCD_INFISICAL_CLIENT_ID/SECRET` (after ArgoCD install)
+3. Agent generates all DB passwords and writes to Infisical
+4. Kubespray runs → agent captures etcd certs/tokens from stdout, writes to Infisical
+5. Pigsty runs → reads via `infisical export`
+6. Agent runs `ansible/playbooks/garage-configure.yml` once the Garage LXC
+   is up — installs Garage, assigns single-node cluster layout, creates the
+   `k8s-longhorn-backup`/`pg-backup` buckets and their S3 keys, and writes
+   `GARAGE_ROOT_TOKEN`, `LONGHORN_S3_ACCESS_KEY`/`_SECRET`,
+   `PGBACKREST_S3_ACCESS_KEY`/`_SECRET` to Infisical — one non-interactive
+   run, no manual CLI step
 7. Agent creates `K8S_BREAK_GLASS_TOKEN` after cluster is up
 
 ## Reference

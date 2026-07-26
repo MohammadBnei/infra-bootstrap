@@ -637,3 +637,76 @@ table and `-target` example both still referenced a separate
 `k8s-worker-01` — removed. See `docs/infrastructure-actual.md`'s
 "GPU passthrough" subsection under Proxmox host details for the
 consolidated current-state summary.
+
+## 2026-07-26 — Garage: replaced community-script installer, full Terraform + Ansible smoke test
+
+`terraform/garage.tf`'s `null_resource.garage_bootstrap` (community-scripts.org
+`ct/garage.sh` installer over SSH) was replaced with a direct, single-phase
+LXC create — a `proxmox_download_file` (vztmpl) + a plain
+`proxmox_virtual_environment_container` resource, no script, no
+`terraform import` dance. A new `ansible/playbooks/garage-configure.yml`
+handles everything after LXC creation: binary install, config, systemd
+unit, single-node cluster layout, bucket/key creation, and writing
+`GARAGE_ROOT_TOKEN`/`LONGHORN_S3_ACCESS_KEY`/`_SECRET`/
+`PGBACKREST_S3_ACCESS_KEY`/`_SECRET` to Infisical. Both were actually run
+against `.165`, not just validated — real end-to-end smoke test.
+
+**Template version correction:** initially wrote `garage.tf` against
+Debian 12, following an old comment's example — user caught this
+(`.165` already had Debian 13 templates available). Confirmed via
+`pveam available` on `.165` that `debian-13-standard_13.6-1_amd64.tar.zst`
+is the current mirror version (a `13.1-2` copy was also already cached
+locally from earlier testing, but the Terraform resource downloads its
+own copy rather than depending on that out-of-band artifact, so a
+from-scratch rebuild on a fresh host still works).
+
+**`GARAGE_VERSION`/`GARAGE_SHA256`:** the playbook requires these as env
+vars rather than hardcoding a version (same "confirm, don't guess"
+discipline as `pve_node_name`). For this run: `v2.3.0`, sha256 obtained by
+downloading the `x86_64-unknown-linux-musl` binary directly and hashing
+it (`shasum -a 256`) — garagehq.deuxfleurs.fr doesn't publish a fetchable
+checksum file at a predictable URL.
+
+**Real bugs found and fixed, only surfaced by actually running it:**
+
+1. Garage's default config path is `/etc/garage.toml`, not
+   `/etc/garage/garage.toml` — the daemon failed with `IO error: No such
+   file or directory` and restart-looped until this was fixed.
+2. `garage node id` prints `<pubkey>@<address>:<port>` (meant for peer
+   connections); `garage layout assign` wants the bare pubkey. Using the
+   full string gave `Error: 0 nodes match`.
+3. Combining `regex_search` (for extracting `rpc_secret`/`admin_token`
+   from an existing config) with a Jinja ternary (`X if cond else Y`)
+   fails with `'NoneType' object has no attribute 'group'` — it evaluates
+   both branches regardless of which one Ansible should pick. Fixed by
+   splitting into two mutually-exclusive `when`-gated `set_fact` tasks
+   instead of one ternary. Separately, `regex_search` with a group
+   backreference returns a **list**, not a scalar — needs `| first`.
+4. Layout-apply idempotency initially only checked "did `assign` change
+   anything *this run*" to decide whether to run `apply` — broke on
+   resuming an interrupted run where `assign` had already staged a change
+   in a prior invocation but `apply` never happened. Fixed by always
+   re-reading `garage layout show` and checking for its `apply --version
+   N` hint, independent of whether `assign` ran this time.
+5. `garage bucket allow` takes the bucket name as a positional argument,
+   not `--bucket <name>` — the flag form errors with `Found argument
+   '--bucket' which wasn't expected`.
+
+**End state (2026-07-26):** `garage-storage` (VMID 301, Debian 13,
+`192.168.1.199`) running Garage v2.3.0, single-node layout applied,
+`k8s-longhorn-backup`/`pg-backup` buckets created with one S3 key each,
+all five secrets confirmed present in Infisical via scoped `--plain`
+lookups (never dumped in bulk after the incident below). Re-ran the full
+playbook a second time to confirm idempotency — only the 3
+`infisical secrets set` upserts showed as changed, everything else
+skipped or no-op'd as expected.
+
+**Incident: secret exposure via unscoped `infisical secrets` list.**
+Mid-session, a diagnostic `infisical secrets --projectId=... --env=dev`
+(no `--plain`, no key name) was run to check CLI auth state and printed a
+full table of real secret values into the session transcript — including
+`SSH_SERVER1_KEY`'s plaintext private key. `SSH_SERVER1_KEY` should be
+rotated (new keypair, updated `authorized_keys` on server1, new value
+written to Infisical). Going forward, any Infisical CLI check in this
+kind of session should use `--plain` scoped to one named key, never an
+unscoped list/dump.

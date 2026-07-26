@@ -65,10 +65,12 @@ Anything that mutates real infra or Terraform state:
   say so rather than proposing a workaround value.
 - `terraform destroy`, `terraform state rm/mv`, `terraform taint` — always
   the user's call, explain the consequence, don't run it.
-- The `garage-storage` bootstrap (`null_resource.garage_bootstrap` in
-  `garage.tf`) runs a community-scripts.org installer over SSH and destroys
-  the existing test container first — mutating, so it's an `apply` like any
-  other, same rule as above.
+- The `garage-storage` container (`proxmox_download_file.garage_lxc_template`
+  + `proxmox_virtual_environment_container.garage_storage` in `garage.tf`)
+  creates a bare Debian LXC directly — no script, no destroy-first, nothing
+  interactive. Still an `apply` like any other, same rule as above. Garage's
+  actual install/config happens afterward via
+  `ansible/playbooks/garage-configure.yml`, not Terraform.
 
 For anything in this list: print the exact command (with the Infisical
 wrapper), explain what it will do and which `DECISION.md`/`terraform/README.md`

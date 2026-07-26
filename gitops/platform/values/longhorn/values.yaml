@@ -12,11 +12,23 @@
 # mounts it at defaultSettings.defaultDataPath below on first boot, so no
 # separate ansible/manual step is needed before this syncs.
 #
-# Replica count 3 assumes 3 schedulable nodes. All 3 k8s VMs currently run
+# Replica count 3 assumes 3 schedulable nodes. Both k8s VMs currently run
 # on the single active PVE host (.165) — this protects against VM/node
-# failure only, not physical-host failure, until .200/.161 join
-# (ADR-0002 known limitation). Also unconfirmed: whether k8s-cp-01
-# is actually schedulable for replicas (ADR-0019).
+# failure only, not physical-host failure, until .200/.161 join. With only
+# 2 nodes in Stage 1, volumes run degraded (2/3 replicas) until Stage 2
+# adds a 3rd schedulable node — expected, not an incident (ADR-0019).
+# k8s-cp-01 IS schedulable for replicas: inventory/ukubi/hosts.yaml puts
+# it in both kube_control_plane and kube_node, so kubespray doesn't apply
+# the control-plane-only NoSchedule taint (ADR-0019).
+#
+# Backup target: Garage S3 (ARCHITECTURE.md §7), bucket created by
+# ansible/playbooks/garage-configure.yml (terraform/garage.tf creates the
+# bare LXC, that playbook installs Garage and provisions the bucket/keys —
+# no manual step). Daily snapshot RecurringJob:
+# gitops/bootstrap/longhorn-daily-snapshot-recurringjob.yaml.
+# Credentials: gitops/bootstrap/longhorn-backup-secret.yaml (InfisicalSecret,
+# LONGHORN_S3_ACCESS_KEY/_SECRET in docs/secrets.md). Configured either way —
+# backups just won't succeed until the Garage LXC bring-up phase is done.
 
 persistence:
   defaultClass: true
@@ -26,6 +38,8 @@ persistence:
 defaultSettings:
   defaultDataPath: /var/lib/longhorn
   defaultReplicaCount: 3
+  backupTarget: s3://k8s-longhorn-backup@garage/
+  backupTargetCredentialSecret: longhorn-backup-secret
 
 # The chart's own docs: "Disable this setting when installing Longhorn
 # using Argo CD or other GitOps solutions." The pre-upgrade check Job is a

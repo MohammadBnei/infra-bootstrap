@@ -13,7 +13,7 @@ build against — expect it to change:
 | `k8s-cp-01` | VM | 201 | new-create, test-phase, no import needed |
 | `k8s-worker-01` | VM | 202 | new-create, test-phase, no import needed — carries GPU passthrough directly (`hostpci0`), no separate `k8s-worker-gpu` VM |
 | `ubuntu-24.04-ci-template` | VM (template) | 9000 | recreated fresh (see `template.tf`) |
-| `garage-storage` | LXC | 301 | test artifact, destroyed + rebuilt via community script, then imported |
+| `garage-storage` | LXC | 301 | test artifact, new-create, direct LXC (download_file + container resource), no script, no import |
 | `pg01` | VM | 205 | **real, production — imported, `prevent_destroy`** |
 | `pg02` | VM | 207 | **real, production — imported, `prevent_destroy`** |
 | `hermesagent` | LXC | 101 | **real, production — imported, `prevent_destroy`** |
@@ -57,7 +57,10 @@ role misconfiguration.
 The provider's `ssh` block needs a **Linux/PAM account on the PVE host** —
 this is a different identity system from the `terraform@pve` PVE-realm API
 user in step A, even though they could share a name. Needed for: cloud
-image download, template build, and running the garage.sh installer.
+image download and template build. (Garage no longer touches this
+credential at all — `garage-storage` gets its own dedicated SSH keypair
+straight to the LXC, see `garage_ssh_public_key_file` in `variables.tf` and
+`ansible/playbooks/garage-configure.yml`.)
 
 For a single-operator homelab, SSH as `root@pam` with a dedicated,
 key-only credential is the pragmatic choice (no new Linux user to
@@ -79,15 +82,13 @@ folders — everything lives at root):
 ## Running Terraform
 
 The bpg provider and this repo's own tooling don't use the same env var
-names, and provisioner `connection` blocks can't inherit the provider's
-`ssh {}` credentials — so the invocation wrapper sets three env vars from
-the same two Infisical secrets:
+names, so the invocation wrapper renames the two Infisical secrets into the
+provider's expected `PROXMOX_VE_*` env vars:
 
 ```bash
 infisical run --projectId=<infra-bootstrap-project-id> --env=dev -- \
   bash -c 'PROXMOX_VE_API_TOKEN="$PVE_API_TOKEN" \
            PROXMOX_VE_SSH_PRIVATE_KEY="$PVE_SSH_PRIVATE_KEY" \
-           TF_VAR_pve_ssh_private_key="$PVE_SSH_PRIVATE_KEY" \
            terraform -chdir=terraform "$@"' _ plan
 ```
 
@@ -110,13 +111,13 @@ secrets by design, but don't commit your filled-in copy — keep it local.
    `plan`/`apply` hard-fails until you supply real values, not guesses.
    After each import, `terraform plan -target=<resource>` must show zero
    changes before importing the next one.
-4. **Garage**: `garage.tf`'s `null_resource.garage_bootstrap` destroys the
-   old test container and reruns the community-scripts.org installer (use
-   the [generator](https://community-scripts.org/generator) to verify the
-   exact `var_*` set before trusting the inline command). After it runs,
-   read `pct config <ctid>` and correct `garage.tf`'s
-   `proxmox_virtual_environment_container` block to match before
-   `terraform import`-ing it too.
+4. **Garage**: `garage.tf` creates the bare LXC in one pass — download the
+   Debian 12 vztmpl, then create the container directly. No script, no
+   `terraform import`, nothing to hand-correct against `pct config`
+   afterward. Once it's `started`, hand off to
+   `ansible/playbooks/garage-configure.yml` (see `ansible/README.md`) for
+   install/config — Terraform's job stops at "bare, SSH-reachable
+   container."
 5. **First real `terraform apply` must use `-target`**, scoped only to
    genuinely-new resources:
    ```
@@ -125,7 +126,7 @@ secrets by design, but don't commit your filled-in copy — keep it local.
      -target=proxmox_virtual_environment_vm.ubuntu_2404_template \
      -target='proxmox_virtual_environment_vm.k8s_node["k8s-cp-01"]' \
      -target='proxmox_virtual_environment_vm.k8s_node["k8s-worker-01"]' \
-     -target=null_resource.garage_bootstrap \
+     -target=proxmox_download_file.garage_lxc_template \
      -target=proxmox_virtual_environment_container.garage_storage
    ```
    This guarantees pg01/pg02/hermesagent can't be touched by an early,

@@ -112,14 +112,20 @@ summarized here):
    variables have no defaults on purpose so a guess can't silently apply.
    `plan -target=<resource>` must show zero changes before moving to the
    next import.
-4. **Garage bootstrap** — `garage.tf`'s `null_resource.garage_bootstrap`
-   runs the community-scripts.org installer over SSH. **Known-flaky**:
-   this installer can drop into an interactive `whiptail` menu instead of
-   running non-interactively, and hang indefinitely under Terraform's
-   non-interactive SSH provisioner (seen and had to be killed by hand in
-   the 2026-07-13 smoke test). Run this one `-target` apply
-   interactively and watch it — don't background it or assume it
-   completed just because the process is still running.
+4. **Garage** — `garage.tf` creates a bare Debian LXC directly (download a
+   vztmpl, create the container), no script and nothing interactive. Safe
+   to run non-interactively, same as any other targeted apply. Once it's
+   `started`, run `ansible-playbook -i ansible/inventories/garage/hosts.yml
+   ansible/playbooks/garage-configure.yml` (fill in that inventory's
+   `ansible_host` with the LXC's IP first) — it installs Garage, assigns
+   single-node cluster layout, creates the `k8s-longhorn-backup`/`pg-backup`
+   buckets and their S3 keys, and writes `GARAGE_ROOT_TOKEN`/
+   `LONGHORN_S3_ACCESS_KEY`/`_SECRET`/`PGBACKREST_S3_ACCESS_KEY`/`_SECRET`
+   to Infisical — one non-interactive run, no manual CLI step. (This
+   replaces the old community-scripts.org installer, which used to drop
+   into an interactive `whiptail` menu and hang indefinitely under
+   Terraform's non-interactive SSH provisioner — seen and killed by hand in
+   the 2026-07-13 smoke test.)
 5. **First real `terraform apply` must use `-target`**, scoped to
    genuinely-new resources (template, `k8s_node` for each node in
    `k8s_nodes`, garage) — see the exact command in `terraform/README.md`

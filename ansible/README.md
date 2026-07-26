@@ -13,13 +13,16 @@ Custom playbooks for things kubespray and pigsty don't cover:
 | `playbooks/pve-postinstall.yml` | Configure a fresh PVE host (repos, NTP, ZFS pool, corosync join, SSH keys) — drafted, see below |
 | `playbooks/vm-provision.yml` | Create QEMU VMs and LXC containers from a host_vars-driven spec |
 | `playbooks/k8s-node-prereqs.yml` | Standalone K8s-node prereq setup (kernel modules, cgroup, containerd) |
+| `playbooks/garage-configure.yml` | Install/configure Garage on the bare LXC terraform/garage.tf creates — drafted, see below |
 | `inventories/proxmox/hosts.yml` | Proxmox host inventory for `pve-postinstall.yml` (`.200`/`.161` — `.165` is a delegation target only) |
+| `inventories/garage/hosts.yml` | Single-host inventory for `garage-configure.yml` (`garage-storage` LXC) |
 | `requirements.yml` | Ansible collections needed by these playbooks (`ansible-galaxy collection install -r ansible/requirements.yml`) |
 
 ## Status
 
 - [x] `register-repos.yml` drafted — first playbook in this repo
 - [x] `pve-postinstall.yml` drafted — see below
+- [x] `garage-configure.yml` drafted — see below
 - [ ] `vm-provision.yml` drafted
 - [ ] `k8s-node-prereqs.yml` drafted (may not be needed if kubespray covers it)
 
@@ -97,6 +100,63 @@ not repeated here.
 **Status:** authored, not yet run — `.200`/`.161` don't have PVE installed
 or a network path to them yet. Safe to `--syntax-check` today; the real run
 is a later, human-driven session once both hosts exist and are reachable.
+
+## `playbooks/garage-configure.yml`
+
+Installs and configures Garage (S3-compatible object storage) on the bare
+`garage-storage` LXC `terraform/garage.tf` creates — replaces what used to
+be a broken community-scripts.org installer (dropped into an interactive
+`whiptail` menu, hung forever under Terraform's non-interactive SSH
+provisioner) plus an entirely manual, unscripted "run `garage layout`/
+`bucket`/`key` by hand" step. This playbook does all of it: installs the
+pinned Garage binary, writes `/etc/garage.toml` and a systemd unit,
+assigns single-node cluster layout, creates the `k8s-longhorn-backup`
+(Longhorn) and `pg-backup` (pgBackRest, provisional name) buckets, issues
+one S3 key per bucket, and writes `GARAGE_ROOT_TOKEN`,
+`LONGHORN_S3_ACCESS_KEY`/`_SECRET`, `PGBACKREST_S3_ACCESS_KEY`/`_SECRET` to
+Infisical directly (`infisical secrets set` — no K8s cluster is involved
+here, unlike `register-repos.yml`).
+
+**Execution model:** targets `garage-storage` from
+`ansible/inventories/garage/hosts.yml` (a single hand-maintained host — fill
+in `ansible_host` with the LXC's real IP after `terraform apply`, matching
+`terraform.tfvars`' `garage_ip`). SSH access is via a dedicated keypair
+(`~/.ssh/id_garage`, seeded into the LXC by `terraform/garage.tf` via
+`garage_ssh_public_key_file`), root user — not the PVE-host or k8s-VM keys.
+
+### Prerequisites
+
+- `garage-storage` LXC already created and reachable (`terraform apply
+  -target=...` per `terraform/README.md`)
+- `~/.ssh/id_garage` keypair generated and its public half already applied
+  (it's baked in at LXC creation time via cloud-init, nothing to do after
+  the fact)
+- Infisical CLI session already authenticated (`source
+  ~/.hermes/cache/inf-env.sh`) — this playbook writes secrets directly, so
+  the session needs write access to the `infra-bootstrap` project
+- `GARAGE_VERSION` / `GARAGE_SHA256` env vars set — check
+  https://garagehq.deuxfleurs.fr/download/ for the current stable release
+  and the sha256 of the `x86_64-unknown-linux-musl` static binary; not
+  hardcoded in the playbook on purpose (same "confirm, don't guess"
+  discipline as `terraform/variables.tf`'s `pve_node_name`)
+
+### How to run
+
+```bash
+# fill in ansible/inventories/garage/hosts.yml's ansible_host first
+export GARAGE_VERSION=v2.3.0        # check the download page for current
+export GARAGE_SHA256=<sha256 of the x86_64-unknown-linux-musl binary>
+source ~/.hermes/cache/inf-env.sh
+ansible-playbook -i ansible/inventories/garage/hosts.yml ansible/playbooks/garage-configure.yml
+```
+
+Safe to re-run: every mutating step checks current state first (layout,
+buckets, keys) or is naturally idempotent (checksum-gated download, secret
+extraction instead of regeneration when `garage.toml` already exists,
+`infisical secrets set` upserts). One caveat: re-running against a
+*destroyed-and-recreated* LXC (not just a live re-run) generates a new
+`rpc_secret`/keys and overwrites Infisical with them — correct, but any
+prior bucket data is gone with the old container.
 
 ### Other playbooks (not yet drafted)
 

@@ -83,40 +83,24 @@ variable "garage_ct_id" {
   default     = 301
 }
 
-variable "pve_host" {
-  description = "Bare IP/hostname of the PVE host, for the null_resource SSH connection block (provisioner connections don't inherit the provider's ssh {} config)."
+variable "garage_ssh_public_key_file" {
+  description = "Path to the public half of garage-storage's dedicated SSH key — a new, separate keypair from PVE-host/k8s-VM credentials (different blast radius: one app LXC, not a whole host or VM fleet). Consumed by ansible/playbooks/garage-configure.yml."
   type        = string
-  default     = "192.168.1.165"
-}
-
-variable "pve_ssh_private_key" {
-  description = "Same key as PROXMOX_VE_SSH_PRIVATE_KEY, passed separately via TF_VAR_pve_ssh_private_key — provisioner connection blocks can't read the provider's ssh {} credentials."
-  type        = string
-  sensitive   = true
-}
-
-variable "garage_template_file_id" {
-  description = <<-EOT
-    REQUIRED, no default on purpose: the LXC OS template asset
-    garage.sh's bootstrap actually used (e.g.
-    "local:vztmpl/debian-13-standard_13.x-y_amd64.tar.zst"). Unknowable
-    ahead of time — read it from `pct config 301` after
-    null_resource.garage_bootstrap runs, before `terraform import`ing
-    proxmox_virtual_environment_container.garage_storage. Don't guess the
-    exact version substring.
-  EOT
-  type        = string
+  default     = "~/.ssh/id_garage.pub"
 }
 
 variable "longhorn_disk_size_gb" {
   description = <<-EOT
-    GB size for each k8s VM's dedicated Longhorn data disk (scsi1),
-    separate from the OS root disk. No default on purpose: real sizing
-    depends on inventorying the legacy NFS export's data volume first
-    (MISSION.md §10 / §15 Q-H) — an unconfirmed apply should fail loud
-    rather than silently under/over-provision.
+    Fallback GB size for a k8s VM's dedicated Longhorn data disk (scsi1)
+    when a k8s_nodes entry doesn't set its own longhorn_disk_size_gb.
+    ADR-0019 resolved per-VM sizing for Stage 1 (platform apps + searxng/
+    pgweb only, no legacy NFS data carried over yet — that inventory
+    happens per-app as each one is migrated later): default to roughly
+    the same size as the OS disk, sized up when a specific app's data
+    volume is known.
   EOT
   type        = number
+  default     = 50
 }
 
 variable "gpu_mapping_name" {
@@ -170,7 +154,7 @@ variable "k8s_nodes" {
       cpu_cores             = 2
       memory_dedicated_mb   = 4096
       os_disk_size_gb       = 40
-      longhorn_disk_size_gb = null
+      longhorn_disk_size_gb = 40
       control_plane         = true
       etcd                  = true
       worker                = true
@@ -182,7 +166,7 @@ variable "k8s_nodes" {
       cpu_cores             = 6
       memory_dedicated_mb   = 15360
       os_disk_size_gb       = 100
-      longhorn_disk_size_gb = null
+      longhorn_disk_size_gb = 100
       control_plane         = false
       etcd                  = false
       worker                = true

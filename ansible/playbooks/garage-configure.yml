@@ -1,0 +1,402 @@
+---
+# Configure Garage (S3-compatible object storage) on the bare garage-storage
+# LXC that terraform/garage.tf creates. Safe to re-run — see the caveat
+# below.
+#
+# WHY THIS PLAYBOOK EXISTS
+# terraform/garage.tf used to rely on a community-scripts.org installer to
+# create AND configure the container in one non-interactive-sounding step.
+# In practice that installer drops into an interactive whiptail menu and
+# hangs forever under Terraform's non-interactive SSH provisioner
+# (docs/bootstrap-test-notes.md). Terraform now only creates a bare,
+# SSH-reachable Debian LXC — this playbook does everything else: install
+# the Garage binary, write its config, start it, assign single-node cluster
+# layout, create the buckets Longhorn/pgBackRest need, issue S3 keys for
+# each, and write the resulting credentials to Infisical. Zero manual CLI
+# steps, zero TUI.
+#
+# PREREQUISITES
+# - garage-storage LXC already created (terraform apply -target=... per
+#   terraform/README.md) and reachable at the IP in
+#   ansible/inventories/garage/hosts.yml (fill in ansible_host there first).
+# - SSH access via the dedicated garage keypair (~/.ssh/id_garage, see
+#   variables.tf's garage_ssh_public_key_file) already seeded via cloud-init.
+# - Infisical CLI session already authenticated in the invoking shell
+#   (source ~/.hermes/cache/inf-env.sh) — this playbook writes secrets
+#   directly via `infisical secrets set`, it does not create K8s Secrets
+#   (there's no cluster involved here, unlike register-repos.yml).
+# - GARAGE_VERSION and GARAGE_SHA256 env vars set before running — check
+#   https://garagehq.deuxfleurs.fr/download/ for the current stable release
+#   and the sha256 for the x86_64-unknown-linux-musl static binary. Not
+#   hardcoded here on purpose — same "confirm, don't guess" discipline as
+#   terraform/variables.tf's pve_node_name/template_storage_id.
+#
+# RE-RUN SAFETY
+# Every mutating step checks current state first (layout/buckets/keys) or is
+# naturally idempotent (get_url checksum, config-file secret extraction
+# instead of regeneration, infisical secrets set is an upsert). One real
+# caveat: re-running this against a *destroyed-and-recreated* LXC (not just
+# a live re-run) generates a brand-new rpc_secret and brand-new S3 keys and
+# overwrites Infisical with them — correct behavior, but any prior bucket
+# data is gone with the old container.
+- name: Install and configure Garage on garage-storage
+  hosts: garage-storage
+  gather_facts: false
+  vars:
+    infisical_project_id: "{{ lookup('env', 'INFISICAL_PROJECT_ID') | default('8a3fa54f-be22-488a-bf51-55158f65c0f2', true) }}"
+    infisical_env: "{{ lookup('env', 'INFISICAL_ENV') | default('dev', true) }}"
+    garage_version: "{{ lookup('env', 'GARAGE_VERSION') }}"
+    garage_sha256: "{{ lookup('env', 'GARAGE_SHA256') }}"
+    garage_arch: "x86_64-unknown-linux-musl"
+    garage_bucket_longhorn: "k8s-longhorn-backup"
+    garage_bucket_pgbackrest: "pg-backup" # provisional — not fixed anywhere else yet, rename freely once pigsty's pgbackrest_repo config is written
+    garage_key_longhorn: "longhorn-backup-key"
+    garage_key_pgbackrest: "pgbackrest-backup-key"
+    garage_layout_zone: "dc1"
+    garage_layout_capacity: "180G"
+
+  handlers:
+    - name: restart garage
+      ansible.builtin.systemd:
+        name: garage
+        state: restarted
+        daemon_reload: true
+
+  tasks:
+    # -------------------------------------------------------------------
+    # Preflight
+    # -------------------------------------------------------------------
+    - name: Assert GARAGE_VERSION/GARAGE_SHA256 are set
+      ansible.builtin.assert:
+        that: lookup('env', item) | length > 0
+        fail_msg: "{{ item }} is not set — check https://garagehq.deuxfleurs.fr/download/ for the current stable release and its x86_64-unknown-linux-musl sha256"
+      loop:
+        - GARAGE_VERSION
+        - GARAGE_SHA256
+      loop_control:
+        label: "{{ item }}"
+
+    - name: Check Infisical CLI session is authenticated
+      delegate_to: localhost
+      become: false
+      ansible.builtin.command:
+        argv:
+          - infisical
+          - secrets
+          - get
+          - PVE_API_TOKEN
+          - --projectId={{ infisical_project_id }}
+          - --env={{ infisical_env }}
+          - --plain
+      register: infisical_check
+      changed_when: false
+      failed_when: false
+
+    - name: Fail if Infisical session isn't authenticated
+      ansible.builtin.assert:
+        that: infisical_check.rc == 0
+        fail_msg: "Infisical CLI not authenticated in this shell — run `source ~/.hermes/cache/inf-env.sh` first"
+
+    # -------------------------------------------------------------------
+    # 1. Install the Garage binary
+    # -------------------------------------------------------------------
+    - name: Download pinned Garage binary
+      ansible.builtin.get_url:
+        url: "https://garagehq.deuxfleurs.fr/_releases/{{ garage_version }}/{{ garage_arch }}/garage"
+        dest: /usr/local/bin/garage
+        checksum: "sha256:{{ garage_sha256 }}"
+        mode: "0755"
+
+    - name: Create Garage data directories
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: directory
+        mode: "0700"
+      loop:
+        - /var/lib/garage/meta
+        - /var/lib/garage/data
+
+    # -------------------------------------------------------------------
+    # 2. Generate (once) or recover the existing rpc_secret/admin_token
+    # -------------------------------------------------------------------
+    - name: Check for existing garage.toml
+      ansible.builtin.stat:
+        path: /etc/garage.toml # Garage's own default config path — NOT /etc/garage/garage.toml
+      register: garage_toml_stat
+
+    - name: Read existing garage.toml (if already configured)
+      ansible.builtin.slurp:
+        src: /etc/garage.toml
+      register: garage_toml_existing
+      when: garage_toml_stat.stat.exists
+      no_log: true
+
+    # Two mutually-exclusive `when`-gated tasks, not a single ternary
+    # expression — combining regex_search with a Jinja `if/else` ternary
+    # evaluates eagerly regardless of the branch taken and blows up with
+    # "'NoneType' object has no attribute 'group'" on whichever branch isn't
+    # supposed to run. regex_search with a group backreference also returns
+    # a list, not a scalar — hence `| first`.
+    - name: Extract existing rpc_secret/admin_token (config already exists)
+      ansible.builtin.set_fact:
+        garage_rpc_secret: "{{ (garage_toml_existing.content | b64decode | regex_search('rpc_secret = \"([0-9a-f]+)\"', '\\1')) | first }}"
+        garage_admin_token: "{{ (garage_toml_existing.content | b64decode | regex_search('admin_token = \"([0-9a-f]+)\"', '\\1')) | first }}"
+      when: garage_toml_stat.stat.exists
+      no_log: true
+
+    - name: Generate new rpc_secret/admin_token (config doesn't exist yet)
+      ansible.builtin.set_fact:
+        garage_rpc_secret: "{{ lookup('pipe', 'openssl rand -hex 32') }}"
+        garage_admin_token: "{{ lookup('pipe', 'openssl rand -hex 32') }}"
+      when: not garage_toml_stat.stat.exists
+      no_log: true
+
+    # -------------------------------------------------------------------
+    # 3. Write garage.toml
+    # -------------------------------------------------------------------
+    - name: Write /etc/garage.toml
+      ansible.builtin.copy:
+        dest: /etc/garage.toml
+        mode: "0600"
+        content: |
+          metadata_dir = "/var/lib/garage/meta"
+          data_dir = "/var/lib/garage/data"
+          db_engine = "sqlite"
+
+          replication_factor = 1
+
+          rpc_bind_addr = "[::]:3901"
+          rpc_public_addr = "{{ ansible_host }}:3901"
+          rpc_secret = "{{ garage_rpc_secret }}"
+
+          [s3_api]
+          # "garage" is a hard requirement, not a free choice — Longhorn's
+          # backupTarget (gitops/platform/values/longhorn/values.yaml) is
+          # already committed to s3://k8s-longhorn-backup@garage/, and
+          # Longhorn's S3 syntax is s3://<bucket>@<region>/.
+          s3_region = "garage"
+          api_bind_addr = "[::]:3900"
+
+          [admin]
+          # Localhost-only: nothing remote consumes the admin API yet, so
+          # admin_token is generated but never synced to Infisical.
+          api_bind_addr = "127.0.0.1:3903"
+          admin_token = "{{ garage_admin_token }}"
+      no_log: true
+      notify: restart garage
+
+    # -------------------------------------------------------------------
+    # 4. systemd unit
+    # -------------------------------------------------------------------
+    - name: Write garage.service systemd unit
+      ansible.builtin.copy:
+        dest: /etc/systemd/system/garage.service
+        mode: "0644"
+        content: |
+          [Unit]
+          Description=Garage S3-compatible object storage
+          After=network-online.target
+          Wants=network-online.target
+
+          [Service]
+          ExecStart=/usr/local/bin/garage server
+          Restart=on-failure
+          RestartSec=5
+
+          [Install]
+          WantedBy=multi-user.target
+      notify: restart garage
+
+    - name: Enable and start garage
+      ansible.builtin.systemd:
+        name: garage
+        enabled: true
+        state: started
+        daemon_reload: true
+
+    - name: Wait for Garage S3 API port
+      ansible.builtin.wait_for:
+        host: 127.0.0.1
+        port: 3900
+        timeout: 30
+
+    - name: Wait for Garage RPC port
+      ansible.builtin.wait_for:
+        host: 127.0.0.1
+        port: 3901
+        timeout: 30
+
+    # -------------------------------------------------------------------
+    # 5. Cluster layout (single node) — idempotent
+    # -------------------------------------------------------------------
+    - name: Get this node's Garage node ID
+      ansible.builtin.command: /usr/local/bin/garage node id -q
+      register: garage_node_id
+      changed_when: false
+
+    - name: Extract bare node pubkey (garage node id prints pubkey@address:port, layout assign wants only the pubkey)
+      ansible.builtin.set_fact:
+        garage_node_pubkey: "{{ garage_node_id.stdout.split('@')[0] }}"
+
+    - name: Check current cluster layout
+      ansible.builtin.command: /usr/local/bin/garage layout show
+      register: garage_layout_show
+      changed_when: false
+
+    - name: Assign this node to the cluster layout
+      ansible.builtin.command: >
+        /usr/local/bin/garage layout assign
+        -z {{ garage_layout_zone }} -c {{ garage_layout_capacity }}
+        {{ garage_node_pubkey }}
+      when: garage_node_pubkey[:16] not in garage_layout_show.stdout
+
+    # Re-check regardless of whether assign ran above — `assign` only
+    # stages a change and can be left pending from a prior interrupted run
+    # (e.g. this playbook failed on a later step last time), so "did assign
+    # just run" is not a reliable signal for "is there a pending apply".
+    - name: Re-read cluster layout to check for a pending apply
+      ansible.builtin.command: /usr/local/bin/garage layout show
+      register: garage_layout_show_current
+      changed_when: false
+
+    - name: Extract pending layout version to apply
+      ansible.builtin.set_fact:
+        # `layout show` prints a "garage layout apply --version N" hint
+        # only when there's a staged change waiting to be applied.
+        garage_layout_version: "{{ (garage_layout_show_current.stdout | regex_search('apply --version ([0-9]+)', '\\1')) | first }}"
+      when: "'apply --version' in garage_layout_show_current.stdout"
+
+    - name: Apply the cluster layout
+      ansible.builtin.command: /usr/local/bin/garage layout apply --version {{ garage_layout_version }}
+      when: "'apply --version' in garage_layout_show_current.stdout"
+
+    # -------------------------------------------------------------------
+    # 6. Buckets — idempotent
+    # -------------------------------------------------------------------
+    - name: List existing buckets
+      ansible.builtin.command: /usr/local/bin/garage bucket list
+      register: garage_bucket_list
+      changed_when: false
+
+    - name: Create Longhorn backup bucket
+      ansible.builtin.command: /usr/local/bin/garage bucket create {{ garage_bucket_longhorn }}
+      when: garage_bucket_longhorn not in garage_bucket_list.stdout
+
+    - name: Create pgBackRest backup bucket
+      ansible.builtin.command: /usr/local/bin/garage bucket create {{ garage_bucket_pgbackrest }}
+      when: garage_bucket_pgbackrest not in garage_bucket_list.stdout
+
+    # -------------------------------------------------------------------
+    # 7. Keys — idempotent creation, unconditional (idempotent) grant
+    # -------------------------------------------------------------------
+    - name: List existing keys
+      ansible.builtin.command: /usr/local/bin/garage key list
+      register: garage_key_list
+      changed_when: false
+
+    - name: Create Longhorn S3 key
+      ansible.builtin.command: /usr/local/bin/garage key create {{ garage_key_longhorn }}
+      when: garage_key_longhorn not in garage_key_list.stdout
+
+    - name: Create pgBackRest S3 key
+      ansible.builtin.command: /usr/local/bin/garage key create {{ garage_key_pgbackrest }}
+      when: garage_key_pgbackrest not in garage_key_list.stdout
+
+    - name: Grant Longhorn key access to its bucket
+      ansible.builtin.command: >
+        /usr/local/bin/garage bucket allow {{ garage_bucket_longhorn }}
+        --read --write --key {{ garage_key_longhorn }}
+      changed_when: false # re-granting identical perms is a no-op in garage itself
+
+    - name: Grant pgBackRest key access to its bucket
+      ansible.builtin.command: >
+        /usr/local/bin/garage bucket allow {{ garage_bucket_pgbackrest }}
+        --read --write --key {{ garage_key_pgbackrest }}
+      changed_when: false
+
+    - name: Read Longhorn key ID/secret
+      ansible.builtin.command: /usr/local/bin/garage key info {{ garage_key_longhorn }} --show-secret
+      register: garage_key_longhorn_info
+      changed_when: false
+      no_log: true
+
+    - name: Read pgBackRest key ID/secret
+      ansible.builtin.command: /usr/local/bin/garage key info {{ garage_key_pgbackrest }} --show-secret
+      register: garage_key_pgbackrest_info
+      changed_when: false
+      no_log: true
+
+    - name: Extract key IDs/secrets
+      ansible.builtin.set_fact:
+        garage_longhorn_key_id: "{{ garage_key_longhorn_info.stdout | regex_search('Key ID:\\s*(\\S+)', '\\1') }}"
+        garage_longhorn_key_secret: "{{ garage_key_longhorn_info.stdout | regex_search('Secret key:\\s*(\\S+)', '\\1') }}"
+        garage_pgbackrest_key_id: "{{ garage_key_pgbackrest_info.stdout | regex_search('Key ID:\\s*(\\S+)', '\\1') }}"
+        garage_pgbackrest_key_secret: "{{ garage_key_pgbackrest_info.stdout | regex_search('Secret key:\\s*(\\S+)', '\\1') }}"
+      no_log: true
+
+    # -------------------------------------------------------------------
+    # 8. Write everything to Infisical (upsert — safe to re-run)
+    # -------------------------------------------------------------------
+    - name: Write GARAGE_ROOT_TOKEN to Infisical
+      delegate_to: localhost
+      become: false
+      no_log: true
+      ansible.builtin.command:
+        argv:
+          - infisical
+          - secrets
+          - set
+          - --projectId={{ infisical_project_id }}
+          - --env={{ infisical_env }}
+          - --type=shared
+          - GARAGE_ROOT_TOKEN={{ garage_rpc_secret }}
+      changed_when: true
+
+    - name: Write LONGHORN_S3_ACCESS_KEY/_SECRET to Infisical
+      delegate_to: localhost
+      become: false
+      no_log: true
+      ansible.builtin.command:
+        argv:
+          - infisical
+          - secrets
+          - set
+          - --projectId={{ infisical_project_id }}
+          - --env={{ infisical_env }}
+          - --type=shared
+          - LONGHORN_S3_ACCESS_KEY={{ garage_longhorn_key_id }}
+          - LONGHORN_S3_SECRET={{ garage_longhorn_key_secret }}
+      changed_when: true
+
+    - name: Write PGBACKREST_S3_ACCESS_KEY/_SECRET to Infisical
+      delegate_to: localhost
+      become: false
+      no_log: true
+      ansible.builtin.command:
+        argv:
+          - infisical
+          - secrets
+          - set
+          - --projectId={{ infisical_project_id }}
+          - --env={{ infisical_env }}
+          - --type=shared
+          - PGBACKREST_S3_ACCESS_KEY={{ garage_pgbackrest_key_id }}
+          - PGBACKREST_S3_SECRET={{ garage_pgbackrest_key_secret }}
+      changed_when: true
+
+    # -------------------------------------------------------------------
+    # Done
+    # -------------------------------------------------------------------
+    - name: Garage configured
+      ansible.builtin.debug:
+        msg:
+          - "Garage is up and configured. GARAGE_ROOT_TOKEN, LONGHORN_S3_ACCESS_KEY/_SECRET,"
+          - "and PGBACKREST_S3_ACCESS_KEY/_SECRET are now in Infisical."
+          - ""
+          - "Verify:"
+          - "  ssh -i ~/.ssh/id_garage root@{{ ansible_host }} garage status"
+          - "  ssh -i ~/.ssh/id_garage root@{{ ansible_host }} garage bucket list"
+          - "  curl -s http://{{ ansible_host }}:3900"
+          - ""
+          - "S3 endpoint is LAN-only for now — the Traefik IngressRoute for"
+          - "s3.bnei.dev and the garage.bnei.lan DNS record are a separate follow-up."

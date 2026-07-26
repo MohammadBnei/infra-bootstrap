@@ -1,7 +1,7 @@
 # Infrastructure — Actual State
 
 > **Source of truth** for what is currently running.
-> Last updated: 2026-07-14
+> Last updated: 2026-07-26
 > Owner: hermesagent (this AI)
 
 This document describes the **current, as-is** state of the homelab infrastructure.
@@ -38,7 +38,10 @@ For the target architecture, see [`../ARCHITECTURE.md`](../ARCHITECTURE.md).
 - Storage: LVM with `pve` volume group, `local-lvm` thinpool
 - Running LXCs:
   - VMID 101 `hermesagent` (2 vCPU / 4GB / 19GB) — this AI
-  - VMID 301 `garage-storage` (2 vCPU / 2GB / 200GB) — running, not yet configured
+  - VMID 301 `garage-storage` (2 vCPU / 2GB / 200GB, Debian 13, IP
+    192.168.1.199) — running, configured (Garage v2.3.0, single-node
+    layout applied, `k8s-longhorn-backup`/`pg-backup` buckets + S3 keys
+    created — see `ansible/playbooks/garage-configure.yml`)
 - Running VMs (Postgres):
   - VMID 205 `pg01` (2 vCPU / 4GB / 40GB) — IP: 192.168.1.205 — Pigsty PG 18 primary
   - VMID 207 `pg02` (2 vCPU / 4GB / 40GB) — IP: 192.168.1.207 — Pigsty PG 18 replica + Redis
@@ -120,7 +123,7 @@ is deliberately not vGPU-style sharing across multiple VMs.
 | PVE nodes | 1 (proxmox .165 only) | server1 + ex-laptop still Debian 12 + libvirt — PVE reinstall pending |
 | K8s nodes | libvirt LXCs on server1 (.200) + ex-laptop (.161) | No new QEMU K8s VMs created yet |
 | Postgres | QEMU VMs on proxmox PVE (.165) | pg01 VMID 205 (.205) + pg02 VMID 207 (.207) |
-| Garage | LXC on proxmox PVE (.165) | VMID 301, running, not configured |
+| Garage | LXC on proxmox PVE (.165) | VMID 301, running, configured (v2.3.0, 192.168.1.199) |
 
 ---
 
@@ -252,9 +255,15 @@ Standard set: pg_stat_statements, pg_trgm, pg_repack, postgres_fdw, etc. (17 tot
 
 ## 6. Object Storage
 
-- **None currently deployed**
-- User wants MinIO replacement (MinIO was archived Jan 2026)
-- Plan: Garage (Deuxfleurs, Rust, S3-compatible)
+- **Garage v2.3.0** — LXC `garage-storage` (VMID 301, 192.168.1.199),
+  single-node layout, S3 API on port 3900 (LAN-only, no Traefik ingress
+  yet), admin API on 3903 (localhost-only)
+- Buckets: `k8s-longhorn-backup` (Longhorn snapshot target, ADR-0019),
+  `pg-backup` (pgBackRest target, provisional name — not yet wired into
+  pigsty's `pgbackrest_repo` config)
+- Provisioned entirely via `terraform/garage.tf` (bare LXC) +
+  `ansible/playbooks/garage-configure.yml` (install/config/secrets) — no
+  manual CLI step, replaces the old MinIO deployment (archived Jan 2026)
 
 ---
 
