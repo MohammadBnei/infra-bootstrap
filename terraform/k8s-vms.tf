@@ -37,10 +37,17 @@
 resource "proxmox_virtual_environment_vm" "k8s_node" {
   for_each  = var.k8s_nodes
   name      = each.key
-  node_name = var.pve_node_name
+  node_name = coalesce(each.value.node_name, var.pve_node_name)
   vm_id     = each.value.vm_id
   started   = true
 
+  # No clone.node_name is set, so the provider clones from a template on
+  # THIS resource's own (coalesced) node_name — for new-host worker entries
+  # that requires ansible/playbooks/pve-postinstall.yml's
+  # template-propagation play to have already migrated VMID 9001 onto that
+  # node first (see docs/runbook-pve-postinstall.md step 5). Not enforced
+  # here; apply will fail with a clear "VM 9001 not found on <node>" error
+  # if that hasn't happened yet.
   clone {
     vm_id = proxmox_virtual_environment_vm.ubuntu_2404_template.vm_id
     full  = true
@@ -55,13 +62,13 @@ resource "proxmox_virtual_environment_vm" "k8s_node" {
   }
 
   disk {
-    datastore_id = var.template_storage_id
+    datastore_id = coalesce(each.value.datastore_id, var.template_storage_id)
     interface    = "scsi0"
     size         = each.value.os_disk_size_gb
   }
 
   disk {
-    datastore_id = var.template_storage_id
+    datastore_id = coalesce(each.value.datastore_id, var.template_storage_id)
     interface    = "scsi1"
     size         = coalesce(each.value.longhorn_disk_size_gb, var.longhorn_disk_size_gb)
   }
@@ -76,7 +83,7 @@ resource "proxmox_virtual_environment_vm" "k8s_node" {
   }
 
   initialization {
-    datastore_id = var.template_storage_id
+    datastore_id = coalesce(each.value.datastore_id, var.template_storage_id)
 
     dns {
       domain = "localdomain"

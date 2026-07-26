@@ -140,6 +140,14 @@ variable "k8s_nodes" {
     Default reproduces the current 2-node topology exactly
     (ARCHITECTURE.md §2) so `terraform plan` shows zero diff right after
     this variable is introduced.
+
+    node_name/datastore_id are optional, defaulting (via coalesce in
+    k8s-vms.tf) to var.pve_node_name/var.template_storage_id — i.e. ".165"
+    — so existing entries need not set them. Once `.200`/`.161` join the
+    PVE cluster (see docs/adr/0020-pve-corosync-cluster.md), new worker
+    entries for them set these explicitly, confirmed from live
+    `pvesh get /nodes` / `pvesm status` output, never guessed — see
+    terraform.tfvars.example.
   EOT
   type = map(object({
     vm_id                 = number
@@ -152,6 +160,8 @@ variable "k8s_nodes" {
     etcd                  = bool
     worker                = bool
     gpu                   = bool
+    node_name             = optional(string)
+    datastore_id          = optional(string)
   }))
   default = {
     "k8s-cp-01" = {

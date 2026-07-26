@@ -23,10 +23,11 @@ ADR-000N` (replaced by a later decision).
 | [0010](0010-reject-external-managed-postgres.md) | External managed Postgres | Rejected |
 | [0011](0011-reject-multi-region-dr-service-mesh.md) | Multi-region / DR / GPU multi-tenancy / service mesh | Rejected |
 | [0012](0012-reject-gitops-for-proxmox.md) | GitOps-managed Proxmox | Rejected |
-| [0013](0013-pve-node-161-sleep-risk-mitigation.md) | `.161` sleep-risk mitigation | Proposed |
-| [0014](0014-pve-storage-layout-zfs-vs-local-zfs.md) | PVE storage layout: ZFS pool vs `local-zfs` | Proposed |
+| [0013](0013-pve-node-161-sleep-risk-mitigation.md) | `.161` sleep-risk mitigation | Accepted |
+| [0014](0014-pve-storage-layout-zfs-vs-local-zfs.md) | PVE storage layout: ZFS pool vs `local-zfs` | Accepted |
 | [0015](0015-kubespray-inventory-submodule-version-alignment.md) | Kubespray inventory ↔ submodule version alignment | Accepted |
 | [0016](0016-k8s-endpoint-naming.md) | K8s API endpoint naming | Proposed |
 | [0017](0017-second-control-plane-member.md) | Second control-plane / etcd member | Proposed |
 | [0018](0018-cilium-ebpf-offload-flip.md) | Cilium eBPF offload flip | Proposed |
 | [0019](0019-longhorn-rollout-specifics.md) | Longhorn rollout specifics | Proposed |
+| [0020](0020-pve-corosync-cluster.md) | PVE corosync cluster (not 3 independent standalone hosts) | Accepted |
