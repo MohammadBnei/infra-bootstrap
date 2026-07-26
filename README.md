@@ -61,15 +61,22 @@ How to actually run a layer day-to-day: that layer's own README below.
 git clone git@github.com:MohammadBnei/infra-bootstrap.git
 cd infra-bootstrap
 git submodule update --init --recursive   # pulls kubespray
-bin/install-requirements.sh               # installs ansible, infisical CLI, etc. on your Mac
+# Install ansible, the Infisical CLI, and kubespray's Python requirements
+# manually (bin/install-requirements.sh is disabled — stale/unreliable),
+# then: ansible-galaxy collection install -r ansible/requirements.yml
 infisical login                           # auth against Infisical
+# Daily-use auth (docs/secrets.md, ansible-ops skill) uses a machine-identity
+# wrapper, not `infisical login` — copy bin/inf-env.sh to
+# ~/.hermes/cache/inf-env.sh (mode 600), place inf-cid/inf-csec next to it
+# (1Password vault "Infisical - hermes-agent", or scp from the agent LXC),
+# then `source ~/.hermes/cache/inf-env.sh` before Infisical-wrapped commands.
 ```
 
 ## Runbook pointers
 
 - [docs/runbook-k8s-bootstrap.md](docs/runbook-k8s-bootstrap.md) — `kubespray` against `inventory/ukubi/`
 - [docs/runbook-pg-bootstrap.md](docs/runbook-pg-bootstrap.md) — `pigsty` against `pigsty/pigsty.yml`
-- `docs/runbook-pve-postinstall.md` — `ansible-playbook ansible/playbooks/pve-postinstall.yml` (not yet drafted)
+- [docs/runbook-pve-postinstall.md](docs/runbook-pve-postinstall.md) — `ansible-playbook ansible/playbooks/pve-postinstall.yml`
 
 ## Branch strategy
 

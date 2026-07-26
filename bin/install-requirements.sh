@@ -1,4 +1,12 @@
 #!/usr/bin/env bash
+# install-requirements.sh — DISABLED, stale/unreliable (flagged 2026-07-26).
+# Left in place for reference only — do not run. Install ansible/infisical
+# CLI manually, and ansible collections via:
+#   ansible-galaxy collection install -r ansible/requirements.yml
+
+echo "install-requirements.sh is disabled (stale/unreliable) — see the comment at the top of this file." >&2
+exit 1
+
 # install-requirements.sh — install everything needed to run the bootstrap configs
 # Run once on a fresh machine (Mac, Linux). Idempotent.
 

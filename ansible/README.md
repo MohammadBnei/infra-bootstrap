@@ -10,15 +10,16 @@ Custom playbooks for things kubespray and pigsty don't cover:
 | Path | Contents |
 |---|---|
 | `playbooks/register-repos.yml` | Create the manual K8s Secrets ArgoCD needs before it can bootstrap the rest of the cluster (drafted — see below) |
-| `playbooks/pve-postinstall.yml` | Configure a fresh PVE host (repos, NTP, sysctl, SSH keys, no-subscription repo if needed) |
+| `playbooks/pve-postinstall.yml` | Configure a fresh PVE host (repos, NTP, ZFS pool, corosync join, SSH keys) — drafted, see below |
 | `playbooks/vm-provision.yml` | Create QEMU VMs and LXC containers from a host_vars-driven spec |
 | `playbooks/k8s-node-prereqs.yml` | Standalone K8s-node prereq setup (kernel modules, cgroup, containerd) |
-| `inventories/proxmox/` | Proxmox host inventory |
+| `inventories/proxmox/hosts.yml` | Proxmox host inventory for `pve-postinstall.yml` (`.200`/`.161` — `.165` is a delegation target only) |
+| `requirements.yml` | Ansible collections needed by these playbooks (`ansible-galaxy collection install -r ansible/requirements.yml`) |
 
 ## Status
 
 - [x] `register-repos.yml` drafted — first playbook in this repo
-- [ ] `pve-postinstall.yml` drafted
+- [x] `pve-postinstall.yml` drafted — see below
 - [ ] `vm-provision.yml` drafted
 - [ ] `k8s-node-prereqs.yml` drafted (may not be needed if kubespray covers it)
 
@@ -80,12 +81,29 @@ render the Secret YAML locally with `kubectl create secret ... --dry-run=client
 on `k8s-cp-01` (`become: true`) with the rendered YAML passed via the
 `command` module's `stdin` argument.
 
-## Other playbooks (not yet drafted)
+## `playbooks/pve-postinstall.yml`
+
+Prepares `.200` (server1) and `.161` (ex-laptop) to join `.165` as a single
+corosync-clustered PVE datacenter (`docs/adr/0020-pve-corosync-cluster.md`):
+lid/suspend disable on `.161` (ADR-0013), repo/NTP prep, a dedicated ZFS
+pool per host (ADR-0014), the corosync join itself, and propagating the
+golden K8s template (VMID 9001) so Terraform can place worker VMs there.
+
+Targets `ansible/inventories/proxmox/hosts.yml` (root SSH, not the K8s VM
+inventory). Full sequencing (the corosync join must run one host at a time)
+lives in [`docs/runbook-pve-postinstall.md`](../docs/runbook-pve-postinstall.md) —
+not repeated here.
+
+**Status:** authored, not yet run — `.200`/`.161` don't have PVE installed
+or a network path to them yet. Safe to `--syntax-check` today; the real run
+is a later, human-driven session once both hosts exist and are reachable.
+
+### Other playbooks (not yet drafted)
 
 ```bash
 infisical run --projectId=<infra-bootstrap-project-id> --env=dev -- \
   ansible-playbook -i ansible/inventories/proxmox/hosts.yml \
-    ansible/playbooks/pve-postinstall.yml
+    ansible/playbooks/vm-provision.yml
 ```
 
 ## See also

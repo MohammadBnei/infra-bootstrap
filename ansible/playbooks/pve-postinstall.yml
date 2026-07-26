@@ -1,0 +1,225 @@
+# PVE post-install prep for `.200` (server1) and `.161` (ex-laptop) — Stage 2
+# of the multi-host expansion (see docs/adr/0020-pve-corosync-cluster.md,
+# docs/runbook-pve-postinstall.md). Authored ahead of hardware/connectivity
+# being available; safe to review/lint now, run once both hosts have PVE
+# installed and are SSH-reachable as root.
+#
+# WHY THIS PLAYBOOK EXISTS
+# `.200`/`.161` currently run Debian 12 + libvirt/KVM (legacy k8s nodes,
+# to be decommissioned separately). Once reinstalled with PVE, they join
+# `.165` as a single corosync-clustered PVE datacenter (ADR-0020) — this
+# playbook is everything needed between "fresh PVE install" and "ready for
+# Terraform to place K8s VMs on them" (Phase B/C of the plan).
+#
+# Requires: ansible.posix collection — ansible-galaxy collection install -r
+# ansible/requirements.yml
+#
+# Run order matters — see docs/runbook-pve-postinstall.md. Plays are tagged
+# so the corosync join and template propagation can be run separately from
+# the rest:
+#   ansible-playbook -i ansible/inventories/proxmox/hosts.yml \
+#     ansible/playbooks/pve-postinstall.yml --skip-tags corosync,template-propagation
+#   ansible-playbook -i ansible/inventories/proxmox/hosts.yml \
+#     ansible/playbooks/pve-postinstall.yml --tags corosync --limit=server1
+#   ansible-playbook -i ansible/inventories/proxmox/hosts.yml \
+#     ansible/playbooks/pve-postinstall.yml --tags corosync --limit=ex-laptop
+#   ansible-playbook -i ansible/inventories/proxmox/hosts.yml \
+#     ansible/playbooks/pve-postinstall.yml --tags template-propagation
+# The corosync join must run against one new host at a time (never both via
+# a bare --limit=pve_new) — simultaneous joins are a known corosync footgun.
+---
+- name: Disable suspend/sleep on ex-laptop (ADR-0013 — PVE node must never sleep)
+  hosts: pve_laptop
+  gather_facts: false
+  tasks:
+    - name: Set lid-switch behavior to ignore in logind.conf
+      ansible.builtin.lineinfile:
+        path: /etc/systemd/logind.conf
+        regexp: "^#?{{ item.key }}="
+        line: "{{ item.key }}={{ item.value }}"
+      loop:
+        - { key: HandleLidSwitch, value: ignore }
+        - { key: HandleLidSwitchDocked, value: ignore }
+        - { key: HandleLidSwitchExternalPower, value: ignore }
+      loop_control:
+        label: "{{ item.key }}"
+      notify: Restart systemd-logind
+
+    - name: Mask sleep/suspend/hibernate targets (belt-and-suspenders vs. non-lid triggers)
+      ansible.builtin.systemd:
+        name: "{{ item }}"
+        masked: true
+      loop:
+        - sleep.target
+        - suspend.target
+        - hibernate.target
+        - hybrid-sleep.target
+
+    - name: Flush handlers now so verification below sees the final state
+      ansible.builtin.meta: flush_handlers
+
+    - name: Verify all 4 targets are masked
+      ansible.builtin.command: "systemctl status {{ item }}"
+      register: mask_status
+      changed_when: false
+      failed_when: "'masked' not in mask_status.stdout"
+      loop:
+        - sleep.target
+        - suspend.target
+        - hibernate.target
+        - hybrid-sleep.target
+
+  handlers:
+    - name: Restart systemd-logind
+      ansible.builtin.systemd:
+        name: systemd-logind
+        state: restarted
+
+- name: Common PVE host prep (repos, time sync, SSH access)
+  hosts: pve_new
+  gather_facts: true
+  vars:
+    pve_admin_ssh_public_key_file: "" # path to hermesagent's public key (bastion pattern, ARCHITECTURE.md §8) — confirm before running
+    pve_sysctl_settings: {} # none locked in yet for the PVE host layer itself (separate from k8s-node-prereqs.yml's kernel/sysctl scope) — add here if/when a real requirement shows up
+  tasks:
+    # PVE 9 (Debian 13/trixie) ships repo files in the deb822 .sources format,
+    # not the old one-line .list format — confirm the exact enterprise-repo
+    # filename on first run (`ls /etc/apt/sources.list.d/`) since it can vary
+    # by point release; this task tolerates either by disabling whichever
+    # exists (failed_when: false, both attempts are safe no-ops otherwise).
+    #
+    # PVE's stock pve-enterprise.sources often omits the `Enabled:` key
+    # entirely (deb822 defaults an absent key to enabled) — `insertafter`
+    # adds an explicit `Enabled: no` right after `Components:` when no
+    # `Enabled:` line exists yet, instead of only rewriting one that does.
+    - name: Disable the pve-enterprise repo, .sources form (no active subscription)
+      ansible.builtin.lineinfile:
+        path: /etc/apt/sources.list.d/pve-enterprise.sources
+        regexp: "^Enabled:"
+        insertafter: "^Components:"
+        line: "Enabled: no"
+      failed_when: false
+
+    - name: Disable the pve-enterprise repo, legacy .list form (no active subscription)
+      ansible.builtin.replace:
+        path: /etc/apt/sources.list.d/pve-enterprise.list
+        regexp: "^deb "
+        replace: "# deb "
+      failed_when: false
+
+    - name: Add the pve-no-subscription repo
+      ansible.builtin.deb822_repository:
+        name: pve-no-subscription
+        types: deb
+        uris: http://download.proxmox.com/debian/pve
+        suites: "{{ ansible_distribution_release }}"
+        components: pve-no-subscription
+        signed_by: /usr/share/keyrings/proxmox-archive-keyring.gpg
+
+    - name: Ensure systemd-timesyncd is enabled and running (NTP)
+      ansible.builtin.systemd:
+        name: systemd-timesyncd
+        enabled: true
+        state: started
+
+    - name: Apply PVE host sysctl settings (currently empty — see pve_sysctl_settings above)
+      ansible.posix.sysctl:
+        name: "{{ item.key }}"
+        value: "{{ item.value }}"
+        sysctl_set: true
+        reload: true
+      loop: "{{ pve_sysctl_settings | dict2items }}"
+      when: pve_sysctl_settings | length > 0
+
+    - name: Authorize the hermesagent bastion SSH key for root
+      ansible.posix.authorized_key:
+        user: root
+        key: "{{ lookup('file', pve_admin_ssh_public_key_file) }}"
+      when: pve_admin_ssh_public_key_file | length > 0
+
+- name: Create dedicated ZFS pool per host (ADR-0014)
+  hosts: pve_new
+  gather_facts: false
+  tasks:
+    - name: Check whether the ZFS pool already exists
+      ansible.builtin.command: "zpool list {{ zfs_pool_name }}"
+      register: zpool_check
+      changed_when: false
+      failed_when: false
+
+    - name: Create the ZFS pool
+      ansible.builtin.command: "zpool create -f {{ zfs_pool_name }} {{ zfs_pool_device }}"
+      when:
+        - zpool_check.rc != 0
+        - zfs_pool_device | length > 0
+
+    # ponytail: "already defined" is PVE's typical conflict wording but is
+    # unconfirmed against a live host (unlike the enterprise-repo task above,
+    # which is confirmed) — verify on first real run; if PVE's wording ever
+    # differs, a legitimate re-run would misreport as failed here.
+    - name: Register the pool as PVE storage
+      ansible.builtin.command: "pvesm add zfspool {{ zfs_pool_name }} -pool {{ zfs_pool_name }}"
+      register: pvesm_add
+      changed_when: "'already defined' not in (pvesm_add.stderr | default(''))"
+      failed_when:
+        - pvesm_add.rc != 0
+        - "'already defined' not in (pvesm_add.stderr | default(''))"
+      when: zfs_pool_device | length > 0
+
+- name: Join the corosync PVE cluster (ADR-0020) — run one host at a time via --limit
+  hosts: pve_new
+  gather_facts: false
+  tags: corosync
+  tasks:
+    - name: Check current corosync membership
+      ansible.builtin.command: pvecm status
+      register: pvecm_status
+      changed_when: false
+      failed_when: false
+
+    # `pvecm add` connects FROM this node TO proxmox over SSH as root — pre-seed
+    # its known_hosts so the first contact doesn't hang on an unattended
+    # fingerprint prompt. This does NOT cover root-password auth: `pvecm add`
+    # still prompts for proxmox's root password unless root SSH key trust
+    # between proxmox and this node is *already* separately established
+    # (distinct from the ansible-control-node -> PVE-host trust this
+    # playbook's own SSH connection relies on) — if it prompts, run this one
+    # task by hand/interactively rather than expecting it to complete unattended.
+    - name: Pre-trust proxmox's SSH host key (avoid an unattended fingerprint prompt)
+      ansible.builtin.shell: |
+        ssh-keyscan -H {{ hostvars['proxmox'].ansible_host }} >> ~/.ssh/known_hosts
+      changed_when: true
+      when: >-
+        pvecm_status.rc != 0 or
+        'Cluster information' not in pvecm_status.stdout
+
+    - name: Join the cluster hosted at proxmox (.165)
+      ansible.builtin.command: "pvecm add {{ hostvars['proxmox'].ansible_host }}"
+      when: >-
+        pvecm_status.rc != 0 or
+        'Cluster information' not in pvecm_status.stdout
+
+- name: Propagate the golden K8s template (VMID 9001) to each new node
+  hosts: pve_new
+  gather_facts: false
+  tags: template-propagation
+  tasks:
+    - name: Fail fast if this host's real PVE node name hasn't been confirmed
+      ansible.builtin.assert:
+        that: pve_node_name | length > 0
+        fail_msg: >-
+          pve_node_name is unset for {{ inventory_hostname }} — confirm via
+          `pvesh get /nodes` after the corosync join and set it in
+          ansible/inventories/proxmox/hosts.yml before running this play.
+
+    - name: Check whether VMID 9001 already exists on this node
+      ansible.builtin.command: "pvesh get /nodes/{{ pve_node_name }}/qemu/9001/status/current"
+      delegate_to: proxmox
+      register: template_check
+      changed_when: false
+      failed_when: false
+
+    - name: Migrate template 9001 from proxmox onto this node
+      ansible.builtin.command: "qm migrate 9001 {{ pve_node_name }} --with-local-disks"
+      delegate_to: proxmox
+      when: template_check.rc != 0
