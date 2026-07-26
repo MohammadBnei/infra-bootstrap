@@ -21,7 +21,7 @@ This is the inventory kubespray reads to build `ukubi-cluster`.
 - [ ] Public key deployed to VMs (`~/.ssh/id_k8s_vms.pub` → `core` user)
 - [ ] `ansible -i hosts.yaml all -m ping` passes
 - [ ] `cluster.yml` first run (2 nodes: cp-01 + worker-01)
-- [ ] `k8s-worker-gpu` added later via second `cluster.yml` run
+- [ ] `k8s-worker-gpu` added later via `scale.yml` (not `cluster.yml` — see Notes below, ADR-0017)
 
 ## How to run
 
@@ -47,4 +47,5 @@ ansible-playbook -i ../inventory/ukubi/hosts.yaml cluster.yml --become --diff
 - Hubble: enabled with TLS
 - ArgoCD: installed via `helm + kubectl apply -f gitops/bootstrap/` after kubespray (not a kubespray addon)
 - cert-manager: NOT installed — Traefik built-in ACME (HTTP-01) is the cert engine
-- k8s-worker-gpu: add to `hosts.yaml` (kube_node only) and re-run `cluster.yml` — set `nvidia_accelerator_enabled: true` and populate `nvidia_gpu_nodes` in k8s-cluster.yml at that time
+- k8s-worker-gpu: add to `hosts.yaml` (kube_node only) and run `scale.yml` (not `cluster.yml` — adding a worker-only node doesn't need the control-plane join role kubespray's own docs reserve for `cluster.yml`; see ADR-0017) — set `nvidia_accelerator_enabled: true` and populate `nvidia_gpu_nodes` in k8s-cluster.yml at that time
+- Future workers on `.200`/`.161` (once they join the PVE cluster — see `docs/adr/0020-pve-corosync-cluster.md`) are added the same way: `scale.yml`, worker-only, no control-plane/etcd role. Treat `.161`'s worker as lower-trust capacity until ADR-0013's sleep-risk mitigation is confirmed in production — best-effort workloads only, no critical-path scheduling, via node labels/taints once it's added.

@@ -13,6 +13,32 @@ garage_container_storage = "" # NVMe-backed pool for garage-storage's disk — c
 garage_ip             = "" # static IP for the recreated garage-storage container — none locked in MISSION.md yet, pick one and treat as provisional
 longhorn_disk_size_gb = 0  # GB size of each k8s VM's dedicated Longhorn disk (scsi1) — size after inventorying the legacy NFS export's data volume, see MISSION.md §15 Q-H
 
+# Only needed once .200/.161 have joined the PVE cluster (see
+# docs/adr/0020-pve-corosync-cluster.md, docs/runbook-pve-postinstall.md):
+# add worker-only entries to k8s_nodes here (setting this variable at all
+# replaces the whole default map, so copy k8s-cp-01/k8s-worker-01 from
+# variables.tf's default alongside any new entries). node_name/datastore_id
+# come from live `pvesh get /nodes` / `pvesm status` on the new node, never
+# guessed. Example shape for a worker on server1 (.200):
+# k8s_nodes = {
+#   "k8s-cp-01"     = { ... }  # copy unchanged from variables.tf default
+#   "k8s-worker-01" = { ... }  # copy unchanged from variables.tf default
+#   "k8s-worker-02" = {
+#     vm_id                 = 203
+#     ip                    = "192.168.1.203"
+#     cpu_cores             = 4
+#     memory_dedicated_mb   = 8192
+#     os_disk_size_gb       = 60
+#     longhorn_disk_size_gb = null
+#     control_plane         = false
+#     etcd                  = false
+#     worker                = true
+#     gpu                   = false
+#     node_name             = "" # confirm via `pvesh get /nodes` on server1
+#     datastore_id          = "" # confirm via `pvesm status` on server1 (the ZFS pool from pve-postinstall.yml)
+#   }
+# }
+
 # Only needed once imported.tf's placeholder variables are filled from live
 # `qm config` / `pct config` capture (see imported.tf's header comment):
 # pg01_disk_datastore_id        = ""
