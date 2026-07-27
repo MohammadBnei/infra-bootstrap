@@ -85,7 +85,10 @@ Never propose these without an explicit user greenlight, even as a
   MetalLB owns L2 — [ADR-0003](docs/adr/0003-cni-cilium-chaining-over-kube-proxy-replacement.md)
 - ❌ **Per-app Helm chart** — [ADR-0004](docs/adr/0004-gitops-pattern-c-registry-applicationset.md)
 - ❌ **Per-app flat ArgoCD Apps that bypass the registry** — [ADR-0004](docs/adr/0004-gitops-pattern-c-registry-applicationset.md)
-- ❌ **App-of-Apps with an explicit `root.yaml`** — [ADR-0004](docs/adr/0004-gitops-pattern-c-registry-applicationset.md)
+- ❌ **App-of-Apps spawning per-app Applications one-by-one** (bypassing
+  the registry) — [ADR-0004](docs/adr/0004-gitops-pattern-c-registry-applicationset.md).
+  A single flat Application self-syncing `gitops/bootstrap/` itself is
+  fine and in use — [ADR-0021](docs/adr/0021-self-syncing-bootstrap-directory.md).
 - ❌ **ArgoCD as a kubespray addon** — [ADR-0005](docs/adr/0005-argocd-install-helm-not-kubespray-addon.md)
 - ❌ **Infisical as SSH CA / TLS CA** — [ADR-0006](docs/adr/0006-reject-infisical-as-ssh-tls-ca.md)
 - ❌ **Vagrant for Proxmox provisioning** — [ADR-0007](docs/adr/0007-reject-vagrant-for-proxmox.md)

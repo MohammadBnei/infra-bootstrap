@@ -53,18 +53,22 @@ then here. When in doubt, open those files.
 - ArgoCD Pattern C: `gitops/apps/registry.yaml` (human source of truth) +
   `gitops/bootstrap/apps.applicationset.yaml` (`list` generator) must stay
   in sync. Always reuse `gitops/platform/common-app-chart` — never a
-  per-app Helm chart. No App-of-Apps `root.yaml`.
+  per-app Helm chart. No App-of-Apps spawning per-app Applications
+  one-by-one (bypassing the registry) — but `gitops/bootstrap/` itself is
+  self-syncing via one flat `bootstrap` Application (ADR-0021); editing
+  that directory and merging to `main` is enough, no manual `kubectl
+  apply` needed after the one-time setup.
 - Greenfield cluster runs use `cluster.yml`, never `scale.yml`.
 - Secrets only via Infisical, fetched at run time — never committed.
 
 ## Forbidden patterns (quick check — full list + reasons in `DECISION.md` §3 and `docs/adr/`)
 
 cert-manager · DNS-01/OVH plugin · Gateway API / Ingress-NGINX / plain
-`Ingress` · Cilium Gateway API · per-app Helm chart · App-of-Apps
-`root.yaml` · Ceph · Wireguard/Tailscale · Infisical as SSH/TLS CA ·
-Vagrant for Proxmox · Flatcar · external managed Postgres · ArgoCD as a
-kubespray addon · GitOps-managed Proxmox · secrets/keys/tokens committed
-to this repo.
+`Ingress` · Cilium Gateway API · per-app Helm chart · per-app Applications
+spawned one-by-one bypassing the registry · Ceph · Wireguard/Tailscale ·
+Infisical as SSH/TLS CA · Vagrant for Proxmox · Flatcar · external managed
+Postgres · ArgoCD as a kubespray addon · GitOps-managed Proxmox ·
+secrets/keys/tokens committed to this repo.
 
 Don't propose any of these without an explicit user greenlight, even as a
 "better alternative" — each has a `docs/adr/*.md` recording why it was

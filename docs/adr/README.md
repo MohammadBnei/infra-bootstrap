@@ -29,5 +29,6 @@ ADR-000N` (replaced by a later decision).
 | [0016](0016-k8s-endpoint-naming.md) | K8s API endpoint naming | Proposed |
 | [0017](0017-second-control-plane-member.md) | Second control-plane / etcd member | Proposed |
 | [0018](0018-cilium-ebpf-offload-flip.md) | Cilium eBPF offload flip | Proposed |
-| [0019](0019-longhorn-rollout-specifics.md) | Longhorn rollout specifics | Proposed |
+| [0019](0019-longhorn-rollout-specifics.md) | Longhorn rollout specifics | Accepted |
 | [0020](0020-pve-corosync-cluster.md) | PVE corosync cluster (not 3 independent standalone hosts) | Accepted |
+| [0021](0021-self-syncing-bootstrap-directory.md) | Self-syncing `gitops/bootstrap/` directory (scoped App-of-Apps) | Accepted |

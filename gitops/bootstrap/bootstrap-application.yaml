@@ -1,0 +1,50 @@
+# Makes ArgoCD self-manage everything else in this directory (the
+# ApplicationSets + standalone Applications that define what runs on the
+# cluster, both platform and user apps) — so editing gitops/bootstrap/
+# and merging to main is enough. No more manual
+# `kubectl apply -f gitops/bootstrap/` after the one-time bootstrap.
+#
+# Scoped App-of-Apps, ADR-0021 (narrows ADR-0004's rejection): one flat
+# directory of plain manifests, not a multi-level hierarchy, and it
+# doesn't change how individual apps get deployed — Pattern C
+# (apps/registry.yaml + list-generator ApplicationSets) is unchanged.
+#
+# traefik-crds/ is a subdirectory, so it's already excluded by this
+# Application's default non-recursive directory source — same
+# deliberately-not-gitops-managed reasoning as traefik-application.yaml's
+# skipCrds (vendored CRDs, lifecycle outside ArgoCD's update path).
+#
+# Bootstrapped once by hand (gitops/README.md Step 3, same one-time
+# nature as installing ArgoCD itself in Step 1). After that this
+# Application manages itself too: future edits to this file sync
+# automatically like everything else here.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: bootstrap
+  namespace: argocd
+  finalizers:
+  - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: git@github.com:MohammadBnei/infra-bootstrap.git
+    targetRevision: HEAD
+    path: gitops/bootstrap
+    directory: {}
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: argocd
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+    - CreateNamespace=true
+    - ServerSideApply=true
+    retry:
+      limit: 5
+      backoff:
+        duration: 5s
+        factor: 2
+        maxDuration: 3m
