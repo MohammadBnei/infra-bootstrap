@@ -14,7 +14,11 @@ charts or N hand-written Applications. Alternatives considered:
 - **App-of-Apps with an explicit `root.yaml`** — rejected; the
   ApplicationSet's `list` generator already gives an explicit,
   reviewable list of expected repos, without the extra indirection layer
-  of a root Application managing child Applications.
+  of a root Application managing child Applications. (This was about how
+  *individual apps* deploy, not about self-syncing the bootstrap
+  manifests themselves — see
+  [ADR-0021](0021-self-syncing-bootstrap-directory.md), which narrows
+  this specifically for that gap.)
 
 ## Decision
 

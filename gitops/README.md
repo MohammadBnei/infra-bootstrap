@@ -64,7 +64,7 @@ Everything is sequenced so each layer is ready before the next depends on it:
 | 5 | Prometheus, Grafana, metrics-server | Observability, no hard ordering constraint |
 | 10 | User apps (`apps.applicationset.yaml`), platform-common-apps (`platform-common-apps.applicationset.yaml`) | Depend on Infisical (secrets) + Traefik (IngressRoutes) |
 
-Note: sync-wave ordering across independent top-level Applications isn't strictly enforced by ArgoCD without an App-of-Apps parent (which `DECISION.md` forbids here — see [ADR-0004](../docs/adr/0004-gitops-pattern-c-registry-applicationset.md)) — these numbers are the intended/documented order. In practice each Application's own `retry`/`selfHeal` policy converges regardless of exact creation order.
+Note: since [ADR-0021](../docs/adr/0021-self-syncing-bootstrap-directory.md) these Application/ApplicationSet manifests are all siblings inside the same `bootstrap` Application's resource list, but none of them carry a sync-wave annotation on their own metadata (only on the child app entries an ApplicationSet's `list` generator spawns) — so ArgoCD still doesn't order these siblings relative to each other. These numbers are the intended/documented order. In practice each Application's own `retry`/`selfHeal` policy converges regardless of exact creation order.
 
 ### Bootstrap credential chain
 
@@ -195,7 +195,7 @@ three inputs deliberately stay local instead of flowing through Infisical.
 
 > **Never commit SSH keys or secrets to this repo.** `register-repos.env` is gitignored (`*.env`).
 
-### Step 3 — Apply bootstrap manifests
+### Step 3 — Apply bootstrap manifests (one-time only)
 
 ```bash
 kubectl apply -f gitops/bootstrap/traefik-crds/
@@ -207,6 +207,15 @@ kubectl apply -f gitops/bootstrap/
 `traefik-application.yaml` sets `helm.skipCrds: true` (see that file's
 comment) and so never installs them itself. Not ArgoCD-managed — same
 reasoning as `skipCrds` itself, see `traefik-application.yaml`.
+
+This second `kubectl apply` only needs to happen once, ever, because
+`gitops/bootstrap/bootstrap-application.yaml` is itself one of the
+manifests it installs — a scoped App-of-Apps
+([ADR-0021](../docs/adr/0021-self-syncing-bootstrap-directory.md)) that
+makes ArgoCD watch and self-sync the rest of this directory from then
+on. **After this first apply, adding a platform or user app is just:
+edit `gitops/bootstrap/` (and/or `gitops/apps/registry.yaml`), merge to
+`main`, done** — no further manual `kubectl apply` needed.
 
 ArgoCD becomes self-managing. Wave 1 (Infisical) syncs immediately using the manually-injected infra-bootstrap SSH key. Once Infisical is healthy, `argocd-github-apps-creds.yaml` resolves and injects the user-app SSH credential into ArgoCD automatically.
 
