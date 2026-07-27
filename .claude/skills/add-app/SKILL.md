@@ -54,10 +54,18 @@ needs a PVC or health probes.
    ```
 2. **Deploy key** — remind the user a read-only SSH deploy key is needed on
    the new repo, with the private key stored in Infisical under
-   `GITHUB_APPS_SSH_KEY` (or added separately to the ArgoCD credential
-   store for a per-repo key). Never generate or write key material into
-   this repo.
-3. **`gitops/apps/registry.yaml`** — append an entry:
+   `GITHUB_APPS_SSH_KEY`. Never generate or write key material into this
+   repo.
+3. **Per-repo ArgoCD credential** — add an explicit `Repository` secret
+   for the new repo: copy `gitops/bootstrap/argocd-repo-editable-blog.yaml`,
+   rename it, change the `url`. Required even though
+   `argocd-github-apps-creds.yaml`'s `repo-creds` template exists —
+   ArgoCD doesn't reliably apply URL-prefix repo-creds templates to the
+   *second* source of a multi-source Application (this ApplicationSet's
+   per-app values repo is source 2 of 2), confirmed via repo-server logs
+   (`ssh: no key found`) onboarding editable-blog. Skipping this step is
+   the most likely reason a new app's Application will fail to sync.
+4. **`gitops/apps/registry.yaml`** — append an entry:
    ```yaml
    - name: <app>
      namespace: <app>
@@ -66,14 +74,15 @@ needs a PVC or health probes.
      valuesPath: values.yaml
      hostname: <app>.bnei.dev
    ```
-4. **`gitops/bootstrap/apps.applicationset.yaml`** — mirror the exact same
+5. **`gitops/bootstrap/apps.applicationset.yaml`** — mirror the exact same
    entry into `spec.generators[0].list.elements`, keeping the existing
    entries' formatting/ordering style.
-5. All user apps sync at wave 10, after Infisical (wave 1) and Traefik
+6. All user apps sync at wave 10, after Infisical (wave 1) and Traefik
    (wave 2) — no per-app wave override needed.
-6. Show the diff and stop. Don't commit or push — the repo's branch
+7. Show the diff and stop. Don't commit or push — the repo's branch
    workflow (feature branch + PR, human merges) is the user's call, not
-   this skill's.
+   this skill's. Once merged, `gitops/bootstrap/` self-syncs (ADR-0021) —
+   no manual `kubectl apply` needed.
 
 ## What this skill does not do
 

@@ -1,0 +1,46 @@
+# Explicit per-repo Repository credential for editable-blog, reusing the
+# same GITHUB_APPS_SSH_KEY as argocd-github-apps-creds.yaml's repo-creds
+# template.
+#
+# Why this exists despite that template: ArgoCD's URL-prefix repo-creds
+# templates don't reliably apply to the *second* source of a multi-source
+# Application (apps.applicationset.yaml's per-app values repo is source
+# 2 of 2) — confirmed via repo-server logs (`ssh: no key found`) when
+# onboarding editable-blog, the first real per-app repo exercised through
+# this path. The first source (infra-bootstrap itself) has always worked
+# because it resolves via repo-infra-bootstrap, an explicit exact-URL
+# Repository secret, not the template. This file follows that same
+# proven pattern instead of the template.
+#
+# Every future per-app repo will need one of these too until upstream
+# ArgoCD fixes credential-template matching for sources[] — see
+# docs/bootstrap-test-notes.md for the full investigation.
+apiVersion: secrets.infisical.com/v1alpha1
+kind: InfisicalSecret
+metadata:
+  name: argocd-repo-editable-blog
+  namespace: argocd
+spec:
+  hostAPI: http://platform-infisical-backend.infisical.svc.cluster.local:8080/api
+  resyncInterval: 60
+  authentication:
+    universalAuth:
+      secretsScope:
+        projectSlug: "infra-bootstrap-1-ge1"
+        envSlug: dev
+        secretsPath: "/"
+      credentialsRef:
+        secretName: universal-auth-credentials
+        secretNamespace: infisical
+  managedSecretReference:
+    secretName: repo-editable-blog
+    secretNamespace: argocd
+    creationPolicy: Orphan
+    template:
+      metadata:
+        labels:
+          argocd.argoproj.io/secret-type: repository
+      data:
+        type: "git"
+        url: "git@github.com:MohammadBnei/editable-blog.git"
+        sshPrivateKey: "{{ .GITHUB_APPS_SSH_KEY }}"

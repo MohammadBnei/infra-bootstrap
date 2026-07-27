@@ -243,7 +243,9 @@ kubectl -n argocd get applications
 
 2. Add a read-only SSH deploy key. The private key goes in Infisical under `GITHUB_APPS_SSH_KEY` (or use a per-repo key added separately to the ArgoCD credential store).
 
-3. Add the app to **both** files (they must stay in sync):
+3. Add an explicit per-repo `Repository` credential secret — copy `gitops/bootstrap/argocd-repo-editable-blog.yaml` and change the name/url. **Don't rely on `argocd-github-apps-creds.yaml`'s `repo-creds` template alone**: ArgoCD doesn't reliably apply URL-prefix repo-creds templates to the *second* source of a multi-source Application (this ApplicationSet's per-app values repo is source 2 of 2) — confirmed via repo-server logs (`ssh: no key found`) onboarding editable-blog. Every per-app repo needs its own explicit secret until upstream fixes this.
+
+4. Add the app to **both** files (they must stay in sync):
 
    **`gitops/apps/registry.yaml`**
    ```yaml
@@ -257,7 +259,7 @@ kubectl -n argocd get applications
 
    **`gitops/bootstrap/apps.applicationset.yaml`** — mirror the same entry under `spec.generators[0].list.elements`.
 
-4. Commit and push. ArgoCD reconciles within seconds.
+5. Commit and push. ArgoCD reconciles within seconds (ADR-0021: `gitops/bootstrap/` self-syncs, no manual `kubectl apply` needed).
 
 ---
 
