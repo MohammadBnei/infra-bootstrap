@@ -18,8 +18,13 @@ spec:
       #
       # searxng/pgweb are NOT here — public-image, no app-specific code,
       # driven as platform apps instead (see platform-common-apps.applicationset.yaml).
-      # This ApplicationSet is intentionally empty until a real user-app
-      # repo exists.
+
+      - name: editable-blog
+        namespace: editable-blog
+        syncWave: "10"
+        repoURL: git@github.com:MohammadBnei/editable-blog.git
+        valuesPath: values.yaml
+        hostname: blog.bnei.dev
 
   template:
     metadata:

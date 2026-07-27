@@ -18,6 +18,16 @@
 # working per-app repo yet (see docs/bootstrap-test-notes.md). Re-add once
 # each has a real values.yaml; don't list a repo that doesn't exist, ArgoCD
 # will just fail to clone it.
+
+# editable-blog: test subject for validating the common-app-chart pipeline
+# before the Freebox cutover (Stage 1 plan). values.yaml lives at the repo
+# root of editable-blog itself.
+- name: editable-blog
+  namespace: editable-blog
+  syncWave: "10"
+  repoURL: git@github.com:MohammadBnei/editable-blog.git
+  valuesPath: values.yaml
+  hostname: blog.bnei.dev
 #
 # searxng and pgweb are NOT here: they're public-image tools with no
 # app-specific code, so they're driven as platform apps instead — see
