@@ -1,3 +1,12 @@
+# ArgoCD's CreateNamespace=true sync option only auto-creates the
+# Application's own destination.namespace (which redirectors-application.yaml
+# deliberately leaves as "default", since each redirect owns its own
+# namespace) - so each redirect must declare its namespace explicitly.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: proxmox
+---
 apiVersion: v1
 kind: Service
 metadata:
