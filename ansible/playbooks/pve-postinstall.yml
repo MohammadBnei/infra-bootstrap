@@ -320,6 +320,15 @@
   hosts: pve_new
   gather_facts: false
   tags: template-propagation
+  # `qm migrate` takes a per-VMID lock on the *source* VM (9001) — running
+  # this play against both pve_new hosts at once (no --limit) means both
+  # hosts' migrate tasks fire concurrently and race for that same lock.
+  # Confirmed live: ex-laptop's attempt got "can't lock file
+  # '/var/lock/pve-manager/pve-migrate-9001' - got timeout" while server1's
+  # ran. `serial: 1` processes one host fully before starting the next,
+  # same one-at-a-time requirement as the corosync join play, just enforced
+  # automatically here instead of relying on a manual --limit.
+  serial: 1
   tasks:
     - name: Fail fast if this host's real PVE node name hasn't been confirmed
       ansible.builtin.assert:
