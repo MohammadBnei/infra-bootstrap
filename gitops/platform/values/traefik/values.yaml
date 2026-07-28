@@ -85,7 +85,7 @@ certificatesResolvers:
     acme:
       email: account@bnei.dev
       storage: /data/acme.json
-      tlsChallenge: {}
+      tlsChallenge: true
 
 # Dashboard via IngressRoute is disabled — expose via IngressRoute if needed
 ingressRoute:
