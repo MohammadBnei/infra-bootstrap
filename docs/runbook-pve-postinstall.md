@@ -50,15 +50,19 @@ command set. In short:
    ansible-playbook -i ansible/inventories/proxmox/hosts.yml \
      ansible/playbooks/pve-postinstall.yml --skip-tags corosync,template-propagation
    ```
-2. **Corosync join, `.200` first**:
+2. **Corosync join, `.200` first**. Needs `PVE_SSH_PRIVATE_KEY` in the
+   environment (the corosync play uses it to pre-trust root@proxmox from the
+   new node, so `pvecm add` never blocks on an interactive password prompt):
    ```bash
-   ansible-playbook -i ansible/inventories/proxmox/hosts.yml \
+   infisical run --projectId=<infra-bootstrap-project-id> --env=dev -- \
+     ansible-playbook -i ansible/inventories/proxmox/hosts.yml \
      ansible/playbooks/pve-postinstall.yml --tags corosync --limit=server1
    ```
    Confirm on `.165` or `.200`: `pvecm status` shows 2/2 quorum.
 3. **Then `.161`**:
    ```bash
-   ansible-playbook -i ansible/inventories/proxmox/hosts.yml \
+   infisical run --projectId=<infra-bootstrap-project-id> --env=dev -- \
+     ansible-playbook -i ansible/inventories/proxmox/hosts.yml \
      ansible/playbooks/pve-postinstall.yml --tags corosync --limit=ex-laptop
    ```
    Confirm `pvecm status` shows 3/3 quorum.

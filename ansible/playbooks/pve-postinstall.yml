@@ -14,14 +14,22 @@
 # Requires: ansible.posix collection — ansible-galaxy collection install -r
 # ansible/requirements.yml
 #
+# The corosync-join play (tag: corosync) also needs PVE_SSH_PRIVATE_KEY in
+# its environment (e.g. via `infisical run --projectId=<id> --env=dev --`) —
+# it reuses the same shared PVE root key already trusted for root@proxmox to
+# pre-establish trust FROM the new node TO proxmox, so `pvecm add` never
+# blocks on an interactive password prompt.
+#
 # Run order matters — see docs/runbook-pve-postinstall.md. Plays are tagged
 # so the corosync join and template propagation can be run separately from
 # the rest:
 #   ansible-playbook -i ansible/inventories/proxmox/hosts.yml \
 #     ansible/playbooks/pve-postinstall.yml --skip-tags corosync,template-propagation
-#   ansible-playbook -i ansible/inventories/proxmox/hosts.yml \
+#   infisical run --projectId=<id> --env=dev -- ansible-playbook \
+#     -i ansible/inventories/proxmox/hosts.yml \
 #     ansible/playbooks/pve-postinstall.yml --tags corosync --limit=server1
-#   ansible-playbook -i ansible/inventories/proxmox/hosts.yml \
+#   infisical run --projectId=<id> --env=dev -- ansible-playbook \
+#     -i ansible/inventories/proxmox/hosts.yml \
 #     ansible/playbooks/pve-postinstall.yml --tags corosync --limit=ex-laptop
 #   ansible-playbook -i ansible/inventories/proxmox/hosts.yml \
 #     ansible/playbooks/pve-postinstall.yml --tags template-propagation
@@ -179,16 +187,44 @@
 
     # `pvecm add` connects FROM this node TO proxmox over SSH as root — pre-seed
     # its known_hosts so the first contact doesn't hang on an unattended
-    # fingerprint prompt. This does NOT cover root-password auth: `pvecm add`
-    # still prompts for proxmox's root password unless root SSH key trust
-    # between proxmox and this node is *already* separately established
-    # (distinct from the ansible-control-node -> PVE-host trust this
-    # playbook's own SSH connection relies on) — if it prompts, run this one
-    # task by hand/interactively rather than expecting it to complete unattended.
+    # fingerprint prompt.
     - name: Pre-trust proxmox's SSH host key (avoid an unattended fingerprint prompt)
       ansible.builtin.shell: |
         ssh-keyscan -H {{ hostvars['proxmox'].ansible_host }} >> ~/.ssh/known_hosts
       changed_when: true
+      when: >-
+        pvecm_status.rc != 0 or
+        'Cluster information' not in pvecm_status.stdout
+
+    # `pvecm add` also needs root-SSH auth FROM this node TO proxmox — a
+    # *separate* trust relationship from the ansible-control-node -> PVE-host
+    # trust this playbook's own connection relies on. Without it, `pvecm add`
+    # blocks on an interactive password prompt that a non-tty ansible task can
+    # never answer (confirmed live: it just sits there running indefinitely).
+    # Reusing the same shared PVE_SSH_PRIVATE_KEY that's already trusted for
+    # root@proxmox (terraform/ansible use it there too) makes this fully
+    # unattended and idempotent instead — same fix covers ex-laptop's join
+    # later for free. Value comes from the calling shell's environment
+    # (`infisical run` sets it), never written to this repo.
+    - name: Write the shared PVE root SSH key for this node's outbound use
+      ansible.builtin.copy:
+        content: "{{ lookup('ansible.builtin.env', 'PVE_SSH_PRIVATE_KEY') }}"
+        dest: /root/.ssh/id_pve_cluster
+        mode: "0600"
+      no_log: true
+      when: >-
+        pvecm_status.rc != 0 or
+        'Cluster information' not in pvecm_status.stdout
+
+    - name: Point outbound SSH to proxmox at that key
+      ansible.builtin.blockinfile:
+        path: /root/.ssh/config
+        create: true
+        mode: "0600"
+        marker: "# {mark} ANSIBLE MANAGED BLOCK - pve cluster trust"
+        block: |
+          Host {{ hostvars['proxmox'].ansible_host }}
+            IdentityFile /root/.ssh/id_pve_cluster
       when: >-
         pvecm_status.rc != 0 or
         'Cluster information' not in pvecm_status.stdout
