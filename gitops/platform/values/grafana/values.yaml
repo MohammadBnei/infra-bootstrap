@@ -7,6 +7,14 @@ persistence:
   enabled: true
   size: 5Gi
 
+# Single RWO Longhorn PVC, single replica: the chart's default RollingUpdate
+# strategy tries to bring the new pod up before killing the old one, and only
+# one pod can attach the volume at a time — Multi-Attach error every time this
+# ConfigMap changes (e.g. adding a dashboard) and forces a rollout. Recreate
+# kills the old pod first.
+deploymentStrategy:
+  type: Recreate
+
 # Admin credentials from K8s Secret (created via InfisicalSecret CR, see
 # gitops/bootstrap/grafana-admin-secret.yaml)
 admin:
