@@ -24,15 +24,18 @@ registry/`common-app-chart` mold. See ADR-0022 for why this exists.
   static runner is all this needs; no autoscaling requirement). Labeled
   `ukubi` so `runs-on: [self-hosted, ukubi]` targets it.
 - `infisicalsecret.yaml` — sources the GitHub PAT the runner registers
-  with from Infisical (`RUNNER_TOKEN` project, see below).
+  with from Infisical (`actions-runner` project, see below).
 
 ## One-time human setup (not something this repo/ArgoCD can do)
 
-1. Create a GitHub PAT scoped to `repo` (classic) or fine-grained
-   `Administration: write` on `infra-bootstrap` and `vos-monolith` — the
-   minimum scope GitHub requires to register a self-hosted runner.
-2. Store it in Infisical under a new project/path this manifest's
-   `infisical.projectSlug`/`secretsPath` points at, as `ACCESS_TOKEN`.
+1. ~~Create a GitHub PAT~~ — done. Fine-grained PAT, `Administration: Read
+   and write`, scoped to `vos-monolith` only (the only repo
+   `deployment.yaml`'s `REPO_URL` registers against today — widen scope +
+   add a second `REPO_URL`/Deployment if a second repo ever adopts
+   `oneOffJobs`, don't pre-provision for it).
+2. ~~Store it in Infisical~~ — done, project `actions-runner` (slug
+   `actions-runner-x-qbo`), secret `ACCESS_TOKEN`. See `docs/secrets.md`'s
+   "Per-app Infisical projects" table.
 3. Apply this Application once (or let `gitops/bootstrap/`'s self-sync
    pick it up per ADR-0021 — no manual `kubectl apply` needed beyond the
    one-time bootstrap already documented in `gitops/README.md`).

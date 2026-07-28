@@ -57,6 +57,7 @@ below (Infisical UI), on top of its `infra-bootstrap-1-ge1` grant.
 | --- | --- | --- | --- |
 | pgweb | `pgweb-p9-hy` | `DATABASE_URL` (pre-existing) | `gitops/platform/values/pgweb/values.yaml` (`infisical.enabled`) |
 | searxng | `searxng-l-dwt` / `5af3f87b-6d31-4c67-a8f2-435653a57412` | `SEARXNG_SECRET_KEY` | `gitops/platform/values/searxng/values.yaml` (InfisicalSecret, `template:`-rendered) |
+| actions-runner | `actions-runner-x-qbo` / `b9043dd5-2956-43e4-9f1b-e9bf7a8e1edc` | `ACCESS_TOKEN` (GitHub fine-grained PAT, `Administration: Read and write`, scoped to `vos-monolith` — registers/deregisters the self-hosted runner via the Actions runners API) | `gitops/platform/actions-runner/infisicalsecret.yaml` → `deployment.yaml`'s `envFrom` |
 
 ## SSH access (per-host)
 
