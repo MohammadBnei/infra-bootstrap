@@ -328,10 +328,14 @@
 
     - name: Extract key IDs/secrets
       ansible.builtin.set_fact:
-        garage_longhorn_key_id: "{{ garage_key_longhorn_info.stdout | regex_search('Key ID:\\s*(\\S+)', '\\1') }}"
-        garage_longhorn_key_secret: "{{ garage_key_longhorn_info.stdout | regex_search('Secret key:\\s*(\\S+)', '\\1') }}"
-        garage_pgbackrest_key_id: "{{ garage_key_pgbackrest_info.stdout | regex_search('Key ID:\\s*(\\S+)', '\\1') }}"
-        garage_pgbackrest_key_secret: "{{ garage_key_pgbackrest_info.stdout | regex_search('Secret key:\\s*(\\S+)', '\\1') }}"
+        # regex_search with a capture group returns a list, not a scalar —
+        # same reasoning as the rpc_secret/admin_token extraction above,
+        # `| first` is required or Infisical ends up storing the Python
+        # list repr ("['GK...']") instead of the bare key.
+        garage_longhorn_key_id: "{{ (garage_key_longhorn_info.stdout | regex_search('Key ID:\\s*(\\S+)', '\\1')) | first }}"
+        garage_longhorn_key_secret: "{{ (garage_key_longhorn_info.stdout | regex_search('Secret key:\\s*(\\S+)', '\\1')) | first }}"
+        garage_pgbackrest_key_id: "{{ (garage_key_pgbackrest_info.stdout | regex_search('Key ID:\\s*(\\S+)', '\\1')) | first }}"
+        garage_pgbackrest_key_secret: "{{ (garage_key_pgbackrest_info.stdout | regex_search('Secret key:\\s*(\\S+)', '\\1')) | first }}"
       no_log: true
 
     # -------------------------------------------------------------------
