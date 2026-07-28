@@ -43,8 +43,13 @@ spec:
         targetRevision: main
         hostname: api.voconsteroid.com
 
-      # vos-monolith-dev (needs 2 value files, base + dev override) is NOT
-      # here — see vos-monolith-dev-application.yaml's comment for why.
+      - name: vos-monolith-dev
+        namespace: vos-dev
+        syncWave: "10"
+        repoURL: https://github.com/MohammadBnei/vos-monolith.git
+        valuesPath: [back/helm/values.yaml, back/helm/values-dev.yaml]
+        targetRevision: dev
+        hostname: dev.api.voconsteroid.com
 
   template:
     metadata:
@@ -61,17 +66,21 @@ spec:
         path: gitops/platform/common-app-chart
         targetRevision: main
         helm:
-          # ArgoCD Go-templates individual string fields only — it can't
-          # range/loop to produce a variable number of YAML list items here
-          # (the ApplicationSet manifest itself must already be valid plain
-          # YAML before any templating runs, since the self-managing
-          # `bootstrap` Application applies it as a literal directory
-          # source). So this only ever emits one value file; apps needing
-          # more than one (currently just vos-monolith-dev) get their own
-          # standalone Application instead — see
-          # vos-monolith-dev-application.yaml.
+          # Fixed 2-slot valueFiles, not a variable-length range: ArgoCD
+          # Go-templates individual string fields only (the ApplicationSet
+          # manifest itself must already be valid plain YAML before any
+          # templating runs, since the self-managing `bootstrap` Application
+          # applies it as a literal directory source) — a `{{- range }}`
+          # here breaks YAML parsing before templating ever gets a chance to
+          # run. Keeping the list length fixed at 2 and only substituting
+          # each item's string content is the same safe idiom as
+          # `{{.name}}`/`{{.hostname}}` elsewhere in this file. Single-file
+          # apps get their one file listed twice (Helm merging a file with
+          # itself is a no-op); apps needing a base + override (e.g.
+          # vos-monolith-dev) set valuesPath to both.
           valueFiles:
           - $values/{{ index .valuesPath 0 }}
+          - $values/{{ if gt (len .valuesPath) 1 }}{{ index .valuesPath 1 }}{{ else }}{{ index .valuesPath 0 }}{{ end }}
           parameters:
           - name: ingress.hostname
             value: '{{.hostname}}'
