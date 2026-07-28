@@ -41,7 +41,7 @@ spec:
       source:
         repoURL: git@github.com:MohammadBnei/infra-bootstrap.git
         path: gitops/platform/common-app-chart
-        targetRevision: HEAD
+        targetRevision: main
         helm:
           valueFiles:
           - ../values/{{.name}}/values.yaml

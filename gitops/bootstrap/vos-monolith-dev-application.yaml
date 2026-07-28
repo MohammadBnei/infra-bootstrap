@@ -19,7 +19,7 @@ spec:
   # Source 1: shared Helm chart from infra-bootstrap
   - repoURL: git@github.com:MohammadBnei/infra-bootstrap.git
     path: gitops/platform/common-app-chart
-    targetRevision: HEAD
+    targetRevision: main
     helm:
       valueFiles:
       - $values/back/helm/values.yaml

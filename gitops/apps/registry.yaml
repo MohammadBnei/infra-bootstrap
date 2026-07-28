@@ -18,11 +18,14 @@
 #               override file (e.g. vos-monolith-dev) must be a standalone
 #               Application instead — see gitops/bootstrap/vos-monolith-dev-application.yaml.
 #               One registry entry is still always one Application/one env.
-#   targetRevision  Branch/tag in repoURL to read valuesPath from. Defaults
-#               to `HEAD` (the repo's default branch) for single-branch
-#               apps — set explicitly (e.g. `main`) for apps whose CI
-#               pushes tag bumps to a branch that ISN'T the GitHub default
-#               branch. Don't assume HEAD == "the production branch".
+#   targetRevision  Literal branch name in repoURL to read valuesPath from —
+#               always a real branch (e.g. `main`), never the symbolic
+#               `HEAD`. Found live: HEAD silently tracks whatever GitHub
+#               calls the "default branch", which is NOT necessarily where
+#               an app's prod CI actually pushes (vos-monolith's default
+#               branch is `dev`; prod tag bumps go to `main`). Being
+#               explicit here means the registry always states, in one
+#               place, exactly which branch is live — no guessing.
 #   hostname    Public hostname — passed as ingress.hostname to common-app-chart
 #
 # Per-app repo must have at minimum:
@@ -41,7 +44,7 @@
   syncWave: "10"
   repoURL: https://github.com/MohammadBnei/editable-blog.git
   valuesPath: [helm/values.yaml]
-  targetRevision: HEAD
+  targetRevision: main
   hostname: blog.bnei.dev
 
 # dream-analyst: second real per-app repo, following editable-blog's
@@ -51,7 +54,7 @@
   syncWave: "10"
   repoURL: https://github.com/MohammadBnei/dream-analyst.git
   valuesPath: [helm/values.yaml]
-  targetRevision: HEAD
+  targetRevision: main
   hostname: dreamer.bnei.dev
 
 # vos-monolith: onboarded onto Pattern C off its previous kustomize +

@@ -40,7 +40,7 @@ spec:
       - $values/gitops/platform/values/traefik/values.yaml
   # Source 2: values from infra-bootstrap — same SSH key as other platform apps
   - repoURL: git@github.com:MohammadBnei/infra-bootstrap.git
-    targetRevision: HEAD
+    targetRevision: main
     ref: values
   destination:
     server: https://kubernetes.default.svc

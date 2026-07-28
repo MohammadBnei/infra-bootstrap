@@ -24,7 +24,7 @@ spec:
         syncWave: "10"
         repoURL: https://github.com/MohammadBnei/editable-blog.git
         valuesPath: [helm/values.yaml]
-        targetRevision: HEAD
+        targetRevision: main
         hostname: blog.bnei.dev
 
       - name: dream-analyst
@@ -32,7 +32,7 @@ spec:
         syncWave: "10"
         repoURL: https://github.com/MohammadBnei/dream-analyst.git
         valuesPath: [helm/values.yaml]
-        targetRevision: HEAD
+        targetRevision: main
         hostname: dreamer.bnei.dev
 
       - name: vos-monolith
@@ -59,7 +59,7 @@ spec:
       # Source 1: shared Helm chart from infra-bootstrap
       - repoURL: git@github.com:MohammadBnei/infra-bootstrap.git
         path: gitops/platform/common-app-chart
-        targetRevision: HEAD
+        targetRevision: main
         helm:
           # ArgoCD Go-templates individual string fields only — it can't
           # range/loop to produce a variable number of YAML list items here
