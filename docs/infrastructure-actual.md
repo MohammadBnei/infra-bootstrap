@@ -207,6 +207,33 @@ Both VMs are QEMU on the same PVE host (.165) — **single point of failure for 
 - **Topology:** simple primary/replica, no witness node
 - **Failover:** manual only; no quorum-based automatic failover
 
+### Monitoring: VictoriaMetrics, not Prometheus
+
+Pigsty's bundled metrics backend on pg01 is **VictoriaMetrics v2.24.0**
+(this is Pigsty v4's default — earlier Pigsty versions used classic
+Prometheus), not classic Prometheus. It implements the same HTTP API
+(`/api/v1/query`, `/api/v1/status/buildinfo`, etc.), so anything that
+speaks to a Prometheus datasource — Grafana's `prometheus` datasource
+type included — works against it unmodified.
+
+Reachable directly over the LAN, no auth: `http://192.168.1.205/vmetrics`
+(behind Pigsty's own nginx portal on `:80`; port `9090` itself is not
+exposed — confirmed via `nc`, connection refused). Also worth noting: only
+the `home` domain (`i.pigsty`) is actually configured in
+`infra_portal` — the `p.pigsty`/`g.pigsty` per-service vhosts Pigsty's
+docs describe are **not** set up on this install, so any `Host` header
+lands on the same catch-all backend. The path (`/vmetrics`) is what
+routes correctly, not the hostname.
+
+The k8s cluster's own Grafana (`gitops/platform/values/grafana/values.yaml`)
+now has this wired up as a second, non-default datasource (`uid:
+ds-prometheus`, matching Pigsty's own fixed datasource UID — see
+`pigsty/roles/infra/templates/grafana/datasource.yml.j2:26`), plus
+Pigsty's own vendored `pgsql-overview` dashboard
+(`pigsty/files/grafana/pgsql/pgsql-overview.json`, copied verbatim since
+its panels already hardcode that same `ds-prometheus` UID). So both
+cluster and Postgres/Pigsty metrics are now visible from one Grafana.
+
 ### Migrated databases (from source .193 ~7.2GB)
 
 | Database | Approx size | Owner | Used by |
