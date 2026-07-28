@@ -22,8 +22,18 @@ service:
 # the ACME resolver for that pod's lifetime (confirmed via logs: "The ACME
 # resolve is skipped from the resolvers list"). fsGroup makes the CSI
 # driver chown the volume to this GID on mount.
+#
+# fsGroupChangePolicy: OnRootMismatch avoids a second bug this uncovered —
+# Kubernetes' default "Always" policy recursively resets every file's mode
+# to add group read/write on EVERY pod (re)start, which stomps acme.json
+# back to 660. lego (Traefik's ACME lib) requires exactly 600 and disables
+# the resolver if it isn't ("permissions 660 ... too open, please use
+# 600"). OnRootMismatch skips the recursive reset once the directory's
+# group ownership already matches, so Traefik's own 0600 file creation
+# isn't overwritten on subsequent restarts.
 podSecurityContext:
   fsGroup: 65532
+  fsGroupChangePolicy: OnRootMismatch
 
 ports:
   # Don't override `port:` here — that's the container's own listen port,
