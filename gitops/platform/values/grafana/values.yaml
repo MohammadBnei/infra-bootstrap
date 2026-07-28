@@ -28,3 +28,56 @@ datasources:
 grafana.ini:
   server:
     root_url: https://grafana.bnei.dev
+
+# Dashboards as code: the chart's own file-provisioning (no sidecar
+# container, no extra RBAC needed) — add a JSON dashboard under the
+# `gitops` key below and it's live on the next values sync, no manual
+# import. `editable: false` keeps them locked from UI edits so this
+# stays the source of truth (see gitops/README.md's dashboards note).
+dashboardProviders:
+  dashboardproviders.yaml:
+    apiVersion: 1
+    providers:
+    - name: gitops
+      orgId: 1
+      folder: ''
+      type: file
+      disableDeletion: false
+      editable: false
+      options:
+        path: /var/lib/grafana/dashboards/gitops
+
+dashboards:
+  gitops:
+    cluster-health:
+      json: |
+        {
+          "title": "Cluster Health (GitOps Example)",
+          "uid": "gitops-cluster-health",
+          "tags": ["gitops"],
+          "timezone": "browser",
+          "schemaVersion": 39,
+          "version": 1,
+          "refresh": "30s",
+          "time": { "from": "now-6h", "to": "now" },
+          "panels": [
+            {
+              "id": 1,
+              "type": "stat",
+              "title": "Targets Up",
+              "gridPos": { "h": 6, "w": 6, "x": 0, "y": 0 },
+              "targets": [
+                { "expr": "count(up == 1)", "refId": "A" }
+              ]
+            },
+            {
+              "id": 2,
+              "type": "timeseries",
+              "title": "Scrape Targets Up",
+              "gridPos": { "h": 10, "w": 18, "x": 6, "y": 0 },
+              "targets": [
+                { "expr": "up", "legendFormat": "{{job}}/{{instance}}", "refId": "A" }
+              ]
+            }
+          ]
+        }
