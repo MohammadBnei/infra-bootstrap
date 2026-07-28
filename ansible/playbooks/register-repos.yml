@@ -9,10 +9,14 @@
 # can't come from Infisical itself, since infisical.bnei.dev *is* the
 # instance being bootstrapped here. See register-repos.env.example.
 #
-# Once Infisical is up, it serves the user-app SSH keys to ArgoCD via
-# InfisicalSecret CRDs (see gitops/bootstrap/argocd-github-apps-creds.yaml).
-# Only the infra-bootstrap SSH key is injected manually here — the minimum
-# required to pull Infisical's own platform values from infra-bootstrap.
+# The ArgoCD credential for cloning user-app repos (repo-creds-github-bnei)
+# is ALSO created here, for a different reason: onboarding editable-blog
+# found that the infisical-operator's Go-template
+# `managedSecretReference.template.data` rendering corrupts secret values
+# unpredictably (confirmed on both a multi-line SSH key and a single-line
+# PAT — see docs/bootstrap-test-notes.md). Rather than route this through
+# Infisical/the operator at all, it's injected manually here, the same
+# proven-reliable way as the infra-bootstrap SSH key.
 #
 # Manifests are rendered locally (kubectl --dry-run=client never contacts
 # the API server) and applied on k8s-cp-01 over the existing SSH connection
@@ -28,6 +32,9 @@
     infisical_namespace: "{{ lookup('env', 'INFISICAL_NAMESPACE') | default('infisical', true) }}"
     infra_bootstrap_repo: "git@github.com:MohammadBnei/infra-bootstrap.git"
     infra_bootstrap_ssh_key_file: "{{ lookup('env', 'INFRA_BOOTSTRAP_SSH_KEY_FILE') | expanduser }}"
+    github_apps_https_url: "https://github.com/MohammadBnei"
+    github_apps_username: "{{ lookup('env', 'GITHUB_APPS_USERNAME') }}"
+    github_apps_pat: "{{ lookup('env', 'GITHUB_APPS_PAT') }}"
 
   tasks:
     - name: Assert required env vars are set
@@ -36,6 +43,8 @@
         fail_msg: "{{ item }} is not set — copy register-repos.env.example to register-repos.env, fill it in, and source it"
       loop:
         - INFRA_BOOTSTRAP_SSH_KEY_FILE
+        - GITHUB_APPS_USERNAME
+        - GITHUB_APPS_PAT
         - ENCRYPTION_KEY
         - AUTH_SECRET
         - SITE_URL
@@ -114,6 +123,68 @@
         argv: [kubectl, apply, -f, "-"]
         stdin: "{{ repo_secret_manifest.stdout }}"
       changed_when: true
+
+    # -------------------------------------------------------------------
+    # 2b. ArgoCD repo-creds template for user-app repos (HTTPS + PAT) —
+    #     injected manually, not via Infisical/InfisicalSecret, per the
+    #     comment at the top of this file (infisical-operator template
+    #     rendering corrupts this value unpredictably). PAT goes through a
+    #     mode-0600 tempfile (never a CLI argument), same as the
+    #     infisical-secrets block below.
+    # -------------------------------------------------------------------
+    - name: Manage repo-creds-github-bnei secret
+      block:
+        - name: Create temp file for GitHub PAT
+          delegate_to: localhost
+          become: false
+          ansible.builtin.tempfile:
+            state: file
+            suffix: .github-apps-pat
+          register: github_apps_pat_tmp
+
+        - name: Write GitHub PAT to temp file
+          delegate_to: localhost
+          become: false
+          no_log: true
+          ansible.builtin.copy:
+            dest: "{{ github_apps_pat_tmp.path }}"
+            mode: "0600"
+            content: "{{ github_apps_pat }}"
+
+        - name: Render repo-creds-github-bnei manifest (local, no cluster contact)
+          delegate_to: localhost
+          become: false
+          no_log: true
+          ansible.builtin.shell:
+            cmd: >
+              kubectl create secret generic repo-creds-github-bnei
+              --namespace {{ argocd_namespace }}
+              --from-literal=type=git
+              --from-literal=url={{ github_apps_https_url }}
+              --from-literal=username={{ github_apps_username }}
+              --from-file=password={{ github_apps_pat_tmp.path }}
+              --dry-run=client -o yaml
+              | kubectl label --local -f -
+              argocd.argoproj.io/secret-type=repo-creds
+              --dry-run=client -o yaml
+          register: github_apps_secret_manifest
+          changed_when: false
+
+        - name: Apply repo-creds-github-bnei secret
+          become: true
+          no_log: true
+          ansible.builtin.command:
+            argv: [kubectl, apply, -f, "-"]
+            stdin: "{{ github_apps_secret_manifest.stdout }}"
+          changed_when: true
+      always:
+        - name: Remove temp file for GitHub PAT
+          delegate_to: localhost
+          become: false
+          ansible.builtin.file:
+            path: "{{ github_apps_pat_tmp.path }}"
+            state: absent
+          when: github_apps_pat_tmp.path is defined
 
     # -------------------------------------------------------------------
     # 3. Infisical server credentials — feeds kubeSecretRef in the

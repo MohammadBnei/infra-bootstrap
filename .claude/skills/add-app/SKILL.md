@@ -52,17 +52,20 @@ needs a PVC or health probes.
      path: /healthz
      initialDelaySeconds: 15
    ```
-2. **Deploy key** — remind the user a read-only SSH deploy key is needed on
-   the new repo, with the private key stored in Infisical under
-   `GITHUB_APPS_SSH_KEY` (or added separately to the ArgoCD credential
-   store for a per-repo key). Never generate or write key material into
-   this repo.
-3. **`gitops/apps/registry.yaml`** — append an entry:
+2. **No per-repo credential needed** — `repo-creds-github-bnei` (HTTPS +
+   PAT, injected manually via `ansible/playbooks/register-repos.yml`, not
+   Infisical — see that file's header comment and
+   `docs/bootstrap-test-notes.md` for why) already grants ArgoCD read
+   access to every `MohammadBnei/*` repo. Just confirm the new repo is
+   under that account.
+3. **`gitops/apps/registry.yaml`** — append an entry, using the **HTTPS**
+   form for `repoURL` (not `git@github.com:...` — this project uses
+   HTTPS + PAT, not SSH):
    ```yaml
    - name: <app>
      namespace: <app>
      syncWave: "10"
-     repoURL: git@github.com:MohammadBnei/<app>.git
+     repoURL: https://github.com/MohammadBnei/<app>.git
      valuesPath: values.yaml
      hostname: <app>.bnei.dev
    ```

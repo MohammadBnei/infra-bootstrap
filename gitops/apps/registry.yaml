@@ -7,7 +7,9 @@
 #   name        ArgoCD Application name (lowercase, dashes only)
 #   namespace   Target namespace (created automatically)
 #   syncWave    All user apps at wave 10 (after platform is ready)
-#   repoURL     Per-app private git repo with values.yaml (SSH deploy key required)
+#   repoURL     Per-app private git repo with values.yaml (HTTPS + PAT auth —
+#               see argocd-github-apps-creds.yaml; SSH deploy keys are
+#               deliberately not used here, see that file's comment)
 #   valuesPath  Path to values file inside repoURL
 #   hostname    Public hostname — passed as ingress.hostname to common-app-chart
 #
@@ -20,13 +22,13 @@
 # will just fail to clone it.
 
 # editable-blog: test subject for validating the common-app-chart pipeline
-# before the Freebox cutover (Stage 1 plan). values.yaml lives at the repo
-# root of editable-blog itself.
+# before the Freebox cutover (Stage 1 plan). values.yaml lives at
+# helm/values.yaml in editable-blog itself.
 - name: editable-blog
   namespace: editable-blog
   syncWave: "10"
-  repoURL: git@github.com:MohammadBnei/editable-blog.git
-  valuesPath: values.yaml
+  repoURL: https://github.com/MohammadBnei/editable-blog.git
+  valuesPath: helm/values.yaml
   hostname: blog.bnei.dev
 #
 # searxng and pgweb are NOT here: they're public-image tools with no

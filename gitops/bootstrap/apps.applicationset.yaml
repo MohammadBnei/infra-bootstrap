@@ -22,8 +22,8 @@ spec:
       - name: editable-blog
         namespace: editable-blog
         syncWave: "10"
-        repoURL: git@github.com:MohammadBnei/editable-blog.git
-        valuesPath: values.yaml
+        repoURL: https://github.com/MohammadBnei/editable-blog.git
+        valuesPath: helm/values.yaml
         hostname: blog.bnei.dev
 
   template:
@@ -46,7 +46,8 @@ spec:
           parameters:
           - name: ingress.hostname
             value: '{{.hostname}}'
-      # Source 2: per-app values repo (private, SSH deploy key required)
+      # Source 2: per-app values repo (private, HTTPS + PAT via
+      # argocd-github-apps-creds.yaml's repo-creds template)
       - repoURL: '{{.repoURL}}'
         targetRevision: HEAD
         ref: values

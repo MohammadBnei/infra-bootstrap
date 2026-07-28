@@ -41,14 +41,14 @@ everything.
 | `HAPROXY_ADMIN_PASSWORD` | HAProxy stats page admin login | agent (random 32B) | pigsty `haproxy_stats` |
 | `PGADMIN_PASSWORD` | pgAdmin console login | agent (random 32B) | pigsty `pgadmin` |
 | `GARAGE_ROOT_TOKEN` | Garage S3 root token (maps to Garage's `rpc_secret` — gates cluster admin/layout/node operations) | agent (`ansible/playbooks/garage-configure.yml`, generated on first boot) | everything that provisions S3 buckets |
-| `GITHUB_APPS_SSH_KEY` | Read-only deploy key (full PEM private key), public half added to every `MohammadBnei/*` user-app repo — lets ArgoCD clone their private `values.yaml` | user (fresh keypair, one public half per app repo) | `gitops/bootstrap/argocd-github-apps-creds.yaml` (InfisicalSecret) → ArgoCD repo-creds |
+| `GITHUB_APPS_PAT` / `GITHUB_APPS_USERNAME` | GitHub Personal Access Token (fine-grained, read-only) + the account it belongs to — lets ArgoCD clone private per-app `values.yaml` repos over HTTPS | user (github.com) | **Not** Infisical/operator-managed — injected via `register-repos.env` + `ansible/playbooks/register-repos.yml`, same as `repo-infra-bootstrap`. The infisical-operator's template rendering corrupts this value unpredictably; see `docs/bootstrap-test-notes.md` |
 | `BASIC_AUTH_HTPASSWD` | Shared Traefik BasicAuth credential (`user:apr1-hash` line) gating admin-only tools (pgweb, etc.) | reused from the existing value in `k8s-cluster/traefik/middlewares/basicauth.yml` (not rotated during migration) | `gitops/bootstrap/basic-admin-auth-secret.yaml` (InfisicalSecret) → shared `basic-admin-auth` Middleware |
 
 ## Per-app Infisical projects
 
 Some `platform-common-apps` (see `gitops/README.md`) get their own small,
 narrowly-scoped Infisical project instead of living at the `infra-bootstrap`
-project root — same reasoning as `GITHUB_APPS_SSH_KEY`'s original placement:
+project root — same reasoning as `GITHUB_APPS_PAT`'s placement:
 keeps a compromised per-app grant from reaching PVE tokens/DB passwords.
 `universal-auth-credentials` needs a separate access grant per project
 below (Infisical UI), on top of its `infra-bootstrap-1-ge1` grant.
