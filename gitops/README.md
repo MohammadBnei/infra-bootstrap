@@ -19,6 +19,7 @@ gitops/
 │   ├── traefik-crds/                      # Traefik's own CRDs (traefik.io_*/hub.traefik.io_*), vendored — see file comment in traefik-application.yaml
 │   ├── actions-runner-application.yaml    # Standalone Application: self-hosted GitHub Actions runner (plain manifests, no chart) — ADR-0022
 │   ├── vos-monolith-dev-application.yaml  # Standalone Application: vos-monolith-dev, deliberately excluded from apps.applicationset.yaml
+│   ├── redirectors-application.yaml       # Standalone Application: TLS-terminating redirects to out-of-cluster hosts, plain manifests in gitops/redirectors/
 │   ├── argocd-ingressroute.yaml           # Traefik IngressRoute → argocd.bnei.dev
 │   ├── infisical-ingressroute.yaml       # Traefik IngressRoute → infisical.bnei.dev
 │   ├── grafana-admin-secret.yaml          # InfisicalSecret → Grafana admin credentials
@@ -51,6 +52,8 @@ gitops/
 │       ├── local-path-provisioner/values.yaml
 │       ├── searxng/values.yaml            # common-app-chart values, driven by platform-common-apps.applicationset.yaml
 │       └── pgweb/values.yaml              # ditto
+├── redirectors/                           # Plain manifests, no chart — TLS-terminating redirects to out-of-cluster hosts
+│   └── proxmox.yaml                       # Service+Endpoints+EndpointSlice+ServersTransport+IngressRoute → proxmox.bnei.dev (192.168.1.165:8006)
 └── apps/
     └── registry.yaml                      # Human source of truth for user apps (apps needing their own repo)
 ```
@@ -69,7 +72,7 @@ Everything is sequenced so each layer is ready before the next depends on it:
 | 1 | **Infisical**, **infisical-operator** | Serves secrets to ArgoCD/apps via `InfisicalSecret` CRDs (the operator provides the CRD itself) — must be ready before any app that needs a private values repo or Infisical-backed secret |
 | 2 | **Traefik** (standalone `traefik-application.yaml`, not in the ApplicationSet) | Ingress — must be up before IngressRoutes resolve |
 | 5 | Prometheus, Grafana, metrics-server | Observability, no hard ordering constraint |
-| 10 | User apps (`apps.applicationset.yaml`), platform-common-apps (`platform-common-apps.applicationset.yaml`) | Depend on Infisical (secrets) + Traefik (IngressRoutes) |
+| 10 | User apps (`apps.applicationset.yaml`), platform-common-apps (`platform-common-apps.applicationset.yaml`), redirectors (`redirectors-application.yaml`) | Depend on Infisical (secrets) + Traefik (IngressRoutes) |
 
 Note: since [ADR-0021](../docs/adr/0021-self-syncing-bootstrap-directory.md) these Application/ApplicationSet manifests are all siblings inside the same `bootstrap` Application's resource list, but none of them carry a sync-wave annotation on their own metadata (only on the child app entries an ApplicationSet's `list` generator spawns) — so ArgoCD still doesn't order these siblings relative to each other. These numbers are the intended/documented order. In practice each Application's own `retry`/`selfHeal` policy converges regardless of exact creation order.
 
@@ -127,6 +130,8 @@ Unlike the two ApplicationSets above, both the chart (`common-app-chart`) and th
 Each user app: `common-app-chart` from infra-bootstrap + per-app `values.yaml` from the app's own private repo (two Application sources, `GITHUB_APPS_SSH_KEY` required).
 
 Image updates are handled by each app's own CD pipeline — ArgoCD just syncs whatever `image.tag` is in `values.yaml`.
+
+**`redirectors-application.yaml`** (wave 10) is also standalone, deliberately not a chart or ApplicationSet: TLS-terminating redirects to out-of-cluster LAN hosts (e.g. Proxmox's web UI at `192.168.1.165:8006`), which have no pods to template a Deployment/Service around. Each redirect is one self-contained plain manifest (selector-less Service + Endpoints/EndpointSlice pointing at the bare IP, optional `ServersTransport` for a self-signed backend cert, IngressRoute with `tls.certResolver: le`) dropped straight into `gitops/redirectors/`, synced the same flat-directory way as `bootstrap-application.yaml` itself (ADR-0021). Add one: copy `proxmox.yaml`, change the name/namespace/hostname/backend IP:port.
 
 ### common-app-chart
 

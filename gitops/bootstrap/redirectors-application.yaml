@@ -1,0 +1,35 @@
+# TLS-terminating redirects to out-of-cluster hosts (LAN appliances like
+# Proxmox) - plain manifests, no chart, one file per redirect in
+# gitops/redirectors/. Add one: drop a new file there (see proxmox.yaml
+# for the shape) and merge to main; this Application picks it up
+# automatically, same self-syncing idea as bootstrap-application.yaml.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: redirectors
+  namespace: argocd
+  finalizers:
+  - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: git@github.com:MohammadBnei/infra-bootstrap.git
+    targetRevision: main
+    path: gitops/redirectors
+    directory: {}
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: default
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+    - CreateNamespace=true
+    - ServerSideApply=true
+    retry:
+      limit: 5
+      backoff:
+        duration: 5s
+        factor: 2
+        maxDuration: 3m
