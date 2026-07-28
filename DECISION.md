@@ -70,6 +70,15 @@ updated.
     homelab.
   - Operations live on Hermes (hermesagent LXC) — no operator-workstation
     action required from the user when an agent can do it via API + SSH.
+- **CI runs in-cluster, not on GitHub-hosted runners:** GitHub-hosted
+  runners can't reach the cluster's K8s API (LAN-only `.bnei.lan`, no VPN
+  per ADR-0009). A self-hosted runner lives in-cluster instead, RBAC-scoped
+  to `vos`/`vos-dev` only (no cluster-wide access) — see
+  [ADR-0022](docs/adr/0022-self-hosted-actions-runner.md). It drives
+  `common-app-chart`'s `hooks:` (guard-railed ArgoCD PreSync/PostSync
+  `Job`s) and `oneOffJobs:` (suspended `CronJob`s + a git-committed ledger,
+  triggered by a generic reusable workflow) — see
+  [ADR-0023](docs/adr/0023-common-app-chart-hooks-and-oneoff-jobs.md).
 
 ## 3. Do not propose (quick reference — see linked ADR for full reasoning)
 
@@ -132,6 +141,6 @@ them:
 
 ---
 
-_Last refreshed: 2026-07-12._
+_Last refreshed: 2026-07-28._
 _Source of truth: this file (`DECISION.md`) for WHY, `docs/adr/` for
 per-decision reasoning, `ARCHITECTURE.md` for WHAT._

@@ -237,6 +237,16 @@ graph TD
     Render --> Cluster[Cluster resources, synced automated+prune+selfHeal]
 ```
 
+**CI/CD:** a self-hosted GitHub Actions runner (`myoung34/github-runner`)
+runs in-cluster as its own standalone Application
+(`gitops/bootstrap/actions-runner-application.yaml`,
+`gitops/platform/actions-runner/`) — GitHub-hosted runners can't reach the
+cluster's LAN-only K8s API, and a VPN was already rejected (ADR-0009). RBAC
+is scoped per-namespace (`vos`/`vos-dev` today), never cluster-wide. It's
+the execution target for `common-app-chart`'s `hooks:`/`oneOffJobs:`
+(ArgoCD sync hooks + a ledger-driven reusable workflow for one-time
+scripts — ADR-0022 / ADR-0023).
+
 ---
 
 ## 6. Database / Pigsty

@@ -91,7 +91,7 @@ manually here instead, same as the infra-bootstrap SSH key. See
 secrets and Infisical's own server credentials are injected manually.
 Everything else flows from Infisical once it's running.
 
-### Three ApplicationSets, plus one standalone Application
+### Three ApplicationSets, plus two standalone Applications
 
 **`platform.applicationset.yaml`** — platform infrastructure, external public Helm charts:
 
@@ -109,13 +109,15 @@ Each platform app: public Helm chart + values from `infra-bootstrap` via the man
 
 **`traefik-application.yaml`** (wave 2) is deliberately a standalone `Application`, not part of the ApplicationSet above: it needs `helm.skipCrds: true` (the chart bundles an outdated Gateway API CRD set that a cluster `ValidatingAdmissionPolicy` rejects), and `skipCrds` is a `bool` field the ApplicationSet CRD validates strictly — it can't be produced by a per-element Go-template conditional in the shared list template. See the comment in the file for the full story.
 
+**`actions-runner-application.yaml`** (wave 1) is also standalone: plain manifests (RBAC/ServiceAccount binding, not something `common-app-chart` renders), deploying the self-hosted GitHub Actions runner (`gitops/platform/actions-runner/`) that executes `common-app-chart`'s `hooks:`/`oneOffJobs:` CI (see ADR-0022). RBAC is scoped per-namespace — extend `rbac-<namespace>.yaml` any time another app's `oneOffJobs` gets wired up.
+
 **`platform-common-apps.applicationset.yaml`** — simple containerized tools with no app-specific code (public image, no CI/CD of their own), all at wave 10:
 
 searxng · pgweb
 
 Unlike the two ApplicationSets above, both the chart (`common-app-chart`) and the values file live in `infra-bootstrap` itself — a single Application source, no external repo or SSH key needed. Add one: append a list element + `gitops/platform/values/<name>/values.yaml`.
 
-**`apps.applicationset.yaml`** — user apps that need their own private repo (app-specific code/CI, own release cadence), all at wave 10. Currently empty — n8n, openweb-ui(+pipelines), whodb, api, and ukubi-ai are deferred until each has a real per-app repo (see `docs/bootstrap-test-notes.md`).
+**`apps.applicationset.yaml`** — user apps that need their own private repo (app-specific code/CI, own release cadence), all at wave 10. Currently: `editable-blog`, `dream-analyst`, `vos-monolith` (see `gitops/apps/registry.yaml`). n8n, openweb-ui(+pipelines), whodb, api, and ukubi-ai are still deferred until each has a real per-app repo (see `docs/bootstrap-test-notes.md`).
 
 Each user app: `common-app-chart` from infra-bootstrap + per-app `values.yaml` from the app's own private repo (two Application sources, `GITHUB_APPS_SSH_KEY` required).
 
