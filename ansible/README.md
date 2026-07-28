@@ -89,17 +89,25 @@ on `k8s-cp-01` (`become: true`) with the rendered YAML passed via the
 Prepares `.200` (server1) and `.161` (ex-laptop) to join `.165` as a single
 corosync-clustered PVE datacenter (`docs/adr/0020-pve-corosync-cluster.md`):
 lid/suspend disable on `.161` (ADR-0013), repo/NTP prep, a dedicated ZFS
-pool per host (ADR-0014), the corosync join itself, and propagating the
-golden K8s template (VMID 9001) so Terraform can place worker VMs there.
+pool per host (ADR-0014), and the corosync join itself. No template
+pre-staging step — clustering already lets any node clone the golden
+K8s template (VMID 9001, stays on proxmox) directly onto another node on
+demand (`qm clone --target <node> --full`), so a future `vm-provision.yml`
+does that at VM-creation time instead.
 
 Targets `ansible/inventories/proxmox/hosts.yml` (root SSH, not the K8s VM
 inventory). Full sequencing (the corosync join must run one host at a time)
 lives in [`docs/runbook-pve-postinstall.md`](../docs/runbook-pve-postinstall.md) —
 not repeated here.
 
-**Status:** authored, not yet run — `.200`/`.161` don't have PVE installed
-or a network path to them yet. Safe to `--syntax-check` today; the real run
-is a later, human-driven session once both hosts exist and are reachable.
+**Status:** run and verified against both hosts — `.200` (server1) and
+`.161` (ex-laptop) are both reinstalled to PVE and joined `.165`'s
+corosync cluster (fixes along the way: `pvecm add --use_ssh 1` to force
+the SSH trust, a wait-for-quorum retry after bootstrapping the cluster).
+`.200` ended up single-disk (its second disk was removed pre-reinstall),
+so its ZFS-pool play is a no-op there — see
+[ADR-0024](../docs/adr/0024-server1-single-disk-ext4-no-dedicated-zfs.md).
+`.161` kept its dedicated `zfs-exlaptop` pool per ADR-0014.
 
 ## `playbooks/garage-configure.yml`
 

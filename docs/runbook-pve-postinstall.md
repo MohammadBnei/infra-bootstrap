@@ -14,9 +14,14 @@ around it.
 ## 1. Goal
 
 Reinstall `.200` (server1) and `.161` (ex-laptop) as PVE 9.x, join them
-into one corosync cluster with `.165`, give each a dedicated ZFS pool
-(ADR-0014), and propagate the golden K8s template (VMID 9001) — leaving
-both nodes ready for Terraform to place K8s worker VMs on them (Phase C).
+into one corosync cluster with `.165`, and give each a dedicated ZFS pool
+(ADR-0014) — leaving both nodes ready for Terraform to place K8s worker
+VMs on them (Phase C). No template pre-staging step: corosync clustering
+already lets any node clone the golden template (VMID 9001, stays on
+proxmox) directly onto another node on demand (`qm clone 9001 <newid>
+--target <node> --full`), so a future `vm-provision.yml` does that at
+VM-creation time rather than this runbook pre-copying it everywhere ahead
+of need.
 
 ## 2. Prereqs
 
@@ -40,15 +45,14 @@ Run against `ansible/inventories/proxmox/hosts.yml`. Never target both new
 hosts at once for the corosync join (play 4) — sequential, one at a time,
 confirming quorum in between.
 
-Plays are tagged so the corosync join and template propagation can be run
-separately from the rest — see the playbook's header comment for the full
-command set. In short:
+Plays are tagged so the corosync join can be run separately from the rest
+— see the playbook's header comment for the full command set. In short:
 
 1. **Lid/suspend fix + common host prep + ZFS pools** (plays 1-3, safe to
    run against both hosts together):
    ```bash
    ansible-playbook -i ansible/inventories/proxmox/hosts.yml \
-     ansible/playbooks/pve-postinstall.yml --skip-tags corosync,template-propagation
+     ansible/playbooks/pve-postinstall.yml --skip-tags corosync
    ```
 2. **Corosync join, `.200` first**. Needs `PVE_SSH_PRIVATE_KEY` in the
    environment (the corosync play uses it to pre-trust root@proxmox from the
@@ -69,25 +73,22 @@ command set. In short:
 4. **Fill in `pve_node_name`** for both hosts in
    `ansible/inventories/proxmox/hosts.yml` from `pvesh get /nodes` output
    (not guaranteed to match the inventory alias — same caveat as
-   `terraform/variables.tf`'s `pve_node_name`).
-5. **Template propagation**:
-   ```bash
-   ansible-playbook -i ansible/inventories/proxmox/hosts.yml \
-     ansible/playbooks/pve-postinstall.yml --tags template-propagation
-   ```
+   `terraform/variables.tf`'s `pve_node_name`). Not consumed by this
+   playbook anymore (no template-propagation step left to need it) — this
+   is for Phase C's Terraform work, which places VMs per-node.
 
 ## 4. Verification
 
 ```bash
 pvecm status        # 3/3 quorum
 pvesm status         # both new ZFS pools visible cluster-wide
-qm list              # (run per-node, or via `pvesh get /nodes/<node>/qemu`) shows VMID 9001 on each new node
 systemctl status sleep.target   # on ex-laptop — masked
 ```
 
 Before trusting the flow for anything with real data on it, test a
-disposable VM: `qm migrate <test-vmid> <target-node> --with-local-disks
---online` should succeed cleanly.
+disposable VM: `qm clone 9001 <test-vmid> --target <node> --full` (an
+independent copy, unlike `qm migrate` which relocates the source instead
+of copying it — see the playbook's header comment) should succeed cleanly.
 
 ## 5. Rollback
 
