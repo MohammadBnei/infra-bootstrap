@@ -53,7 +53,7 @@ gitops/
 │       ├── searxng/values.yaml            # common-app-chart values, driven by platform-common-apps.applicationset.yaml
 │       └── pgweb/values.yaml              # ditto
 ├── redirectors/                           # Plain manifests, no chart — TLS-terminating redirects to out-of-cluster hosts
-│   └── proxmox.yaml                       # Namespace+Service+Endpoints+EndpointSlice+ServersTransport+IngressRoute → proxmox.bnei.dev (192.168.1.165:8006)
+│   └── proxmox.yaml                       # Namespace+Service(ExternalName)+ServersTransport+IngressRoute → proxmox.bnei.dev (192.168.1.165:8006)
 └── apps/
     └── registry.yaml                      # Human source of truth for user apps (apps needing their own repo)
 ```
@@ -131,7 +131,9 @@ Each user app: `common-app-chart` from infra-bootstrap + per-app `values.yaml` f
 
 Image updates are handled by each app's own CD pipeline — ArgoCD just syncs whatever `image.tag` is in `values.yaml`.
 
-**`redirectors-application.yaml`** (wave 10) is also standalone, deliberately not a chart or ApplicationSet: TLS-terminating redirects to out-of-cluster LAN hosts (e.g. Proxmox's web UI at `192.168.1.165:8006`), which have no pods to template a Deployment/Service around. Each redirect is one self-contained plain manifest (own `Namespace` object — `CreateNamespace=true` only auto-creates the Application's own `destination.namespace`, not other namespaces referenced inside a directory source, same reason `actions-runner`'s manifests declare their own `Namespace` too — plus a selector-less Service + Endpoints/EndpointSlice pointing at the bare IP, optional `ServersTransport` for a self-signed backend cert, IngressRoute with `tls.certResolver: le`) dropped straight into `gitops/redirectors/`, synced the same flat-directory way as `bootstrap-application.yaml` itself (ADR-0021). Add one: copy `proxmox.yaml`, change the name/namespace/hostname/backend IP:port.
+**`redirectors-application.yaml`** (wave 10) is also standalone, deliberately not a chart or ApplicationSet: TLS-terminating redirects to out-of-cluster LAN hosts (e.g. Proxmox's web UI at `192.168.1.165:8006`), which have no pods to template a Deployment/Service around. Each redirect is one self-contained plain manifest (own `Namespace` object — `CreateNamespace=true` only auto-creates the Application's own `destination.namespace`, not other namespaces referenced inside a directory source, same reason `actions-runner`'s manifests declare their own `Namespace` too — plus a `type: ExternalName` Service pointing at the bare IP, optional `ServersTransport` for a self-signed backend cert, IngressRoute with `tls.certResolver: le`) dropped straight into `gitops/redirectors/`, synced the same flat-directory way as `bootstrap-application.yaml` itself (ADR-0021). Add one: copy `proxmox.yaml`, change the name/namespace/hostname/backend IP:port.
+
+Deliberately `ExternalName`, not `ClusterIP` + hand-authored `Endpoints`/`EndpointSlice`: `argocd-cm`'s `resource.exclusions` excludes both `Endpoints` and `EndpointSlice` cluster-wide (standard tuning to cut watch/UI churn from the control-plane-managed ones), so ArgoCD silently drops them from any manifest it applies — Traefik ends up with a Service but zero backends ("no available server"). `ExternalName` sidesteps this entirely: no Endpoints/EndpointSlice exist for that Service type, and Traefik's `kubernetesCRD` provider resolves `spec.externalName` directly, IP literals included.
 
 ### common-app-chart
 

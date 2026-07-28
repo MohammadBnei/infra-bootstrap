@@ -7,51 +7,26 @@ kind: Namespace
 metadata:
   name: proxmox
 ---
+# ExternalName, not ClusterIP+Endpoints/EndpointSlice: ArgoCD's argocd-cm
+# excludes both Endpoints and EndpointSlice cluster-wide (standard
+# resource.exclusions tuning, to cut watch/UI churn from the
+# control-plane-managed ones) - so a hand-authored Endpoints/EndpointSlice
+# pair is silently dropped on every sync, leaving Traefik with no backend
+# ("no available server"). ExternalName needs neither - Traefik's
+# kubernetesCRD provider resolves spec.externalName directly, IP literals
+# included.
 apiVersion: v1
 kind: Service
 metadata:
   name: proxmox
   namespace: proxmox
 spec:
-  type: ClusterIP
+  type: ExternalName
+  externalName: "192.168.1.165"
   ports:
   - port: 8006
-    targetPort: 8006
     protocol: TCP
     name: https
-  # No selector - backend is a bare LAN IP, not a pod
----
-apiVersion: v1
-kind: Endpoints
-metadata:
-  name: proxmox
-  namespace: proxmox
-subsets:
-- addresses:
-  - ip: "192.168.1.165"
-  ports:
-  - port: 8006
-    name: https
-    protocol: TCP
----
-apiVersion: discovery.k8s.io/v1
-kind: EndpointSlice
-metadata:
-  name: proxmox
-  namespace: proxmox
-  labels:
-    kubernetes.io/service-name: proxmox
-addressType: IPv4
-ports:
-- name: https
-  protocol: TCP
-  port: 8006
-endpoints:
-- addresses:
-  - "192.168.1.165"
-  conditions:
-    ready: true
-    serving: true
 ---
 # Proxmox's pveproxy serves a self-signed cert - skip verifying it on the
 # upstream hop (the client-facing hop still gets a real cert via Traefik's
