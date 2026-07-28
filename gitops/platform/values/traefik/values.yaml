@@ -16,6 +16,15 @@ service:
   annotations:
     metallb.universe.tf/loadBalancerIPs: 192.168.1.233
 
+# Chart's default podSecurityContext (runAsUser/runAsGroup: 65532) has no
+# fsGroup, so the acme.json PVC mounts root:root/0755 — Traefik can't
+# create the file at all ("permission denied"), which permanently disables
+# the ACME resolver for that pod's lifetime (confirmed via logs: "The ACME
+# resolve is skipped from the resolvers list"). fsGroup makes the CSI
+# driver chown the volume to this GID on mount.
+podSecurityContext:
+  fsGroup: 65532
+
 ports:
   # Don't override `port:` here — that's the container's own listen port,
   # and the chart's default securityContext runs as non-root (UID 65532,
