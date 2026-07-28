@@ -1,0 +1,28 @@
+{{- range $name, $job := .Values.oneOffJobs }}
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: {{ $.Release.Name }}-{{ $name | lower }}
+  namespace: {{ $.Release.Namespace }}
+  labels:
+    {{- include "common-app-chart.labels" $ | nindent 4 }}
+spec:
+  # Schedule is syntactically required by the CronJob API but functionally
+  # irrelevant here — Feb 31st never occurs. `suspend: true` below is what
+  # actually prevents auto-firing; this is belt-and-suspenders.
+  schedule: "0 0 31 2 *"
+  suspend: true
+  concurrencyPolicy: Forbid
+  jobTemplate:
+    spec:
+      backoffLimit: 0
+      template:
+        metadata:
+          labels:
+            {{- include "common-app-chart.selectorLabels" $ | nindent 12 }}
+        spec:
+          restartPolicy: Never
+          containers:
+          {{- include "common-app-chart.jobContainer" (dict "root" $ "name" $name "job" $job) | nindent 10 }}
+{{- end }}

@@ -105,3 +105,49 @@ extraVolumeMounts: []
 # templating works inside. Same idiom as Bitnami's `extraDeploy` — keeps
 # common-app-chart generic instead of growing per-app special cases.
 extraManifests: []
+
+# Recurring, idempotent, every-sync ArgoCD hook Jobs (schema migrations,
+# etc.) — map-keyed so a layered env-override file (see registry.yaml's
+# valuesPath) can touch one field (e.g. just image.tag) via Helm's map
+# deep-merge, without repeating the whole entry (Helm replaces *lists*
+# wholesale on merge, but deep-merges maps).
+#
+# The chart always sets the ArgoCD hook annotation, backoffLimit: 0, and
+# restartPolicy: Never — not user-configurable — so a hook can't silently
+# degrade into a stuck normal resource (missing hook annotation leaves an
+# immutable Job stuck on a stale image forever) or mask failures behind
+# retries.
+hooks: {}
+# hooks:
+#   migrate:
+#     type: PreSync            # PreSync | PostSync | SyncFail
+#     enabled: true             # default true; explicit `false` skips
+#                                # rendering entirely (safe decommission)
+#     hookDeletePolicy: BeforeHookCreation   # optional override
+#     image:
+#       repository: ""
+#       tag: "latest"
+#     command: []
+#     args: []
+#     env: []
+#     envFrom: []                # auto-appends the InfisicalSecret secretRef
+#                                 # when infisical.enabled, same as the Deployment
+#     resources: {}
+
+# Irregular / one-time scripts. Rendered as suspended CronJobs (suspend:
+# true — a schedule is syntactically required but never fires on its own);
+# triggered on demand via `kubectl create job --from=cronjob/<release>-<name>
+# <run-id>`. `lastRunTag` is a ledger field the chart never reads — CI
+# writes it back once a run against that tag has succeeded.
+oneOffJobs: {}
+# oneOffJobs:
+#   dbCheck:
+#     image:
+#       repository: ""
+#       tag: "latest"
+#     command: []
+#     args: []
+#     env: []
+#     envFrom: []
+#     resources: {}
+#     lastRunTag: null
