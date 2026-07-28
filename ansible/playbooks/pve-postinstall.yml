@@ -124,11 +124,26 @@
         components: pve-no-subscription
         signed_by: /usr/share/keyrings/proxmox-archive-keyring.gpg
 
-    - name: Ensure systemd-timesyncd is enabled and running (NTP)
+    # PVE hosts ship with either systemd-timesyncd or chrony depending on the
+    # install media/point release (confirmed live: server1 has
+    # systemd-timesyncd, ex-laptop only has chrony) — enable whichever is
+    # actually present instead of assuming one.
+    - name: Detect which time-sync service is available on this host
+      ansible.builtin.service_facts:
+
+    - name: Ensure systemd-timesyncd is enabled and running (NTP), if present
       ansible.builtin.systemd:
         name: systemd-timesyncd
         enabled: true
         state: started
+      when: "'systemd-timesyncd.service' in ansible_facts.services"
+
+    - name: Ensure chrony is enabled and running (NTP), if present instead
+      ansible.builtin.systemd:
+        name: chrony
+        enabled: true
+        state: started
+      when: "'chrony.service' in ansible_facts.services"
 
     - name: Apply PVE host sysctl settings (currently empty — see pve_sysctl_settings above)
       ansible.posix.sysctl:
@@ -206,9 +221,19 @@
     # unattended and idempotent instead — same fix covers ex-laptop's join
     # later for free. Value comes from the calling shell's environment
     # (`infisical run` sets it), never written to this repo.
+    #
+    # `infisical run` strips the value's trailing newline when injecting it
+    # as an env var — an OpenSSH private key file without that final newline
+    # after "-----END OPENSSH PRIVATE KEY-----" fails to parse ("error in
+    # libcrypto"), confirmed live (this task wrote a 398-byte, newline-less
+    # file that left `pvecm add` hung on a key that could never work). Same
+    # trailing-newline-corruption class as the GitHub PAT bug fixed in
+    # ansible/playbooks/register-repos.yml — opposite direction here (add one
+    # back, rather than trim an extra one), so `trim` first to normalize
+    # whatever whitespace made it through, then append exactly one newline.
     - name: Write the shared PVE root SSH key for this node's outbound use
       ansible.builtin.copy:
-        content: "{{ lookup('ansible.builtin.env', 'PVE_SSH_PRIVATE_KEY') }}"
+        content: "{{ (lookup('ansible.builtin.env', 'PVE_SSH_PRIVATE_KEY') | trim) ~ '\n' }}"
         dest: /root/.ssh/id_pve_cluster
         mode: "0600"
       no_log: true
