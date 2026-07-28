@@ -12,10 +12,12 @@
 #               deliberately not used here, see that file's comment)
 #   valuesPath  List of values file paths inside repoURL, layered in order
 #               (later files win — Helm deep-merges maps, replaces lists
-#               wholesale). Single-app-single-env: one-element list. Multi-env
-#               apps: a shared base file + a per-env override file, e.g.
-#               [helm/values.yaml, helm/values-dev.yaml] — see vos-monolith-dev
-#               below. One registry entry is still always one Application/one env.
+#               wholesale). The shared ApplicationSet template only supports
+#               one-element lists (ArgoCD Go-templates string fields, not a
+#               variable-length YAML list); a multi-env app needing a base +
+#               override file (e.g. vos-monolith-dev) must be a standalone
+#               Application instead — see gitops/bootstrap/vos-monolith-dev-application.yaml.
+#               One registry entry is still always one Application/one env.
 #   hostname    Public hostname — passed as ingress.hostname to common-app-chart
 #
 # Per-app repo must have at minimum:
@@ -47,9 +49,7 @@
 
 # vos-monolith: onboarded onto Pattern C off its previous kustomize +
 # imperative-Application setup — see docs/adr/ for the hooks/oneOffJobs
-# chart pattern this replaced it with. Two registry entries (not one) since
-# one entry is always one Application/one env; vos-monolith-dev layers a
-# dev override on top of the same base values file.
+# chart pattern this replaced it with.
 - name: vos-monolith
   namespace: vos
   syncWave: "10"
@@ -57,12 +57,13 @@
   valuesPath: [back/helm/values.yaml]
   hostname: api.voconsteroid.com
 
-- name: vos-monolith-dev
-  namespace: vos-dev
-  syncWave: "10"
-  repoURL: https://github.com/MohammadBnei/vos-monolith.git
-  valuesPath: [back/helm/values.yaml, back/helm/values-dev.yaml]
-  hostname: dev.api.voconsteroid.com
+# vos-monolith-dev is NOT a list-generator entry here: it needs 2 value
+# files (base + dev override), which the shared ApplicationSet template
+# can't express (Go-templates individual string fields only, not a
+# variable-length YAML list — see apps.applicationset.yaml's comment). It's
+# deployed as a standalone Application instead:
+# gitops/bootstrap/vos-monolith-dev-application.yaml (same pattern as
+# platform-traefik for the same reason).
 #
 # searxng and pgweb are NOT here: they're public-image tools with no
 # app-specific code, so they're driven as platform apps instead — see

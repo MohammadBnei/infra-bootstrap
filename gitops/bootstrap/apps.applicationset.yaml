@@ -40,12 +40,8 @@ spec:
         valuesPath: [back/helm/values.yaml]
         hostname: api.voconsteroid.com
 
-      - name: vos-monolith-dev
-        namespace: vos-dev
-        syncWave: "10"
-        repoURL: https://github.com/MohammadBnei/vos-monolith.git
-        valuesPath: [back/helm/values.yaml, back/helm/values-dev.yaml]
-        hostname: dev.api.voconsteroid.com
+      # vos-monolith-dev (needs 2 value files, base + dev override) is NOT
+      # here — see vos-monolith-dev-application.yaml's comment for why.
 
   template:
     metadata:
@@ -62,10 +58,17 @@ spec:
         path: gitops/platform/common-app-chart
         targetRevision: HEAD
         helm:
+          # ArgoCD Go-templates individual string fields only — it can't
+          # range/loop to produce a variable number of YAML list items here
+          # (the ApplicationSet manifest itself must already be valid plain
+          # YAML before any templating runs, since the self-managing
+          # `bootstrap` Application applies it as a literal directory
+          # source). So this only ever emits one value file; apps needing
+          # more than one (currently just vos-monolith-dev) get their own
+          # standalone Application instead — see
+          # vos-monolith-dev-application.yaml.
           valueFiles:
-          {{- range .valuesPath }}
-          - $values/{{ . }}
-          {{- end }}
+          - $values/{{ index .valuesPath 0 }}
           parameters:
           - name: ingress.hostname
             value: '{{.hostname}}'
