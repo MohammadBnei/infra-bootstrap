@@ -95,18 +95,6 @@ spec:
       - resources-finalizer.argocd.argoproj.io
     spec:
       project: default
-      {{- if eq .name "longhorn" }}
-      # Longhorn's own webhook cert rotation injects
-      # spec.conversion.webhook.clientConfig.caBundle into its CRDs at
-      # runtime; the chart's manifest never sets it. That's a permanent,
-      # expected diff (not real drift) — without this, all 7 Longhorn
-      # CRDs sit OutOfSync forever and selfHeal churns every reconcile.
-      ignoreDifferences:
-      - group: apiextensions.k8s.io
-        kind: CustomResourceDefinition
-        jsonPointers:
-        - /spec/conversion/webhook/clientConfig/caBundle
-      {{- end }}
       sources:
       # Source 1: public Helm chart — no credentials needed
       - repoURL: '{{.chartRepoURL}}'
