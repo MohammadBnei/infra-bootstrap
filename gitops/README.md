@@ -129,6 +129,8 @@ A minimal Helm chart for standard web apps. Renders:
 - `IngressRoute` — Traefik CRD, `entryPoints: [websecure]`, native ACME via `tls.certResolver`
 - `PersistentVolumeClaim` — optional, gated by `persistence.enabled`
 - `InfisicalSecret` — optional, gated by `infisical.enabled`, auto-wired into the Deployment's `envFrom`
+- `hooks:` — guard-railed ArgoCD PreSync/PostSync `Job`s (schema migrations, etc. — see ADR-0023)
+- `oneOffJobs:` — suspended `CronJob`s for one-time scripts, triggered via `kubectl create job --from=cronjob/...` and a ledger-driven reusable CI workflow (see ADR-0022/0023)
 
 Key values a per-app `values.yaml` must set:
 

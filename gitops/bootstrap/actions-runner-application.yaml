@@ -1,0 +1,42 @@
+# Standalone Application for the self-hosted GitHub Actions runner
+# (ADR-0022) — plain manifests, not common-app-chart (RBAC/ServiceAccount
+# binding isn't something that chart supports, and this isn't a web app).
+# Same pattern as traefik-application.yaml/bootstrap-application.yaml for
+# things that don't fit the registry/common-app-chart mold.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: platform-actions-runner
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "1"
+  finalizers:
+  - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: git@github.com:MohammadBnei/infra-bootstrap.git
+    targetRevision: HEAD
+    path: gitops/platform/actions-runner
+    directory: {}
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: actions-runner
+  ignoreDifferences:
+  - group: secrets.infisical.com
+    kind: InfisicalSecret
+    jsonPointers:
+    - /status
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+    - CreateNamespace=true
+    - ServerSideApply=true
+    retry:
+      limit: 5
+      backoff:
+        duration: 5s
+        factor: 2
+        maxDuration: 3m

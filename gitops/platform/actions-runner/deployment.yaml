@@ -1,0 +1,52 @@
+# Self-hosted runner, registered against vos-monolith (the repo that
+# actually calls the reusable workflow today — GitHub Actions runs a
+# reusable workflow's job using runners visible to the CALLING repo, not
+# the repo the reusable workflow file lives in). A repo-scoped runner
+# only picks up jobs for that one repo; if a second app repo adopts
+# oneOffJobs, either add a second runner Deployment registered against
+# that repo, or move to an org-level runner group once/if this account
+# becomes a GitHub organization (personal accounts can't register
+# org-level runners).
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: actions-runner
+  namespace: actions-runner
+spec:
+  replicas: 1
+  revisionHistoryLimit: 3
+  selector:
+    matchLabels:
+      app: actions-runner
+  template:
+    metadata:
+      labels:
+        app: actions-runner
+    spec:
+      serviceAccountName: actions-runner
+      containers:
+      - name: runner
+        image: myoung34/github-runner:latest
+        env:
+        - name: REPO_URL
+          value: https://github.com/MohammadBnei/vos-monolith
+        - name: RUNNER_NAME_PREFIX
+          value: ukubi
+        - name: RUNNER_SCOPE
+          value: repo
+        - name: LABELS
+          value: self-hosted,ukubi
+        - name: RUNNER_WORKDIR
+          value: /tmp/runner
+        - name: EPHEMERAL
+          value: "false"
+        envFrom:
+        - secretRef:
+            name: actions-runner-infisical
+        resources:
+          requests:
+            cpu: 200m
+            memory: 256Mi
+          limits:
+            cpu: 500m
+            memory: 512Mi
