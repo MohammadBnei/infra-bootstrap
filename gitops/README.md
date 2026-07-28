@@ -10,12 +10,14 @@ ArgoCD-driven GitOps for the ukubi-cluster (QEMU VMs on Proxmox). Everything in 
 gitops/
 ├── bootstrap/                             # Applied once to bring the cluster up
 │   ├── (secrets created by ansible/playbooks/register-repos.yml, not a file here — see ansible/README.md)
+│   │     — this now includes repo-creds-github-bnei (ArgoCD repo-creds for
+│   │     user-app repos, HTTPS + PAT), deliberately NOT an InfisicalSecret;
+│   │     see register-repos.yml's header comment for why
 │   ├── argocd-application.yaml            # ArgoCD self-manages its own Helm chart
 │   ├── traefik-application.yaml           # Standalone Application (needs helm.skipCrds, can't live in the shared ApplicationSet template — see file comment)
 │   ├── traefik-crds/                      # Traefik's own CRDs (traefik.io_*/hub.traefik.io_*), vendored — see file comment in traefik-application.yaml
 │   ├── argocd-ingressroute.yaml           # Traefik IngressRoute → argocd.bnei.dev
 │   ├── infisical-ingressroute.yaml       # Traefik IngressRoute → infisical.bnei.dev
-│   ├── argocd-github-apps-creds.yaml      # InfisicalSecret → ArgoCD repo-creds for user apps
 │   ├── grafana-admin-secret.yaml          # InfisicalSecret → Grafana admin credentials
 │   ├── basic-admin-auth-middleware.yaml   # Shared Traefik BasicAuth Middleware (ns default), for admin-only tools
 │   ├── basic-admin-auth-secret.yaml       # InfisicalSecret → the above Middleware's htpasswd credential
@@ -69,21 +71,25 @@ Note: since [ADR-0021](../docs/adr/0021-self-syncing-bootstrap-directory.md) the
 ### Bootstrap credential chain
 
 ```
-ansible/playbooks/register-repos.yml (manual, one-time):
+ansible/playbooks/register-repos.yml (manual, one-time — safe to re-run):
   ├─ infisical-secrets          (ns: infisical) ← register-repos.env (ENCRYPTION_KEY, DB_CONNECTION_URI, ...)
   ├─ universal-auth-credentials (ns: infisical) ← register-repos.env (ARGOCD_INFISICAL_CLIENT_ID/SECRET)
-  └─ repo-infra-bootstrap       (ns: argocd)    ← register-repos.env (INFRA_BOOTSTRAP_SSH_KEY_FILE)
+  ├─ repo-infra-bootstrap       (ns: argocd)    ← register-repos.env (INFRA_BOOTSTRAP_SSH_KEY_FILE)
+  └─ repo-creds-github-bnei     (ns: argocd)    ← register-repos.env (GITHUB_APPS_USERNAME/GITHUB_APPS_PAT)
+       ArgoCD can now clone all MohammadBnei/* repos over HTTPS
 
-Wave 1: Infisical starts
-  └─ argocd-github-apps-creds.yaml (InfisicalSecret) resolves →
-       repo-creds-github-bnei (ns: argocd) ← GITHUB_APPS_SSH_KEY from Infisical
-       ArgoCD can now clone all MohammadBnei/* repos
-
-Wave 2: Traefik syncs (values in infra-bootstrap, SSH key already present)
-Wave 10: User apps sync (SSH keys for per-app repos now in ArgoCD cred store)
+Wave 2: Traefik syncs (values in infra-bootstrap, credential already present)
+Wave 10: User apps sync (repo-creds-github-bnei already present)
 ```
 
-Only the infra-bootstrap SSH key and Infisical's own server credentials are injected manually. Everything else flows from Infisical once it's running.
+`repo-creds-github-bnei` used to flow through Infisical via an `InfisicalSecret`
+CR (`argocd-github-apps-creds.yaml`, now removed) — onboarding editable-blog
+found the infisical-operator's template rendering corrupts this value
+unpredictably (confirmed on both an SSH key and a PAT), so it's injected
+manually here instead, same as the infra-bootstrap SSH key. See
+`docs/bootstrap-test-notes.md` for the full investigation. Only these four
+secrets and Infisical's own server credentials are injected manually.
+Everything else flows from Infisical once it's running.
 
 ### Three ApplicationSets, plus one standalone Application
 
@@ -150,7 +156,7 @@ readinessProbe:
 
 Annotations: `annotations` (Deployment), `podAnnotations` (pod template), `service.annotations` (Service), `ingress.annotations` (IngressRoute) — plain key/value maps, rendered as-is.
 
-The chart can template its own `InfisicalSecret` CR — set `infisical.enabled: true` and `infisical.projectSlug` in the app's `values.yaml` and the resulting K8s Secret is auto-wired into the Deployment's `envFrom` (no manual `secretRef` needed). It reuses the cluster's shared `universal-auth-credentials` machine identity (ns `infisical`) — grant that identity access to your app's Infisical project in the Infisical UI, don't mint new K8s credentials per app. Defaults: `envSlug: dev`, `secretsPath: "/"`, in-cluster `hostAPI`. Apps that need a manually-authored `InfisicalSecret` (e.g. field remapping via `template:`) can still define one in their private repo and reference it manually via `envFrom`.
+The chart can template its own `InfisicalSecret` CR — set `infisical.enabled: true` and `infisical.projectSlug` in the app's `values.yaml` and the resulting K8s Secret is auto-wired into the Deployment's `envFrom` (no manual `secretRef` needed). It reuses the cluster's shared `universal-auth-credentials` machine identity (ns `infisical`) — grant that identity access to your app's Infisical project in the Infisical UI, don't mint new K8s credentials per app. Defaults: `envSlug: dev`, `secretsPath: "/"`, in-cluster `hostAPI`. Set `infisical.autoReload: true` to have the chart add `secrets.infisical.com/auto-reload: "true"` to the Deployment automatically (restarts it when the managed secret changes) — no need to hand-add it under `annotations:`. Apps that need a manually-authored `InfisicalSecret` (e.g. field remapping via `template:`) can still define one in their private repo and reference it manually via `envFrom`.
 
 `apps.applicationset.yaml` and `platform-common-apps.applicationset.yaml` both set `ignoreDifferences` for `InfisicalSecret`'s `.status` so the operator's periodic resync doesn't leave the Application permanently `OutOfSync`.
 
@@ -217,7 +223,7 @@ on. **After this first apply, adding a platform or user app is just:
 edit `gitops/bootstrap/` (and/or `gitops/apps/registry.yaml`), merge to
 `main`, done** — no further manual `kubectl apply` needed.
 
-ArgoCD becomes self-managing. Wave 1 (Infisical) syncs immediately using the manually-injected infra-bootstrap SSH key. Once Infisical is healthy, `argocd-github-apps-creds.yaml` resolves and injects the user-app SSH credential into ArgoCD automatically.
+ArgoCD becomes self-managing. Wave 1 (Infisical) syncs immediately using the manually-injected infra-bootstrap credential. `repo-creds-github-bnei` (also manually injected, see "Bootstrap credential chain" above) is already present for user-app repos at wave 10.
 
 ### Step 4 — Watch it come up
 
@@ -241,16 +247,16 @@ kubectl -n argocd get applications
      port: 3000
    ```
 
-2. Add a read-only SSH deploy key. The private key goes in Infisical under `GITHUB_APPS_SSH_KEY` (or use a per-repo key added separately to the ArgoCD credential store).
+2. No per-repo credential needed — `repo-creds-github-bnei` already grants ArgoCD HTTPS read access to every `MohammadBnei/*` repo (see "Bootstrap credential chain" above). Just make sure the repo is under that account/org.
 
-3. Add the app to **both** files (they must stay in sync):
+3. Add the app to **both** files (they must stay in sync), using the **HTTPS** form for `repoURL` (not `git@github.com:...` — this project uses HTTPS + PAT, not SSH deploy keys, see the credential chain section above for why):
 
    **`gitops/apps/registry.yaml`**
    ```yaml
    - name: myapp
      namespace: myapp
      syncWave: "10"
-     repoURL: git@github.com:MohammadBnei/myapp.git
+     repoURL: https://github.com/MohammadBnei/myapp.git
      valuesPath: values.yaml
      hostname: myapp.bnei.dev
    ```

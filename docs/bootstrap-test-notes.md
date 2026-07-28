@@ -710,3 +710,217 @@ rotated (new keypair, updated `authorized_keys` on server1, new value
 written to Infisical). Going forward, any Infisical CLI check in this
 kind of session should use `--plain` scoped to one named key, never an
 unscoped list/dump.
+
+**Bug: infisical-operator (secrets-operator chart) doesn't detect value
+changes for Go-template `managedSecretReference.template.data` fields.**
+Hit while fixing a bad Garage S3 key (`regex_search` without `| first`
+had stored the Python list-repr `['GK...']` instead of the bare key in
+Infisical — see `ansible/playbooks/garage-configure.yml`'s fix). After
+correcting the source value in Infisical, `longhorn-backup-secret`'s
+managed K8s Secret never updated, through: a 60s `resyncInterval`
+elapsing repeatedly, deleting the managed Secret (recreated with the
+same stale value), restarting both the operator and the
+`platform-infisical-backend` deployment, and deleting+recreating the
+`InfisicalSecret` CR itself (fresh UID, no stored status). Root-caused by
+querying the in-cluster Infisical API directly with a fresh token
+(bypassing the operator's own caching) — confirmed the *server* already
+had the correct value with a fresh ETag. The operator's own logs show
+its very first reconcile after a restart fetches fresh data via machine
+identity but still logs `Managed Kubernetes secret already up to date,
+skipping update` — a diffing bug specific to templated secrets, not a
+data-freshness problem. **Workaround**: `kubectl apply` a
+`kubectl create secret generic ... --dry-run=client -o yaml` directly
+against the managed Secret, bypassing the operator for that one secret.
+Not operator-managed after that — revisit if this chart gets upgraded
+(current version pinned in
+`gitops/platform/values/infisical-operator/values.yaml`).
+
+## 2026-07-27 — editable-blog onboarding: ArgoCD repo credentials
+
+First real per-app repo exercised through `apps.applicationset.yaml`'s
+multi-source template (n8n/openweb-ui/etc. were all still deferred).
+`editable-blog`'s Application stuck in `Unknown` sync status,
+repo-server logs: `Failed to get git client for repo
+git@github.com:MohammadBnei/editable-blog.git: failed to list refs:
+ssh: no key found`.
+
+Two wrong turns before the real cause:
+
+1. First guessed this was ArgoCD not applying the `repo-creds`
+   URL-prefix credential template to the *second* source of a
+   multi-source Application. Built and PR'd an explicit per-repo
+   `Repository` secret (mirroring `repo-infra-bootstrap`, which does
+   work) — but before merging, tested the actual key material directly
+   (temp pod, `ssh-keygen -y` against the mounted secret, never
+   printing key bytes) and found `GITHUB_APPS_SSH_KEY`'s stored value
+   itself was unparseable (`invalid format` / `error in libcrypto:
+   unsupported` across two different OpenSSH builds) — a data problem,
+   not an ArgoCD scoping problem. Closed the PR without merging; it
+   would have added a permanent per-app credential file for no reason.
+2. Regenerated the key fresh (`ssh-keygen`, uploaded to Infisical via
+   `secrets set NAME=@/path/to/file`, never through copy-paste) and
+   confirmed via direct `infisical secrets get --plain` that the raw
+   value in Infisical parses cleanly. But the *operator-materialized*
+   K8s Secret (`repo-creds-github-bnei`, from
+   `argocd-github-apps-creds.yaml`'s `InfisicalSecret`) still failed
+   `ssh-keygen -y` with `invalid format` even on this brand-new,
+   never-copy-pasted key.
+
+That second result points at the **same infisical-operator
+Go-template rendering bug** logged above, just a different
+manifestation: multi-line PEM/OpenSSH key values get mangled somewhere
+in `managedSecretReference.template.data` interpolation, not just
+stale-cached. **Workaround, same as before**: bypass the operator for
+this Secret — piped `infisical secrets get --plain` straight into
+`kubectl create secret generic repo-creds-github-bnei --from-file=
+sshPrivateKey=/dev/stdin ... | kubectl apply -f -`, verified via
+`ssh-keygen -y` against the resulting Secret. Held correctly past one
+full `resyncInterval` (60s) without the operator reverting it — same
+lucky-but-unreliable non-interference as the Longhorn case.
+
+Separately: `GITHUB_APPS_SSH_KEY` as a single shared credential across
+all `MohammadBnei/*` repos can only work as a **machine-user account
+key** (invited as a read-only collaborator per repo), never as a
+GitHub deploy key — GitHub rejects registering one public key as a
+deploy key on more than one repo. The key regenerated here
+(`argocd-bot@ukubi-cluster`) is intended for a new dedicated machine
+GitHub account, not yet created as of this writing.
+
+**Any future secret pushed through an `InfisicalSecret` CR's templated
+`managedSecretReference` — especially multi-line values like private
+keys — should be spot-checked against the actual K8s Secret content,
+not just against `infisical secrets get`,** until this operator bug is
+fixed upstream.
+
+### Follow-up — machine user created, GitHub collaborator-permission API quirk
+
+`argocd-ukubi-bot` GitHub account created and added as a collaborator on
+`editable-blog`, with the regenerated key added as its account SSH key
+(not a deploy key). It ended up with **Write** access instead of Read —
+`gh api -X PUT repos/.../collaborators/argocd-ukubi-bot -f
+permission=pull` returns `204 No Content` (success) but the effective
+permission stays `write` on every re-check; the GitHub web UI's role
+dropdown also didn't let it be downgraded. Root cause not chased further
+— accepted as-is per user decision, since Write is a superset of the
+Read access ArgoCD actually needs (it only clones/fetches, never
+pushes). Functionally fine; just broader than least-privilege.
+
+### Follow-up — real bug: k8s VMs had no CPU passthrough, crashed Bun-based images
+
+Once the git/credential problem was fully resolved, `editable-blog`'s
+Application reached `Synced`, but the pod crash-looped with **exit code
+132 (SIGILL)** and zero log output (crashed before the runtime could
+buffer anything). Root cause: `terraform/k8s-vms.tf`'s `cpu` block never
+set `type`, so both `k8s-cp-01` and `k8s-worker-01` were running on
+Proxmox's default `qemu64` baseline CPU model — confirmed via
+`/proc/cpuinfo` inside a `kubectl debug node/...` pod: `model name
+: QEMU Virtual CPU version 2.5+`, no `avx2` flag. editable-blog's
+Dockerfile runs its production process via `bun x serve ...`, and Bun
+hard-requires AVX2 — it crashes with SIGILL on any CPU lacking it. This
+is the first workload in the cluster to actually need a modern
+instruction set, so nothing surfaced this until now.
+
+**Fix**: added `type = "host"` to `cpu` in `terraform/k8s-vms.tf`
+(matching the existing `machine = "q35"` comment style/precedent right
+above it) so both K8s VMs get `.165`'s real CPU features passed through
+(confirmed: `AMD Ryzen 5 3600X 6-Core Processor`, `avx2` present).
+`terraform plan -target=proxmox_virtual_environment_vm.k8s_node` showed
+a clean in-place update (`qemu64 -> host`, 0 to add/destroy) — doesn't
+touch `pg01`/`pg02`/`hermesagent`. Required a reboot of both VMs to take
+effect (CPU model isn't hot-swappable), a brief full-cluster blip —
+acceptable pre-cutover, no real traffic yet.
+
+**Caveat for Stage 2** (already noted inline in `k8s-vms.tf`): `host`
+CPU type passes through the exact physical CPU, which isn't
+live-migration-safe across physically different CPU models. Once
+`.200`/`.161` join and their CPUs are known, may need to switch to a
+named baseline microarchitecture common to all three hosts instead of
+`host`.
+
+**Result**: pod `Running`/`Ready` with zero crashes since the reboot;
+`curl` from an in-cluster pod to `http://editable-blog.editable-blog
+.svc.cluster.local:3000/` returns `200`. ArgoCD Application health is
+`Healthy`.
+
+### Follow-up — sync status `Unknown`, and the real end of the SSH saga
+
+`status.sync.status` stayed `Unknown` (health `Healthy`) even after
+repeated hard refreshes and repo-server restarts, with the condition
+frozen on the original `ssh: no key found` message. Root-caused by
+re-testing the (previously verified-good) `repo-creds-github-bnei`
+secret again, hours later: it had been **silently re-corrupted** by the
+infisical-operator (`ssh-keygen -y` now failed `invalid format` on a
+secret that had parsed cleanly right after the fix). The "holds past one
+resync interval" check done earlier in this doc was not sufficient
+evidence of stability — the operator's corruption is real and recurring,
+not a one-time fluke, and can strike a completely fresh, never-corrupted
+key.
+
+This closed the door on trusting the operator with this credential in
+any form. Decision (with user sign-off): **switch from SSH deploy keys
+to HTTPS + a GitHub Personal Access Token**, for two independent
+reasons:
+1. GitHub deploy keys are inherently one-key-per-repo (confirmed:
+   attempting to reuse a key across repos is rejected by GitHub) — a
+   single shared SSH credential across all `MohammadBnei/*` repos was
+   only ever going to work via a machine-user *account* key, not a
+   deploy key.
+2. HTTPS + PAT sidesteps SSH entirely, including the operator's
+   template-corruption bug for this value.
+
+A dedicated machine account (`argocd-ukubi-bot`) was created and added
+as a collaborator for the SSH attempt, but ended up with **Write**
+instead of Read access — both the `gh api -X PUT .../collaborators/...
+-f permission=pull` API call (returns `204` but doesn't change the
+effective permission) and the GitHub web UI's role dropdown failed to
+downgrade an already-accepted collaborator. Accepted as-is (Write is a
+superset of what ArgoCD needs, just broader than least-privilege) — not
+chased further.
+
+The user then generated the PAT from their **own** personal account
+instead (read access to all their repos, fine-grained token), which is
+actually simpler going forward: no per-repo collaborator invite needed
+for future apps.
+
+**Confirmed the PAT is ALSO subject to operator corruption**: even a
+single-line token got extra garbage bytes appended by the
+`InfisicalSecret` template rendering (a stray space + `/`, 97 bytes
+where the raw Infisical value was 94) — this bug is not limited to
+multi-line PEM/SSH values as first assumed. **This surfaced a real
+credential exposure**: a test command built a `user:pass@` URL directly
+from the (corrupted) token, and when `git` failed, its own error message
+echoed the full URL — including the token — into the session transcript.
+The user was notified immediately and asked to revoke/regenerate;
+rotation deferred by user decision, proceeded with the same
+(already-exposed) token for now. **Lesson for future credential
+testing: never embed a raw secret in a URL or command line whose failure
+output could echo it back — build auth via a header/file inside the
+test pod instead**, which is what all subsequent testing in this
+investigation switched to.
+
+**Final, durable fix**: stopped routing this credential through
+Infisical/the operator at all. `gitops/bootstrap/argocd-github-apps-
+creds.yaml` (the `InfisicalSecret` CR) was deleted — critically, this
+had to happen *before* committing the change, otherwise ADR-0021's
+self-syncing `bootstrap` Application (`prune: true`, `selfHeal: true`)
+would keep recreating the CR from git every time it was deleted to stop
+the corruption, permanently undoing the fix. `repo-creds-github-bnei` is
+now injected the same way as `repo-infra-bootstrap`: manually, via
+`ansible/playbooks/register-repos.yml` (`GITHUB_APPS_USERNAME` /
+`GITHUB_APPS_PAT` in `register-repos.env`, PAT routed through a
+mode-0600 tempfile, never a CLI argument). `editable-blog`'s `repoURL`
+switched from `git@github.com:...` to `https://github.com/...` in both
+`gitops/apps/registry.yaml` and `gitops/bootstrap/apps.applicationset
+.yaml` to match.
+
+Separately, a parallel session moved `editable-blog`'s `values.yaml` to
+`helm/values.yaml` and switched its Infisical wiring from a raw
+`secrets.infisical.com/auto-reload` annotation to `common-app-chart`'s
+native `infisical.autoReload` field — both legitimate, folded in as part
+of getting this Application to sync.
+
+**End state**: `editable-blog` ArgoCD Application `Synced`/`Healthy`,
+pod serving `200` on port 3000, verified via `git ls-remote` with a
+hand-built `Authorization: Basic` header (not a URL) from inside a
+throwaway pod — confirms the HTTPS+PAT path works end to end without
+repeating the exposure mistake above.
