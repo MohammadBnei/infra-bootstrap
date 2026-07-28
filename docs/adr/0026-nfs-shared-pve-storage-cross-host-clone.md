@@ -63,10 +63,11 @@ only (`.165`/`server1`/`ex-laptop`) with `no_root_squash` (PVE mounts NFS
 storage as root).
 
 The export is registered as a PVE storage pool named `shared-templates`
-— a one-time manual `pvesm add nfs ...` (cluster-wide config via corosync,
-ADR-0020, so this is done once regardless of node count), content types
-`images` (VM disks) and `snippets` (cloud-init vendor-data, see
-Consequences).
+via `pvesm add nfs ...`, automated as a second play in
+`nfs-configure.yml` (idempotent, only runs if not already present) —
+cluster-wide config via corosync (ADR-0020), so this only ever runs once
+regardless of node count. Content types `images` (VM disks) and
+`snippets` (cloud-init vendor-data, see Consequences).
 
 `terraform/template.tf`'s golden template disk + cloud-init drive move
 onto `shared-templates` via a new `template_shared_storage_id` variable —
@@ -84,14 +85,31 @@ clone-then-migrate fallback.
 
 - `server1` gains a 4th tenant (after the future `pg02` migration, still
   a separate later step) — modest footprint (1 vCPU / 1GB / 120GB total).
-- **Non-obvious second fix bundled in:** `terraform/cloud-init.tf`'s
-  `k8s_vm_vendor_data` snippet (qemu-guest-agent install +
-  Longhorn-disk auto-format) previously lived on `.165`'s local
-  `snippets` storage. Every PVE node has its own separately-named `local`
-  storage, so a `server1`-hosted `k8s_nodes` entry would have resolved
-  `vendor_data_file_id` against `server1`'s own (empty) local storage at
-  boot and silently lost the snippet. Moved to `shared-templates`
-  alongside the template disk — same shared-storage fix, same root cause.
+- **Non-obvious second fix, found the hard way:** `terraform/cloud-init.tf`'s
+  `k8s_vm_vendor_data` snippet (qemu-guest-agent install + Longhorn-disk
+  auto-format) lives on `.165`'s local `snippets` storage. Every PVE node
+  has its own separately-named `local` storage, so a `server1`-hosted
+  `k8s_nodes` entry would resolve `vendor_data_file_id` against
+  `server1`'s own (empty) local storage at boot and silently lose the
+  snippet. The obvious fix — repoint the existing resource's
+  `datastore_id` at `shared-templates` — turned out to be wrong: a real
+  `terraform plan` showed `vendor_data_file_id` is `ForceNew`, so moving
+  it would mark every VM referencing it, including the already-live
+  `k8s-cp-01`/`k8s-worker-01`, "must be replaced" (destroy the running
+  control plane). Fixed instead with a second, separate resource
+  (`k8s_vm_vendor_data_shared`, identical content) that only cross-host
+  `k8s_nodes` entries reference — same shared-storage fix, without
+  touching what already-live VMs point at. `clone.node_name` hit the
+  identical ForceNew trap and got the identical fix: conditional on
+  whether the entry is actually cross-host, `null` (== omitted,
+  unchanged) otherwise.
+- **Third fix, also found by testing, not foreseen in this ADR's original
+  design:** `nfs-storage`'s own `agent.enabled = true` made `terraform
+  apply` hang waiting for a qemu-guest-agent handshake — nothing installs
+  the agent before first boot on a VM built straight from a cloud image
+  with no vendor-data. Fixed with a small dedicated
+  `nfs_vm_vendor_data` snippet (guest-agent install only, no Longhorn
+  logic) applied at create time, not deferred to `nfs-configure.yml`.
 - The template's disk move (`template_storage_id` → shared storage) is a
   real, if low-risk, change to already-tracked state (VMID 9001) —
   nothing already cloned from it is affected retroactively.

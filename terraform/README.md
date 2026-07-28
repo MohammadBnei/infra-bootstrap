@@ -187,23 +187,26 @@ Needed once before the first `k8s_nodes` entry targeting `server1`/
 `ex-laptop` (e.g. `k8s-worker-02`) — see
 `docs/adr/0026-nfs-shared-pve-storage-cross-host-clone.md` for the why.
 
-1. `terraform apply -target=proxmox_download_file.nfs_vm_cloudimg -target=proxmox_virtual_environment_vm.nfs_storage` —
-   bare, SSH-reachable VM only, same "Terraform stops at bare" split as
-   `garage.tf`.
+1. `terraform apply -target=proxmox_download_file.nfs_vm_cloudimg
+   -target=proxmox_virtual_environment_file.nfs_vm_vendor_data
+   -target=proxmox_virtual_environment_vm.nfs_storage` — bare,
+   SSH-reachable VM only, same "Terraform stops at bare" split as
+   `garage.tf`. The vendor-data snippet must be targeted alongside the VM,
+   not applied separately after — `agent.enabled = true` makes `apply`
+   wait on a qemu-guest-agent handshake that never arrives if the snippet
+   installing it isn't there at first boot (confirmed by testing).
 2. `ansible-playbook -i ansible/inventories/nfs/hosts.yml
+   -i ansible/inventories/proxmox/hosts.yml
    ansible/playbooks/nfs-configure.yml` — formats the export disk,
-   installs and configures `nfs-kernel-server`.
-3. **One-time, by hand, any PVE cluster member** (`storage.cfg` is
-   cluster-shared, ADR-0020 — this is not repeated per node):
-   ```bash
-   pvesm add nfs shared-templates \
-     --server <nfs_ip> --export /export/templates \
-     --content images,snippets --path /mnt/pve/shared-templates
-   ```
-4. `terraform plan` — expect only the golden template's disk +
-   cloud-init drive + the `k8s_vm_vendor_data` snippet moving onto
-   `shared-templates`; `apply` once confirmed.
-5. From here, any new `k8s_nodes` entry with `node_name` set to
+   installs and configures `nfs-kernel-server`, **and** registers
+   `shared-templates` as a PVE storage pool (idempotent — the second play
+   only runs `pvesm add` if it isn't already registered). `storage.cfg` is
+   cluster-shared (ADR-0020), so this only needs one PVE host regardless
+   of node count.
+3. `terraform plan` — expect only the golden template's disk +
+   cloud-init drive moving onto `shared-templates`; `apply` once
+   confirmed.
+4. From here, any new `k8s_nodes` entry with `node_name` set to
    `server1`/`ex-laptop` clones directly via `shared-templates` instead
    of the automatic clone-then-migrate fallback.
 

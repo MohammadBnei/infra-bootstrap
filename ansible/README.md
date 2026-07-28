@@ -178,23 +178,27 @@ direct-clone path instead of an automatic clone-then-migrate (see
 Much smaller scope than `garage-configure.yml`: no Infisical writes, no
 application state — just format the raw second disk, install
 `nfs-kernel-server`, write `/etc/exports` restricted to the 3 PVE cluster
-members with `no_root_squash`, and start the service. Registering the
-export as a PVE storage pool (`pvesm add nfs ...`) is a separate, one-time
-manual step printed at the end of this playbook's run — see
-`terraform/README.md`'s "Shared storage for cross-host cloning" section.
+members with `no_root_squash`, and start the service. A second play then
+registers the export as a PVE storage pool (`pvesm add nfs ...`) against
+the `proxmox` host alias — idempotent (only runs if not already present),
+and only needed once since `storage.cfg` is cluster-shared (ADR-0020).
 
-**Execution model:** targets `nfs-storage` from
+**Execution model:** the first play targets `nfs-storage` from
 `ansible/inventories/nfs/hosts.yml` (a single hand-maintained host — fill
 in `ansible_host` with the VM's real IP after `terraform apply`, matching
-`terraform.tfvars`' `nfs_ip`). SSH access is via a dedicated keypair
+`terraform.tfvars`' `nfs_ip`); SSH access is via a dedicated keypair
 (`~/.ssh/id_nfs`, seeded into the VM by `terraform/nfs.tf` via
 `nfs_ssh_public_key_file`), `core` user + sudo — same pattern as the K8s
-VMs, unlike `garage-storage`'s root-user LXC.
+VMs, unlike `garage-storage`'s root-user LXC. The second play targets
+`proxmox` from `ansible/inventories/proxmox/hosts.yml` (root SSH, same
+alias `pve-postinstall.yml` uses) — both inventories must be passed.
 
 ### Prerequisites
 
 - `nfs-storage` VM already created and reachable (`terraform apply
-  -target=...` per `terraform/README.md`)
+  -target=...` per `terraform/README.md`, including the
+  `nfs_vm_vendor_data` snippet — `agent.enabled = true` makes `apply`
+  hang without it, confirmed by testing)
 - `~/.ssh/id_nfs` keypair generated and its public half already applied
   (baked in at VM creation time via cloud-init)
 
@@ -202,7 +206,9 @@ VMs, unlike `garage-storage`'s root-user LXC.
 
 ```bash
 # fill in ansible/inventories/nfs/hosts.yml's ansible_host first
-ansible-playbook -i ansible/inventories/nfs/hosts.yml ansible/playbooks/nfs-configure.yml
+ansible-playbook -i ansible/inventories/nfs/hosts.yml \
+  -i ansible/inventories/proxmox/hosts.yml \
+  ansible/playbooks/nfs-configure.yml
 ```
 
 Safe to re-run: the format step is `blkid`-guarded, the mount/exports are

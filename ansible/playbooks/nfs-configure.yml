@@ -17,12 +17,16 @@
 #   ansible/inventories/nfs/hosts.yml (fill in ansible_host first).
 # - SSH access via the dedicated nfs keypair (~/.ssh/id_nfs, see
 #   variables.tf's nfs_ssh_public_key_file) already seeded via cloud-init.
+# - Run with BOTH inventories so the second play below (PVE storage
+#   registration) can resolve the `proxmox` host alias:
+#     ansible-playbook -i ansible/inventories/nfs/hosts.yml \
+#       -i ansible/inventories/proxmox/hosts.yml \
+#       ansible/playbooks/nfs-configure.yml
 #
-# NOT DONE HERE (see docs/adr/0026 / terraform/README.md):
-# - Registering the export as PVE storage (`pvesm add nfs ...`) — a
-#   one-time, cluster-wide config change, run by hand once this playbook
-#   confirms the export is live, same precedent as the GPU PCI mapping
-#   and the snippets content-type enable.
+# Registers the export as a PVE storage pool (`pvesm add nfs ...`) itself
+# — storage.cfg is cluster-shared (ADR-0020), so this only ever needs to
+# run against one cluster member (`proxmox`/.165, same alias
+# pve-postinstall.yml uses), regardless of how many PVE nodes exist.
 - name: Configure NFS export on nfs-storage
   hosts: nfs-storage
   gather_facts: false
@@ -69,6 +73,11 @@
         fstype: ext4
         state: mounted
 
+    # qemu-guest-agent is installed via terraform/nfs.tf's dedicated
+    # nfs_vm_vendor_data cloud-init snippet at first boot, not here —
+    # Terraform's agent.enabled = true would otherwise hang waiting for a
+    # handshake with an agent nothing installs until this playbook runs.
+
     # -------------------------------------------------------------------
     # 2. Install and configure nfs-kernel-server
     # -------------------------------------------------------------------
@@ -100,12 +109,35 @@
     # -------------------------------------------------------------------
     - name: NFS export configured
       ansible.builtin.debug:
-        msg:
-          - "{{ nfs_export_path }} is exported to {{ nfs_allowed_clients | join(', ') }}."
-          - ""
-          - "Verify: ssh -i ~/.ssh/id_nfs core@{{ ansible_host }} sudo exportfs -v"
-          - ""
-          - "Next (one-time, by hand, any PVE cluster member):"
-          - "  pvesm add nfs shared-templates --server {{ ansible_host }} \\"
-          - "    --export {{ nfs_export_path }} --content images,snippets \\"
-          - "    --path /mnt/pve/shared-templates"
+        msg: "{{ nfs_export_path }} is exported to {{ nfs_allowed_clients | join(', ') }}. Verify: ssh -i ~/.ssh/id_nfs core@{{ ansible_host }} sudo exportfs -v"
+
+# -------------------------------------------------------------------
+# Register the export as PVE storage — cluster-wide via storage.cfg
+# (ADR-0020), so this runs once against any single member.
+# -------------------------------------------------------------------
+- name: Register shared-templates PVE storage
+  hosts: proxmox
+  gather_facts: false
+  vars:
+    nfs_server: "192.168.1.198" # matches terraform.tfvars' nfs_ip
+    nfs_storage_name: shared-templates
+    nfs_export_path: /export/templates
+    nfs_storage_path: /mnt/pve/shared-templates
+    nfs_storage_content: images,snippets
+
+  tasks:
+    - name: Check existing PVE storage pools
+      ansible.builtin.command: pvesm status
+      register: pvesm_status
+      changed_when: false
+
+    - name: Add shared-templates NFS storage
+      ansible.builtin.command: >
+        pvesm add nfs {{ nfs_storage_name }}
+        --server {{ nfs_server }} --export {{ nfs_export_path }}
+        --content {{ nfs_storage_content }} --path {{ nfs_storage_path }}
+      when: nfs_storage_name not in pvesm_status.stdout
+
+    - name: shared-templates PVE storage ready
+      ansible.builtin.debug:
+        msg: "{{ nfs_storage_name }} registered cluster-wide — verify with `pvesm status` on any PVE node."

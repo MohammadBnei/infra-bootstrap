@@ -24,10 +24,12 @@
 # node_name/download storage are hardcoded to "server1" rather than
 # variables — this is a single fixed-purpose resource (user's explicit
 # placement choice), unlike k8s_nodes' extensible map. Confirm server1's
-# "local" storage actually supports content type "import" via `pvesh get
-# /storage` before first apply — same "confirm, don't guess" discipline
-# as pve_node_name (true by default on a fresh PVE install, matching
-# .165, but not yet verified live on server1).
+# "local" storage actually supports content types "import" and "snippets"
+# via `pvesh get /storage` before first apply — same "confirm, don't
+# guess" discipline as pve_node_name (true by default on a fresh PVE
+# install, matching .165, but not yet verified live on server1). If
+# "snippets" isn't enabled yet: `pvesm set local --content
+# <existing-list>,snippets` on server1, same one-time prereq as .165's.
 
 resource "proxmox_download_file" "nfs_vm_cloudimg" {
   content_type = "import"
@@ -36,6 +38,32 @@ resource "proxmox_download_file" "nfs_vm_cloudimg" {
   url          = "https://cloud-images.ubuntu.com/noble/current/noble-server-cloudimg-amd64.img"
   file_name    = "noble-server-cloudimg-amd64-nfs.qcow2"
   overwrite    = false
+}
+
+# Guest-agent-only vendor-data — deliberately NOT cloud-init.tf's shared
+# k8s_vm_vendor_data (that also formats a Longhorn disk, irrelevant here,
+# and would pull in the cross-node shared-storage dependency this VM
+# exists to solve in the first place). Confirmed by a real test run: with
+# agent.enabled = true below and no way to install the agent before first
+# boot, `terraform apply` hangs waiting for a guest-agent handshake that
+# never comes (same failure mode cloud-init.tf's own header comment
+# documents for the k8s VMs) — installing it via nfs-configure.yml
+# afterward is too late, Terraform is already stuck waiting during create.
+resource "proxmox_virtual_environment_file" "nfs_vm_vendor_data" {
+  content_type = "snippets"
+  datastore_id = "local"
+  node_name    = "server1"
+
+  source_raw {
+    file_name = "nfs-vm-vendor-data.yaml"
+    data      = <<-EOT
+      #cloud-config
+      packages:
+        - qemu-guest-agent
+      runcmd:
+        - systemctl enable --now qemu-guest-agent
+    EOT
+  }
 }
 
 resource "proxmox_virtual_environment_vm" "nfs_storage" {
@@ -92,6 +120,8 @@ resource "proxmox_virtual_environment_vm" "nfs_storage" {
         gateway = var.gateway_ipv4
       }
     }
+
+    vendor_data_file_id = proxmox_virtual_environment_file.nfs_vm_vendor_data.id
   }
 
   network_device {
@@ -100,5 +130,13 @@ resource "proxmox_virtual_environment_vm" "nfs_storage" {
 
   operating_system {
     type = "l26"
+  }
+
+  # Safe now that nfs_vm_vendor_data (above) installs the agent at first
+  # boot — confirmed by testing that enabling this without a way to
+  # install the agent before boot makes apply hang waiting for a
+  # handshake that never arrives (see that resource's comment).
+  agent {
+    enabled = true
   }
 }

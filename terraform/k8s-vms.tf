@@ -57,8 +57,17 @@ resource "proxmox_virtual_environment_vm" "k8s_node" {
   # right path itself: a direct clone if the template's disks are on
   # shared storage (docs/adr/0026's shared-templates NFS pool), or an
   # automatic clone-then-migrate if not.
+  #
+  # Set to null (== omitted) for same-host entries, not unconditionally —
+  # confirmed via a real `terraform plan` that clone.node_name is a
+  # ForceNew attribute: setting it on an entry that already exists in
+  # state (k8s-cp-01/k8s-worker-01, both live production VMs) marks them
+  # "must be replaced" even though the resolved value is identical to
+  # where they already live. Only entries actually landing on a different
+  # node need it; same-host entries must keep this block byte-for-byte
+  # unchanged from before this ADR-0026 change.
   clone {
-    node_name = var.pve_node_name
+    node_name = coalesce(each.value.node_name, var.pve_node_name) != var.pve_node_name ? var.pve_node_name : null
     vm_id     = proxmox_virtual_environment_vm.ubuntu_2404_template.vm_id
     full      = true
   }
@@ -121,7 +130,10 @@ resource "proxmox_virtual_environment_vm" "k8s_node" {
       }
     }
 
-    vendor_data_file_id = proxmox_virtual_environment_file.k8s_vm_vendor_data.id
+    # Same-host entries keep the original (.165-local) snippet untouched;
+    # cross-host entries use the shared-storage copy — see cloud-init.tf's
+    # header comment for why this can't just be one repointed resource.
+    vendor_data_file_id = coalesce(each.value.node_name, var.pve_node_name) != var.pve_node_name ? proxmox_virtual_environment_file.k8s_vm_vendor_data_shared.id : proxmox_virtual_environment_file.k8s_vm_vendor_data.id
   }
 
   network_device {
