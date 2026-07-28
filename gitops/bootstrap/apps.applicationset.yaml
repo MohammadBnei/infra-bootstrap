@@ -54,6 +54,8 @@ spec:
   template:
     metadata:
       name: '{{.name}}'
+      labels:
+        gitops.bnei.dev/tier: user-app
       annotations:
         argocd.argoproj.io/sync-wave: '{{.syncWave}}'
       finalizers:

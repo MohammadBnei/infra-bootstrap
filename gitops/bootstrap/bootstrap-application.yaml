@@ -23,6 +23,8 @@ kind: Application
 metadata:
   name: bootstrap
   namespace: argocd
+  labels:
+    gitops.bnei.dev/tier: core
   finalizers:
   - resources-finalizer.argocd.argoproj.io
 spec:
