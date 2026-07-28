@@ -254,8 +254,19 @@
         pvecm_status.rc != 0 or
         'Cluster information' not in pvecm_status.stdout
 
+    # `--use_ssh 1` matters: PVE 9's `pvecm add` defaults to its *API*-based
+    # join (PVE::CLI::pvecm's `code` sub always calls
+    # PVE::PTY::read_password("Please enter superuser (root) password for
+    # ...") first when `use_ssh` isn't set — confirmed by reading
+    # /usr/share/perl5/PVE/CLI/pvecm.pm live) and prompts for proxmox's root
+    # password unconditionally, ignoring any SSH key trust entirely. That's
+    # what was actually hanging the join, not a missing/broken key (the
+    # trust tasks above are correct and necessary, just for the *other* join
+    # path). `--use_ssh 1` forces the old SSH-based method, which does
+    # respect the key trust (PVE's own ssh calls for this path use `-o
+    # BatchMode=yes`).
     - name: Join the cluster hosted at proxmox (.165)
-      ansible.builtin.command: "pvecm add {{ hostvars['proxmox'].ansible_host }}"
+      ansible.builtin.command: "pvecm add {{ hostvars['proxmox'].ansible_host }} --use_ssh 1"
       when: >-
         pvecm_status.rc != 0 or
         'Cluster information' not in pvecm_status.stdout
