@@ -323,4 +323,3 @@
       when: >-
         pvecm_status.rc != 0 or
         'Cluster information' not in pvecm_status.stdout
-

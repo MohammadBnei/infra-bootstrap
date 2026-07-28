@@ -1,0 +1,17 @@
+extends: default
+
+rules:
+  document-start: disable
+  line-length: disable
+  comments:
+    min-spaces-from-content: 1
+  indentation:
+    # Hand-authored ArgoCD/K8s manifests here don't indent sequence items
+    # under their key; values.yaml files adapted from upstream charts often
+    # do. Both conventions coexist legitimately — "whatever" only requires
+    # each individual context to be internally consistent.
+    indent-sequences: whatever
+
+ignore: |
+  gitops/bootstrap/traefik-crds/
+  gitops/platform/common-app-chart/templates/
