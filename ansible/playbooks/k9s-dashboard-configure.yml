@@ -259,7 +259,7 @@
     # -------------------------------------------------------------------
     # Done
     # -------------------------------------------------------------------
-    - name: k9s-dashboard configured
+    - name: K9s-dashboard configured
       ansible.builtin.debug:
         msg:
           - "kubectl + k9s installed, kubeconfig written (cluster-admin, ukubi-cluster)."
