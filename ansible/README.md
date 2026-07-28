@@ -15,9 +15,11 @@ Custom playbooks for things kubespray and pigsty don't cover:
 | `playbooks/k8s-node-prereqs.yml` | Standalone K8s-node prereq setup (kernel modules, cgroup, containerd) |
 | `playbooks/garage-configure.yml` | Install/configure Garage on the bare LXC terraform/garage.tf creates — drafted, see below |
 | `playbooks/nfs-configure.yml` | Format + export NFS on the bare VM terraform/nfs.tf creates — drafted, see below |
+| `playbooks/k9s-dashboard-configure.yml` | Install kubectl/k9s + write a cluster-admin kubeconfig on the bare k9s-dashboard LXC terraform/k9s-dashboard.tf creates — drafted, see below |
 | `inventories/proxmox/hosts.yml` | Proxmox host inventory for `pve-postinstall.yml` (`.200`/`.161` — `.165` is a delegation target only) |
 | `inventories/garage/hosts.yml` | Single-host inventory for `garage-configure.yml` (`garage-storage` LXC) |
 | `inventories/nfs/hosts.yml` | Single-host inventory for `nfs-configure.yml` (`nfs-storage` VM) |
+| `inventories/k9s-dashboard/hosts.yml` | Single-host inventory for `k9s-dashboard-configure.yml` (`k9s-dashboard` LXC) |
 | `requirements.yml` | Ansible collections needed by these playbooks (`ansible-galaxy collection install -r ansible/requirements.yml`) |
 
 ## Status
@@ -26,6 +28,7 @@ Custom playbooks for things kubespray and pigsty don't cover:
 - [x] `pve-postinstall.yml` drafted — see below
 - [x] `garage-configure.yml` drafted — see below
 - [x] `nfs-configure.yml` drafted — see below
+- [x] `k9s-dashboard-configure.yml` drafted — see below
 - [ ] `vm-provision.yml` drafted
 - [ ] `k8s-node-prereqs.yml` drafted (may not be needed if kubespray covers it)
 
@@ -213,6 +216,67 @@ ansible-playbook -i ansible/inventories/nfs/hosts.yml \
 
 Safe to re-run: the format step is `blkid`-guarded, the mount/exports are
 declarative, `exportfs -ra` just re-reads current state.
+
+## `playbooks/k9s-dashboard-configure.yml`
+
+Installs `kubectl` + `k9s` and writes a cluster-admin-scoped kubeconfig on
+the bare `k9s-dashboard` LXC `terraform/k9s-dashboard.tf` creates — a
+human SSHes into this box and runs `k9s` against the live `ukubi-cluster`
+instead of SSHing to `k8s-cp-01` and running one-off `kubectl` commands.
+
+**Why this doesn't violate the `k8s-ops` skill's hard rule:** that rule
+says a cluster kubeconfig/`admin.conf` must never be materialized on the
+*operator's* machine — every ad-hoc `kubectl` call goes over SSH to
+`k8s-cp-01` instead. `k9s-dashboard` isn't the operator's machine, it's
+the purpose-built box this kubeconfig is meant to live on (k9s needs
+continuous API access, which the SSH-per-command pattern can't give it).
+The playbook never writes a cluster credential anywhere else.
+
+**Execution model:** two plays in one file. Play 1 targets `k8s-cp-01`
+(from `inventory/ukubi/hosts.yaml`): creates a dedicated `k9s-dashboard`
+ServiceAccount + a `cluster-admin` ClusterRoleBinding (same precedent as
+the existing `K8S_BREAK_GLASS_TOKEN`, see `docs/secrets.md`) — manifests
+rendered locally via `--dry-run=client`, applied remotely via stdin, same
+pattern as `register-repos.yml` — then mints a long-lived token and reads
+the cluster's API server URL/CA data, all over the existing SSH connection
+(these can't be dry-run'd). Play 2 targets `k9s-dashboard` (from
+`ansible/inventories/k9s-dashboard/hosts.yml`): reads Play 1's registered
+facts via `hostvars['k8s-cp-01'][...]` (facts persist across plays in one
+playbook run), installs `kubectl`/`k9s`, and writes the resulting
+kubeconfig to `/root/.kube/config`. Root user, dedicated SSH keypair
+(`~/.ssh/id_k9s_dashboard`, seeded into the LXC by
+`terraform/k9s-dashboard.tf` via `k9s_dashboard_ssh_public_key_file`).
+
+### Prerequisites
+
+- `k9s-dashboard` LXC already created and reachable (`terraform apply
+  -target=...` per `terraform/README.md`)
+- `~/.ssh/id_k9s_dashboard` keypair generated and its public half already
+  applied (baked in at LXC creation time via cloud-init)
+- `ansible/inventories/k9s-dashboard/hosts.yml`'s `ansible_host` filled in
+- `KUBECTL_VERSION` (match `inventory/ukubi/group_vars/k8s_cluster/
+  k8s-cluster.yml`'s `kube_version`) and `K9S_VERSION`/`K9S_SHA256` (check
+  https://github.com/derailed/k9s/releases for the current release and the
+  sha256 of `k9s_linux_amd64.tar.gz`) env vars set — not hardcoded in the
+  playbook, same "confirm, don't guess" discipline as `garage-configure.yml`'s
+  `GARAGE_VERSION`/`GARAGE_SHA256`
+
+### How to run
+
+```bash
+# fill in ansible/inventories/k9s-dashboard/hosts.yml's ansible_host first
+export KUBECTL_VERSION=v1.35.4   # match inventory/ukubi/group_vars/k8s_cluster/k8s-cluster.yml's kube_version
+export K9S_VERSION=v0.50.6       # check https://github.com/derailed/k9s/releases for current
+export K9S_SHA256=<sha256 of k9s_linux_amd64.tar.gz for that release>
+ansible-playbook -i inventory/ukubi/hosts.yaml \
+  -i ansible/inventories/k9s-dashboard/hosts.yml \
+  ansible/playbooks/k9s-dashboard-configure.yml
+```
+
+Safe to re-run: ServiceAccount/ClusterRoleBinding creation is
+`apply`-based, `kubectl`/`k9s` installs are checksum-gated. Token minting
+mints a fresh token every run (rotates, not a bug) and the kubeconfig is
+overwritten to match.
 
 ### Other playbooks (not yet drafted)
 
