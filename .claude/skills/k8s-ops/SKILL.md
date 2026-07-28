@@ -48,24 +48,36 @@ cat gitops/bootstrap/some-manifest.yaml | ssh -i ~/.ssh/id_k8s_vms core@<ip> \
 To render a Secret offline (no live cluster contact) and apply it the same
 way: `kubectl create secret ... --dry-run=client -o yaml | ssh ... apply -f -`.
 
-## `gitops/bootstrap/*.yaml` does NOT self-sync
+## `gitops/bootstrap/*.yaml` DOES self-sync (as of ADR-0021)
 
-There is deliberately no App-of-Apps watching `gitops/bootstrap/`
-(`DECISION.md`'s own "no root.yaml" lock, [ADR-0004](../../../docs/adr/0004-gitops-pattern-c-registry-applicationset.md)). That means the ArgoCD self-app,
-both ApplicationSets, and any standalone `Application` (e.g.
-`traefik-application.yaml`) are only ever applied **once**, manually. Editing
-and pushing one of these files changes nothing live until it's re-applied:
+A standalone `bootstrap` Application
+(`gitops/bootstrap/bootstrap-application.yaml`, [ADR-0021](../../../docs/adr/0021-self-syncing-bootstrap-directory.md)) watches the
+`gitops/bootstrap/` directory itself (plain manifests, non-recursive —
+`traefik-crds/` is excluded the same way `traefik-application.yaml`
+excludes it), tracking `main`, `automated: {prune: true, selfHeal: true}`.
+Confirmed live: `kubectl get application -n argocd bootstrap` shows
+`spec.source.path: gitops/bootstrap`, `targetRevision: main`, and that
+automated policy.
 
-```bash
-cat gitops/bootstrap/<file>.yaml | ssh -i ~/.ssh/id_k8s_vms core@<ip> \
-  "sudo kubectl --kubeconfig /etc/kubernetes/admin.conf apply -f -"
-```
+That means editing any file in `gitops/bootstrap/` (an ApplicationSet, a
+standalone `Application`, an `IngressRoute`) and merging to `main` is
+enough — ArgoCD picks it up on its next poll/webhook, no manual `kubectl
+apply` needed. The **only** one-time manual step left is bootstrapping
+`bootstrap-application.yaml` itself, once, at cluster genesis (`gitops/
+README.md` Step 3) — after that it manages itself too, including its own
+future edits.
 
-Only `gitops/platform/values/*.yaml` auto-syncs (it's pulled via the
-Applications' separate git `ref: values` source) — an edit there just needs
-a push, no manual re-apply. If a fix "isn't taking effect" after a push,
-check which category the edited file falls into before assuming ArgoCD is
-broken.
+ADR-0004's "no root.yaml" rejection is about *how individual apps get
+deployed* (registry.yaml + `list` generator beats a root Application
+spawning per-app children one-by-one) — Pattern C's actual app-deployment
+mechanism is unchanged. ADR-0021 only makes the bootstrap directory's own
+manifests self-sync; it doesn't reverse ADR-0004.
+
+`gitops/platform/values/*.yaml` also auto-syncs (pulled via the
+Applications' separate git `ref: values` source) — same "just push" story.
+If a fix "isn't taking effect," check `kubectl get application -n argocd
+bootstrap` for `OutOfSync` (still waiting on ArgoCD's poll/webhook or a
+merge to `main`) before assuming something is broken.
 
 ## Always check the real chart schema before writing a values file
 
