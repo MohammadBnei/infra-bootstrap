@@ -29,6 +29,20 @@ datasources:
       url: http://platform-prometheus-kube-p-prometheus.monitoring.svc.cluster.local:9090
       isDefault: true
 
+    # Pigsty's own metrics backend (pg01, 192.168.1.205) — actually
+    # VictoriaMetrics (v2.24.0), not classic Prometheus, but it implements
+    # the same HTTP API so Grafana's "prometheus" datasource type works
+    # against it unchanged. Reached via Pigsty's nginx portal on :80
+    # (confirmed live: no vhost/Host-header routing is actually configured
+    # beyond the "home" catch-all, so any Host header lands on the same
+    # backend — /vmetrics is the only path that matters). Direct LAN
+    # IP:port, same pattern as longhorn-backup-secret.yaml's S3 endpoint —
+    # no ingress/DNS exists for this yet.
+    - name: Pigsty (VictoriaMetrics)
+      type: prometheus
+      url: http://192.168.1.205/vmetrics
+      isDefault: false
+
 # IngressRoute: gitops/bootstrap/grafana-ingressroute.yaml (Traefik
 # IngressRoute, ADR-0001 — not Gateway API/HTTPRoute).
 grafana.ini:
