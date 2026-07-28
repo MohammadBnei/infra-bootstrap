@@ -18,6 +18,11 @@
 #               override file (e.g. vos-monolith-dev) must be a standalone
 #               Application instead — see gitops/bootstrap/vos-monolith-dev-application.yaml.
 #               One registry entry is still always one Application/one env.
+#   targetRevision  Branch/tag in repoURL to read valuesPath from. Defaults
+#               to `HEAD` (the repo's default branch) for single-branch
+#               apps — set explicitly (e.g. `main`) for apps whose CI
+#               pushes tag bumps to a branch that ISN'T the GitHub default
+#               branch. Don't assume HEAD == "the production branch".
 #   hostname    Public hostname — passed as ingress.hostname to common-app-chart
 #
 # Per-app repo must have at minimum:
@@ -36,6 +41,7 @@
   syncWave: "10"
   repoURL: https://github.com/MohammadBnei/editable-blog.git
   valuesPath: [helm/values.yaml]
+  targetRevision: HEAD
   hostname: blog.bnei.dev
 
 # dream-analyst: second real per-app repo, following editable-blog's
@@ -45,16 +51,22 @@
   syncWave: "10"
   repoURL: https://github.com/MohammadBnei/dream-analyst.git
   valuesPath: [helm/values.yaml]
+  targetRevision: HEAD
   hostname: dreamer.bnei.dev
 
 # vos-monolith: onboarded onto Pattern C off its previous kustomize +
 # imperative-Application setup — see docs/adr/ for the hooks/oneOffJobs
-# chart pattern this replaced it with.
+# chart pattern this replaced it with. targetRevision is explicitly `main`
+# — vos-monolith's GitHub default branch is actually `dev`, and
+# back_ci.yml's prod tag-bump pushes go to `main`, not whatever HEAD
+# resolves to. (Found live: HEAD silently pointed this Application at
+# `dev` branch content instead of `main`.)
 - name: vos-monolith
   namespace: vos
   syncWave: "10"
   repoURL: https://github.com/MohammadBnei/vos-monolith.git
   valuesPath: [back/helm/values.yaml]
+  targetRevision: main
   hostname: api.voconsteroid.com
 
 # vos-monolith-dev is NOT a list-generator entry here: it needs 2 value

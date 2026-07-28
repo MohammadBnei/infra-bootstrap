@@ -24,6 +24,7 @@ spec:
         syncWave: "10"
         repoURL: https://github.com/MohammadBnei/editable-blog.git
         valuesPath: [helm/values.yaml]
+        targetRevision: HEAD
         hostname: blog.bnei.dev
 
       - name: dream-analyst
@@ -31,6 +32,7 @@ spec:
         syncWave: "10"
         repoURL: https://github.com/MohammadBnei/dream-analyst.git
         valuesPath: [helm/values.yaml]
+        targetRevision: HEAD
         hostname: dreamer.bnei.dev
 
       - name: vos-monolith
@@ -38,6 +40,7 @@ spec:
         syncWave: "10"
         repoURL: https://github.com/MohammadBnei/vos-monolith.git
         valuesPath: [back/helm/values.yaml]
+        targetRevision: main
         hostname: api.voconsteroid.com
 
       # vos-monolith-dev (needs 2 value files, base + dev override) is NOT
@@ -76,7 +79,7 @@ spec:
       # gitops/README.md's "Bootstrap credential chain" for how
       # repo-creds-github-bnei is injected)
       - repoURL: '{{.repoURL}}'
-        targetRevision: HEAD
+        targetRevision: '{{.targetRevision}}'
         ref: values
       destination:
         server: https://kubernetes.default.svc
