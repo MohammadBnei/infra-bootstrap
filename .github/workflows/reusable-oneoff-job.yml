@@ -1,0 +1,139 @@
+name: Reusable One-Off Job Runner
+
+# Called from an app repo's own thin workflow (e.g. vos-monolith's
+# .github/workflows/oneoff-jobs.yml) on every push that touches its
+# common-app-chart values file(s). Reads the oneOffJobs ledger embedded in
+# those values files, triggers any entry whose image.tag has moved past
+# lastRunTag via the CronJob-backed `kubectl create job --from=cronjob/...`
+# primitive, waits for it to finish, and writes the result straight back
+# into the ledger (success) or the CI run's own output (failure) — no
+# per-app bespoke CI, no separate dashboard to check.
+#
+# Runs on a self-hosted, in-cluster runner (see docs/adr/ for the runner
+# ADR) — GitHub-hosted runners can't reach the cluster's API server at all.
+
+on:
+  workflow_call:
+    inputs:
+      namespace:
+        description: "Target namespace, e.g. vos / vos-dev"
+        required: true
+        type: string
+      release_name:
+        description: "Helm release / ArgoCD Application name — CronJobs are named <release_name>-<job_name>"
+        required: true
+        type: string
+      values_files:
+        description: "Newline-delimited, ordered list of values file paths (mirrors the registry.yaml valuesPath layering for this entry). The LAST file is where lastRunTag gets written back."
+        required: true
+        type: string
+      job_timeout_seconds:
+        description: "How long to wait for a triggered Job to finish before treating it as failed"
+        required: false
+        type: number
+        default: 1800
+
+jobs:
+  run-pending:
+    runs-on: [self-hosted, ukubi]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: Run pending oneOffJobs
+        id: run
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          # values_files is newline-delimited (workflow_call has no list
+          # input type); turn it into a bash array, in order. (Avoiding
+          # `mapfile`/`readarray` — bash 4+ only, not guaranteed present on
+          # every runner image.)
+          VALUES_FILES=()
+          while IFS= read -r line; do
+            [ -n "$line" ] && VALUES_FILES+=("$line")
+          done <<< "${{ inputs.values_files }}"
+          LAST_FILE="${VALUES_FILES[$((${#VALUES_FILES[@]} - 1))]}"
+
+          # Reproduce Helm's layered deep-merge (later file wins) so
+          # "pending" is judged against the same merged view ArgoCD/Helm
+          # actually renders, not just the last file in isolation.
+          YQ_ARGS=()
+          for f in "${VALUES_FILES[@]}"; do
+            YQ_ARGS+=("$f")
+          done
+          MERGE_EXPR=$(printf 'select(fileIndex==%d) * ' $(seq 0 $((${#VALUES_FILES[@]} - 1))) | sed 's/ \* $//')
+          MERGED=$(yq eval-all "$MERGE_EXPR" "${YQ_ARGS[@]}")
+
+          NAMES=$(echo "$MERGED" | yq '.oneOffJobs // {} | keys | .[]' -r)
+
+          FAILED=0
+          for name in $NAMES; do
+            tag=$(echo "$MERGED" | yq ".oneOffJobs.${name}.image.tag" -r)
+            last_run_tag=$(echo "$MERGED" | yq ".oneOffJobs.${name}.lastRunTag // \"\"" -r)
+
+            if [ "$tag" == "$last_run_tag" ]; then
+              echo "::notice::${name}: tag ${tag} already ran, skipping"
+              continue
+            fi
+
+            cronjob_name="${{ inputs.release_name }}-$(echo "$name" | tr '[:upper:]' '[:lower:]')"
+            run_id="$(echo "$name" | tr '[:upper:]' '[:lower:]')-${{ github.run_id }}-${{ github.run_attempt }}"
+
+            echo "::notice::${name}: triggering ${cronjob_name} (tag ${tag}) as job/${run_id}"
+            kubectl create job --from="cronjob/${cronjob_name}" "$run_id" -n "${{ inputs.namespace }}"
+
+            deadline=$((SECONDS + ${{ inputs.job_timeout_seconds }}))
+            status=""
+            while [ $SECONDS -lt $deadline ]; do
+              complete=$(kubectl get job "$run_id" -n "${{ inputs.namespace }}" -o jsonpath='{.status.conditions[?(@.type=="Complete")].status}' 2>/dev/null || true)
+              failed=$(kubectl get job "$run_id" -n "${{ inputs.namespace }}" -o jsonpath='{.status.conditions[?(@.type=="Failed")].status}' 2>/dev/null || true)
+              if [ "$complete" == "True" ]; then status="complete"; break; fi
+              if [ "$failed" == "True" ]; then status="failed"; break; fi
+              sleep 5
+            done
+            status="${status:-timeout}"
+
+            if [ "$status" == "complete" ]; then
+              echo "::notice::${name}: succeeded"
+              yq -i ".oneOffJobs.${name}.lastRunTag = \"${tag}\"" "$LAST_FILE"
+            else
+              echo "::error::${name}: ${status} — see logs below"
+              {
+                echo "### ${name} ${status} (job/${run_id})"
+                echo '```'
+                kubectl logs -n "${{ inputs.namespace }}" "job/${run_id}" --all-containers --prefix 2>&1 || echo "(no logs available)"
+                echo '```'
+              } >> "$GITHUB_STEP_SUMMARY"
+              FAILED=1
+            fi
+          done
+
+          if [ "$FAILED" -eq 1 ]; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            exit 1
+          fi
+          echo "changed=true" >> "$GITHUB_OUTPUT"
+
+      - name: Commit updated ledger
+        if: steps.run.outputs.changed == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          VALUES_FILES=()
+          while IFS= read -r line; do
+            [ -n "$line" ] && VALUES_FILES+=("$line")
+          done <<< "${{ inputs.values_files }}"
+          LAST_FILE="${VALUES_FILES[$((${#VALUES_FILES[@]} - 1))]}"
+          if git diff --quiet -- "$LAST_FILE"; then
+            echo "No ledger changes to commit."
+            exit 0
+          fi
+          git config user.name "${GITHUB_ACTOR}"
+          git config user.email "${GITHUB_ACTOR}@users.noreply.github.com"
+          git add "$LAST_FILE"
+          git commit -m "Chore: record oneOffJobs run(s) for ${{ inputs.release_name }}"
+          git push
