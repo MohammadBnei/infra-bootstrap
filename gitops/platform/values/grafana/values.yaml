@@ -20,7 +20,13 @@ datasources:
     datasources:
     - name: Prometheus
       type: prometheus
-      url: http://prometheus-kube-prometheus-prometheus.monitoring.svc.cluster.local:9090
+      # kube-prometheus-stack's chart fullname truncates to
+      # "platform-prometheus-kube-p-*" for this release name — not the
+      # "prometheus-kube-prometheus-prometheus" you'd guess from the chart
+      # name. Confirmed live: `kubectl get svc -n monitoring`. Same class
+      # of naming mismatch as grafana-ingressroute.yaml/infisical-
+      # ingressroute.yaml — always check the real Service name.
+      url: http://platform-prometheus-kube-p-prometheus.monitoring.svc.cluster.local:9090
       isDefault: true
 
 # IngressRoute: gitops/bootstrap/grafana-ingressroute.yaml (Traefik
