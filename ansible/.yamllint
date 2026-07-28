@@ -1,0 +1,19 @@
+---
+extends: default
+
+rules:
+  document-start:
+    present: true
+  line-length: disable
+  comments:
+    min-spaces-from-content: 1
+  braces:
+    max-spaces-inside: 1
+  # ansible-lint's embedded yaml rule requires these exact settings to
+  # accept a custom yamllint config at all (otherwise it silently falls back
+  # to its own defaults and disables --fix) — see
+  # https://docs.ansible.com/projects/lint/rules/yaml/
+  comments-indentation: disable
+  octal-values:
+    forbid-implicit-octal: true
+    forbid-explicit-octal: true

@@ -42,7 +42,7 @@
       - 192.168.1.161
 
   handlers:
-    - name: reload exports
+    - name: Reload exports
       ansible.builtin.command: exportfs -ra
       changed_when: true
 
@@ -93,7 +93,7 @@
         mode: "0644"
         content: |
           {{ nfs_export_path }} {% for client in nfs_allowed_clients %}{{ client }}(rw,no_root_squash,sync,no_subtree_check) {% endfor %}
-      notify: reload exports
+      notify: Reload exports
 
     - name: Enable and start nfs-kernel-server
       ansible.builtin.systemd:
@@ -138,6 +138,6 @@
         --content {{ nfs_storage_content }} --path {{ nfs_storage_path }}
       when: nfs_storage_name not in pvesm_status.stdout
 
-    - name: shared-templates PVE storage ready
+    - name: Shared-templates PVE storage ready
       ansible.builtin.debug:
         msg: "{{ nfs_storage_name }} registered cluster-wide — verify with `pvesm status` on any PVE node."

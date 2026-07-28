@@ -1,0 +1,29 @@
+# CI-only overlay for `helm lint`/`helm template` in .github/workflows/lint.yml.
+# No real Application uses this file — real apps pass their own values via
+# registry.yaml's valuesPath. This turns on every optional template path
+# with dummy-but-schema-valid data so CI actually renders
+# ingressroute/pvc/infisicalsecret/hooks/oneoff-cronjobs too, not just the
+# always-on Deployment+Service.
+image:
+  repository: ghcr.io/example/ci-check
+
+ingress:
+  hostname: ci-check.example.com
+
+persistence:
+  enabled: true
+
+infisical:
+  enabled: true
+  projectSlug: ci-check
+
+hooks:
+  migrate:
+    type: PreSync
+    image:
+      repository: ghcr.io/example/ci-check-migrate
+
+oneOffJobs:
+  dbCheck:
+    image:
+      repository: ghcr.io/example/ci-check-job
