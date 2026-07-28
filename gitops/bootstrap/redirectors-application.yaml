@@ -16,7 +16,6 @@ spec:
     repoURL: git@github.com:MohammadBnei/infra-bootstrap.git
     targetRevision: main
     path: gitops/redirectors
-    directory: {}
   destination:
     server: https://kubernetes.default.svc
     namespace: default

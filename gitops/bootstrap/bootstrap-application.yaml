@@ -31,7 +31,12 @@ spec:
     repoURL: git@github.com:MohammadBnei/infra-bootstrap.git
     targetRevision: main
     path: gitops/bootstrap
-    directory: {}
+    # Don't add `directory: {}` here — it's the zero value, and an
+    # explicit empty struct in git never round-trips through the live
+    # object (K8s omits empty structs on read), so ArgoCD's diff sees it
+    # as permanently missing and self-heals forever. Caused this app (and
+    # redirectors/platform-actions-runner, same mistake) to resync every
+    # few minutes indefinitely.
   destination:
     server: https://kubernetes.default.svc
     namespace: argocd
