@@ -1,9 +1,18 @@
 # terraform/ — Proxmox VM/LXC provisioning
 
 Terraform (via the [`bpg/proxmox`](https://registry.terraform.io/providers/bpg/proxmox/latest) provider)
-for VM/LXC provisioning on `.165` (`192.168.1.165`), the only currently-live
-Proxmox host. `.200` and `.161` still need a PVE reinstall — this isn't a
-multi-host setup yet.
+for VM/LXC provisioning on `.165` (`192.168.1.165`) only. `.200` (server1)
+and `.161` (ex-laptop) are both now reinstalled to PVE and joined `.165`'s
+corosync cluster via Ansible (see `ansible/README.md`, ADR-0020,
+ADR-0024) — but Terraform itself doesn't provision on them yet, so this
+is still a single-host *Terraform* setup even though PVE itself is now a
+3-node cluster.
+
+**Cross-host gotcha (ADR-0024):** `variables.tf`'s optional per-node
+`datastore_id` isn't set for `server1`, so any future `server1`-targeted
+VM falls back to `.165`'s `template_storage_id` via `coalesce` — wrong
+for a cross-host VM. Any resource block targeting `server1` must set
+`datastore_id: local-lvm` explicitly.
 
 Current topology is **provisional**, laid out to have something concrete to
 build against — expect it to change:
@@ -167,7 +176,9 @@ secrets by design, but don't commit your filled-in copy — keep it local.
   if/when this setup is adopted as the new locked provisioning method.
   (`inventory/ukubi/hosts.yaml` *is* touched — `hosts-inventory.tf`
   generates it from `var.k8s_nodes` via `templatefile()`.)
-- `.200`/`.161` — no multi-host abstraction until those hosts actually run
-  PVE.
+- `.200`/`.161` — both run PVE and are corosync-clustered with `.165` now,
+  but there's still no multi-host Terraform abstraction (provider aliasing,
+  per-host `datastore_id` wiring) until this setup actually provisions on
+  them.
 - Installing kubespray/Pigsty on top of the VMs this creates — that's the
   next, already-planned step, done via the existing `ansible-ops` skill.

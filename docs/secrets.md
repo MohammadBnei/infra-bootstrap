@@ -70,8 +70,8 @@ other secrets above, all at project root:
 | Secret group | Host | Purpose |
 | --- | --- | --- |
 | `SSH_PROXMOX_HOST/KEY/PORT/USER` | `.165` | primary, currently-live PVE host — day-to-day PVE/VM/LXC ops outside what the Terraform token covers |
-| `SSH_SERVER1_HOST/KEY/PORT/USER` | `192.168.1.200` | `server1` — currently Debian 12 + libvirt, pending PVE reinstall; also hosts pg02's target HDD for pgBackRest |
-| `SSH_LAPTOP_HOST/KEY/PORT/USER` | `192.168.1.161` | `ex-laptop` — currently Debian 12 + libvirt, pending PVE reinstall as the 3rd node ([ADR-0013](adr/0013-pve-node-161-sleep-risk-mitigation.md)) |
+| `SSH_SERVER1_HOST/KEY/PORT/USER` | `192.168.1.200` | `server1` — reinstalled to PVE, joined the corosync cluster ([ADR-0024](adr/0024-server1-single-disk-ext4-no-dedicated-zfs.md)); its pgBackRest target HDD was physically removed pre-reinstall, no backup target defined yet |
+| `SSH_LAPTOP_HOST/KEY/PORT/USER` | `192.168.1.161` | `ex-laptop` — reinstalled to PVE, joined the corosync cluster as the 3rd node ([ADR-0013](adr/0013-pve-node-161-sleep-risk-mitigation.md)) |
 | `SSH_PI4_HOST/KEY/PORT/USER` | `192.168.1.55` | Pi 4 — Pi-hole/DNS helper, authoritative for `bnei.lan` |
 | `SSH_OLDPG_HOST/KEY/PORT/USER` | `192.168.1.193` | old Pigsty Postgres setup, superseded by the new `pg-proxmox` cluster — kept running as a rollback target in case of a major outage during/after migration, not yet decommissioned |
 

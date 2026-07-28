@@ -1,6 +1,6 @@
 # ADR-0014: PVE storage layout — ZFS pool vs `local-zfs` directory
 
-**Status:** Accepted
+**Status:** Accepted (server1 portion amended by [ADR-0024](0024-server1-single-disk-ext4-no-dedicated-zfs.md) — the 149GB HDD assumed below was physically removed before reinstall, so `server1` never got a dedicated ZFS pool. The `ex-laptop`/`zfs-exlaptop` decision here is unaffected.)
 
 ## Context
 

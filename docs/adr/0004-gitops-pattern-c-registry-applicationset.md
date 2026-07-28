@@ -1,6 +1,6 @@
 # ADR-0004: GitOps Pattern C — registry.yaml + ApplicationSet `list` generator
 
-**Status:** Accepted
+**Status:** Accepted (credential clause amended by [ADR-0025](0025-repo-credential-shared-pat-not-ssh-deploy-key.md) — the SSH-deploy-key mechanism below was replaced by a shared HTTPS+PAT credential; the registry/ApplicationSet structure is otherwise unaffected)
 
 ## Context
 
@@ -39,7 +39,8 @@ charts or N hand-written Applications. Alternatives considered:
   10 max duration.
 - Repo credentials: SSH deploy key per repo, empty passphrase,
   read-only — works across GitHub/Gitea/self-hosted GitLab without
-  per-host recoding.
+  per-host recoding. **Superseded — see [ADR-0025](0025-repo-credential-shared-pat-not-ssh-deploy-key.md):
+  actual mechanism is now one shared HTTPS+PAT credential.**
 - CRDs are **not** gitops-managed; their lifecycle is outside ArgoCD's
   update path.
 
