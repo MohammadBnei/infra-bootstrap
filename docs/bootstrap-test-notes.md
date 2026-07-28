@@ -977,3 +977,128 @@ bug.
 pod serving `200` on port 3000 continuously (`16` restarts total, `0`
 since the CPU fix, over 2.5 hours). HTTPS+PAT path confirmed fully
 working end to end.
+
+## 2026-07-28 — Freebox cutover: real Let's Encrypt certs, three chained bugs
+
+After Stage 1 was verified healthy internally, the Freebox port-forward was
+repointed from the legacy HAProxy target to the new Traefik VIP
+(`192.168.1.233`). First external check (via a truly external HTTP client,
+not a LAN-side curl) immediately surfaced three separate, unrelated bugs
+stacked on top of each other — each one only became visible once the
+previous one was fixed.
+
+### Bug 1 — wrong port before the right port
+
+First external `curl`/fetch attempt got `ECONNREFUSED` on 443. The Freebox
+rule had been updated to point at `.233` but kept the legacy HAProxy's
+destination port (`8000`/`8443`) instead of standard `80`/`443` — Traefik's
+LoadBalancer service listens on the standard ports, nothing was listening
+on `8000`/`8443` at that IP. Fixed by pointing the Freebox rule at `.233`
+port `80` **and** `443` explicitly (two separate rules — easy to fix one
+and assume the other is fine).
+
+### Bug 2 — Traefik never actually had a working cert, the whole time
+
+Once the port was right, external TLS connected but every client reported
+`unable to verify the first certificate`. `openssl s_client` against the
+VIP confirmed Traefik was serving its own `TRAEFIK DEFAULT CERT`
+(self-signed fallback), not a Let's Encrypt cert — for every hostname,
+silently, since the platform first came up. Root cause, from Traefik's own
+logs at pod startup:
+
+```
+ERR The ACME resolve is skipped from the resolvers list
+  error="unable to get ACME account: open /data/acme.json: permission denied"
+```
+
+The chart runs non-root (`runAsUser`/`runAsGroup: 65532`) but its
+`values.yaml` never set `podSecurityContext.fsGroup`, so the acme.json PVC
+mounted `root:root`/`0755` — Traefik could never create the file at all,
+which **permanently disables the ACME resolver for that pod's lifetime**
+(not retried). This had been true since the very first bring-up; nothing
+about the Freebox cutover caused it, the cutover just made it visible for
+the first time (`curl -k` during earlier internal checks had masked it by
+skipping verification). Fixed with `podSecurityContext.fsGroup: 65532`
+(PR #19).
+
+Fixing this uncovered a second layer immediately: on the *next* pod
+restart, Traefik logged a **new** error —
+
+```
+ERR The ACME resolve is skipped from the resolvers list
+  error="unable to get ACME account: permissions 660 for /data/acme.json are too open, please use 600"
+```
+
+Kubernetes' default `fsGroupChangePolicy: Always` recursively resets every
+file's mode to add group read/write on **every** pod (re)start, which
+stomps `acme.json` back to `660` regardless of what Traefik itself wrote.
+Fixed with `fsGroupChangePolicy: OnRootMismatch`, which skips the reset
+once the directory's group ownership already matches — preserving
+Traefik's own `0600` file creation across restarts.
+
+### Bug 3 — HTTP-01 challenge silently swallowed somewhere outside the cluster
+
+With permissions fixed and stale `acme.json` state wiped, Traefik's ACME
+resolver started cleanly and began real HTTP-01 attempts — all of which
+failed with:
+
+```
+acme: error: 403 :: urn:ietf:params:acme:error:unauthorized ::
+82.65.231.50: Invalid response from
+http://argocd.bnei.dev/.well-known/acme-challenge/<token>: 404
+```
+
+The diagnostic that mattered: hitting the exact same challenge path
+directly against Traefik's VIP from inside the LAN (bypassing the Freebox
+entirely) with a **fake** token correctly logged Traefik's own rejection —
+`Cannot retrieve the ACME challenge for argocd.bnei.dev (token
+"testtoken123")` — proving the internal router mechanism worked. That
+exact log line **never appeared** for any of the real Let's Encrypt
+validation attempts, even though LE got back a real, fast HTTP 404 (not a
+timeout/connection-refused, which is what a simple missing-forward would
+produce). That combination — a clean response, but Traefik's own handler
+never seeing the request — points at something on the path (suspected
+transparent ISP proxy/cache on port 80; ruled out the Freebox's own
+remote-admin UI specifically, since that would present a branded page, not
+a bare 404) intercepting *before* the cluster, at a layer neither side
+could directly inspect (no external plain-HTTP test tool available, and no
+way to packet-capture the ISP's side).
+
+Rather than keep debugging blind at an unreachable layer, switched the
+`le` resolver from `httpChallenge` (port 80) to `tlsChallenge` (TLS-ALPN-01,
+validated entirely over port 443, already confirmed working end-to-end
+externally). Same built-in Traefik ACME, no change to ADR-0001's
+cert-manager/DNS-01 rejection. (PR #20)
+
+### Bug 4 (self-inflicted) — `tlsChallenge: {}` renders nothing
+
+PR #20 originally shipped `tlsChallenge: {}`. The chart's CLI-arg templating
+only flattens **non-empty** maps into `--flag=value` pairs — an empty map
+has nothing to recurse into, so it silently produced no argument at all,
+leaving ACME with **no challenge type configured whatsoever** (worse than
+before: now neither `httpChallenge` nor `tlsChallenge` was set). Caught by
+rendering the chart locally with `helm template` before pushing rather
+than trusting the live cluster to reveal it. Fix: `tlsChallenge: true` (a
+boolean scalar, not a map) — confirmed via `helm template` that this is
+what actually produces `--certificatesresolvers.le.acme.tlsChallenge=true`.
+
+### Process note — two direct pushes to `main`
+
+Both Bug 4's fix and one intermediate Bug 2 fix landed as direct commits
+to `main` rather than through a feature branch + PR. The first was a
+genuine slip (local checkout ended up on `main` after an earlier PR merge,
+not re-verified with `git branch --show-current` before committing — user
+flagged it, decided the small low-risk diff wasn't worth reverting). The
+second was explicitly authorized in advance ("push to main directly your
+small fixes") while the user was away. Lesson for next time: always run
+`git branch --show-current` immediately before any commit, regardless of
+what branch was active minutes earlier in the same session.
+
+### End state
+
+All three hostnames (`argocd.bnei.dev`, `dreamer.bnei.dev`,
+`blog.bnei.dev`) confirmed serving real Let's Encrypt certificates
+(issuer `Let's Encrypt`, CNs `YR1`/`YR2`, valid ~90 days from issuance) via
+`openssl s_client` against the VIP. Freebox cutover fully verified
+externally. `argocd-initial-admin-secret` deleted after the user set a
+real admin password through the UI.
