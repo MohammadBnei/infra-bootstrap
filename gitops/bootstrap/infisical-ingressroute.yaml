@@ -10,7 +10,16 @@ spec:
   - kind: Rule
     match: Host(`infisical.bnei.dev`)
     services:
-    - name: infisical
+    # platform.applicationset.yaml names the ArgoCD Application (and hence
+    # the Helm release, since no releaseName override is set)
+    # "platform-infisical", not "infisical" — the chart's fullname template
+    # produces "platform-infisical-backend" for the backend Service. This
+    # file predates that naming convention and was never updated, so
+    # Traefik logged "kubernetes service not found: infisical/infisical"
+    # and never created a router for this host at all — no router meant no
+    # ACME cert was ever requested, so infisical.bnei.dev silently fell
+    # back to Traefik's default self-signed cert.
+    - name: platform-infisical-backend
       port: 8080
   tls:
     certResolver: le
