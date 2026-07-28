@@ -37,8 +37,8 @@ spec:
             # existing Application, including its CRDs, before a
             # differently-shaped replacement could take over).
             resource.customizations.ignoreDifferences.apiextensions.k8s.io_CustomResourceDefinition: |
-              jsonPointers:
-              - /spec/conversion/webhook/clientConfig/caBundle
+              jqPathExpressions:
+              - '.spec.conversion.webhook.clientConfig.caBundle'
           params:
             # TLS terminated at Traefik — ArgoCD serves plain HTTP inside the cluster
             "server.insecure": "true"
