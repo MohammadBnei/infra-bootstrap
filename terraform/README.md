@@ -38,6 +38,7 @@ build against — expect it to change:
 | `hermesagent` | LXC | 101 | **real, production — imported, `prevent_destroy`** |
 | `nfs-storage` | VM | 302 | new-create on `server1`, built directly from cloud image (not cloned) — shared PVE storage, ADR-0026 |
 | `k8s-worker-02` | VM | 203 | new-create on `server1`, cloned cross-host from the golden template via `shared-templates` |
+| `k9s-dashboard` | LXC | 102 | new-create on `server1`, ops-only convenience box (k9s + kubectl against ukubi-cluster), no application workload, no import needed |
 
 ## Prerequisites (one-time, by hand)
 
@@ -139,6 +140,13 @@ secrets by design, but don't commit your filled-in copy — keep it local.
    `ansible/playbooks/garage-configure.yml` (see `ansible/README.md`) for
    install/config — Terraform's job stops at "bare, SSH-reachable
    container."
+   **k9s-dashboard**: `k9s-dashboard.tf` creates the bare LXC the same
+   way — no script, no import. Lives on `server1`, not `.165` (user's
+   explicit placement choice), so it downloads its own Debian 13 vztmpl
+   rather than reusing `garage.tf`'s — `vztmpl` content on "local" storage
+   is per-node in Proxmox, not visible across the corosync cluster. Once
+   `started`, hand off to `ansible/playbooks/k9s-dashboard-configure.yml`
+   (see `ansible/README.md`).
 5. **First real `terraform apply` must use `-target`**, scoped only to
    genuinely-new resources:
    ```
@@ -148,13 +156,15 @@ secrets by design, but don't commit your filled-in copy — keep it local.
      -target='proxmox_virtual_environment_vm.k8s_node["k8s-cp-01"]' \
      -target='proxmox_virtual_environment_vm.k8s_node["k8s-worker-01"]' \
      -target=proxmox_download_file.garage_lxc_template \
-     -target=proxmox_virtual_environment_container.garage_storage
+     -target=proxmox_virtual_environment_container.garage_storage \
+     -target=proxmox_download_file.k9s_dashboard_lxc_template \
+     -target=proxmox_virtual_environment_container.k9s_dashboard
    ```
    This guarantees pg01/pg02/hermesagent can't be touched by an early,
    broad apply even by accident.
 6. After that, a full `terraform plan` (no `-target`) should show `No
-   changes.` on pg01/pg02/hermesagent/garage every time — that's the
-   ongoing steady-state health check.
+   changes.` on pg01/pg02/hermesagent/garage/k9s-dashboard every time —
+   that's the ongoing steady-state health check.
 7. `k8s-worker-01`'s `hostpci0` block needs a PCI Resource Mapping named
    per `gpu_mapping_name` (default `"gpu"`) — **done** as of 2026-07-14:
    `node=bnei,path=0000:0b:00,id=10de:1e84,iommugroup=2`, covering all 4

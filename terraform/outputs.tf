@@ -9,3 +9,11 @@ output "garage_storage_ip" {
 output "garage_storage_ct_id" {
   value = var.garage_ct_id
 }
+
+output "k9s_dashboard_ip" {
+  value = var.k9s_dashboard_ip
+}
+
+output "k9s_dashboard_ct_id" {
+  value = var.k9s_dashboard_ct_id
+}

@@ -234,3 +234,25 @@ variable "k8s_vm_ssh_private_key_file" {
   type        = string
   default     = "~/.ssh/id_k8s_vms"
 }
+
+variable "k9s_dashboard_container_storage" {
+  description = "PVE storage pool for the k9s-dashboard LXC disk — confirm exact name via `pvesm status`. Fine to reuse the same pool as garage_container_storage; this box is tiny (8GB, negligible I/O)."
+  type        = string
+}
+
+variable "k9s_dashboard_ip" {
+  description = "Static IP for k9s-dashboard. No VMID/IP was locked for it anywhere in MISSION.md/docs — pick one on first apply and treat as provisional, same precedent as garage_ip/nfs_ip."
+  type        = string
+}
+
+variable "k9s_dashboard_ct_id" {
+  description = "VMID/CTID for the k9s-dashboard container."
+  type        = number
+  default     = 102
+}
+
+variable "k9s_dashboard_ssh_public_key_file" {
+  description = "Path to the public half of k9s-dashboard's dedicated SSH key — a new, separate keypair from PVE-host/k8s-VM/garage/nfs credentials (own blast radius: this box carries a live cluster-admin-scoped kubeconfig on disk). Consumed by ansible/playbooks/k9s-dashboard-configure.yml."
+  type        = string
+  default     = "~/.ssh/id_k9s_dashboard.pub"
+}

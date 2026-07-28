@@ -1,0 +1,270 @@
+---
+# Configure the bare k9s-dashboard LXC (terraform/k9s-dashboard.tf): install
+# kubectl + k9s, and write a cluster-admin-scoped kubeconfig so a human can
+# SSH in and run `k9s` against the live ukubi-cluster. Safe to re-run.
+#
+# WHY THIS PLAYBOOK EXISTS
+# k9s needs a kubeconfig to talk to the K8s API continuously (watches, not
+# one-shot exec) — the SSH-per-command pattern the k8s-ops skill uses for
+# ad-hoc kubectl calls doesn't work for it.
+#
+# k8s-ops' hard rule is that /etc/kubernetes/admin.conf (or any cluster
+# credential) must never be materialized on the OPERATOR'S machine — every
+# kubectl call goes over SSH to k8s-cp-01 instead. That rule is not violated
+# here: the k9s-dashboard LXC IS the intended, purpose-built place this
+# kubeconfig is meant to live — it's the whole reason the box exists, not
+# the operator's laptop. This playbook never writes a cluster credential
+# anywhere except the dashboard LXC's own disk.
+#
+# Play 1 creates a dedicated ServiceAccount + ClusterRoleBinding
+# (cluster-admin — same precedent as the existing K8S_BREAK_GLASS_TOKEN,
+# see docs/secrets.md) on k8s-cp-01 and mints a long-lived token, all over
+# the existing SSH connection (manifests rendered locally via
+# --dry-run=client, applied remotely via stdin — same pattern as
+# register-repos.yml). Play 2 uses those facts (Ansible registered vars
+# persist across plays in one playbook run — read via hostvars) to install
+# kubectl/k9s and write the kubeconfig on k9s-dashboard itself.
+#
+# RE-RUN SAFETY
+# ServiceAccount/ClusterRoleBinding creation is apply-based (idempotent).
+# Token minting always mints a fresh token on every run — expected, not a
+# bug, it just rotates. kubectl/k9s installs are checksum-gated (get_url
+# skips re-download when unchanged). Kubeconfig write is a plain overwrite
+# every run, matching the freshly-minted token.
+#
+# Prerequisites:
+# - k9s-dashboard LXC already created and reachable (terraform apply
+#   -target=... per terraform/README.md); ansible/inventories/k9s-dashboard/
+#   hosts.yml's ansible_host filled in with its real IP.
+# - SSH access to k8s-cp-01 already configured (inventory/ukubi/hosts.yaml).
+# - KUBECTL_VERSION / K9S_VERSION / K9S_SHA256 env vars set before running —
+#   not hardcoded, same "confirm, don't guess" discipline as
+#   garage-configure.yml's GARAGE_VERSION/GARAGE_SHA256. KUBECTL_VERSION
+#   should match inventory/ukubi/group_vars/k8s_cluster/k8s-cluster.yml's
+#   kube_version; K9S_VERSION/K9S_SHA256 come from
+#   https://github.com/derailed/k9s/releases (sha256 of k9s_linux_amd64.tar.gz).
+#
+# How to run:
+#   export KUBECTL_VERSION=v1.35.4
+#   export K9S_VERSION=v0.50.6
+#   export K9S_SHA256=<sha256 of k9s_linux_amd64.tar.gz for that release>
+#   ansible-playbook -i inventory/ukubi/hosts.yaml \
+#     -i ansible/inventories/k9s-dashboard/hosts.yml \
+#     ansible/playbooks/k9s-dashboard-configure.yml
+
+- name: Mint a cluster-admin kubeconfig for k9s-dashboard
+  hosts: k8s-cp-01
+  gather_facts: false
+  vars:
+    k9s_sa_namespace: kube-system
+    k9s_sa_name: k9s-dashboard
+
+  tasks:
+    # Fail before touching the cluster at all if any required var is
+    # missing — cheaper than minting a token and failing in Play 2.
+    - name: Assert KUBECTL_VERSION/K9S_VERSION/K9S_SHA256 are set
+      ansible.builtin.assert:
+        that: lookup('env', item) | length > 0
+        fail_msg: "{{ item }} is not set — see this playbook's header comment for where each value comes from"
+      loop:
+        - KUBECTL_VERSION
+        - K9S_VERSION
+        - K9S_SHA256
+      loop_control:
+        label: "{{ item }}"
+
+    # -------------------------------------------------------------------
+    # 1. ServiceAccount
+    # -------------------------------------------------------------------
+    - name: Render k9s-dashboard ServiceAccount manifest (local, no cluster contact)
+      delegate_to: localhost
+      become: false
+      ansible.builtin.command:
+        argv: [kubectl, create, serviceaccount, "{{ k9s_sa_name }}", -n, "{{ k9s_sa_namespace }}", --dry-run=client, -o, yaml]
+      register: sa_manifest
+      changed_when: false
+
+    - name: Apply k9s-dashboard ServiceAccount
+      become: true
+      ansible.builtin.command:
+        argv: [kubectl, apply, -f, "-"]
+        stdin: "{{ sa_manifest.stdout }}"
+      changed_when: true
+
+    # -------------------------------------------------------------------
+    # 2. ClusterRoleBinding — cluster-admin (confirmed scope), same
+    #    precedent as the existing K8S_BREAK_GLASS_TOKEN (docs/secrets.md)
+    # -------------------------------------------------------------------
+    - name: Render k9s-dashboard ClusterRoleBinding manifest (local, no cluster contact)
+      delegate_to: localhost
+      become: false
+      ansible.builtin.command:
+        argv:
+          - kubectl
+          - create
+          - clusterrolebinding
+          - "{{ k9s_sa_name }}-cluster-admin"
+          - --clusterrole=cluster-admin
+          - --serviceaccount={{ k9s_sa_namespace }}:{{ k9s_sa_name }}
+          - --dry-run=client
+          - -o
+          - yaml
+      register: crb_manifest
+      changed_when: false
+
+    - name: Apply k9s-dashboard ClusterRoleBinding
+      become: true
+      ansible.builtin.command:
+        argv: [kubectl, apply, -f, "-"]
+        stdin: "{{ crb_manifest.stdout }}"
+      changed_when: true
+
+    # -------------------------------------------------------------------
+    # 3. Mint token + read cluster connection info — these are live reads/
+    #    mutations, not dry-run-able. Output only ever lands in Ansible
+    #    registered vars, consumed by Play 2 below; never written to a
+    #    local file.
+    # -------------------------------------------------------------------
+    - name: Mint a long-lived token for k9s-dashboard
+      become: true
+      no_log: true
+      ansible.builtin.command:
+        argv:
+          - kubectl
+          - --kubeconfig=/etc/kubernetes/admin.conf
+          - create
+          - token
+          - "{{ k9s_sa_name }}"
+          - -n
+          - "{{ k9s_sa_namespace }}"
+          - --duration=8760h
+      register: k9s_token_result
+      changed_when: true
+
+    - name: Read cluster API server URL
+      become: true
+      changed_when: false
+      ansible.builtin.command:
+        argv:
+          - kubectl
+          - --kubeconfig=/etc/kubernetes/admin.conf
+          - config
+          - view
+          - --raw
+          - --minify
+          - -o
+          - jsonpath={.clusters[0].cluster.server}
+      register: k9s_api_server
+
+    - name: Read cluster CA data
+      become: true
+      no_log: true
+      changed_when: false
+      ansible.builtin.command:
+        argv:
+          - kubectl
+          - --kubeconfig=/etc/kubernetes/admin.conf
+          - config
+          - view
+          - --raw
+          - --minify
+          - -o
+          - jsonpath={.clusters[0].cluster.certificate-authority-data}
+      register: k9s_ca_data
+
+- name: Install kubectl/k9s and write the kubeconfig on k9s-dashboard
+  hosts: k9s-dashboard
+  gather_facts: false
+  vars:
+    kubectl_version: "{{ lookup('env', 'KUBECTL_VERSION') }}"
+    k9s_version: "{{ lookup('env', 'K9S_VERSION') }}"
+    k9s_sha256: "{{ lookup('env', 'K9S_SHA256') }}"
+    # Registered vars from Play 1 persist across plays in a single
+    # ansible-playbook run — no set_fact/cacheable needed, just hostvars.
+    k9s_api_server: "{{ hostvars['k8s-cp-01']['k9s_api_server'].stdout | trim }}"
+    k9s_ca_data: "{{ hostvars['k8s-cp-01']['k9s_ca_data'].stdout | trim }}"
+    k9s_token: "{{ hostvars['k8s-cp-01']['k9s_token_result'].stdout | trim }}"
+
+  tasks:
+    # -------------------------------------------------------------------
+    # 1. kubectl
+    # -------------------------------------------------------------------
+    - name: Install kubectl
+      ansible.builtin.get_url:
+        url: "https://dl.k8s.io/release/{{ kubectl_version }}/bin/linux/amd64/kubectl"
+        dest: /usr/local/bin/kubectl
+        # dl.k8s.io publishes a matching .sha256 file per release — get_url
+        # can fetch a checksum from a URL directly, no separate pinned hash
+        # var needed here (unlike k9s below, which has no such endpoint).
+        checksum: "sha256:https://dl.k8s.io/release/{{ kubectl_version }}/bin/linux/amd64/kubectl.sha256"
+        mode: "0755"
+
+    # -------------------------------------------------------------------
+    # 2. k9s — pinned VERSION/SHA256, same discipline as
+    #    garage-configure.yml's GARAGE_VERSION/GARAGE_SHA256
+    # -------------------------------------------------------------------
+    - name: Download k9s release tarball
+      ansible.builtin.get_url:
+        url: "https://github.com/derailed/k9s/releases/download/{{ k9s_version }}/k9s_Linux_amd64.tar.gz"
+        dest: /root/k9s.tar.gz
+        checksum: "sha256:{{ k9s_sha256 }}"
+        mode: "0644"
+
+    - name: Extract k9s binary
+      ansible.builtin.unarchive:
+        src: /root/k9s.tar.gz
+        dest: /usr/local/bin
+        remote_src: true
+        include: [k9s]
+        mode: "0755"
+
+    - name: Remove downloaded k9s tarball
+      ansible.builtin.file:
+        path: /root/k9s.tar.gz
+        state: absent
+
+    # -------------------------------------------------------------------
+    # 3. Kubeconfig — cluster-admin scope, this LXC only
+    # -------------------------------------------------------------------
+    - name: Create ~/.kube directory
+      ansible.builtin.file:
+        path: /root/.kube
+        state: directory
+        mode: "0700"
+
+    - name: Write kubeconfig
+      no_log: true
+      ansible.builtin.copy:
+        dest: /root/.kube/config
+        mode: "0600"
+        content: |
+          apiVersion: v1
+          kind: Config
+          clusters:
+            - name: ukubi-cluster
+              cluster:
+                server: "{{ k9s_api_server }}"
+                certificate-authority-data: "{{ k9s_ca_data }}"
+          contexts:
+            - name: ukubi-cluster
+              context:
+                cluster: ukubi-cluster
+                user: k9s-dashboard
+          current-context: ukubi-cluster
+          users:
+            - name: k9s-dashboard
+              user:
+                token: "{{ k9s_token }}"
+
+    # -------------------------------------------------------------------
+    # Done
+    # -------------------------------------------------------------------
+    - name: k9s-dashboard configured
+      ansible.builtin.debug:
+        msg:
+          - "kubectl + k9s installed, kubeconfig written (cluster-admin, ukubi-cluster)."
+          - ""
+          - "Verify:"
+          - "  ssh -i ~/.ssh/id_k9s_dashboard root@{{ ansible_host }}"
+          - "  kubectl get nodes"
+          - "  k9s"
