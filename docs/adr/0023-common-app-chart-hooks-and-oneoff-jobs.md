@@ -45,11 +45,25 @@ no per-app chart):
 
 2. **`registry.yaml`'s `valuesPath` becomes a list** — multi-env apps
    layer a shared base + a per-env override file via ArgoCD/Helm's
-   already-existing native `helm.valueFiles` merge (the ApplicationSet
-   template already treated it as a list, just always with one element).
-   One registry entry is still always one Application/one environment;
-   the list only controls which values files that entry's Application
-   layers. No kustomize reintroduced.
+   native `helm.valueFiles` merge. **Correction, found live**: the shared
+   `apps.applicationset.yaml` list-generator template can only Go-template
+   individual *string* fields (`'{{.name}}'`-style), not emit a
+   variable-length YAML list — a raw `{{- range .valuesPath }}...{{- end
+   }}` block breaks the ApplicationSet outright, since the self-managing
+   `bootstrap` Application (ADR-0021) applies this file as a literal
+   manifest *before* any Go-template rendering runs. So the shared
+   template only ever emits exactly one value file (`index .valuesPath
+   0`); an app needing more than one (today, only `vos-monolith-dev`)
+   gets its own standalone Application instead, same pattern as
+   `traefik-application.yaml` — see
+   `gitops/bootstrap/vos-monolith-dev-application.yaml`. One registry
+   entry is still always one Application/one environment. No kustomize
+   reintroduced.
+   Also found live: `targetRevision` must be explicit per app (`registry.yaml`'s
+   `targetRevision` field), not assumed to be `HEAD` — `vos-monolith`'s
+   GitHub default branch is `dev`, so `HEAD` silently pointed its *prod*
+   Application at `dev`-branch content instead of `main`, where its prod
+   CI actually pushes tag bumps.
 
 3. **`oneOffJobs:` map** (`templates/oneoff-cronjobs.yaml`) — for
    irregular/one-time scripts. Each entry renders as a suspended
