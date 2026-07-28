@@ -149,7 +149,12 @@
           ansible.builtin.copy:
             dest: "{{ github_apps_pat_tmp.path }}"
             mode: "0600"
-            content: "{{ github_apps_pat }}"
+            # `trim` matters: a trailing newline here (e.g. from piping
+            # `infisical secrets get --plain` some other way into this var)
+            # produces a Basic-auth string GitHub silently rejects with
+            # "Password authentication is not supported" -- cost real
+            # debugging time once already, see docs/bootstrap-test-notes.md.
+            content: "{{ github_apps_pat | trim }}"
 
         - name: Render repo-creds-github-bnei manifest (local, no cluster contact)
           delegate_to: localhost
