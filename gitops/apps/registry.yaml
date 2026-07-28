@@ -10,14 +10,14 @@
 #   repoURL     Per-app private git repo with values.yaml (HTTPS + PAT auth —
 #               see argocd-github-apps-creds.yaml; SSH deploy keys are
 #               deliberately not used here, see that file's comment)
-#   valuesPath  List of values file paths inside repoURL, layered in order
-#               (later files win — Helm deep-merges maps, replaces lists
-#               wholesale). The shared ApplicationSet template only supports
-#               one-element lists (ArgoCD Go-templates string fields, not a
-#               variable-length YAML list); a multi-env app needing a base +
-#               override file (e.g. vos-monolith-dev) must be a standalone
-#               Application instead — see gitops/bootstrap/vos-monolith-dev-application.yaml.
-#               One registry entry is still always one Application/one env.
+#   valuesPath  List of 1 or 2 values file paths inside repoURL, layered in
+#               order (the override wins — Helm deep-merges maps, replaces
+#               lists wholesale). The shared ApplicationSet template has a
+#               fixed 2-slot valueFiles (ArgoCD Go-templates string fields,
+#               not a variable-length YAML list) — give it one path for a
+#               single values file, or [base, override] for a multi-env app
+#               (e.g. vos-monolith-dev). One registry entry is still always
+#               one Application/one env.
 #   targetRevision  Literal branch name in repoURL to read valuesPath from —
 #               always a real branch (e.g. `main`), never the symbolic
 #               `HEAD`. Found live: HEAD silently tracks whatever GitHub
@@ -72,14 +72,17 @@
   targetRevision: main
   hostname: api.voconsteroid.com
 
-# vos-monolith-dev is NOT a list-generator entry here: it needs 2 value
-# files (base + dev override), which the shared ApplicationSet template
-# can't express (Go-templates individual string fields only, not a
-# variable-length YAML list — see apps.applicationset.yaml's comment). It's
-# deployed as a standalone Application instead:
-# gitops/bootstrap/vos-monolith-dev-application.yaml (same pattern as
-# platform-traefik for the same reason).
-#
+# vos-monolith-dev: dev deployment of the same app, base values.yaml +
+# dev-specific values-dev.yaml override, both from the dev branch (see
+# apps.applicationset.yaml's fixed 2-slot valueFiles comment).
+- name: vos-monolith-dev
+  namespace: vos-dev
+  syncWave: "10"
+  repoURL: https://github.com/MohammadBnei/vos-monolith.git
+  valuesPath: [back/helm/values.yaml, back/helm/values-dev.yaml]
+  targetRevision: dev
+  hostname: dev.api.voconsteroid.com
+
 # searxng and pgweb are NOT here: they're public-image tools with no
 # app-specific code, so they're driven as platform apps instead — see
 # gitops/bootstrap/platform-common-apps.applicationset.yaml and
