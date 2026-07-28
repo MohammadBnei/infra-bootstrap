@@ -14,8 +14,10 @@ Custom playbooks for things kubespray and pigsty don't cover:
 | `playbooks/vm-provision.yml` | Create QEMU VMs and LXC containers from a host_vars-driven spec |
 | `playbooks/k8s-node-prereqs.yml` | Standalone K8s-node prereq setup (kernel modules, cgroup, containerd) |
 | `playbooks/garage-configure.yml` | Install/configure Garage on the bare LXC terraform/garage.tf creates — drafted, see below |
+| `playbooks/nfs-configure.yml` | Format + export NFS on the bare VM terraform/nfs.tf creates — drafted, see below |
 | `inventories/proxmox/hosts.yml` | Proxmox host inventory for `pve-postinstall.yml` (`.200`/`.161` — `.165` is a delegation target only) |
 | `inventories/garage/hosts.yml` | Single-host inventory for `garage-configure.yml` (`garage-storage` LXC) |
+| `inventories/nfs/hosts.yml` | Single-host inventory for `nfs-configure.yml` (`nfs-storage` VM) |
 | `requirements.yml` | Ansible collections needed by these playbooks (`ansible-galaxy collection install -r ansible/requirements.yml`) |
 
 ## Status
@@ -23,6 +25,7 @@ Custom playbooks for things kubespray and pigsty don't cover:
 - [x] `register-repos.yml` drafted — first playbook in this repo
 - [x] `pve-postinstall.yml` drafted — see below
 - [x] `garage-configure.yml` drafted — see below
+- [x] `nfs-configure.yml` drafted — see below
 - [ ] `vm-provision.yml` drafted
 - [ ] `k8s-node-prereqs.yml` drafted (may not be needed if kubespray covers it)
 
@@ -165,6 +168,51 @@ extraction instead of regeneration when `garage.toml` already exists,
 *destroyed-and-recreated* LXC (not just a live re-run) generates a new
 `rpc_secret`/keys and overwrites Infisical with them — correct, but any
 prior bucket data is gone with the old container.
+
+## `playbooks/nfs-configure.yml`
+
+Formats and exports NFS on the bare `nfs-storage` VM `terraform/nfs.tf`
+creates — shared PVE storage so cross-host VM template cloning takes a
+direct-clone path instead of an automatic clone-then-migrate (see
+[ADR-0026](../docs/adr/0026-nfs-shared-pve-storage-cross-host-clone.md)).
+Much smaller scope than `garage-configure.yml`: no Infisical writes, no
+application state — just format the raw second disk, install
+`nfs-kernel-server`, write `/etc/exports` restricted to the 3 PVE cluster
+members with `no_root_squash`, and start the service. A second play then
+registers the export as a PVE storage pool (`pvesm add nfs ...`) against
+the `proxmox` host alias — idempotent (only runs if not already present),
+and only needed once since `storage.cfg` is cluster-shared (ADR-0020).
+
+**Execution model:** the first play targets `nfs-storage` from
+`ansible/inventories/nfs/hosts.yml` (a single hand-maintained host — fill
+in `ansible_host` with the VM's real IP after `terraform apply`, matching
+`terraform.tfvars`' `nfs_ip`); SSH access is via a dedicated keypair
+(`~/.ssh/id_nfs`, seeded into the VM by `terraform/nfs.tf` via
+`nfs_ssh_public_key_file`), `core` user + sudo — same pattern as the K8s
+VMs, unlike `garage-storage`'s root-user LXC. The second play targets
+`proxmox` from `ansible/inventories/proxmox/hosts.yml` (root SSH, same
+alias `pve-postinstall.yml` uses) — both inventories must be passed.
+
+### Prerequisites
+
+- `nfs-storage` VM already created and reachable (`terraform apply
+  -target=...` per `terraform/README.md`, including the
+  `nfs_vm_vendor_data` snippet — `agent.enabled = true` makes `apply`
+  hang without it, confirmed by testing)
+- `~/.ssh/id_nfs` keypair generated and its public half already applied
+  (baked in at VM creation time via cloud-init)
+
+### How to run
+
+```bash
+# fill in ansible/inventories/nfs/hosts.yml's ansible_host first
+ansible-playbook -i ansible/inventories/nfs/hosts.yml \
+  -i ansible/inventories/proxmox/hosts.yml \
+  ansible/playbooks/nfs-configure.yml
+```
+
+Safe to re-run: the format step is `blkid`-guarded, the mount/exports are
+declarative, `exportfs -ra` just re-reads current state.
 
 ### Other playbooks (not yet drafted)
 

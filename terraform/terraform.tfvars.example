@@ -6,6 +6,13 @@
 
 pve_node_name        = "" # confirm via `pvesh get /nodes` — likely "bnei" but not guaranteed identical to the DNS hostname
 template_storage_id  = "" # PVE storage pool for the template + K8s VM disks, e.g. "local-lvm" or a ZFS pool — check `pvesm status`
+
+# Only needed once the nfs-storage VM (terraform/nfs.tf) is up and
+# registered as PVE storage per docs/adr/0026 / terraform/README.md's
+# "Shared storage for cross-host cloning" section:
+# nfs_storage_id           = "" # PVE storage pool on server1 for nfs-storage's own disks — check `pvesm status` on server1 (ADR-0024: local-lvm, no ZFS pool)
+# nfs_ip                   = "" # static IP for nfs-storage — none locked elsewhere, pick one and treat as provisional
+# template_shared_storage_id = "shared-templates" # the NFS storage pool name given to `pvesm add nfs shared-templates ...`
 # template_download_storage_id defaults to "local" — only override if that
 # storage doesn't support content type "import" on your host (`pvesh get
 # /storage`, look for "import" in the content list; LVM-thin pools never do)
@@ -36,10 +43,15 @@ garage_ip             = "" # static IP for the recreated garage-storage containe
 #     etcd                  = false
 #     worker                = true
 #     gpu                   = false
-#     node_name             = "" # confirm via `pvesh get /nodes` on server1
-#     datastore_id          = "" # confirm via `pvesm status` on server1 (the ZFS pool from pve-postinstall.yml)
+#     node_name             = "server1"   # confirmed via `pvesh get /nodes`
+#     datastore_id          = "local-lvm" # confirmed via `pvesm status` — ADR-0024, server1 has no ZFS pool
 #   }
 # }
+#
+# Cross-host cloning needs the nfs_storage_id/template_shared_storage_id
+# vars above set up first (docs/adr/0026) — without them the provider
+# still works, just via a slower automatic clone-then-migrate fallback
+# instead of a direct clone.
 
 # Only needed once imported.tf's placeholder variables are filled from live
 # `qm config` / `pct config` capture (see imported.tf's header comment):

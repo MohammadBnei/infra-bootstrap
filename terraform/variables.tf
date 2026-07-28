@@ -89,6 +89,42 @@ variable "garage_ssh_public_key_file" {
   default     = "~/.ssh/id_garage.pub"
 }
 
+variable "nfs_storage_id" {
+  description = "PVE storage pool on server1 for the nfs-storage VM's own disks — confirm via `pvesm status` on server1 before first apply (ADR-0024: server1 has no ZFS pool, VM/LXC disks land on local-lvm like .165, but don't assume the name matches — confirm live)."
+  type        = string
+}
+
+variable "nfs_ip" {
+  description = "Static IP for the nfs-storage VM (server1). No VMID/IP was locked for it anywhere else — pick one on first apply and treat as provisional, same precedent as garage_ip."
+  type        = string
+}
+
+variable "nfs_vm_id" {
+  description = "VMID for the nfs-storage VM."
+  type        = number
+  default     = 302
+}
+
+variable "nfs_ssh_public_key_file" {
+  description = "Path to the public half of nfs-storage's dedicated SSH key — new, separate keypair from PVE-host/k8s-VM/garage credentials (own blast radius: one storage VM). Consumed by ansible/playbooks/nfs-configure.yml."
+  type        = string
+  default     = "~/.ssh/id_nfs.pub"
+}
+
+variable "template_shared_storage_id" {
+  description = <<-EOT
+    PVE storage pool for the golden template's (VMID 9001) disk +
+    cloud-init drive — must be a *shared* storage (docs/adr/0026) so
+    k8s-vms.tf's cross-node clone takes the provider's direct-clone path
+    instead of the slower clone-then-migrate fallback. Deliberately
+    separate from template_storage_id, which stays the coalesce fallback
+    for k8s_nodes entries that don't set their own datastore_id — do not
+    point that variable at shared storage, it would also try to move
+    k8s-cp-01/k8s-worker-01's already-working local-lvm disks.
+  EOT
+  type        = string
+}
+
 variable "longhorn_disk_size_gb" {
   description = <<-EOT
     Fallback GB size for a k8s VM's dedicated Longhorn data disk (scsi1)

@@ -46,16 +46,30 @@ resource "proxmox_virtual_environment_vm" "k8s_node" {
   # in imported.tf, which already use q35 uniformly.
   machine = "q35"
 
-  # No clone.node_name is set, so the provider clones from a template on
-  # THIS resource's own (coalesced) node_name — for new-host worker entries
-  # that requires ansible/playbooks/pve-postinstall.yml's
-  # template-propagation play to have already migrated VMID 9001 onto that
-  # node first (see docs/runbook-pve-postinstall.md step 5). Not enforced
-  # here; apply will fail with a clear "VM 9001 not found on <node>" error
-  # if that hasn't happened yet.
+  # clone.node_name is the SOURCE node (always var.pve_node_name — the
+  # template only ever lives on .165), independent of this resource's own
+  # (coalesced) node_name, which is the destination. Verified against
+  # bpg/terraform-provider-proxmox's actual vmCreateClone: leaving this
+  # unset makes the provider call CloneVM against the *target* node
+  # (node-scoped API endpoint, not ID-scoped — cluster-unique VMIDs don't
+  # save you here), which 404s for any cross-host worker since VM 9001
+  # only physically exists on .165. Setting it lets the provider pick the
+  # right path itself: a direct clone if the template's disks are on
+  # shared storage (docs/adr/0026's shared-templates NFS pool), or an
+  # automatic clone-then-migrate if not.
+  #
+  # Set to null (== omitted) for same-host entries, not unconditionally —
+  # confirmed via a real `terraform plan` that clone.node_name is a
+  # ForceNew attribute: setting it on an entry that already exists in
+  # state (k8s-cp-01/k8s-worker-01, both live production VMs) marks them
+  # "must be replaced" even though the resolved value is identical to
+  # where they already live. Only entries actually landing on a different
+  # node need it; same-host entries must keep this block byte-for-byte
+  # unchanged from before this ADR-0026 change.
   clone {
-    vm_id = proxmox_virtual_environment_vm.ubuntu_2404_template.vm_id
-    full  = true
+    node_name = coalesce(each.value.node_name, var.pve_node_name) != var.pve_node_name ? var.pve_node_name : null
+    vm_id     = proxmox_virtual_environment_vm.ubuntu_2404_template.vm_id
+    full      = true
   }
 
   cpu {
@@ -116,7 +130,10 @@ resource "proxmox_virtual_environment_vm" "k8s_node" {
       }
     }
 
-    vendor_data_file_id = proxmox_virtual_environment_file.k8s_vm_vendor_data.id
+    # Same-host entries keep the original (.165-local) snippet untouched;
+    # cross-host entries use the shared-storage copy — see cloud-init.tf's
+    # header comment for why this can't just be one repointed resource.
+    vendor_data_file_id = coalesce(each.value.node_name, var.pve_node_name) != var.pve_node_name ? proxmox_virtual_environment_file.k8s_vm_vendor_data_shared.id : proxmox_virtual_environment_file.k8s_vm_vendor_data.id
   }
 
   network_device {

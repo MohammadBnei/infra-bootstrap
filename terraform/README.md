@@ -14,6 +14,16 @@ VM falls back to `.165`'s `template_storage_id` via `coalesce` — wrong
 for a cross-host VM. Any resource block targeting `server1` must set
 `datastore_id: local-lvm` explicitly.
 
+**Cross-host cloning (ADR-0026):** cloning the golden template (VMID
+9001) onto a different node than `.165` needed two fixes, both now in
+place — see `docs/adr/0026-nfs-shared-pve-storage-cross-host-clone.md`
+for the full story: `k8s-vms.tf`'s `clone` block now sets `node_name`
+(the source node) explicitly, and the template's disk + cloud-init drive
++ vendor-data snippet all moved onto a new `shared-templates` NFS storage
+(`nfs.tf`, hosted on a dedicated `nfs-storage` VM on `server1`) so the
+provider takes its direct-clone path instead of a slower automatic
+clone-then-migrate.
+
 Current topology is **provisional**, laid out to have something concrete to
 build against — expect it to change:
 
@@ -26,6 +36,8 @@ build against — expect it to change:
 | `pg01` | VM | 205 | **real, production — imported, `prevent_destroy`** |
 | `pg02` | VM | 207 | **real, production — imported, `prevent_destroy`** |
 | `hermesagent` | LXC | 101 | **real, production — imported, `prevent_destroy`** |
+| `nfs-storage` | VM | 302 | new-create on `server1`, built directly from cloud image (not cloned) — shared PVE storage, ADR-0026 |
+| `k8s-worker-02` | VM | 203 | new-create on `server1`, cloned cross-host from the golden template via `shared-templates` |
 
 ## Prerequisites (one-time, by hand)
 
@@ -169,16 +181,41 @@ secrets by design, but don't commit your filled-in copy — keep it local.
 9. Once VMs boot: `ssh -i ~/.ssh/id_k8s_vms core@192.168.1.201` (etc.) to
    confirm cloud-init actually worked before handing off to kubespray.
 
+## Shared storage for cross-host cloning (Stage 2, ADR-0026)
+
+Needed once before the first `k8s_nodes` entry targeting `server1`/
+`ex-laptop` (e.g. `k8s-worker-02`) — see
+`docs/adr/0026-nfs-shared-pve-storage-cross-host-clone.md` for the why.
+
+1. `terraform apply -target=proxmox_download_file.nfs_vm_cloudimg
+   -target=proxmox_virtual_environment_file.nfs_vm_vendor_data
+   -target=proxmox_virtual_environment_vm.nfs_storage` — bare,
+   SSH-reachable VM only, same "Terraform stops at bare" split as
+   `garage.tf`. The vendor-data snippet must be targeted alongside the VM,
+   not applied separately after — `agent.enabled = true` makes `apply`
+   wait on a qemu-guest-agent handshake that never arrives if the snippet
+   installing it isn't there at first boot (confirmed by testing).
+2. `ansible-playbook -i ansible/inventories/nfs/hosts.yml
+   -i ansible/inventories/proxmox/hosts.yml
+   ansible/playbooks/nfs-configure.yml` — formats the export disk,
+   installs and configures `nfs-kernel-server`, **and** registers
+   `shared-templates` as a PVE storage pool (idempotent — the second play
+   only runs `pvesm add` if it isn't already registered). `storage.cfg` is
+   cluster-shared (ADR-0020), so this only needs one PVE host regardless
+   of node count.
+3. `terraform plan` — expect only the golden template's disk +
+   cloud-init drive moving onto `shared-templates`; `apply` once
+   confirmed.
+4. From here, any new `k8s_nodes` entry with `node_name` set to
+   `server1`/`ex-laptop` clones directly via `shared-templates` instead
+   of the automatic clone-then-migrate fallback.
+
 ## Out of scope here
 
-- `ARCHITECTURE.md`, `DECISION.md`, `CLAUDE.md`, `ansible/README.md`, and
-  skill files are **not** touched by this work — update them separately
-  if/when this setup is adopted as the new locked provisioning method.
-  (`inventory/ukubi/hosts.yaml` *is* touched — `hosts-inventory.tf`
-  generates it from `var.k8s_nodes` via `templatefile()`.)
-- `.200`/`.161` — both run PVE and are corosync-clustered with `.165` now,
-  but there's still no multi-host Terraform abstraction (provider aliasing,
-  per-host `datastore_id` wiring) until this setup actually provisions on
-  them.
+- `.161` (ex-laptop) — corosync-clustered with `.165`/`server1` since
+  ADR-0020, but no `k8s_nodes`/`nfs.tf` resource targets it yet. The
+  single-provider-block pattern (`node_name`/`datastore_id` per resource,
+  no provider aliasing needed) already extends there the same way it did
+  to `server1` — just not exercised yet.
 - Installing kubespray/Pigsty on top of the VMs this creates — that's the
   next, already-planned step, done via the existing `ansible-ops` skill.

@@ -294,3 +294,112 @@ kubectl apply -f -` directly.
 template fix doesn't retroactively fix a running instance; reset the
 credential in-app (e.g. `grafana-cli admin reset-password`) after confirming
 the new template renders clean.
+
+## 2026-07-28 — Stage 2 Phase C: NFS shared storage + first cross-host K8s worker
+
+`server1`/`ex-laptop` finished PVE reinstall + corosync join earlier the same
+day; this session did the next step — a K8s worker on `server1`
+(`k8s-worker-02`) plus the shared PVE storage (ADR-0026) needed to clone
+onto it cleanly. Full plan/design is in ADR-0026; this is what actually broke
+during real `terraform plan`/`apply` runs against live infra, none of it
+anticipated by the design alone.
+
+- **Cross-node clone 404, root-caused via provider source, not guesswork**:
+  `k8s-vms.tf`'s `clone` block never set a source `node_name`. Cluster-unique
+  VMIDs make it tempting to assume that doesn't matter — it does. Pulled
+  `bpg/terraform-provider-proxmox`'s actual `vmCreateClone`
+  (`proxmoxtf/resource/vm/vm.go`): with `clone.node_name` unset, the provider
+  calls `CloneVM` against the *target* node's API endpoint
+  (`/nodes/{node}/qemu/{vmid}/clone`, node-scoped, not ID-scoped) — a
+  `server1`-targeted clone 404s because VM 9001 only physically exists on
+  `.165`. Setting `clone.node_name` lets the provider branch correctly: a
+  direct clone if the source's disks are on shared storage, or an automatic
+  clone-then-migrate (`--with-local-disks`) if not.
+- **LXC rejected for the NFS server, before it was ever built**: `nfs-kernel-server`
+  needs kernel-level `nfsd`, not reliably namespaced inside a container.
+  Checked `terraform providers schema -json` for
+  `proxmox_virtual_environment_container` — its `features` block only covers
+  what a container may *mount as a client* (`fuse`, `mount`, `nesting`), no
+  AppArmor/privilege escape hatch to make an in-container `nfsd` reliable.
+  Built `nfs-storage` as a lightweight VM instead (from the cloud image
+  directly, not cloned — cloning from a template not yet on shared storage to
+  bootstrap the storage meant to fix that would be circular).
+- **Near-miss: `clone.node_name` and `vendor_data_file_id` are both
+  `ForceNew`.** Setting either unconditionally on the shared `k8s_node`
+  resource (used by every `k8s_nodes` entry via `for_each`) marked the
+  already-**live** `k8s-cp-01`/`k8s-worker-01` "must be replaced" in a real
+  `terraform plan` — i.e. destroy-and-recreate the running control plane.
+  Caught before any apply by actually reading the plan output line by line,
+  not just the `Plan: N to add/change/destroy` summary. Fixed by making both
+  conditional on the entry actually being cross-host (`null` == omitted,
+  byte-for-byte unchanged for same-host entries); the vendor-data snippet
+  additionally needed a second, separate resource
+  (`k8s_vm_vendor_data_shared`) rather than repointing the original, for the
+  same ForceNew reason.
+- **`nfs-storage` boot hang**: `agent.enabled = true` with no way to install
+  `qemu-guest-agent` before first boot (this VM isn't built via the shared
+  k8s vendor-data snippet) made `apply` hang waiting for a handshake that
+  never arrives — confirmed by actually hitting it, not foreseen in the
+  design. Fixed with a small dedicated cloud-init snippet (guest-agent
+  install only) applied at create time.
+- **Template disk "move" flatly rejected**: `Error: Cannot move
+  local-lvm:base-9001-disk-1 to datastore shared-templates ... it is not
+  owned by this VM!`. Once a VM is flagged `template = true`, Proxmox renames
+  its disk to a `base-<vmid>-disk-N` volume for (potential) linked-clone use,
+  and `move_disk` refuses to relocate that kind of volume regardless of who's
+  asking — an in-place `datastore_id` change was never going to work for a
+  template's disk specifically (works fine for normal VM disks, e.g. the
+  later NFS→local-lvm move for `k8s-worker-02` itself). Fixed with
+  `terraform apply -replace=... -target=...` instead of a config edit — since
+  nothing had ever cloned from the old copy yet (only full clones are used
+  here, no linked-clone dependency), destroying and rebuilding the template
+  fresh directly on `shared-templates` was safe.
+- **`rtk` hook silently mangled a `terraform plan`**: one `terraform plan`
+  run through this session's `rtk`-wrapped shell came back showing only an
+  unrelated `local_file` diff — no error, just quietly missing every
+  Proxmox-backed resource that should have appeared. Re-running the exact
+  same command via `rtk proxy <cmd>` (documented escape hatch for "raw
+  command, no filtering") produced the real, complete plan. Lesson: don't
+  trust a suspiciously-empty/small plan on this machine — re-run through
+  `rtk proxy` before concluding infra state is actually clean.
+- **`-target` apply quirk (cosmetic, not a bug)**: a `-target`ed apply only
+  recomputes outputs that fall within the targeted resource's dependency
+  graph — `k8s_node_ips` (a pure `var.k8s_nodes` expression, no resource
+  refs) kept printing a stale 2-entry map after `k8s-worker-02` was targeted
+  elsewhere. A full untargeted `terraform plan` confirmed the real value was
+  correct all along; the printed "Outputs:" after a targeted apply just
+  isn't trustworthy for anything outside that target's own graph.
+- **`local_file.kubespray_inventory` needs its own apply**: it's a sibling
+  resource to the VM (both depend on `var.k8s_nodes`, neither depends on the
+  other), so `-target`ing just the new VM does not regenerate
+  `inventory/ukubi/hosts.yaml`. Needed a separate
+  `apply -target=local_file.kubespray_inventory` before `kubespray`'s
+  `scale.yml` could see the new node at all — easy to miss since the VM
+  itself comes up fine either way.
+- **Infisical CLI**: this instance is self-hosted
+  (`https://infisical.bnei.dev`) — `infisical login` needs `--domain=...`
+  explicitly, the flag defaults to app.infisical.com's cloud endpoint
+  otherwise. The previously-documented `source ~/.hermes/cache/inf-env.sh`
+  shortcut was stale this session; a fresh `infisical login --domain=...`
+  plus `infisical run --projectId=... --env=dev -- ...` worked once
+  re-authenticated.
+- **What NFS shared storage actually bought (worth being honest about)**:
+  not "free" cross-host provisioning — a full clone still copies bytes
+  either way. What it removes is the *cross-host network* copy: without
+  shared storage, a cross-node clone means clone-onto-`.165` (copy #1) then
+  `qm migrate --with-local-disks` over the LAN to the target (copy #2, plus a
+  transient VM briefly existing on `.165`). With shared storage, the clone
+  writes once into NFS (reachable identically from any node, so Proxmox just
+  repoints the VM's config to the target node — no network copy for that
+  step), and since `k8s-worker-02`'s own `datastore_id` is `local-lvm` (fast
+  local disk for a real workload VM, not NFS — ADR-0026's explicit scope
+  boundary), a second move happens from NFS to local-lvm, but *within*
+  `server1` itself, not across hosts.
+
+End state: `k8s-worker-02` cloned directly onto `server1` via
+`shared-templates`, joined via `kubespray scale.yml`
+(`--limit`/`--tags` not needed — greenfield-safe since `scale.yml` only adds,
+never resets, existing members), `Ready` in the live cluster within ~70s,
+Cilium/kube-proxy/Longhorn manager+CSI already scheduled onto it via
+DaemonSets, all 18 ArgoCD Applications stayed `Synced`/`Healthy` throughout —
+no GitOps-side changes needed for a node-level join.

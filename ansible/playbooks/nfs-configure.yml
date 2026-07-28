@@ -1,0 +1,143 @@
+---
+# Configure NFS export on the bare nfs-storage VM that terraform/nfs.tf
+# creates. Safe to re-run — every task is naturally idempotent (mkfs
+# guarded by a blkid check, mount/exports are declarative, exportfs -ra
+# just re-reads current state).
+#
+# WHY THIS PLAYBOOK EXISTS
+# terraform/nfs.tf only creates a bare VM with a raw second disk — same
+# "Terraform stops at bare, SSH-reachable" split as garage.tf/
+# garage-configure.yml. This playbook formats that disk, exports it over
+# NFS, and registers it as shared PVE storage so terraform/k8s-vms.tf's
+# cross-node clone (docs/adr/0026) has somewhere shared to clone from/to.
+#
+# PREREQUISITES
+# - nfs-storage VM already created (terraform apply -target=... per
+#   terraform/README.md) and reachable at the IP in
+#   ansible/inventories/nfs/hosts.yml (fill in ansible_host first).
+# - SSH access via the dedicated nfs keypair (~/.ssh/id_nfs, see
+#   variables.tf's nfs_ssh_public_key_file) already seeded via cloud-init.
+# - Run with BOTH inventories so the second play below (PVE storage
+#   registration) can resolve the `proxmox` host alias:
+#     ansible-playbook -i ansible/inventories/nfs/hosts.yml \
+#       -i ansible/inventories/proxmox/hosts.yml \
+#       ansible/playbooks/nfs-configure.yml
+#
+# Registers the export as a PVE storage pool (`pvesm add nfs ...`) itself
+# — storage.cfg is cluster-shared (ADR-0020), so this only ever needs to
+# run against one cluster member (`proxmox`/.165, same alias
+# pve-postinstall.yml uses), regardless of how many PVE nodes exist.
+- name: Configure NFS export on nfs-storage
+  hosts: nfs-storage
+  gather_facts: false
+  vars:
+    nfs_export_path: /export/templates
+    nfs_export_device: /dev/sdb
+    nfs_export_label: nfsexport
+    # PVE hosts allowed to mount this export — docs/adr/0020's corosync
+    # cluster members, never opened wider than that.
+    nfs_allowed_clients:
+      - 192.168.1.165
+      - 192.168.1.200
+      - 192.168.1.161
+
+  handlers:
+    - name: reload exports
+      ansible.builtin.command: exportfs -ra
+      changed_when: true
+
+  tasks:
+    # -------------------------------------------------------------------
+    # 1. Format + mount the raw export disk
+    # -------------------------------------------------------------------
+    # Same idempotency idiom as cloud-init.tf's Longhorn-disk bootcmd
+    # (blkid-guarded mkfs) rather than pulling in community.general's
+    # filesystem module for one call — ansible.posix (already a required
+    # collection, ansible/requirements.yml) has no mkfs module of its own.
+    - name: Format export disk if not already formatted
+      ansible.builtin.shell: |
+        blkid {{ nfs_export_device }} | grep -q TYPE= || mkfs.ext4 -L {{ nfs_export_label }} {{ nfs_export_device }}
+      register: nfs_mkfs
+      changed_when: "'TYPE=' not in nfs_mkfs.stdout"
+
+    - name: Create export directory
+      ansible.builtin.file:
+        path: "{{ nfs_export_path }}"
+        state: directory
+        mode: "0755"
+
+    - name: Mount export disk
+      ansible.posix.mount:
+        path: "{{ nfs_export_path }}"
+        src: "LABEL={{ nfs_export_label }}"
+        fstype: ext4
+        state: mounted
+
+    # qemu-guest-agent is installed via terraform/nfs.tf's dedicated
+    # nfs_vm_vendor_data cloud-init snippet at first boot, not here —
+    # Terraform's agent.enabled = true would otherwise hang waiting for a
+    # handshake with an agent nothing installs until this playbook runs.
+
+    # -------------------------------------------------------------------
+    # 2. Install and configure nfs-kernel-server
+    # -------------------------------------------------------------------
+    - name: Install nfs-kernel-server
+      ansible.builtin.apt:
+        name: nfs-kernel-server
+        state: present
+        update_cache: true
+
+    - name: Write /etc/exports
+      ansible.builtin.copy:
+        dest: /etc/exports
+        mode: "0644"
+        content: |
+          {{ nfs_export_path }} {% for client in nfs_allowed_clients %}{{ client }}(rw,no_root_squash,sync,no_subtree_check) {% endfor %}
+      notify: reload exports
+
+    - name: Enable and start nfs-kernel-server
+      ansible.builtin.systemd:
+        name: nfs-kernel-server
+        enabled: true
+        state: started
+
+    - name: Flush handlers now so the export is live before verification
+      ansible.builtin.meta: flush_handlers
+
+    # -------------------------------------------------------------------
+    # Done
+    # -------------------------------------------------------------------
+    - name: NFS export configured
+      ansible.builtin.debug:
+        msg: "{{ nfs_export_path }} is exported to {{ nfs_allowed_clients | join(', ') }}. Verify: ssh -i ~/.ssh/id_nfs core@{{ ansible_host }} sudo exportfs -v"
+
+# -------------------------------------------------------------------
+# Register the export as PVE storage — cluster-wide via storage.cfg
+# (ADR-0020), so this runs once against any single member.
+# -------------------------------------------------------------------
+- name: Register shared-templates PVE storage
+  hosts: proxmox
+  gather_facts: false
+  vars:
+    nfs_server: "192.168.1.198" # matches terraform.tfvars' nfs_ip
+    nfs_storage_name: shared-templates
+    nfs_export_path: /export/templates
+    nfs_storage_path: /mnt/pve/shared-templates
+    nfs_storage_content: images,snippets
+
+  tasks:
+    - name: Check existing PVE storage pools
+      ansible.builtin.command: pvesm status
+      register: pvesm_status
+      changed_when: false
+
+    - name: Add shared-templates NFS storage
+      ansible.builtin.command: >
+        pvesm add nfs {{ nfs_storage_name }}
+        --server {{ nfs_server }} --export {{ nfs_export_path }}
+        --content {{ nfs_storage_content }} --path {{ nfs_storage_path }}
+      when: nfs_storage_name not in pvesm_status.stdout
+
+    - name: shared-templates PVE storage ready
+      ansible.builtin.debug:
+        msg: "{{ nfs_storage_name }} registered cluster-wide — verify with `pvesm status` on any PVE node."
