@@ -82,12 +82,41 @@ spec:
             enabled: false
           ingressGrpc:
             enabled: false
+          metrics:
+            enabled: true
+            serviceMonitor:
+              enabled: true
+
+        # argocd_app_info/argocd_app_sync_total/argocd_cluster_connection_status
+        # (used by the Grafana "ArgoCD Overview" dashboard, gitops/platform/
+        # values/grafana/values.yaml) come from the controller, not server.
+        controller:
+          metrics:
+            enabled: true
+            serviceMonitor:
+              enabled: true
 
         applicationSet:
           enabled: true
 
         notifications:
           enabled: false
+
+        # Use the shared Pigsty Redis (pg02, redis-main cluster) instead of
+        # the chart's bundled single-node Redis — one less thing to run/back
+        # up. Password comes from the argocd-redis Secret (argocd-redis-secret.yaml,
+        # InfisicalSecret → REDIS_MAIN_PASSWORD; no username, just requirepass).
+        # ArgoCD always uses Redis db 0 (no db-index param) and namespaces its
+        # own keys, so sharing the instance with other consumers (e.g.
+        # Infisical) is safe.
+        redis:
+          enabled: false
+        redisSecretInit:
+          enabled: false
+        externalRedis:
+          host: "192.168.1.207"
+          port: 6379
+          existingSecret: argocd-redis
   destination:
     server: https://kubernetes.default.svc
     namespace: argocd

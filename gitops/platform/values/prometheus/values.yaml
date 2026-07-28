@@ -14,6 +14,11 @@ grafana:
 prometheus:
   prometheusSpec:
     retention: 7d
+    # Chart default only watches ServiceMonitors carrying this release's own
+    # label, so externally-created ones (e.g. argo-cd's own chart, enabled in
+    # argocd-application.yaml) are invisible otherwise. Single-tenant homelab
+    # cluster — no need to scope this narrower.
+    serviceMonitorSelectorNilUsesHelmValues: false
     storageSpec:
       volumeClaimTemplate:
         spec:

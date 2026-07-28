@@ -25,6 +25,7 @@ gitops/
 │   ├── basic-admin-auth-middleware.yaml   # Shared Traefik BasicAuth Middleware (ns default), for admin-only tools
 │   ├── basic-admin-auth-secret.yaml       # InfisicalSecret → the above Middleware's htpasswd credential
 │   ├── longhorn-backup-secret.yaml        # InfisicalSecret → Longhorn's Garage S3 backup-target credentials
+│   ├── argocd-redis-secret.yaml            # InfisicalSecret → shared Pigsty Redis password, for argocd-application.yaml's externalRedis
 │   ├── longhorn-daily-snapshot-recurringjob.yaml  # Longhorn RecurringJob CR, daily snapshot schedule
 │   ├── platform.applicationset.yaml       # ApplicationSet for remaining platform apps (not traefik)
 │   ├── platform-common-apps.applicationset.yaml  # ApplicationSet for common-app-chart-based platform tools (public image, no app-specific code)

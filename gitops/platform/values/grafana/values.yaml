@@ -128,7 +128,7 @@ dashboards:
             {"collapsed":false,"gridPos":{"h":1,"w":24,"x":0,"y":0},"id":147,"title":"Overview","type":"row"},
             {
               "datasource":{"type":"prometheus","uid":"ds-prometheus"},
-              "fieldConfig":{"defaults":{"color":{"mode":"thresholds"},"links":[{"title":"Node Overview","url":"/d/node-overview?${__url_time_range}"}],"thresholds":{"mode":"absolute","steps":[{"color":"#3e668f","value":0}]}}},
+              "fieldConfig":{"defaults":{"color":{"mode":"thresholds"},"links":[{"title":"Node Overview","url":"http://192.168.1.205/ui/d/node-overview?${__url_time_range}"}],"thresholds":{"mode":"absolute","steps":[{"color":"#3e668f","value":0}]}}},
               "gridPos":{"h":3,"w":8,"x":0,"y":1},
               "id":99,
               "options":{"colorMode":"background","graphMode":"none","justifyMode":"center","orientation":"auto","percentChangeColorMode":"standard","reduceOptions":{"calcs":["lastNotNull"],"fields":"","values":false},"showPercentChange":false,"text":{},"textMode":"name","wideLayout":true},
@@ -143,9 +143,9 @@ dashboards:
               "fieldConfig":{
                 "defaults":{"color":{"mode":"thresholds"},"max":2.5,"min":0,"thresholds":{"mode":"absolute","steps":[{"color":"#3e668f","value":0}]}},
                 "overrides":[
-                  { "matcher":{"id":"byRegexp","options":"/Mem|Disk|Data/"},"properties":[{"id":"unit","value":"bytes"},{"id":"decimals","value":0}]                                         },{ "matcher":{"id":"byName","options":"Cluster"}          ,"properties":[{"id":"links","value":[{"title":"PGSQL Cluster","url":"/d/pgsql-cluster?${__url_time_range}"}]}]   },
-                  { "matcher":{"id":"byName","options":"Instance"}         ,"properties":[{"id":"links","value":[{"title":"PGSQL Instance","url":"/d/pgsql-instance?${__url_time_range}"}]}] },{ "matcher":{"id":"byName","options":"Service"}          ,"properties":[{"id":"links","value":[{"title":"PGSQL Service","url":"/d/pgsql-service?${__url_time_range}"}]}]   },
-                  { "matcher":{"id":"byName","options":"Node"}             ,"properties":[{"id":"links","value":[{"title":"PGSQL Node","url":"/d/node-instance?${__url_time_range}"}]}]      },{ "matcher":{"id":"byName","options":"DB"}               ,"properties":[{"id":"links","value":[{"title":"PGSQL Database","url":"/d/pgsql-database?${__url_time_range}"}]}] }
+                  { "matcher":{"id":"byRegexp","options":"/Mem|Disk|Data/"},"properties":[{"id":"unit","value":"bytes"},{"id":"decimals","value":0}]                                         },{ "matcher":{"id":"byName","options":"Cluster"}          ,"properties":[{"id":"links","value":[{"title":"PGSQL Cluster","url":"http://192.168.1.205/ui/d/pgsql-cluster?${__url_time_range}"}]}]   },
+                  { "matcher":{"id":"byName","options":"Instance"}         ,"properties":[{"id":"links","value":[{"title":"PGSQL Instance","url":"http://192.168.1.205/ui/d/pgsql-instance?${__url_time_range}"}]}] },{ "matcher":{"id":"byName","options":"Service"}          ,"properties":[{"id":"links","value":[{"title":"PGSQL Service","url":"http://192.168.1.205/ui/d/pgsql-service?${__url_time_range}"}]}]   },
+                  { "matcher":{"id":"byName","options":"Node"}             ,"properties":[{"id":"links","value":[{"title":"PGSQL Node","url":"http://192.168.1.205/ui/d/node-instance?${__url_time_range}"}]}]      },{ "matcher":{"id":"byName","options":"DB"}               ,"properties":[{"id":"links","value":[{"title":"PGSQL Database","url":"http://192.168.1.205/ui/d/pgsql-database?${__url_time_range}"}]}] }
                 ]
               },
               "gridPos":{"h":3,"w":16,"x":8,"y":1},
@@ -171,7 +171,7 @@ dashboards:
               "datasource":{"type":"prometheus","uid":"ds-prometheus"},
               "description":"ETCD Health server ratio, and number of Postgres cluster in Failsafe mode",
               "fieldConfig":{
-                "defaults":{"color":{"mode":"thresholds"},"links":[{"title":"ETCD Overview","url":"/d/etcd-overview?${__url_time_range}"}],"noValue":"N/A","thresholds":{"mode":"absolute","steps":[{"color":"red","value":0}]},"unit":"none"},
+                "defaults":{"color":{"mode":"thresholds"},"links":[{"title":"ETCD Overview","url":"http://192.168.1.205/ui/d/etcd-overview?${__url_time_range}"}],"noValue":"N/A","thresholds":{"mode":"absolute","steps":[{"color":"red","value":0}]},"unit":"none"},
                 "overrides":[
                   {
                     "matcher":{"id":"byName","options":"ETCD Status"},
@@ -207,7 +207,7 @@ dashboards:
               "fieldConfig":{
                 "defaults":{
                   "color":{"mode":"thresholds"},
-                  "links":[{"title":"PGSQL Alert: CPU","url":"/d/pgsql-alert?viewPanel=43&${__url_time_range}"}],
+                  "links":[{"title":"PGSQL Alert: CPU","url":"http://192.168.1.205/ui/d/pgsql-alert?viewPanel=43&${__url_time_range}"}],
                   "mappings":[{"options":{"match":"null+nan","result":{"color":"gray","index":0,"text":"\u2205"}},"type":"special"}],
                   "min":0,
                   "thresholds":{"mode":"absolute","steps":[{"color":"#3e668f","value":0},{"color":"#346f36cc","value":0.1},{"color":"#fcdb72","value":0.3},{"color":"#f79f64","value":0.5},{"color":"red","value":0.7},{"color":"#b783af","value":0.9},{"color":"text","value":1}]},
@@ -224,7 +224,7 @@ dashboards:
             },
             {
               "datasource":{"type":"prometheus","uid":"ds-prometheus"},
-              "fieldConfig":{"defaults":{"color":{"mode":"thresholds"},"links":[{"title":"PGSQL Alert: Backend Session","url":"/d/pgsql-alert?viewPanel=101&${__url_time_range}"}],"mappings":[{"options":{"match":"null+nan","result":{"color":"gray","index":0,"text":"\u2205"}},"type":"special"}],"min":0,"thresholds":{"mode":"absolute","steps":[{"color":"#346f36cc","value":0}]},"unit":"none"}},
+              "fieldConfig":{"defaults":{"color":{"mode":"thresholds"},"links":[{"title":"PGSQL Alert: Backend Session","url":"http://192.168.1.205/ui/d/pgsql-alert?viewPanel=101&${__url_time_range}"}],"mappings":[{"options":{"match":"null+nan","result":{"color":"gray","index":0,"text":"\u2205"}},"type":"special"}],"min":0,"thresholds":{"mode":"absolute","steps":[{"color":"#346f36cc","value":0}]},"unit":"none"}},
               "gridPos":{"h":3,"w":2,"x":6,"y":4},
               "id":76,
               "options":{"colorMode":"background","graphMode":"area","justifyMode":"auto","orientation":"auto","percentChangeColorMode":"standard","reduceOptions":{"calcs":["lastNotNull"],"fields":"","values":false},"showPercentChange":false,"text":{"titleSize":12,"valueSize":18},"textMode":"value_and_name","wideLayout":true},
@@ -235,7 +235,7 @@ dashboards:
             },
             {
               "datasource":{"type":"prometheus","uid":"ds-prometheus"},
-              "fieldConfig":{"defaults":{"color":{"mode":"thresholds"},"links":[{"title":"PGSQL Alert: Xact Commit","url":"/d/pgsql-alert?viewPanel=98&${__url_time_range}"}],"mappings":[{"options":{"match":"null+nan","result":{"color":"gray","index":0,"text":"\u2205"}},"type":"special"}],"min":0,"thresholds":{"mode":"absolute","steps":[{"color":"#346f36cc","value":0}]},"unit":"none"}},
+              "fieldConfig":{"defaults":{"color":{"mode":"thresholds"},"links":[{"title":"PGSQL Alert: Xact Commit","url":"http://192.168.1.205/ui/d/pgsql-alert?viewPanel=98&${__url_time_range}"}],"mappings":[{"options":{"match":"null+nan","result":{"color":"gray","index":0,"text":"\u2205"}},"type":"special"}],"min":0,"thresholds":{"mode":"absolute","steps":[{"color":"#346f36cc","value":0}]},"unit":"none"}},
               "gridPos":{"h":3,"w":2,"x":8,"y":4},
               "id":72,
               "options":{"colorMode":"background","graphMode":"area","justifyMode":"auto","orientation":"auto","percentChangeColorMode":"standard","reduceOptions":{"calcs":["lastNotNull"],"fields":"","values":false},"showPercentChange":false,"text":{"titleSize":12,"valueSize":18},"textMode":"value_and_name","wideLayout":true},
@@ -246,7 +246,7 @@ dashboards:
             },
             {
               "datasource":{"type":"prometheus","uid":"ds-prometheus"},
-              "fieldConfig":{"defaults":{"color":{"mode":"thresholds"},"links":[{"title":"PGSQL Alert: Rollback","url":"/d/pgsql-alert?viewPanel=99&${__url_time_range}"}],"mappings":[{"options":{"match":"null+nan","result":{"color":"gray","index":0,"text":"\u2205"}},"type":"special"}],"min":0,"thresholds":{"mode":"absolute","steps":[{"color":"#346f36cc","value":0},{"color":"#EAB839","value":10}]},"unit":"none"}},
+              "fieldConfig":{"defaults":{"color":{"mode":"thresholds"},"links":[{"title":"PGSQL Alert: Rollback","url":"http://192.168.1.205/ui/d/pgsql-alert?viewPanel=99&${__url_time_range}"}],"mappings":[{"options":{"match":"null+nan","result":{"color":"gray","index":0,"text":"\u2205"}},"type":"special"}],"min":0,"thresholds":{"mode":"absolute","steps":[{"color":"#346f36cc","value":0},{"color":"#EAB839","value":10}]},"unit":"none"}},
               "gridPos":{"h":3,"w":2,"x":10,"y":4},
               "id":73,
               "options":{"colorMode":"background","graphMode":"area","justifyMode":"auto","orientation":"auto","percentChangeColorMode":"standard","reduceOptions":{"calcs":["lastNotNull"],"fields":"","values":false},"showPercentChange":false,"text":{"titleSize":12,"valueSize":18},"textMode":"value_and_name","wideLayout":true},
@@ -260,7 +260,7 @@ dashboards:
               "fieldConfig":{
                 "defaults":{
                   "color":{"mode":"thresholds"},
-                  "links":[{"title":"Node Alert: FS Space","url":"/d/node-alert?viewPanel=23&${__url_time_range}"}],
+                  "links":[{"title":"Node Alert: FS Space","url":"http://192.168.1.205/ui/d/node-alert?viewPanel=23&${__url_time_range}"}],
                   "mappings":[{"options":{"match":"null+nan","result":{"color":"gray","index":0,"text":"\u2205"}},"type":"special"}],
                   "max":1,
                   "min":0,
@@ -283,7 +283,7 @@ dashboards:
                 "defaults":{
                   "color":{"mode":"thresholds"},
                   "decimals":2,
-                  "links":[{"title":"PGSQL Alert: Age","url":"/d/pgsql-alert?viewPanel=82&${__url_time_range}"}],
+                  "links":[{"title":"PGSQL Alert: Age","url":"http://192.168.1.205/ui/d/pgsql-alert?viewPanel=82&${__url_time_range}"}],
                   "mappings":[{"options":{"match":"null+nan","result":{"color":"gray","index":0,"text":"\u2205"}},"type":"special"}],
                   "max":1,
                   "min":0,
@@ -305,7 +305,7 @@ dashboards:
               "fieldConfig":{
                 "defaults":{
                   "color":{"mode":"thresholds"},
-                  "links":[{"title":"PGSQL Alert: Lag in Bytes","url":"/d/pgsql-alert?viewPanel=86&${__url_time_range}"}],
+                  "links":[{"title":"PGSQL Alert: Lag in Bytes","url":"http://192.168.1.205/ui/d/pgsql-alert?viewPanel=86&${__url_time_range}"}],
                   "mappings":[{"options":{"match":"null+nan","result":{"color":"gray","index":0,"text":"Lag = \u2205"}},"type":"special"}],
                   "min":0,
                   "thresholds":{"mode":"absolute","steps":[{"color":"#346f36cc","value":0},{"color":"#fcdb72","value":1000},{"color":"#f79f64","value":100000},{"color":"red","value":1000000},{"color":"#b783af","value":10000000},{"color":"text","value":100000000}]},
@@ -325,7 +325,7 @@ dashboards:
               "fieldConfig":{
                 "defaults":{
                   "color":{"mode":"thresholds"},
-                  "links":[{"title":"PGSQL Alert: Idle in Transaction","url":"/d/pgsql-alert?viewPanel=79&${__url_time_range}"}],
+                  "links":[{"title":"PGSQL Alert: Idle in Transaction","url":"http://192.168.1.205/ui/d/pgsql-alert?viewPanel=79&${__url_time_range}"}],
                   "mappings":[{"options":{"match":"null+nan","result":{"color":"gray","index":0,"text":"\u2205"}},"type":"special"}],
                   "min":0,
                   "thresholds":{"mode":"absolute","steps":[{"color":"#346f36cc","value":0},{"color":"#f79f64","value":1},{"color":"red","value":8}]},
@@ -345,7 +345,7 @@ dashboards:
               "fieldConfig":{
                 "defaults":{
                   "color":{"mode":"thresholds"},
-                  "links":[{"title":"PGSQL Alert: Waiting Clients","url":"/d/pgsql-alert?viewPanel=89&${__url_time_range}"}],
+                  "links":[{"title":"PGSQL Alert: Waiting Clients","url":"http://192.168.1.205/ui/d/pgsql-alert?viewPanel=89&${__url_time_range}"}],
                   "mappings":[{"options":{"match":"null+nan","result":{"color":"#808080","index":0,"text":"Queue Nowait"}},"type":"special"}],
                   "min":0,
                   "thresholds":{"mode":"absolute","steps":[{"color":"#346f36cc","value":0},{"color":"#f79f64","value":1},{"color":"red","value":8}]},
@@ -366,7 +366,7 @@ dashboards:
                 "defaults":{
                   "color":{"mode":"thresholds"},
                   "decimals":1,
-                  "links":[{"title":"PGSQL Alert: Connection Usage","url":"/d/pgsql-alert?viewPanel=76&${__url_time_range}"}],
+                  "links":[{"title":"PGSQL Alert: Connection Usage","url":"http://192.168.1.205/ui/d/pgsql-alert?viewPanel=76&${__url_time_range}"}],
                   "mappings":[{"options":{"match":"null+nan","result":{"color":"#808080","index":0,"text":"\u2205"}},"type":"special"}],
                   "max":1,
                   "min":0,
@@ -387,19 +387,19 @@ dashboards:
               "fieldConfig":{
                 "defaults":{"color":{"mode":"thresholds"},"decimals":1,"mappings":[{"options":{"-1":{"color":"gray","index":1,"text":"N/A"}},"type":"value"},{"options":{"match":"null+nan","result":{"color":"#3e668f","index":0,"text":"No Clusters"}},"type":"special"}],"min":0,"thresholds":{"mode":"absolute","steps":[{"color":"#3e668f","value":0}]},"unit":"percentunit"},
                 "overrides":[
-                  {"matcher":{"id":"byFrameRefID","options":"A"},"properties":[{"id":"links","value":[{"title":"PGSQL Cluster ${__field.labels.cls}","url":"/d/pgsql-cluster?var-cls=${__field.labels.cls}&${__url_time_range}"}]},{"id":"color","value":{"fixedColor":"#3e668f","mode":"fixed"}}]},
-                  {"matcher":{"id":"byFrameRefID","options":"B"},"properties":[{"id":"links","value":[{"title":"Redis Cluster ${__field.labels.cls}","url":"/d/redis-cluster?var-cls=${__field.labels.cls}&${__url_time_range}"}]},{"id":"color","value":{"fixedColor":"#cc4637d9","mode":"fixed"}}]},
-                  {"matcher":{"id":"byFrameRefID","options":"C"},"properties":[{"id":"links","value":[{"title":"Node Cluster : ${__field.labels.cls}","url":"/d/node-cluster?var-cls=${__field.labels.cls}&${__url_time_range}"}]},{"id":"color","value":{"fixedColor":"#e6b03ee6","mode":"fixed"}}]},
+                  {"matcher":{"id":"byFrameRefID","options":"A"},"properties":[{"id":"links","value":[{"title":"PGSQL Cluster ${__field.labels.cls}","url":"http://192.168.1.205/ui/d/pgsql-cluster?var-cls=${__field.labels.cls}&${__url_time_range}"}]},{"id":"color","value":{"fixedColor":"#3e668f","mode":"fixed"}}]},
+                  {"matcher":{"id":"byFrameRefID","options":"B"},"properties":[{"id":"links","value":[{"title":"Redis Cluster ${__field.labels.cls}","url":"http://192.168.1.205/ui/d/redis-cluster?var-cls=${__field.labels.cls}&${__url_time_range}"}]},{"id":"color","value":{"fixedColor":"#cc4637d9","mode":"fixed"}}]},
+                  {"matcher":{"id":"byFrameRefID","options":"C"},"properties":[{"id":"links","value":[{"title":"Node Cluster : ${__field.labels.cls}","url":"http://192.168.1.205/ui/d/node-cluster?var-cls=${__field.labels.cls}&${__url_time_range}"}]},{"id":"color","value":{"fixedColor":"#e6b03ee6","mode":"fixed"}}]},
                   {
                     "matcher":{"id":"byFrameRefID","options":"D"},
                     "properties":[
-                      { "id":"color"     ,"value":{"fixedColor":"#5b9cd5","mode":"thresholds"}                                                                                                           },{ "id":"links"     ,"value":[{"title":"ETCD Overview","url":"/d/etcd-overview?${__url_time_range}"}]                                                                               },
+                      { "id":"color"     ,"value":{"fixedColor":"#5b9cd5","mode":"thresholds"}                                                                                                           },{ "id":"links"     ,"value":[{"title":"ETCD Overview","url":"http://192.168.1.205/ui/d/etcd-overview?${__url_time_range}"}]                                                                               },
                       { "id":"thresholds","value":{"mode":"absolute","steps":[{"color":"text","value":0},{"color":"#b783af","value":0.5},{"color":"red","value":0.66666},{"color":"#5b9cd5","value":1}]} },{ "id":"decimals"  ,"value":0                                                                                                                                                      },
                       { "id":"mappings"  ,"value":[{"options":{"0":{"color":"text","index":1,"text":"Dead"},"1":{"color":"#5b9cd5","index":0,"text":"Healthy"}},"type":"value"}]                         }
                     ]
                   },
-                  {"matcher":{"id":"byFrameRefID","options":"E"},"properties":[{"id":"color","value":{"fixedColor":"#d0475799","mode":"fixed"}},{"id":"links","value":[{"title":"Minio Overview","url":"/d/minio-overview?${__url_time_range}"}]}]},
-                  {"matcher":{"id":"byFrameRefID","options":"R"},"properties":[{"id":"color","value":{"fixedColor":"#6986a3","mode":"fixed"}},{"id":"unit","value":"tps"},{"id":"decimals","value":0},{"id":"links","value":[{"title":"PGRDS Cluster : ${__field.labels.cls}","url":"/d/pgrds-cluster?var-cls=${__field.labels.cls}&${__url_time_range}"}]}]}
+                  {"matcher":{"id":"byFrameRefID","options":"E"},"properties":[{"id":"color","value":{"fixedColor":"#d0475799","mode":"fixed"}},{"id":"links","value":[{"title":"Minio Overview","url":"http://192.168.1.205/ui/d/minio-overview?${__url_time_range}"}]}]},
+                  {"matcher":{"id":"byFrameRefID","options":"R"},"properties":[{"id":"color","value":{"fixedColor":"#6986a3","mode":"fixed"}},{"id":"unit","value":"tps"},{"id":"decimals","value":0},{"id":"links","value":[{"title":"PGRDS Cluster : ${__field.labels.cls}","url":"http://192.168.1.205/ui/d/pgrds-cluster?var-cls=${__field.labels.cls}&${__url_time_range}"}]}]}
                 ]
               },
               "gridPos":{"h":14,"w":8,"x":0,"y":7},
@@ -420,14 +420,14 @@ dashboards:
               "fieldConfig":{
                 "defaults":{"color":{"mode":"thresholds"},"mappings":[{"options":{"match":"null+nan","result":{"index":0,"text":"No Instances"}},"type":"special"}],"max":1.1,"min":0,"thresholds":{"mode":"absolute","steps":[{"color":"#3e668f","value":0},{"color":"#aaaaaa","value":1}]}},
                 "overrides":[
-                  { "matcher":{"id":"byFrameRefID","options":"A"},"properties":[{"id":"thresholds","value":{"mode":"absolute","steps":[{"color":"text","value":0},{"color":"#3e668f","value":1}]}},{"id":"links","value":[{"title":"PGSQL Instance: ${__field.labels.ins}","url":"/d/pgsql-instance?var-ins=${__field.labels.ins}&${__url_time_range}"}]}]          },
-                  { "matcher":{"id":"byFrameRefID","options":"B"},"properties":[{"id":"thresholds","value":{"mode":"absolute","steps":[{"color":"#13212fd6","value":0},{"color":"#346f36cc","value":1}]}},{"id":"links","value":[{"title":"PGSQL Pgbouncer: ${__field.labels.ins}","url":"/d/pgsql-pgbouncer?var-ins=${__field.labels.ins}&${__url_time_range}"}]}] },
-                  { "matcher":{"id":"byFrameRefID","options":"C"},"properties":[{"id":"thresholds","value":{"mode":"absolute","steps":[{"color":"text","value":0},{"color":"#5b9cd5","value":1}]}},{"id":"links","value":[{"title":"PGSQL Patroni : ${__field.labels.cls}","url":"/d/pgsql-patroni?var-cls=${__field.labels.cls}&${__url_time_range}"}]}]           },
-                  { "matcher":{"id":"byFrameRefID","options":"V"},"properties":[{"id":"thresholds","value":{"mode":"absolute","steps":[{"color":"#1c151b","value":0},{"color":"#f79f64","value":1}]}},{"id":"links","value":[{"title":"PGSQL VIP : ${__field.labels.vip}","url":"/d/node-vip?var-vip=${__field.labels.vip}&${__url_time_range}"}]}]                 },
-                  { "matcher":{"id":"byFrameRefID","options":"R"},"properties":[{"id":"thresholds","value":{"mode":"absolute","steps":[{"color":"#252f34","value":0},{"color":"#6a8d9d","value":1}]}},{"id":"links","value":[{"title":"PGRDS Instance : ${__field.labels.ins}","url":"/d/pgrds-instance?var-ins=${__field.labels.ins}&${__url_time_range}"}]}]      },
-                  { "matcher":{"id":"byFrameRefID","options":"D"},"properties":[{"id":"thresholds","value":{"mode":"absolute","steps":[{"color":"#24292e","value":0},{"color":"#b783af","value":1}]}},{"id":"links","value":[{"title":"PGSQL Exporter : ${__field.labels.ins}","url":"/d/pgsql-exporter?var-ins=${__field.labels.ins}&${__url_time_range}"}]}]      },
-                  { "matcher":{"id":"byFrameRefID","options":"E"},"properties":[{"id":"thresholds","value":{"mode":"absolute","steps":[{"color":"#24292e","value":0},{"color":"#7771a4","value":1}]}},{"id":"links","value":[{"title":"PGSQL Exporter : ${__field.labels.ins}","url":"/d/pgsql-exporter?var-ins=${__field.labels.ins}&${__url_time_range}"}]}]      },
-                  { "matcher":{"id":"byFrameRefID","options":"S"},"properties":[{"id":"links","value":[{"title":"PGSQL Backup : ${__field.labels.cls}","url":"/d/pgsql-pitr?var-cls=${__field.labels.cls}&${__url_time_range}"}]},{"id":"thresholds","value":{"mode":"absolute","steps":[{"color":"#252f34","value":0},{"color":"#42606b","value":1}]}}]            }
+                  { "matcher":{"id":"byFrameRefID","options":"A"},"properties":[{"id":"thresholds","value":{"mode":"absolute","steps":[{"color":"text","value":0},{"color":"#3e668f","value":1}]}},{"id":"links","value":[{"title":"PGSQL Instance: ${__field.labels.ins}","url":"http://192.168.1.205/ui/d/pgsql-instance?var-ins=${__field.labels.ins}&${__url_time_range}"}]}]          },
+                  { "matcher":{"id":"byFrameRefID","options":"B"},"properties":[{"id":"thresholds","value":{"mode":"absolute","steps":[{"color":"#13212fd6","value":0},{"color":"#346f36cc","value":1}]}},{"id":"links","value":[{"title":"PGSQL Pgbouncer: ${__field.labels.ins}","url":"http://192.168.1.205/ui/d/pgsql-pgbouncer?var-ins=${__field.labels.ins}&${__url_time_range}"}]}] },
+                  { "matcher":{"id":"byFrameRefID","options":"C"},"properties":[{"id":"thresholds","value":{"mode":"absolute","steps":[{"color":"text","value":0},{"color":"#5b9cd5","value":1}]}},{"id":"links","value":[{"title":"PGSQL Patroni : ${__field.labels.cls}","url":"http://192.168.1.205/ui/d/pgsql-patroni?var-cls=${__field.labels.cls}&${__url_time_range}"}]}]           },
+                  { "matcher":{"id":"byFrameRefID","options":"V"},"properties":[{"id":"thresholds","value":{"mode":"absolute","steps":[{"color":"#1c151b","value":0},{"color":"#f79f64","value":1}]}},{"id":"links","value":[{"title":"PGSQL VIP : ${__field.labels.vip}","url":"http://192.168.1.205/ui/d/node-vip?var-vip=${__field.labels.vip}&${__url_time_range}"}]}]                 },
+                  { "matcher":{"id":"byFrameRefID","options":"R"},"properties":[{"id":"thresholds","value":{"mode":"absolute","steps":[{"color":"#252f34","value":0},{"color":"#6a8d9d","value":1}]}},{"id":"links","value":[{"title":"PGRDS Instance : ${__field.labels.ins}","url":"http://192.168.1.205/ui/d/pgrds-instance?var-ins=${__field.labels.ins}&${__url_time_range}"}]}]      },
+                  { "matcher":{"id":"byFrameRefID","options":"D"},"properties":[{"id":"thresholds","value":{"mode":"absolute","steps":[{"color":"#24292e","value":0},{"color":"#b783af","value":1}]}},{"id":"links","value":[{"title":"PGSQL Exporter : ${__field.labels.ins}","url":"http://192.168.1.205/ui/d/pgsql-exporter?var-ins=${__field.labels.ins}&${__url_time_range}"}]}]      },
+                  { "matcher":{"id":"byFrameRefID","options":"E"},"properties":[{"id":"thresholds","value":{"mode":"absolute","steps":[{"color":"#24292e","value":0},{"color":"#7771a4","value":1}]}},{"id":"links","value":[{"title":"PGSQL Exporter : ${__field.labels.ins}","url":"http://192.168.1.205/ui/d/pgsql-exporter?var-ins=${__field.labels.ins}&${__url_time_range}"}]}]      },
+                  { "matcher":{"id":"byFrameRefID","options":"S"},"properties":[{"id":"links","value":[{"title":"PGSQL Backup : ${__field.labels.cls}","url":"http://192.168.1.205/ui/d/pgsql-pitr?var-cls=${__field.labels.cls}&${__url_time_range}"}]},{"id":"thresholds","value":{"mode":"absolute","steps":[{"color":"#252f34","value":0},{"color":"#42606b","value":1}]}}]            }
                 ]
               },
               "gridPos":{"h":14,"w":16,"x":8,"y":7},
@@ -451,7 +451,7 @@ dashboards:
               "datasource":{"type":"prometheus","uid":"ds-prometheus"},
               "fieldConfig":{
                 "defaults":{"color":{"mode":"thresholds"},"decimals":0,"max":1,"min":0,"noValue":"OK","thresholds":{"mode":"absolute","steps":[{"color":"#3e668f","value":0},{"color":"#fcdb72","value":1},{"color":"#f79f64","value":4},{"color":"#b783af","value":8},{"color":"text","value":16}]},"unit":"none"},
-                "overrides":[{"matcher":{"id":"byFrameRefID","options":"A"},"properties":[{"id":"links","value":[{"targetBlank":true,"title":"Pigsty Alertmanager","url":"/alertmgr/"}]}]},{"matcher":{"id":"byFrameRefID","options":"B"},"properties":[{"id":"links","value":[{"title":"PGSQL Alert","url":"/d/pgsql-alert?${__url_time_range}"}]}]}]
+                "overrides":[{"matcher":{"id":"byFrameRefID","options":"A"},"properties":[{"id":"links","value":[{"targetBlank":true,"title":"Pigsty Alertmanager","url":"/alertmgr/"}]}]},{"matcher":{"id":"byFrameRefID","options":"B"},"properties":[{"id":"links","value":[{"title":"PGSQL Alert","url":"http://192.168.1.205/ui/d/pgsql-alert?${__url_time_range}"}]}]}]
               },
               "gridPos":{"h":6,"w":4,"x":0,"y":21},
               "id":118,
@@ -520,7 +520,7 @@ dashboards:
                   "links":[
                     { "targetBlank":true,"title":"AlertInfo ${__field.labels.alertname} on Cluster ${__field.labels.cls}","url":"/alertmgr/#/alerts?filter=%7Bcls%3D%22${__field.labels.cls}%22%2C%20alertname%3D%22${__field.labels.alertname}%22%7D"       },
                     { "targetBlank":true,"title":"Silence ${__field.labels.alertname} on Cluster ${__field.labels.cls}"  ,"url":"/alertmgr/#/silences/new?filter=%7Bcls%3D%22${__field.labels.cls}%22%2C%20alertname%3D%22${__field.labels.alertname}%22%7D" },
-                    {                    "title":"PGSQL Cluster for ${__field.labels.cls} : Alerts"                      ,"url":"/d/pgsql-cluster?var-cls=${__field.labels.cls}&viewPanel=78&${__url_time_range}"                                            }
+                    {                    "title":"PGSQL Cluster for ${__field.labels.cls} : Alerts"                      ,"url":"http://192.168.1.205/ui/d/pgsql-cluster?var-cls=${__field.labels.cls}&viewPanel=78&${__url_time_range}"                                            }
                   ],
                   "min":0,
                   "noValue":"No Alert",
@@ -569,7 +569,7 @@ dashboards:
                     "stacking":{"group":"A","mode":"none"},
                     "thresholdsStyle":{"mode":"area"}
                   },
-                  "links":[{"title":"PGSQL Cluster ${__field.labels.cls}","url":"/d/pgsql-cluster?var-cls=${__field.labels.cls}&${__url_time_range}"}],
+                  "links":[{"title":"PGSQL Cluster ${__field.labels.cls}","url":"http://192.168.1.205/ui/d/pgsql-cluster?var-cls=${__field.labels.cls}&${__url_time_range}"}],
                   "mappings":[{"options":{"-1":{"color":"gray","index":1,"text":"N/A"}},"type":"value"},{"options":{"match":"null+nan","result":{"color":"gray","index":0,"text":"No Data"}},"type":"special"}],
                   "min":0,
                   "thresholds":{"mode":"absolute","steps":[{"color":"#3e668f","value":0},{"color":"green","value":0.1},{"color":"yellow","value":0.3},{"color":"orange","value":0.5},{"color":"red","value":0.7},{"color":"purple","value":0.9},{"color":"text","value":1}]},
@@ -618,8 +618,8 @@ dashboards:
                   "unit":"short"
                 },
                 "overrides":[
-                  { "matcher":{"id":"byFrameRefID","options":"A"},"properties":[{"id":"links","value":[{"title":"PGSQL Instance : ${__field.labels.ins}","url":"/d/pgsql-instance?var-ins=${__field.labels.ins}&${__url_time_range}"}]}] },
-                  { "matcher":{"id":"byFrameRefID","options":"B"},"properties":[{"id":"links","value":[{"title":"PGRDS Instance : ${__field.labels.ins}","url":"/d/pgrds-instance?var-ins=${__field.labels.ins}&${__url_time_range}"}]}] }
+                  { "matcher":{"id":"byFrameRefID","options":"A"},"properties":[{"id":"links","value":[{"title":"PGSQL Instance : ${__field.labels.ins}","url":"http://192.168.1.205/ui/d/pgsql-instance?var-ins=${__field.labels.ins}&${__url_time_range}"}]}] },
+                  { "matcher":{"id":"byFrameRefID","options":"B"},"properties":[{"id":"links","value":[{"title":"PGRDS Instance : ${__field.labels.ins}","url":"http://192.168.1.205/ui/d/pgrds-instance?var-ins=${__field.labels.ins}&${__url_time_range}"}]}] }
                 ]
               },
               "gridPos":{"h":6,"w":16,"x":8,"y":27},
@@ -640,15 +640,15 @@ dashboards:
               "fieldConfig":{
                 "defaults":{"color":{"mode":"thresholds"},"custom":{"align":"center","cellOptions":{"type":"auto"},"footer":{"reducers":[]},"inspect":false},"max":1.2,"min":0,"thresholds":{"mode":"absolute","steps":[{"color":"#e3e3e3e0","value":0}]}},
                 "overrides":[
-                  {"matcher":{"id":"byName","options":"Instance"},"properties":[{"id":"links","value":[{"title":"PGSQL Instance ${__data.fields.Instance}","url":"/d/pgsql-instance?var-ins=${__data.fields.Instance}&${__url_time_range}"}]}]},
-                  {"matcher":{"id":"byName","options":"IP"},"properties":[{"id":"custom.width","value":110},{"id":"links","value":[{"title":"PGSQL Node for ${__data.fields.IP}","url":"/d/node-instance?var-id=${__data.fields.IP}&${__url_time_range}"}]}]},
+                  {"matcher":{"id":"byName","options":"Instance"},"properties":[{"id":"links","value":[{"title":"PGSQL Instance ${__data.fields.Instance}","url":"http://192.168.1.205/ui/d/pgsql-instance?var-ins=${__data.fields.Instance}&${__url_time_range}"}]}]},
+                  {"matcher":{"id":"byName","options":"IP"},"properties":[{"id":"custom.width","value":110},{"id":"links","value":[{"title":"PGSQL Node for ${__data.fields.IP}","url":"http://192.168.1.205/ui/d/node-instance?var-id=${__data.fields.IP}&${__url_time_range}"}]}]},
                   {
                     "matcher":{"id":"byName","options":"Role"},
                     "properties":[
                       { "id":"custom.width"      ,"value":80                                                                                                                                                                                                                                  },
                       { "id":"mappings"          ,"value":[{"options":{"0":{"color":"#3e668f","index":1,"text":"primary"},"1":{"color":"#346f36cc","index":0,"text":"replica"}},"type":"value"},{"options":{"match":"null+nan","result":{"color":"transparent","index":2}},"type":"special"}] },
                       { "id":"custom.cellOptions","value":{"mode":"gradient","type":"color-background"}                                                                                                                                                                                       },
-                      { "id":"links"             ,"value":[{"title":"PGSQL Service for ${cls}-${__data.fields.Status}","url":"/d/pgsql-service?var-svc=${__data.fields.Cluster}-${__data.fields.Status}&${__url_time_range}"}]                                                                },
+                      { "id":"links"             ,"value":[{"title":"PGSQL Service for ${cls}-${__data.fields.Status}","url":"http://192.168.1.205/ui/d/pgsql-service?var-svc=${__data.fields.Cluster}-${__data.fields.Status}&${__url_time_range}"}]                                                                },
                       { "id":"custom.filterable" ,"value":true                                                                                                                                                                                                                                }
                     ]
                   },{
@@ -663,7 +663,7 @@ dashboards:
                       { "id":"mappings"          ,"value":[{"options":{"-1":{"color":"#80808080","index":0,"text":"N/A"}},"type":"value"},{"options":{"match":"null+nan","result":{"color":"transparent","index":1}},"type":"special"}]                                                                        }
                     ]
                   },
-                  {"matcher":{"id":"byName","options":"Cluster"},"properties":[{"id":"links","value":[{"title":"PGSQL Cluster for ${__data.fields.Cluster}","url":"/d/pgsql-cluster?var-cls=${__data.fields.Cluster}&${__url_time_range}"}]},{"id":"custom.filterable","value":true}]},
+                  {"matcher":{"id":"byName","options":"Cluster"},"properties":[{"id":"links","value":[{"title":"PGSQL Cluster for ${__data.fields.Cluster}","url":"http://192.168.1.205/ui/d/pgsql-cluster?var-cls=${__data.fields.Cluster}&${__url_time_range}"}]},{"id":"custom.filterable","value":true}]},
                   {
                     "matcher":{"id":"byName","options":"Space"},
                     "properties":[
@@ -849,7 +849,7 @@ dashboards:
                 "defaults":{
                   "color":{"mode":"thresholds"},
                   "decimals":2,
-                  "links":[{"title":"PGSQL Instance: ${__field.labels.ins}","url":"/d/pgsql-instance?var-ins=${__field.labels.ins}&${__url_time_range}"}],
+                  "links":[{"title":"PGSQL Instance: ${__field.labels.ins}","url":"http://192.168.1.205/ui/d/pgsql-instance?var-ins=${__field.labels.ins}&${__url_time_range}"}],
                   "mappings":[{"options":{"-1":{"color":"gray","index":1,"text":"N/A"}},"type":"value"},{"options":{"match":"null+nan","result":{"color":"gray","index":0,"text":"No Data"}},"type":"special"}],
                   "thresholds":{"mode":"absolute","steps":[{"color":"#3e668f","value":0},{"color":"#346f36cc","value":0.1},{"color":"#fcdb72","value":0.3},{"color":"#f79f64","value":0.5},{"color":"red","value":0.7},{"color":"#b783af","value":0.9},{"color":"text","value":1}]},
                   "unit":"percentunit"
@@ -873,9 +873,9 @@ dashboards:
               "fieldConfig":{
                 "defaults":{"color":{"mode":"thresholds"},"custom":{"align":"center","cellOptions":{"type":"auto"},"footer":{"reducers":[]},"inspect":false},"mappings":[{"options":{"match":"null+nan","result":{"color":"transparent","index":1}},"type":"special"}],"thresholds":{"mode":"absolute","steps":[{"color":"#346f36cc","value":0}]}},
                 "overrides":[
-                  {"matcher":{"id":"byName","options":"Instance"},"properties":[{"id":"links","value":[{"title":"PGSQL Instance: ${__data.fields.Instance}","url":"/d/pgsql-instance?var-ins=${__data.fields.Instance}&${__url_time_range}"}]},{"id":"custom.minWidth","value":120}]},
-                  {"matcher":{"id":"byName","options":"Cluster"},"properties":[{"id":"links","value":[{"title":"PGSQL Patroni Cluster: ${__data.fields.Cluster}","url":"/d/pgsql-patroni?var-cls=${__data.fields.Cluster}&${__url_time_range}"}]},{"id":"custom.minWidth","value":120},{"id":"custom.filterable","value":true}]},
-                  {"matcher":{"id":"byName","options":"Shard"},"properties":[{"id":"links","value":[{"title":"PGSQL Shard : ${__data.fields.Shard}","url":"/d/pgsql-shard?var-shard=${__data.fields.Shard}&${__url_time_range}"}]},{"id":"custom.width","value":100},{"id":"custom.filterable","value":true}]},
+                  {"matcher":{"id":"byName","options":"Instance"},"properties":[{"id":"links","value":[{"title":"PGSQL Instance: ${__data.fields.Instance}","url":"http://192.168.1.205/ui/d/pgsql-instance?var-ins=${__data.fields.Instance}&${__url_time_range}"}]},{"id":"custom.minWidth","value":120}]},
+                  {"matcher":{"id":"byName","options":"Cluster"},"properties":[{"id":"links","value":[{"title":"PGSQL Patroni Cluster: ${__data.fields.Cluster}","url":"http://192.168.1.205/ui/d/pgsql-patroni?var-cls=${__data.fields.Cluster}&${__url_time_range}"}]},{"id":"custom.minWidth","value":120},{"id":"custom.filterable","value":true}]},
+                  {"matcher":{"id":"byName","options":"Shard"},"properties":[{"id":"links","value":[{"title":"PGSQL Shard : ${__data.fields.Shard}","url":"http://192.168.1.205/ui/d/pgsql-shard?var-shard=${__data.fields.Shard}&${__url_time_range}"}]},{"id":"custom.width","value":100},{"id":"custom.filterable","value":true}]},
                   {
                     "matcher":{"id":"byName","options":"Role"},
                     "properties":[
@@ -911,7 +911,7 @@ dashboards:
                     "properties":[{"id":"custom.width","value":100},{"id":"unit","value":"s"},{"id":"thresholds","value":{"mode":"absolute","steps":[{"color":"#346f36cc","value":0},{"color":"#f79f64","value":20},{"color":"#cc4637d9","value":30},{"color":"#b783af","value":60},{"color":"text","value":300}]}},{"id":"custom.cellOptions","value":{"mode":"gradient","type":"color-background"}}]
                   },
                   {"matcher":{"id":"byName","options":"Up"},"properties":[{"id":"custom.width","value":90},{"id":"mappings","value":[{"options":{"0":{"color":"#cc4637d9","index":0,"text":"Dead"},"1":{"color":"#346f36cc","index":1,"text":"Alive"}},"type":"value"}]},{"id":"custom.cellOptions","value":{"type":"color-background"}},{"id":"custom.filterable","value":true}]},
-                  {"matcher":{"id":"byName","options":"IP"},"properties":[{"id":"custom.width","value":110},{"id":"links","value":[{"title":"Node Instance : ${__data.fields.IP}","url":"/d/node-instance?var-id=${__data.fields.IP}&${__url_time_range}"}]}]}
+                  {"matcher":{"id":"byName","options":"IP"},"properties":[{"id":"custom.width","value":110},{"id":"links","value":[{"title":"Node Instance : ${__data.fields.IP}","url":"http://192.168.1.205/ui/d/node-instance?var-id=${__data.fields.IP}&${__url_time_range}"}]}]}
                 ]
               },
               "gridPos":{"h":10,"w":17,"x":0,"y":46},
@@ -954,7 +954,7 @@ dashboards:
                 {
                   "datasource":{"type":"prometheus","uid":"ds-prometheus"},
                   "fieldConfig":{
-                    "defaults":{"color":{"mode":"thresholds"},"links":[{"title":"ETCD Overview","url":"/d/etcd-overview?${__url_time_range}"}],"noValue":"N/A","thresholds":{"mode":"absolute","steps":[{"color":"red","value":null}]},"unit":"none"},
+                    "defaults":{"color":{"mode":"thresholds"},"links":[{"title":"ETCD Overview","url":"http://192.168.1.205/ui/d/etcd-overview?${__url_time_range}"}],"noValue":"N/A","thresholds":{"mode":"absolute","steps":[{"color":"red","value":null}]},"unit":"none"},
                     "overrides":[
                       {
                         "matcher":{"id":"byName","options":"ETCD Health"},
@@ -994,7 +994,7 @@ dashboards:
                   },
                   "gridPos":{"h":7,"w":13,"x":4,"y":57},
                   "id":125,
-                  "links":[{"title":"ETCD Overview","url":"/d/etcd-overview?${__url_time_range}"}],
+                  "links":[{"title":"ETCD Overview","url":"http://192.168.1.205/ui/d/etcd-overview?${__url_time_range}"}],
                   "options":{"alignValue":"left","legend":{"displayMode":"list","placement":"bottom","showLegend":false},"mergeValues":true,"rowHeight":0.96,"showValue":"never","tooltip":{"hideZeros":false,"mode":"single","sort":"none"}},
                   "pluginVersion":"12.0.2",
                   "targets":[
@@ -1008,7 +1008,7 @@ dashboards:
                   "datasource":{"type":"prometheus","uid":"ds-prometheus"},
                   "description":"How long since patroni the HA agent successfully connect to DCS:etcd.\nMax amoung cluster\n\nvalue larger than 20s needs extra attention",
                   "fieldConfig":{
-                    "defaults":{"color":{"mode":"thresholds"},"decimals":1,"links":[{"title":"PGSQL Patroni : ${__field.labels.cls}","url":"/d/pgsql-patroni?var-cls=${__field.labels.cls}&${__url_time_range}"}],"thresholds":{"mode":"absolute","steps":[{"color":"#346f36cc","value":null}]}},
+                    "defaults":{"color":{"mode":"thresholds"},"decimals":1,"links":[{"title":"PGSQL Patroni : ${__field.labels.cls}","url":"http://192.168.1.205/ui/d/pgsql-patroni?var-cls=${__field.labels.cls}&${__url_time_range}"}],"thresholds":{"mode":"absolute","steps":[{"color":"#346f36cc","value":null}]}},
                     "overrides":[{"matcher":{"id":"byName","options":"Value"},"properties":[{"id":"unit","value":"s"},{"id":"thresholds","value":{"mode":"absolute","steps":[{"color":"#346f36cc"},{"color":"#346f36cc","value":1},{"color":"#f79f64","value":20},{"color":"red","value":30},{"color":"#b783af","value":60},{"color":"text","value":300}]}}]}]
                   },
                   "gridPos":{"h":14,"w":7,"x":17,"y":57},
@@ -1093,7 +1093,7 @@ dashboards:
                         "stacking":{"group":"A","mode":"none"},
                         "thresholdsStyle":{"mode":"off"}
                       },
-                      "links":[{"title":"PGSQL Service : ${__field.labels.proxy}","url":"/d/pgsql-service?var-svc=${__field.labels.proxy}&${__url_time_range}"}],
+                      "links":[{"title":"PGSQL Service : ${__field.labels.proxy}","url":"http://192.168.1.205/ui/d/pgsql-service?var-svc=${__field.labels.proxy}&${__url_time_range}"}],
                       "mappings":[{"options":{"match":"null+nan","result":{"color":"#808080","index":1}},"type":"special"}],
                       "thresholds":{"mode":"absolute","steps":[{"color":"#cc4637d9","value":null},{"color":"#346f36cc","value":1}]}
                     }
@@ -1111,7 +1111,7 @@ dashboards:
                     "defaults":{
                       "color":{"mode":"thresholds"},
                       "custom":{"fillOpacity":60,"hideFrom":{"legend":false,"tooltip":false,"viz":false},"insertNulls":false,"lineWidth":0,"spanNulls":false},
-                      "links":[{"title":"PGSQL Service : ${__field.labels.proxy}","url":"/d/pgsql-service?var-svc=${__field.labels.proxy}&${__url_time_range}"}],
+                      "links":[{"title":"PGSQL Service : ${__field.labels.proxy}","url":"http://192.168.1.205/ui/d/pgsql-service?var-svc=${__field.labels.proxy}&${__url_time_range}"}],
                       "mappings":[{"options":{"match":"null+nan","result":{"color":"#808080","index":1}},"type":"special"}],
                       "thresholds":{"mode":"absolute","steps":[{"color":"#cc4637d9","value":null},{"color":"#346f36cc","value":1}]}
                     }
@@ -1130,7 +1130,7 @@ dashboards:
                     "defaults":{
                       "color":{"mode":"thresholds"},
                       "decimals":4,
-                      "links":[{"title":"PGSQL Service : ${__field.labels.proxy}","url":"/d/pgsql-service?var-svc=${__field.labels.proxy}&${__url_time_range}"}],
+                      "links":[{"title":"PGSQL Service : ${__field.labels.proxy}","url":"http://192.168.1.205/ui/d/pgsql-service?var-svc=${__field.labels.proxy}&${__url_time_range}"}],
                       "thresholds":{"mode":"absolute","steps":[{"color":"text","value":null},{"color":"#7771a4","value":0.9},{"color":"#b783af","value":0.95},{"color":"#cc4637d9","value":0.99},{"color":"#f79f64","value":0.999},{"color":"#fcdb72","value":0.9999},{"color":"#3e668f","value":0.99999},{"color":"#346f36cc","value":1}]},
                       "unit":"percentunit"
                     }
@@ -1161,7 +1161,7 @@ dashboards:
                       {
                         "matcher":{"id":"byName","options":"Database"},
                         "properties":[
-                          { "id":"links"             ,"value":[{"title":"PGSQL Database : ${__data.fields.Instance}.${__data.fields.Database}","url":"/d/pgsql-database?var-ins=${__data.fields.Instance}&var-datname=${__data.fields.Database}&${__url_time_range}"}] },
+                          { "id":"links"             ,"value":[{"title":"PGSQL Database : ${__data.fields.Instance}.${__data.fields.Database}","url":"http://192.168.1.205/ui/d/pgsql-database?var-ins=${__data.fields.Instance}&var-datname=${__data.fields.Database}&${__url_time_range}"}] },
                           { "id":"mappings"          ,"value":[{"options":{"postgres":{"color":"#3e668f","index":2},"template0":{"color":"#f79f64","index":0},"template1":{"color":"#fcdb72","index":1}},"type":"value"}]                                              },
                           { "id":"custom.cellOptions","value":{"type":"auto"}                                                                                                                                                                                          },
                           { "id":"color"             ,"value":{"fixedColor":"text","mode":"fixed"}                                                                                                                                                                     },
@@ -1216,9 +1216,9 @@ dashboards:
                           { "id":"mappings"          ,"value":[{"options":{"-1":{"color":"#3e668f","index":1,"text":"NO LIMIT"}},"type":"value"},{"options":{"match":"null+nan","result":{"color":"gray","index":0,"text":"N/A"}},"type":"special"},{"options":{"from":0,"result":{"color":"#f79f64","index":2},"to":99999999},"type":"range"}] }
                         ]
                       },
-                      {"matcher":{"id":"byName","options":"Instance"},"properties":[{"id":"custom.minWidth","value":150},{"id":"links","value":[{"title":"PGSQL Instance : ${__data.fields.Instance}","url":"/d/pgsql-instance?var-ins=${__data.fields.Instance}&${__url_time_range}"}]},{"id":"custom.filterable","value":true}]},
-                      {"matcher":{"id":"byName","options":"Catalog"},"properties":[{"id":"custom.minWidth","value":100},{"id":"links","value":[{"title":"PGCAT Database : ${__data.fields.Instance}.${__data.fields.Database}","url":"/d/pgcat-database?var-dsn=${__data.fields.Instance}.${__data.fields.Database}"}]}]},
-                      {"matcher":{"id":"byName","options":"Cluster"},"properties":[{"id":"links","value":[{"title":"PGSQL Databases : ${cls}.${datname}","url":"/d/pgsql-databases?var-cls=${__data.fields.Cluster}&var-datname=${__data.fields.Database}"}]},{"id":"custom.minWidth","value":120},{"id":"custom.filterable","value":true}]}
+                      {"matcher":{"id":"byName","options":"Instance"},"properties":[{"id":"custom.minWidth","value":150},{"id":"links","value":[{"title":"PGSQL Instance : ${__data.fields.Instance}","url":"http://192.168.1.205/ui/d/pgsql-instance?var-ins=${__data.fields.Instance}&${__url_time_range}"}]},{"id":"custom.filterable","value":true}]},
+                      {"matcher":{"id":"byName","options":"Catalog"},"properties":[{"id":"custom.minWidth","value":100},{"id":"links","value":[{"title":"PGCAT Database : ${__data.fields.Instance}.${__data.fields.Database}","url":"http://192.168.1.205/ui/d/pgcat-database?var-dsn=${__data.fields.Instance}.${__data.fields.Database}"}]}]},
+                      {"matcher":{"id":"byName","options":"Cluster"},"properties":[{"id":"links","value":[{"title":"PGSQL Databases : ${cls}.${datname}","url":"http://192.168.1.205/ui/d/pgsql-databases?var-cls=${__data.fields.Cluster}&var-datname=${__data.fields.Database}"}]},{"id":"custom.minWidth","value":120},{"id":"custom.filterable","value":true}]}
                     ]
                   },
                   "gridPos":{"h":11,"w":24,"x":0,"y":59},
@@ -1264,4 +1264,86 @@ dashboards:
           "version":1,
           "author":"Ruohang Feng (rh@vonng.com)",
           "license":"https://pigsty.io/docs/about/license/"
+        }
+
+    # Hand-rolled, deliberately small — kube-state-metrics/node-exporter/
+    # cAdvisor are already scraped by kube-prometheus-stack, no extra
+    # exporters needed. Panels use no "datasource" field so they fall back
+    # to the default datasource (Prometheus, see datasources.yaml above).
+    k8s-cluster-overview:
+      json: |
+        {
+          "title": "Kubernetes Cluster Overview",
+          "uid": "k8s-cluster-overview",
+          "tags": ["gitops", "kubernetes"],
+          "timezone": "browser",
+          "schemaVersion": 39,
+          "version": 1,
+          "refresh": "30s",
+          "time": { "from": "now-6h", "to": "now" },
+          "panels": [
+            { "id": 1, "type": "stat", "title": "Nodes Ready", "gridPos": { "h": 4, "w": 4, "x": 0, "y": 0 },
+              "targets": [{ "expr": "sum(kube_node_status_condition{condition=\"Ready\",status=\"true\"})", "refId": "A" }] },
+            { "id": 2, "type": "stat", "title": "Nodes Total", "gridPos": { "h": 4, "w": 4, "x": 4, "y": 0 },
+              "targets": [{ "expr": "count(kube_node_info)", "refId": "A" }] },
+            { "id": 3, "type": "stat", "title": "Pods Running", "gridPos": { "h": 4, "w": 4, "x": 8, "y": 0 },
+              "targets": [{ "expr": "sum(kube_pod_status_phase{phase=\"Running\"})", "refId": "A" }] },
+            { "id": 4, "type": "stat", "title": "Pods Not Ready", "gridPos": { "h": 4, "w": 4, "x": 12, "y": 0 },
+              "fieldConfig": { "defaults": { "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": 0 }, { "color": "red", "value": 1 }] } } },
+              "targets": [{ "expr": "sum(kube_pod_status_phase{phase=~\"Pending|Failed|Unknown\"})", "refId": "A" }] },
+            { "id": 5, "type": "stat", "title": "Pod Restarts (1h)", "gridPos": { "h": 4, "w": 4, "x": 16, "y": 0 },
+              "fieldConfig": { "defaults": { "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": 0 }, { "color": "orange", "value": 1 }, { "color": "red", "value": 10 }] } } },
+              "targets": [{ "expr": "sum(increase(kube_pod_container_status_restarts_total[1h]))", "refId": "A" }] },
+            { "id": 6, "type": "stat", "title": "Deployments Degraded", "gridPos": { "h": 4, "w": 4, "x": 20, "y": 0 },
+              "fieldConfig": { "defaults": { "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": 0 }, { "color": "red", "value": 1 }] } } },
+              "targets": [{ "expr": "count(kube_deployment_status_replicas_available < kube_deployment_spec_replicas) or on() vector(0)", "refId": "A" }] },
+            { "id": 7, "type": "timeseries", "title": "CPU Usage by Node", "gridPos": { "h": 8, "w": 12, "x": 0, "y": 4 },
+              "targets": [{ "expr": "sum by (instance) (rate(node_cpu_seconds_total{mode!=\"idle\"}[5m]))", "legendFormat": "{{instance}}", "refId": "A" }] },
+            { "id": 8, "type": "timeseries", "title": "Memory Used by Node", "gridPos": { "h": 8, "w": 12, "x": 12, "y": 4 },
+              "fieldConfig": { "defaults": { "unit": "bytes" } },
+              "targets": [{ "expr": "node_memory_MemTotal_bytes - node_memory_MemAvailable_bytes", "legendFormat": "{{instance}}", "refId": "A" }] },
+            { "id": 9, "type": "timeseries", "title": "Filesystem Usage (root)", "gridPos": { "h": 8, "w": 12, "x": 0, "y": 12 },
+              "fieldConfig": { "defaults": { "unit": "percentunit", "max": 1, "min": 0 } },
+              "targets": [{ "expr": "1 - (node_filesystem_avail_bytes{mountpoint=\"/\"} / node_filesystem_size_bytes{mountpoint=\"/\"})", "legendFormat": "{{instance}}", "refId": "A" }] },
+            { "id": 10, "type": "timeseries", "title": "Pod Restarts by Namespace", "gridPos": { "h": 8, "w": 12, "x": 12, "y": 12 },
+              "targets": [{ "expr": "sum by (namespace) (increase(kube_pod_container_status_restarts_total[1h]))", "legendFormat": "{{namespace}}", "refId": "A" }] }
+          ]
+        }
+
+    # Needs argocd-application.yaml's controller/server metrics+serviceMonitor
+    # enabled and prometheus/values.yaml's cluster-wide ServiceMonitor
+    # discovery — both added alongside this dashboard.
+    argocd-overview:
+      json: |
+        {
+          "title": "ArgoCD Overview",
+          "uid": "argocd-overview",
+          "tags": ["gitops", "argocd"],
+          "timezone": "browser",
+          "schemaVersion": 39,
+          "version": 1,
+          "refresh": "30s",
+          "time": { "from": "now-6h", "to": "now" },
+          "panels": [
+            { "id": 1, "type": "stat", "title": "Applications", "gridPos": { "h": 4, "w": 4, "x": 0, "y": 0 },
+              "targets": [{ "expr": "count(argocd_app_info)", "refId": "A" }] },
+            { "id": 2, "type": "stat", "title": "Healthy", "gridPos": { "h": 4, "w": 4, "x": 4, "y": 0 },
+              "targets": [{ "expr": "sum(argocd_app_info{health_status=\"Healthy\"}) or on() vector(0)", "refId": "A" }] },
+            { "id": 3, "type": "stat", "title": "Degraded", "gridPos": { "h": 4, "w": 4, "x": 8, "y": 0 },
+              "fieldConfig": { "defaults": { "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": 0 }, { "color": "red", "value": 1 }] } } },
+              "targets": [{ "expr": "sum(argocd_app_info{health_status=\"Degraded\"}) or on() vector(0)", "refId": "A" }] },
+            { "id": 4, "type": "stat", "title": "Synced", "gridPos": { "h": 4, "w": 4, "x": 12, "y": 0 },
+              "targets": [{ "expr": "sum(argocd_app_info{sync_status=\"Synced\"}) or on() vector(0)", "refId": "A" }] },
+            { "id": 5, "type": "stat", "title": "OutOfSync", "gridPos": { "h": 4, "w": 4, "x": 16, "y": 0 },
+              "fieldConfig": { "defaults": { "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": 0 }, { "color": "orange", "value": 1 }] } } },
+              "targets": [{ "expr": "sum(argocd_app_info{sync_status=\"OutOfSync\"}) or on() vector(0)", "refId": "A" }] },
+            { "id": 6, "type": "stat", "title": "Cluster Connections Down", "gridPos": { "h": 4, "w": 4, "x": 20, "y": 0 },
+              "fieldConfig": { "defaults": { "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": 0 }, { "color": "red", "value": 1 }] } } },
+              "targets": [{ "expr": "count(argocd_cluster_connection_status == 0) or on() vector(0)", "refId": "A" }] },
+            { "id": 7, "type": "timeseries", "title": "Sync Operations by Phase", "gridPos": { "h": 8, "w": 12, "x": 0, "y": 4 },
+              "targets": [{ "expr": "sum by (phase) (rate(argocd_app_sync_total[5m]))", "legendFormat": "{{phase}}", "refId": "A" }] },
+            { "id": 8, "type": "table", "title": "Apps Not Healthy or Not Synced", "gridPos": { "h": 8, "w": 12, "x": 12, "y": 4 },
+              "targets": [{ "expr": "argocd_app_info{health_status!=\"Healthy\"} or argocd_app_info{sync_status!=\"Synced\"}", "format": "table", "instant": true, "refId": "A" }],
+              "transformations": [{ "id": "organize", "options": { "excludeByName": { "Time": true, "Value": true } } }] }
+          ]
         }
