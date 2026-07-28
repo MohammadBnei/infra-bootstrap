@@ -135,6 +135,8 @@ Image updates are handled by each app's own CD pipeline — ArgoCD just syncs wh
 
 Deliberately `ExternalName`, not `ClusterIP` + hand-authored `Endpoints`/`EndpointSlice`: `argocd-cm`'s `resource.exclusions` excludes both `Endpoints` and `EndpointSlice` cluster-wide (standard tuning to cut watch/UI churn from the control-plane-managed ones), so ArgoCD silently drops them from any manifest it applies — Traefik ends up with a Service but zero backends ("no available server"). `ExternalName` sidesteps this entirely: no Endpoints/EndpointSlice exist for that Service type, and Traefik's `kubernetesCRD` provider resolves `spec.externalName` directly, IP literals included.
 
+This requires `providers.kubernetesCRD.allowExternalNameServices: true` in `gitops/platform/values/traefik/values.yaml` — off by default in Traefik itself (an SSRF guardrail), so without it every redirector's IngressRoute fails with `externalName services not allowed` and clients get a 404 (no router gets built at all).
+
 ### common-app-chart
 
 A minimal Helm chart for standard web apps. Renders:
