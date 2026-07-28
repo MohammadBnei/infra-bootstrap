@@ -104,7 +104,7 @@ extraManifests:
 
               server:
                 base_url: "https://searxng.bnei.dev/"
-                secret_key: "{{ "{{" }} .SEARXNG_SECRET_KEY {{ "}}" }}"
+                secret_key: "{{ "{{" }} .SEARXNG_SECRET_KEY.Value {{ "}}" }}"
                 limiter: false
                 image_proxy: true
 

@@ -1102,3 +1102,53 @@ All three hostnames (`argocd.bnei.dev`, `dreamer.bnei.dev`,
 `openssl s_client` against the VIP. Freebox cutover fully verified
 externally. `argocd-initial-admin-secret` deleted after the user set a
 real admin password through the UI.
+
+## 2026-07-28 — root cause found: InfisicalSecret template values need `.Value`
+
+The "infisical-operator's template rendering corrupts this value
+unpredictably" symptom logged twice above (Longhorn S3 key, GitHub SSH
+deploy key) plus a new instance (Grafana admin login, `grafana-admin`
+Secret in `monitoring` — TLS worked once `grafana-ingressroute.yaml` was
+added, but login failed) all turned out to be the same single bug, not
+three unrelated ones.
+
+Confirmed by decoding the live `grafana-admin` Secret: the `password`
+field held `{TzNiX2gHl4+uvlMaI7zUQP8Q2YfQc3P6ZY25hXwa2hU= /}` — a Go
+struct's default `%v` stringification, not a plain string. Cross-checked
+against upstream (github.com/Infisical/infisical discussions #3492 /
+issue #3483): every key referenced inside an `InfisicalSecret`'s
+`managedSecretReference.template.data` block is exposed to the Go
+template as `TemplateSecret{ Value string, SecretPath string }`, **not**
+a bare string. `{{ .KEY }}` prints the whole struct (`{value
+secretPath}`); the correct syntax is `{{ .KEY.Value }}`. Every
+`template:` block in this repo was written with the bare form.
+
+Fixed in all four places that had it:
+`gitops/bootstrap/basic-admin-auth-secret.yaml`,
+`gitops/bootstrap/grafana-admin-secret.yaml`,
+`gitops/bootstrap/longhorn-backup-secret.yaml`,
+`gitops/platform/values/searxng/values.yaml` (the last one double-escaped,
+`{{ "{{" }} .KEY.Value {{ "}}" }}`, since it's Helm `tpl`-rendered before
+the operator ever sees it). `gitops/platform/common-app-chart/templates/
+infisicalsecret.yaml` and `gitops/platform/actions-runner/
+infisicalsecret.yaml` were never affected — neither uses a `template:`
+block, so the operator passes their keys straight through unmodified.
+
+This does **not** explain the separate "operator doesn't detect value
+changes for templated fields, logs `already up to date, skipping update`"
+caching symptom noted in the Longhorn entry above — that looks like a
+real, distinct upstream bug in the diffing logic for templated secrets
+specifically. The documented workaround for *that* one (bypass the
+operator, `kubectl create secret ... | kubectl apply -f -` directly)
+still stands as a fallback if a templated secret's value stops updating
+on rotation even with the `.Value` fix in place.
+
+Practical effect: any already-provisioned app that reads its password
+from one of these Secrets at first boot (Grafana, kube-prometheus-stack)
+already has the *old, malformed* value baked into its own state (Grafana
+writes it into its DB on first admin-user creation and never re-reads the
+Secret after that). Fixing the template makes new/future provisioning
+correct — it does not retroactively fix an already-running instance;
+reset the credential in the app directly (e.g. `grafana-cli admin
+reset-password` via `kubectl exec`) after confirming the new templated
+value renders clean.
