@@ -33,11 +33,11 @@ then here. When in doubt, open those files.
 | `ARCHITECTURE.md` | Canonical target topology/specs (the WHAT) |
 | `DECISION.md` | Canonical settled decisions, forbidden patterns, drift log (the WHY, short form) |
 | `docs/adr/` | One Architecture Decision Record per proposition (Proposed/Accepted/Rejected/Superseded) |
-| `docs/` | Secrets schema, actual state, ADRs, runbooks (**mostly TODO**, see below) |
+| `docs/` | Secrets schema, actual state, ADRs, runbooks — most runbooks now exist, see `docs/README.md` status table |
 | `kubespray/` | Submodule, pinned v2.31.0 |
 | `inventory/ukubi/` | Active kubespray inventory |
 | `inventory/mycluster/` | Legacy, flagged for deletion (MISSION §14) — don't extend it |
-| `ansible/` | `register-repos.yml` drafted; `pve-postinstall.yml`/`vm-provision.yml`/`k8s-node-prereqs.yml` still pending — see `ansible/README.md` status table |
+| `ansible/` | `register-repos.yml`/`pve-postinstall.yml`/`garage-configure.yml` done and run; `vm-provision.yml`/`k8s-node-prereqs.yml` still pending — see `ansible/README.md` status table |
 | `pigsty/` | Vendored Pigsty deployment (own docs/CLAUDE.md) |
 | `gitops/` | ArgoCD source of truth — see `gitops/README.md` |
 | `k8s-cluster/` | Submodule, separate repo, the GitOps *runtime target* (not managed from here) |
@@ -79,11 +79,12 @@ rejected, linked from `DECISION.md` §3.
 
 This repo is mid-bootstrap, not finished:
 
-- `ansible/playbooks/register-repos.yml` and both bootstrap runbooks now
-  exist (still untracked pending PR); `pve-postinstall.yml`/
-  `vm-provision.yml`/`k8s-node-prereqs.yml` and their runbooks are still
-  TODO — check `ansible/README.md` / `docs/README.md` for the current
-  checklist rather than assuming.
+- `ansible/playbooks/register-repos.yml`, `pve-postinstall.yml`, and
+  `garage-configure.yml` are done, committed, and have been run for real
+  (server1/ex-laptop reinstalled to PVE and joined the corosync cluster,
+  see ADR-0020/ADR-0024); `vm-provision.yml`/`k8s-node-prereqs.yml` and
+  their runbooks are still TODO — check `ansible/README.md` /
+  `docs/README.md` for the current checklist rather than assuming.
 - `inventory/mycluster/` is legacy and should eventually be deleted.
 - `DECISION.md`'s own §4 "known drift" list can itself go stale — don't
   trust it blindly — run the `mission-drift` skill before relying on

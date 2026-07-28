@@ -1,8 +1,20 @@
 # Infrastructure — Actual State
 
 > **Source of truth** for what is currently running.
-> Last updated: 2026-07-26
+> Last updated: 2026-07-28
 > Owner: hermesagent (this AI)
+>
+> **Stale-sections flag (2026-07-28):** `server1` and `ex-laptop` were
+> both reinstalled to PVE and joined the corosync cluster with `.165`
+> this week (see ADR-0024, `ansible/inventories/proxmox/hosts.yml`). A
+> full OS reinstall wipes whatever ran directly on the prior Debian
+> 12/libvirt install — so §2's "K8s nodes" row, §3's `node1`/`node4`
+> entries, the NFS export in §5, and the HAProxy entry in §7 (all
+> hosted on server1's *old* OS) are almost certainly gone, not just
+> "legacy". This pass updates the confirmed facts (host OS, PVE
+> cluster membership) but does **not** re-verify §3/§5/§7's remaining
+> claims live — treat those as needing a fresh state scan before relying
+> on them.
 
 This document describes the **current, as-is** state of the homelab infrastructure.
 For the target architecture, see [`../ARCHITECTURE.md`](../ARCHITECTURE.md).
@@ -14,8 +26,8 @@ For the target architecture, see [`../ARCHITECTURE.md`](../ARCHITECTURE.md).
 | Host | IP | OS | Kernel | CPU | RAM | Disks | GPU | Role |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | **proxmox** (bnei) | 192.168.1.165 | PVE 9.2.3 (Debian 13) | 7.0.6-2-pve | AMD Ryzen 5 3600X (6C/12T) | 31GB | 2× NVMe 1TB + 2× SATA SSD 1TB | NVIDIA RTX 2070 SUPER (PCI 0b:00.0) | PVE host |
-| **server1** (server) | 192.168.1.200:2222 | Debian 12 (bookworm) | 6.12.12+bpo-amd64 | Intel i5-8500 (6C/6T) | 31GB | NVMe 476GB (root) + HDD 149GB (Ceph OSD leftover) | Intel UHD 630 | libvirt/KVM host |
-| **ex-laptop** | 192.168.1.161:2222 | Debian 12 (bookworm) | 6.1.0-41-amd64 | Intel i7-5500U (2C/4T) | 15GB | SSD 238GB (root) | Intel HD 5500 + AMD R7 M265 | libvirt/KVM host |
+| **server1** (server) | 192.168.1.200:2222 | PVE 9.2 (reinstalled, ext4 root + `local-lvm`, no ZFS — [ADR-0024](adr/0024-server1-single-disk-ext4-no-dedicated-zfs.md)) | TBD (PVE default) | Intel i5-8500 (6C/6T) | 31GB | NVMe 476GB (root); 149GB HDD physically removed pre-reinstall | Intel UHD 630 | PVE host, joined corosync cluster with `.165` |
+| **ex-laptop** | 192.168.1.161:2222 | PVE 9.2 (reinstalled) | TBD (PVE default) | Intel i7-5500U (2C/4T) | 15GB | SSD 238GB (root, `zfs-exlaptop` pool per ADR-0014) | Intel HD 5500 + AMD R7 M265 | PVE host, joined corosync cluster with `.165` |
 | **Pi 4** (raspberry) | 192.168.1.55 | Debian 13 (trixie) | 6.12.62+rpt-rpi-v8 | Cortex-A72 (4C/4T) | **1.8GB** | microSD 238GB (mmcblk0) | none | Test/dev node: PG 18 + Docker |
 
 ### Network
@@ -120,8 +132,8 @@ is deliberately not vGPU-style sharing across multiple VMs.
 
 | Layer | Actual | Notes |
 | --- | --- | --- |
-| PVE nodes | 1 (proxmox .165 only) | server1 + ex-laptop still Debian 12 + libvirt — PVE reinstall pending |
-| K8s nodes | libvirt LXCs on server1 (.200) + ex-laptop (.161) | No new QEMU K8s VMs created yet |
+| PVE nodes | 3 (proxmox .165, server1 .200, ex-laptop .161) | All reinstalled/joined the corosync cluster — see ADR-0020, ADR-0024 |
+| K8s nodes | none confirmed running | Legacy libvirt nodes (node1/node4) were hosted on server1/ex-laptop's prior OS, wiped by the PVE reinstall — see stale-sections flag above. No new QEMU K8s VMs created yet either |
 | Postgres | QEMU VMs on proxmox PVE (.165) | pg01 VMID 205 (.205) + pg02 VMID 207 (.207) |
 | Garage | LXC on proxmox PVE (.165) | VMID 301, running, configured (v2.3.0, 192.168.1.199) |
 
@@ -141,10 +153,10 @@ is deliberately not vGPU-style sharing across multiple VMs.
 
 | Node | Role | IP | OS | Where it runs |
 | --- | --- | --- | --- | --- |
-| node1 | control-plane + worker | 192.168.1.181 | Debian 12 | libvirt VM on server1 *(legacy — will be decommissioned after PVE reinstall)* |
-| node4 | control-plane + worker | 192.168.1.191 | Debian 12 | libvirt VM on ex-laptop *(legacy — will be decommissioned after PVE reinstall)* |
+| node1 | control-plane + worker | 192.168.1.181 | Debian 12 | *(gone — was a libvirt VM on server1, wiped by server1's PVE reinstall; not re-verified)* |
+| node4 | control-plane + worker | 192.168.1.191 | Debian 12 | *(gone — was a libvirt VM on ex-laptop, wiped by ex-laptop's PVE reinstall; not re-verified)* |
 
-**Status:** Legacy cluster is the only running cluster — all apps healthy. No new QEMU K8s VMs created yet (persistently). The kubespray v2.23/v2.31 mismatch (Q-D) that previously blocked new-cluster provisioning was fixed 2026-07-12 — see `docs/bootstrap-test-notes.md`; multiple full `cluster.yml` smoke-test bootstraps (07-12 through 07-14) have since run clean end-to-end, but each was test/teardown, not a permanent cutover.
+**Status:** The legacy libvirt cluster's host OS (server1, ex-laptop) has been reinstalled to PVE, so `node1`/`node4` and everything that ran on them are believed gone — **no K8s cluster is currently confirmed running** (not re-verified live in this pass, see stale-sections flag above). No new QEMU K8s VMs have been created on the PVE cluster yet either. The kubespray v2.23/v2.31 mismatch (Q-D) that previously blocked new-cluster provisioning was fixed 2026-07-12 — see `docs/bootstrap-test-notes.md`; multiple full `cluster.yml` smoke-test bootstraps (07-12 through 07-14) ran clean end-to-end pre-reinstall, but each was test/teardown, not a permanent cutover.
 
 ### Workloads
 
@@ -234,6 +246,10 @@ Standard set: pg_stat_statements, pg_trgm, pg_repack, postgres_fdw, etc. (17 tot
 
 ### NFS
 
+*(Not re-verified — server1's host OS was reinstalled to PVE, see
+stale-sections flag at the top of this doc; this NFS export almost
+certainly no longer exists as described.)*
+
 - **Server:** server1 (192.168.1.200)
 - **Export:** `/home/mohammad/.local/share/k8s-nfs` → `192.168.1.200/24`
 - **Used by:** K8s cluster (NFS subdir provisioner for PVs)
@@ -275,6 +291,10 @@ Standard set: pg_stat_statements, pg_trgm, pg_repack, postgres_fdw, etc. (17 tot
 - **Local resolver:** None — relies on Freebox
 
 ### Load Balancer / Reverse Proxy
+
+*(Not re-verified — server1's host OS was reinstalled to PVE, see
+stale-sections flag at the top of this doc; this HAProxy instance almost
+certainly no longer exists as described.)*
 
 - **HAProxy on server1** (port 8000, 8443)
   - Fronting the existing K8s services

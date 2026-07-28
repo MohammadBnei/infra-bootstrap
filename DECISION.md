@@ -118,11 +118,15 @@ These items in working-tree files contradict this decision log. The
 agent **must** reconcile them before invoking anything that consumes
 them:
 
-- **`inventory/ukubi/README.md`** still references the "libvirt ukubi
-  cluster on `server1`" as a coexisting cluster. Under greenfield that
-  cluster is gone.
 - **`inventory/mycluster/`** exists as a separate inventory (legacy).
   Under greenfield it is obsolete — flag for deletion in a later PR.
+- **Postgres auto-failover vs. §2's "no automatic failover" decision:**
+  `pigsty/pigsty.yml`'s `patroni_mode` is left at its unmodified
+  default, which performs auto-failover/promotion via etcd — that looks
+  like it contradicts the "no witness node and no automatic failover"
+  line in §2. Not resolved here — needs a check against the actually
+  running Pigsty deployment (not just the config file) before deciding
+  which side is wrong.
 
 ## 5. Maintenance
 

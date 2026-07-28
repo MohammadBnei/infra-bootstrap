@@ -47,3 +47,15 @@ question.
 - `.161` sleeping no longer risks losing PVE quorum outright (2-of-3
   majority survives), but ADR-0013's suspend-disable mitigation still
   applies for its own VM availability.
+
+## Implementation note (added after the real run, 2026-07-28)
+
+`.165` didn't already have a corosync cluster to add a node to (it had
+never been clustered before) — `pve-postinstall.yml` first checks for an
+existing cluster and runs `pvecm create` on `.165` if none exists yet,
+*then* `pvecm add --use_ssh 1` for `.200`/`.161` onto it, then waits for
+quorum with a retry loop before moving on (a bare `pvecm add` can return
+before the joining node is actually quorate). Both `.200` and `.161` have
+since joined successfully. None of this bootstrap-if-absent/quorum-wait
+behavior was anticipated in the original decision above — it's a real
+implementation detail, not a change to the decision itself.

@@ -60,8 +60,8 @@ graph TD
 | Host | IP | Target OS | Role |
 | --- | --- | --- | --- |
 | **proxmox** (bnei) | 192.168.1.165 | PVE 9.2.3 (keep) | Primary PVE host: K8s VMs + Postgres VMs + Garage LXC |
-| **server1** | 192.168.1.200 | PVE 9.2 (reinstall pending) | PVE host: future K8s/PG placement |
-| **ex-laptop** | 192.168.1.161 | PVE 9.2 (reinstall pending) | 3rd PVE node, sleep-risk mitigation open ([ADR-0013](docs/adr/0013-pve-node-161-sleep-risk-mitigation.md)) |
+| **server1** | 192.168.1.200 | PVE 9.2 (reinstalled, joined corosync cluster) | PVE host: future K8s/PG placement |
+| **ex-laptop** | 192.168.1.161 | PVE 9.2 (reinstalled, joined corosync cluster) | 3rd PVE node, sleep-risk mitigation open ([ADR-0013](docs/adr/0013-pve-node-161-sleep-risk-mitigation.md)) |
 | **Pi 4** | 192.168.1.55 | Debian 13 trixie (fresh) | Pi-hole / local DNS helper |
 
 ### proxmox PVE (192.168.1.165) — 32GB RAM, 12 threads, 2× NVMe 1TB
@@ -75,7 +75,7 @@ graph TD
 
 Full eBPF hardware support (AMD Ryzen). ~3GB PVE overhead reserved.
 
-### server1 PVE (192.168.1.200, after reinstall) — 32GB RAM, 6 threads, NVMe 476GB + HDD 149GB
+### server1 PVE (192.168.1.200, reinstalled) — 32GB RAM, 6 threads, NVMe 476GB (149GB HDD removed pre-reinstall, ext4 root + `local-lvm`, no dedicated ZFS pool — [ADR-0024](docs/adr/0024-server1-single-disk-ext4-no-dedicated-zfs.md))
 
 | VM/LXC | Type | vCPU | RAM | Disk | Notes |
 | --- | --- | --- | --- | --- | --- |
@@ -271,7 +271,7 @@ graph LR
         P1 --> Exporter[pg_exporter → Grafana]
     end
     P1 -- pgBackRest, local --> LocalBackup[local disk, each VM]
-    P1 -- pgBackRest, off-host --> HDD[149GB HDD on server1]
+    P1 -.->|pgBackRest, off-host target: open, see ADR-0024| Open[no backup target defined yet]
 ```
 
 **Backups:** 7 daily / 4 weekly / 3 monthly, PITR 7 days — see §10 below
@@ -307,7 +307,10 @@ later. Replaces MinIO (archived Jan 2026).
 
 ### Backup target
 
-149GB HDD on server1 (replaces the dead Ceph OSD it used to serve).
+Open — the 149GB HDD on server1 that was slated to replace the dead Ceph
+OSD was physically removed before server1's reinstall
+([ADR-0024](docs/adr/0024-server1-single-disk-ext4-no-dedicated-zfs.md)).
+No backup target is defined until this is revisited.
 
 ---
 
@@ -357,12 +360,12 @@ Wildcard cert `*.bnei.dev` via Traefik ACME HTTP-01 (§4 above).
 
 | Data | Method | Target | Frequency | Retention |
 | --- | --- | --- | --- | --- |
-| Postgres (full + WAL) | pgBackRest | local + 149GB HDD on server1 | daily + continuous WAL | 7d / 4w / 3m |
+| Postgres (full + WAL) | pgBackRest | local only; off-host target open, see §7/ADR-0024 (server1's HDD was physically removed) | daily + continuous WAL | 7d / 4w / 3m |
 | K8s manifests | Git | `github.com/MohammadBnei/k8s-cluster` | on commit | indefinite |
 | K8s PVs | Longhorn snapshots (+ Velero if added) | Garage (S3) | daily | 7 daily |
-| Proxmox config | cron + tar | NFS or backup HDD | daily | 7 daily |
-| Pi-hole config | restic | NFS or backup HDD | daily | 7 daily |
-| `/home/mohammad` | restic | NFS or backup HDD | daily | 7 daily |
+| Proxmox config | cron + tar | open, see §7/ADR-0024 | daily | 7 daily |
+| Pi-hole config | restic | open, see §7/ADR-0024 | daily | 7 daily |
+| `/home/mohammad` | restic | open, see §7/ADR-0024 | daily | 7 daily |
 
 Backup verification: monthly restore test to a sandbox VM.
 
@@ -371,7 +374,8 @@ Backup verification: monthly restore test to a sandbox VM.
 ## 11. Migration Path
 
 Full phased plan (execution detail lives in `docs/bootstrap-test-notes.md`
-and the runbooks under `docs/`, most still TODO):
+and the runbooks under `docs/` — see `docs/README.md`'s status table for
+which ones still remain):
 
 ```mermaid
 graph TD

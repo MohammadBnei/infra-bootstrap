@@ -13,14 +13,19 @@ gitops/
 │   │     — this now includes repo-creds-github-bnei (ArgoCD repo-creds for
 │   │     user-app repos, HTTPS + PAT), deliberately NOT an InfisicalSecret;
 │   │     see register-repos.yml's header comment for why
+│   ├── bootstrap-application.yaml         # Scoped App-of-Apps that self-syncs this whole directory (ADR-0021) — the one thing applied by hand, ever
 │   ├── argocd-application.yaml            # ArgoCD self-manages its own Helm chart
 │   ├── traefik-application.yaml           # Standalone Application (needs helm.skipCrds, can't live in the shared ApplicationSet template — see file comment)
 │   ├── traefik-crds/                      # Traefik's own CRDs (traefik.io_*/hub.traefik.io_*), vendored — see file comment in traefik-application.yaml
+│   ├── actions-runner-application.yaml    # Standalone Application: self-hosted GitHub Actions runner (plain manifests, no chart) — ADR-0022
+│   ├── vos-monolith-dev-application.yaml  # Standalone Application: vos-monolith-dev, deliberately excluded from apps.applicationset.yaml
 │   ├── argocd-ingressroute.yaml           # Traefik IngressRoute → argocd.bnei.dev
 │   ├── infisical-ingressroute.yaml       # Traefik IngressRoute → infisical.bnei.dev
 │   ├── grafana-admin-secret.yaml          # InfisicalSecret → Grafana admin credentials
 │   ├── basic-admin-auth-middleware.yaml   # Shared Traefik BasicAuth Middleware (ns default), for admin-only tools
 │   ├── basic-admin-auth-secret.yaml       # InfisicalSecret → the above Middleware's htpasswd credential
+│   ├── longhorn-backup-secret.yaml        # InfisicalSecret → Longhorn's Garage S3 backup-target credentials
+│   ├── longhorn-daily-snapshot-recurringjob.yaml  # Longhorn RecurringJob CR, daily snapshot schedule
 │   ├── platform.applicationset.yaml       # ApplicationSet for remaining platform apps (not traefik)
 │   ├── platform-common-apps.applicationset.yaml  # ApplicationSet for common-app-chart-based platform tools (public image, no app-specific code)
 │   └── apps.applicationset.yaml           # ApplicationSet for user apps with their own private repo
