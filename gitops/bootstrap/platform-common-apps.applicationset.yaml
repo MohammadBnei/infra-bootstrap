@@ -30,6 +30,8 @@ spec:
   template:
     metadata:
       name: '{{.name}}'
+      labels:
+        gitops.bnei.dev/tier: platform-common
       annotations:
         # Same wave as gitops/apps/registry.yaml's user apps — depends on
         # Infisical (secrets) + Traefik (ingress) from earlier waves.

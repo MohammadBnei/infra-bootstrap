@@ -8,6 +8,8 @@ kind: Application
 metadata:
   name: platform-actions-runner
   namespace: argocd
+  labels:
+    gitops.bnei.dev/tier: platform
   annotations:
     argocd.argoproj.io/sync-wave: "1"
   finalizers:
