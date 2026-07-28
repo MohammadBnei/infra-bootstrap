@@ -56,6 +56,12 @@ providers:
   kubernetesCRD:
     enabled: true
     allowCrossNamespace: true
+    # Off by default in Traefik itself (SSRF guardrail — an ExternalName
+    # Service is attacker-redirectable DNS-based routing). Needed for
+    # gitops/redirectors/*.yaml's ExternalName-based out-of-cluster
+    # backends (see gitops/README.md); every ExternalName Service still
+    # only comes from a PR-reviewed manifest in this repo, not user input.
+    allowExternalNameServices: true
   kubernetesIngress:
     enabled: false
 
