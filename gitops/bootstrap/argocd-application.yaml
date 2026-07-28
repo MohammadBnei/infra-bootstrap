@@ -30,6 +30,18 @@ spec:
             # sources) and has no credentials for. Skip submodule init entirely rather
             # than granting the deploy key access to a repo it doesn't use.
             "reposerver.enable.git.submodule": "false"
+          secret:
+            # GitHub webhook shared secret, for near-instant sync on push instead of
+            # waiting out the ~3min poll interval. Deliberately committed, not
+            # Infisical-managed: it only lets GitHub tell ArgoCD "go check git now" —
+            # no write access, no RBAC bypass, worst case with a guessed value is an
+            # attacker forcing extra refreshes. The chart writes the whole
+            # argocd-secret from these values on every self-sync (selfHeal: true
+            # above), so an Infisical-sourced value would need a dedicated
+            # secret + RBAC-scoped PostSync hook Job just to survive that — not
+            # worth it for a low-stakes shared token. Register the same value as
+            # the webhook secret on the GitHub repo (Settings → Webhooks).
+            githubSecret: "ukubi-cluster-webhook-2026"
 
         server:
           service:
