@@ -14,7 +14,7 @@ ADR-000N` (replaced by a later decision).
 | [0001](0001-ingress-traefik-ingressroute-over-gateway-api.md) | Traefik IngressRoute over Gateway API | Accepted |
 | [0002](0002-storage-longhorn-over-ceph-nfs.md) | Longhorn over Ceph / NFS-server plan | Accepted |
 | [0003](0003-cni-cilium-chaining-over-kube-proxy-replacement.md) | Cilium chaining mode, kube-proxy retained | Accepted |
-| [0004](0004-gitops-pattern-c-registry-applicationset.md) | GitOps Pattern C (registry + ApplicationSet) | Accepted |
+| [0004](0004-gitops-pattern-c-registry-applicationset.md) | GitOps Pattern C (registry + ApplicationSet) | Accepted (credential clause amended by 0025) |
 | [0005](0005-argocd-install-helm-not-kubespray-addon.md) | ArgoCD via Helm, not kubespray addon | Accepted |
 | [0006](0006-reject-infisical-as-ssh-tls-ca.md) | Infisical as SSH/TLS CA | Rejected |
 | [0007](0007-reject-vagrant-for-proxmox.md) | Vagrant for Proxmox provisioning | Rejected |
@@ -34,3 +34,5 @@ ADR-000N` (replaced by a later decision).
 | [0021](0021-self-syncing-bootstrap-directory.md) | Self-syncing `gitops/bootstrap/` directory (scoped App-of-Apps) | Accepted |
 | [0022](0022-self-hosted-actions-runner.md) | Self-hosted GitHub Actions runner in-cluster | Accepted |
 | [0023](0023-common-app-chart-hooks-and-oneoff-jobs.md) | `hooks:`/`oneOffJobs:` in common-app-chart, layered values for multi-env | Accepted |
+| [0024](0024-server1-single-disk-ext4-no-dedicated-zfs.md) | `server1` reinstalled single-disk, ext4 root, no dedicated ZFS pool | Accepted |
+| [0025](0025-repo-credential-shared-pat-not-ssh-deploy-key.md) | Repo credentials via shared HTTPS+PAT, not per-repo SSH deploy key | Accepted |

@@ -11,6 +11,17 @@
 # playbook is everything needed between "fresh PVE install" and "ready for
 # Terraform to place K8s VMs on them" (Phase B/C of the plan).
 #
+# No template-propagation step here on purpose: corosync clustering already
+# lets any node clone/manage any other node's VMs through the shared cluster
+# filesystem, so a future `vm-provision.yml` can do `qm clone 9001 <newid>
+# --target <node> --full` directly at VM-creation time — no need to
+# pre-stage a local copy of the golden template (VMID 9001, stays on
+# proxmox) on every new node ahead of time. An earlier version of this
+# playbook tried to pre-stage it via `qm migrate`, which actually *relocates*
+# a VM rather than copying it (a VMID is cluster-wide unique in PVE's
+# pmxcfs) — confirmed live when "propagating" the template this way silently
+# moved it off proxmox entirely instead of leaving a copy behind.
+#
 # Requires: ansible.posix collection — ansible-galaxy collection install -r
 # ansible/requirements.yml
 #
@@ -21,18 +32,15 @@
 # blocks on an interactive password prompt.
 #
 # Run order matters — see docs/runbook-pve-postinstall.md. Plays are tagged
-# so the corosync join and template propagation can be run separately from
-# the rest:
+# so the corosync join can be run separately from the rest:
 #   ansible-playbook -i ansible/inventories/proxmox/hosts.yml \
-#     ansible/playbooks/pve-postinstall.yml --skip-tags corosync,template-propagation
+#     ansible/playbooks/pve-postinstall.yml --skip-tags corosync
 #   infisical run --projectId=<id> --env=dev -- ansible-playbook \
 #     -i ansible/inventories/proxmox/hosts.yml \
 #     ansible/playbooks/pve-postinstall.yml --tags corosync --limit=server1
 #   infisical run --projectId=<id> --env=dev -- ansible-playbook \
 #     -i ansible/inventories/proxmox/hosts.yml \
 #     ansible/playbooks/pve-postinstall.yml --tags corosync --limit=ex-laptop
-#   ansible-playbook -i ansible/inventories/proxmox/hosts.yml \
-#     ansible/playbooks/pve-postinstall.yml --tags template-propagation
 # The corosync join must run against one new host at a time (never both via
 # a bare --limit=pve_new) — simultaneous joins are a known corosync footgun.
 ---
@@ -316,36 +324,3 @@
         pvecm_status.rc != 0 or
         'Cluster information' not in pvecm_status.stdout
 
-- name: Propagate the golden K8s template (VMID 9001) to each new node
-  hosts: pve_new
-  gather_facts: false
-  tags: template-propagation
-  # `qm migrate` takes a per-VMID lock on the *source* VM (9001) — running
-  # this play against both pve_new hosts at once (no --limit) means both
-  # hosts' migrate tasks fire concurrently and race for that same lock.
-  # Confirmed live: ex-laptop's attempt got "can't lock file
-  # '/var/lock/pve-manager/pve-migrate-9001' - got timeout" while server1's
-  # ran. `serial: 1` processes one host fully before starting the next,
-  # same one-at-a-time requirement as the corosync join play, just enforced
-  # automatically here instead of relying on a manual --limit.
-  serial: 1
-  tasks:
-    - name: Fail fast if this host's real PVE node name hasn't been confirmed
-      ansible.builtin.assert:
-        that: pve_node_name | length > 0
-        fail_msg: >-
-          pve_node_name is unset for {{ inventory_hostname }} — confirm via
-          `pvesh get /nodes` after the corosync join and set it in
-          ansible/inventories/proxmox/hosts.yml before running this play.
-
-    - name: Check whether VMID 9001 already exists on this node
-      ansible.builtin.command: "pvesh get /nodes/{{ pve_node_name }}/qemu/9001/status/current"
-      delegate_to: proxmox
-      register: template_check
-      changed_when: false
-      failed_when: false
-
-    - name: Migrate template 9001 from proxmox onto this node
-      ansible.builtin.command: "qm migrate 9001 {{ pve_node_name }} --with-local-disks"
-      delegate_to: proxmox
-      when: template_check.rc != 0
