@@ -30,6 +30,15 @@
   repoURL: https://github.com/MohammadBnei/editable-blog.git
   valuesPath: helm/values.yaml
   hostname: blog.bnei.dev
+
+# dream-analyst: second real per-app repo, following editable-blog's
+# now-proven pipeline.
+- name: dream-analyst
+  namespace: dream-analyst
+  syncWave: "10"
+  repoURL: https://github.com/MohammadBnei/dream-analyst.git
+  valuesPath: helm/values.yaml
+  hostname: dreamer.bnei.dev
 #
 # searxng and pgweb are NOT here: they're public-image tools with no
 # app-specific code, so they're driven as platform apps instead — see

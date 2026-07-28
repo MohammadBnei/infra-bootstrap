@@ -26,6 +26,13 @@ spec:
         valuesPath: helm/values.yaml
         hostname: blog.bnei.dev
 
+      - name: dream-analyst
+        namespace: dream-analyst
+        syncWave: "10"
+        repoURL: https://github.com/MohammadBnei/dream-analyst.git
+        valuesPath: helm/values.yaml
+        hostname: dreamer.bnei.dev
+
   template:
     metadata:
       name: '{{.name}}'
@@ -46,8 +53,9 @@ spec:
           parameters:
           - name: ingress.hostname
             value: '{{.hostname}}'
-      # Source 2: per-app values repo (private, HTTPS + PAT via
-      # argocd-github-apps-creds.yaml's repo-creds template)
+      # Source 2: per-app values repo (private, HTTPS + PAT — see
+      # gitops/README.md's "Bootstrap credential chain" for how
+      # repo-creds-github-bnei is injected)
       - repoURL: '{{.repoURL}}'
         targetRevision: HEAD
         ref: values
