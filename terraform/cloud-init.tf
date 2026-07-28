@@ -14,13 +14,23 @@
 # cloud-init (vendor_data_file_id doesn't replace them, unlike
 # user_data_file_id, which would).
 #
-# Prerequisite, once by hand on .165 (proxmox_virtual_environment_file
-# can't create it — content-type support is a storage-level PVE setting):
-#   pvesm set local --content import,backup,vztmpl,iso,snippets
+# datastore_id is template_shared_storage_id (NFS, docs/adr/0026), not
+# template_download_storage_id (.165's local "snippets" storage) — every
+# PVE node has its own separately-named "local" storage, so a
+# server1-hosted k8s_nodes entry (e.g. k8s-worker-02) would resolve
+# vendor_data_file_id against server1's *own* local storage at boot and
+# never find a file that only physically exists on .165, silently losing
+# the qemu-guest-agent install + Longhorn disk auto-format this snippet
+# provides. Shared NFS storage is visible under the same name from every
+# node, so this only needs to exist once.
+#
+# Prerequisite, once by hand (docs/adr/0026 / terraform/README.md): the
+# shared-templates NFS storage must be registered with content type
+# "snippets" alongside "images" before this resource's first apply.
 
 resource "proxmox_virtual_environment_file" "k8s_vm_vendor_data" {
   content_type = "snippets"
-  datastore_id = var.template_download_storage_id
+  datastore_id = var.template_shared_storage_id
   node_name    = var.pve_node_name
 
   source_raw {

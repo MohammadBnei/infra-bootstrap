@@ -80,6 +80,8 @@ Full eBPF hardware support (AMD Ryzen). ~3GB PVE overhead reserved.
 | VM/LXC | Type | vCPU | RAM | Disk | Notes |
 | --- | --- | --- | --- | --- | --- |
 | pg02 | VM (Q35, OVMF) | 2 | 4GB | 40GB | Target home for the Pigsty replica after migration off `.165` |
+| nfs-storage | VM (Q35, OVMF) | 1 | 1GB | 120GB | Shared PVE storage for cross-host VM template cloning — [ADR-0026](docs/adr/0026-nfs-shared-pve-storage-cross-host-clone.md), never mounted by K8s |
+| k8s-worker-02 | VM (Q35, OVMF) | 4 | 8GB | 60GB | First cross-host K8s worker (Stage 2 Phase C), `192.168.1.203` |
 
 CPU **lacks** eBPF hardware support — one reason Cilium chaining mode is
 locked cluster-wide (see [ADR-0003](docs/adr/0003-cni-cilium-chaining-over-kube-proxy-replacement.md)).
@@ -123,6 +125,7 @@ install on this Pi 4 held no data).
 | --- | --- | --- | --- | --- |
 | k8s-cp-01 | proxmox | 192.168.1.201 | 2 vCPU / 4GB | Control plane (sole) |
 | k8s-worker-01 | proxmox | 192.168.1.202 | 6 vCPU / 15GB | Standard workloads + GPU passthrough, NVIDIA device plugin |
+| k8s-worker-02 | server1 | 192.168.1.203 | 4 vCPU / 8GB | Standard workloads, first cross-host worker (Stage 2 Phase C) |
 
 ### GPU passthrough
 
@@ -179,6 +182,7 @@ A    pi4.bnei.lan            → 192.168.1.55
 A    postgres-1.bnei.lan     → 192.168.1.205
 A    postgres-2.bnei.lan     → <assigned after server1 rejoin>
 A    garage.bnei.lan         → <assigned>
+A    nfs-storage.bnei.lan    → 192.168.1.198
 A    k8s.bnei.lan            → 192.168.1.180  (reserved, see ADR-0016)
 A    *.bnei.dev              → public IP / router port-forward
 ```
@@ -304,6 +308,14 @@ later. Replaces MinIO (archived Jan 2026).
 - `local-lvm` (LVM-thin): VM disks, thin-provisioned.
 - ZFS pool vs `local-zfs` directory for new storage: open, see
   [ADR-0014](docs/adr/0014-pve-storage-layout-zfs-vs-local-zfs.md).
+- `shared-templates` (NFS, hosted on the `nfs-storage` VM on `server1`):
+  cluster-wide shared storage for the golden K8s template's disk +
+  cloud-init vendor-data, so Terraform's cross-host VM cloning takes a
+  direct-clone path instead of clone-then-migrate — see
+  [ADR-0026](docs/adr/0026-nfs-shared-pve-storage-cross-host-clone.md).
+  Scoped strictly to PVE-internal VM template storage, **not** mounted
+  into K8s (that's Longhorn, above) — a different problem from the NFS
+  server ADR-0002 already rejected for K8s app PVs.
 
 ### Backup target
 

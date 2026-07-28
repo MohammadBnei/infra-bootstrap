@@ -46,16 +46,21 @@ resource "proxmox_virtual_environment_vm" "k8s_node" {
   # in imported.tf, which already use q35 uniformly.
   machine = "q35"
 
-  # No clone.node_name is set, so the provider clones from a template on
-  # THIS resource's own (coalesced) node_name — for new-host worker entries
-  # that requires ansible/playbooks/pve-postinstall.yml's
-  # template-propagation play to have already migrated VMID 9001 onto that
-  # node first (see docs/runbook-pve-postinstall.md step 5). Not enforced
-  # here; apply will fail with a clear "VM 9001 not found on <node>" error
-  # if that hasn't happened yet.
+  # clone.node_name is the SOURCE node (always var.pve_node_name — the
+  # template only ever lives on .165), independent of this resource's own
+  # (coalesced) node_name, which is the destination. Verified against
+  # bpg/terraform-provider-proxmox's actual vmCreateClone: leaving this
+  # unset makes the provider call CloneVM against the *target* node
+  # (node-scoped API endpoint, not ID-scoped — cluster-unique VMIDs don't
+  # save you here), which 404s for any cross-host worker since VM 9001
+  # only physically exists on .165. Setting it lets the provider pick the
+  # right path itself: a direct clone if the template's disks are on
+  # shared storage (docs/adr/0026's shared-templates NFS pool), or an
+  # automatic clone-then-migrate if not.
   clone {
-    vm_id = proxmox_virtual_environment_vm.ubuntu_2404_template.vm_id
-    full  = true
+    node_name = var.pve_node_name
+    vm_id     = proxmox_virtual_environment_vm.ubuntu_2404_template.vm_id
+    full      = true
   }
 
   cpu {
