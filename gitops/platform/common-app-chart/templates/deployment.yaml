@@ -5,7 +5,11 @@ metadata:
   namespace: {{ .Release.Namespace }}
   labels:
     {{- include "common-app-chart.labels" . | nindent 4 }}
-  {{- with .Values.annotations }}
+  {{- $annotations := .Values.annotations | default dict }}
+  {{- if .Values.infisical.autoReload }}
+  {{- $annotations = merge (dict "secrets.infisical.com/auto-reload" "true") $annotations }}
+  {{- end }}
+  {{- with $annotations }}
   annotations:
     {{- toYaml . | nindent 4 }}
   {{- end }}

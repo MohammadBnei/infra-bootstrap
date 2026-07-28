@@ -40,6 +40,11 @@ resource "proxmox_virtual_environment_vm" "k8s_node" {
   node_name = coalesce(each.value.node_name, var.pve_node_name)
   vm_id     = each.value.vm_id
   started   = true
+  # q35 required for PCIe passthrough (hostpci needs a PCIe root port,
+  # which the default i440fx/"pc" machine type doesn't provide) — set
+  # for every node, not just the GPU one, for consistency with pg01/pg02
+  # in imported.tf, which already use q35 uniformly.
+  machine = "q35"
 
   # No clone.node_name is set, so the provider clones from a template on
   # THIS resource's own (coalesced) node_name — for new-host worker entries
@@ -55,6 +60,16 @@ resource "proxmox_virtual_environment_vm" "k8s_node" {
 
   cpu {
     cores = each.value.cpu_cores
+    # Default (unset) resolves to Proxmox's "qemu64" baseline, which lacks
+    # AVX2 — confirmed via /proc/cpuinfo on k8s-worker-01 ("QEMU Virtual
+    # CPU version 2.5+", no avx2 flag). Bun (used by editable-blog's
+    # runtime image) hard-requires AVX2 and crashes with SIGILL
+    # (exit 132) without it. "host" passes through .165's real CPU
+    # features. Revisit for Stage 2: "host" isn't live-migration-safe
+    # across physically different CPUs once .200/.161 join — may need a
+    # named baseline model (e.g. a modern microarchitecture common to all
+    # three hosts) instead once their CPUs are known.
+    type = "host"
   }
 
   memory {

@@ -1,0 +1,22 @@
+# Daily Longhorn backup RecurringJob (ADR-0019). The "default" group is
+# special in Longhorn: every volume is a member unless it explicitly opts
+# out, so this applies to all PVs without per-volume labeling.
+#
+# Same chicken-and-egg as the InfisicalSecret CRs in this directory: the
+# RecurringJob CRD comes from the Longhorn chart itself (wave 0), so this
+# fails on the first `kubectl apply -f gitops/bootstrap/` at bootstrap
+# Step 3 and needs a re-apply once Longhorn has synced — expected, not a
+# bug (see gitops/README.md's bootstrap sequence).
+apiVersion: longhorn.io/v1beta2
+kind: RecurringJob
+metadata:
+  name: daily-backup
+  namespace: longhorn-system
+spec:
+  name: daily-backup
+  cron: "0 3 * * *"
+  task: "backup"
+  groups:
+    - "default"
+  retain: 7
+  concurrency: 2

@@ -274,11 +274,13 @@ for the full backup matrix across all data types.
 ### Longhorn (K8s app PVs)
 
 Default StorageClass, in-cluster, distributed across each K8s VM's
-dedicated `scsi1` disk. Replica count 3 (chart default). Postgres is
-**not** on Longhorn — local on each data VM. Why Longhorn over
-Ceph/NFS: [ADR-0002](docs/adr/0002-storage-longhorn-over-ceph-nfs.md).
-Rollout specifics (sizing, replica count on `k8s-cp-01`,
-`local-path-provisioner` fate) are still open: [ADR-0019](docs/adr/0019-longhorn-rollout-specifics.md).
+dedicated `scsi1` disk. Replica count 3 (chart default), degraded (2/3)
+until Stage 2 adds a 3rd schedulable node. Postgres is **not** on
+Longhorn — local on each data VM. Why Longhorn over Ceph/NFS:
+[ADR-0002](docs/adr/0002-storage-longhorn-over-ceph-nfs.md). Rollout
+specifics (sizing, replica count on `k8s-cp-01`, `local-path-provisioner`
+fate, backup target): [ADR-0019](docs/adr/0019-longhorn-rollout-specifics.md)
+(Accepted).
 
 ### Garage (object storage)
 

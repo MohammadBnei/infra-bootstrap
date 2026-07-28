@@ -92,6 +92,9 @@ This repo is mid-bootstrap, not finished:
 
 - All changes via feature branch + PR. No direct push to `main`.
 - Secrets never committed; always fetched from Infisical at run time.
+- Any commit, PR, or other artifact that credits an AI co-author must use
+  `Co-Authored-By: ukubi-claude-macbook <noreply@bnei.dev>` — never
+  `Claude`/`Claude Code`/`Claude Sonnet 5` etc.
 - **This session is not the autonomous "Hermes" agent** described in
   `README.md`/`DECISION.md` §2. The repo's real workflow has a human run
   `ansible-playbook`/`kubespray`/`pigsty` against real infra personally —

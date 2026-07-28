@@ -1,3 +1,8 @@
+# Terraform-generated — DO NOT EDIT BY HAND.
+# Regenerated from terraform/variables.tf's `k8s_nodes` on every
+# `terraform apply` (see terraform/hosts-inventory.tf). Manual edits here
+# are overwritten on next apply. To change topology, edit `k8s_nodes` in
+# terraform/variables.tf.
 all:
   hosts:
     k8s-cp-01:

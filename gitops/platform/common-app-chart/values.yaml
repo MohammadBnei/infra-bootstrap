@@ -54,6 +54,9 @@ infisical:
   hostAPI: http://platform-infisical-backend.infisical.svc.cluster.local:8080/api
   resyncInterval: 60
   secretName: ""   # defaults to "<release-name>-infisical"
+  # Sets secrets.infisical.com/auto-reload: "true" on the Deployment so the
+  # Infisical operator restarts it when the managed secret's content changes.
+  autoReload: false
   credentialsRef:
     secretName: universal-auth-credentials
     secretNamespace: infisical

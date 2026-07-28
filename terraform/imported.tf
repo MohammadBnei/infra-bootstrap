@@ -143,9 +143,20 @@ resource "proxmox_virtual_environment_vm" "pg01" {
 
   lifecycle {
     prevent_destroy = true
-    # see disk.size comment above — no whole-number GB value is a true
-    # zero-diff for a 52.5G live disk.
-    ignore_changes = [disk[0].size]
+    # disk[0].size is NOT ignored here on purpose: live is 52.5G (a
+    # previous manual resize left it fractional), 53 is a safe round-UP
+    # grow (never shrinks, no data risk) that also fixes the weird value.
+    # agent/smbios/operating_system/ipv6 ARE ignored: import's refresh
+    # showed these don't match live (see docs/bootstrap-test-notes.md /
+    # 2026-07-26 import run) and none of them are read back reliably
+    # enough to guess a correct value for a live prod VM — leave live
+    # reality untouched rather than push a guessed change.
+    ignore_changes = [
+      agent,
+      smbios,
+      operating_system,
+      initialization[0].ip_config[0].ipv6,
+    ]
   }
 }
 
@@ -204,7 +215,13 @@ resource "proxmox_virtual_environment_vm" "pg02" {
 
   lifecycle {
     prevent_destroy = true
-    ignore_changes  = [disk[0].size]
+    # see pg01's lifecycle comment — same reasoning, same fields.
+    ignore_changes = [
+      agent,
+      smbios,
+      operating_system,
+      initialization[0].ip_config[0].ipv6,
+    ]
   }
 }
 
@@ -255,6 +272,30 @@ resource "proxmox_virtual_environment_container" "hermesagent" {
     # (long percent-encoded HTML) — decorative only, not reproduced here
     # to avoid a transcription error silently "fixing" cosmetic text on a
     # production LXC. Ignored so it's never flagged as drift.
-    ignore_changes = [description]
+    #
+    # operating_system is ALSO ignored, for a sharper reason: the
+    # provider schema requires template_file_id whenever this block is
+    # declared at all, which is unknowable for an already-running LXC
+    # that wasn't created via clone — and leaving the block out entirely
+    # makes Terraform want to destroy+recreate this resource (type is a
+    # ForceNew attribute for containers, unlike VMs). prevent_destroy
+    # correctly blocked that on first import plan; ignore_changes is the
+    # actual fix, not a workaround.
+    #
+    # console/environment_variables/features[0].mount/
+    # initialization[0].ip_config/memory[0].swap: real drift the import
+    # surfaced, none of it something to guess-fix on this live agent
+    # host — same "don't push an unverified change to production"
+    # reasoning as pg01/pg02's lifecycle block.
+    ignore_changes = [
+      description,
+      operating_system,
+      console,
+      environment_variables,
+      features[0].mount,
+      initialization[0].ip_config,
+      memory[0].swap,
+      disk[0].mount_options,
+    ]
   }
 }
