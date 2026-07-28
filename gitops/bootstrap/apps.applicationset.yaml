@@ -23,15 +23,29 @@ spec:
         namespace: editable-blog
         syncWave: "10"
         repoURL: https://github.com/MohammadBnei/editable-blog.git
-        valuesPath: helm/values.yaml
+        valuesPath: [helm/values.yaml]
         hostname: blog.bnei.dev
 
       - name: dream-analyst
         namespace: dream-analyst
         syncWave: "10"
         repoURL: https://github.com/MohammadBnei/dream-analyst.git
-        valuesPath: helm/values.yaml
+        valuesPath: [helm/values.yaml]
         hostname: dreamer.bnei.dev
+
+      - name: vos-monolith
+        namespace: vos
+        syncWave: "10"
+        repoURL: https://github.com/MohammadBnei/vos-monolith.git
+        valuesPath: [back/helm/values.yaml]
+        hostname: api.voconsteroid.com
+
+      - name: vos-monolith-dev
+        namespace: vos-dev
+        syncWave: "10"
+        repoURL: https://github.com/MohammadBnei/vos-monolith.git
+        valuesPath: [back/helm/values.yaml, back/helm/values-dev.yaml]
+        hostname: dev.api.voconsteroid.com
 
   template:
     metadata:
@@ -49,7 +63,9 @@ spec:
         targetRevision: HEAD
         helm:
           valueFiles:
-          - $values/{{.valuesPath}}
+          {{- range .valuesPath }}
+          - $values/{{ . }}
+          {{- end }}
           parameters:
           - name: ingress.hostname
             value: '{{.hostname}}'

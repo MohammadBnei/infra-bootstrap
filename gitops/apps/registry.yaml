@@ -10,7 +10,12 @@
 #   repoURL     Per-app private git repo with values.yaml (HTTPS + PAT auth —
 #               see argocd-github-apps-creds.yaml; SSH deploy keys are
 #               deliberately not used here, see that file's comment)
-#   valuesPath  Path to values file inside repoURL
+#   valuesPath  List of values file paths inside repoURL, layered in order
+#               (later files win — Helm deep-merges maps, replaces lists
+#               wholesale). Single-app-single-env: one-element list. Multi-env
+#               apps: a shared base file + a per-env override file, e.g.
+#               [helm/values.yaml, helm/values-dev.yaml] — see vos-monolith-dev
+#               below. One registry entry is still always one Application/one env.
 #   hostname    Public hostname — passed as ingress.hostname to common-app-chart
 #
 # Per-app repo must have at minimum:
@@ -28,7 +33,7 @@
   namespace: editable-blog
   syncWave: "10"
   repoURL: https://github.com/MohammadBnei/editable-blog.git
-  valuesPath: helm/values.yaml
+  valuesPath: [helm/values.yaml]
   hostname: blog.bnei.dev
 
 # dream-analyst: second real per-app repo, following editable-blog's
@@ -37,8 +42,27 @@
   namespace: dream-analyst
   syncWave: "10"
   repoURL: https://github.com/MohammadBnei/dream-analyst.git
-  valuesPath: helm/values.yaml
+  valuesPath: [helm/values.yaml]
   hostname: dreamer.bnei.dev
+
+# vos-monolith: onboarded onto Pattern C off its previous kustomize +
+# imperative-Application setup — see docs/adr/ for the hooks/oneOffJobs
+# chart pattern this replaced it with. Two registry entries (not one) since
+# one entry is always one Application/one env; vos-monolith-dev layers a
+# dev override on top of the same base values file.
+- name: vos-monolith
+  namespace: vos
+  syncWave: "10"
+  repoURL: https://github.com/MohammadBnei/vos-monolith.git
+  valuesPath: [back/helm/values.yaml]
+  hostname: api.voconsteroid.com
+
+- name: vos-monolith-dev
+  namespace: vos-dev
+  syncWave: "10"
+  repoURL: https://github.com/MohammadBnei/vos-monolith.git
+  valuesPath: [back/helm/values.yaml, back/helm/values-dev.yaml]
+  hostname: dev.api.voconsteroid.com
 #
 # searxng and pgweb are NOT here: they're public-image tools with no
 # app-specific code, so they're driven as platform apps instead — see
