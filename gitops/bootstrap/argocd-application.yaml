@@ -3,6 +3,8 @@ kind: Application
 metadata:
   name: argocd
   namespace: argocd
+  labels:
+    gitops.bnei.dev/tier: core
   finalizers:
   - resources-finalizer.argocd.argoproj.io
 spec:
@@ -22,6 +24,35 @@ spec:
           domain: argocd.bnei.dev
 
         configs:
+          cm:
+            # Longhorn's CRDs have two permanent, expected diffs against
+            # their own chart manifest — neither is real drift:
+            #   1. spec.conversion.webhook.clientConfig.caBundle: injected
+            #      live by Longhorn's own webhook cert rotation; the chart
+            #      never sets it.
+            #   2. spec.preserveUnknownFields: the chart sets `false`, but
+            #      apiextensions.k8s.io/v1's API server silently drops this
+            #      legacy field on write (structural schemas replaced it) —
+            #      confirmed via `kubectl get crd ... -o
+            #      jsonpath='{.spec.preserveUnknownFields}'` returning empty
+            #      on every Longhorn CRD despite it being `false` in git.
+            # Without both, ArgoCD sees a permanent diff and selfHeal
+            # re-syncs platform-longhorn every reconcile forever, even
+            # though nothing is actually wrong (confirmed via a byte-level
+            # diff of the live vs. chart-rendered CRD with only known-noisy
+            # metadata stripped — these two fields were the only remainder).
+            # Cluster-wide via argocd-cm (not per-Application
+            # ignoreDifferences) because both fields only ever appear on
+            # CRDs with a conversion webhook — safe as a global rule, and
+            # avoids restructuring longhorn out of
+            # platform.applicationset.yaml's shared list (which would risk
+            # the ApplicationSet controller deleting-and-cascading the
+            # existing Application, including its CRDs, before a
+            # differently-shaped replacement could take over).
+            resource.customizations.ignoreDifferences.apiextensions.k8s.io_CustomResourceDefinition: |
+              jsonPointers:
+              - /spec/conversion/webhook/clientConfig/caBundle
+              - /spec/preserveUnknownFields
           params:
             # TLS terminated at Traefik — ArgoCD serves plain HTTP inside the cluster
             "server.insecure": "true"

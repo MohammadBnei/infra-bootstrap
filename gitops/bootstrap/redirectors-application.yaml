@@ -8,6 +8,8 @@ kind: Application
 metadata:
   name: redirectors
   namespace: argocd
+  labels:
+    gitops.bnei.dev/tier: redirector
   finalizers:
   - resources-finalizer.argocd.argoproj.io
 spec:
@@ -16,7 +18,6 @@ spec:
     repoURL: git@github.com:MohammadBnei/infra-bootstrap.git
     targetRevision: main
     path: gitops/redirectors
-    directory: {}
   destination:
     server: https://kubernetes.default.svc
     namespace: default

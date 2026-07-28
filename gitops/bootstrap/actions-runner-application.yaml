@@ -8,6 +8,8 @@ kind: Application
 metadata:
   name: platform-actions-runner
   namespace: argocd
+  labels:
+    gitops.bnei.dev/tier: platform
   annotations:
     argocd.argoproj.io/sync-wave: "1"
   finalizers:
@@ -18,7 +20,6 @@ spec:
     repoURL: git@github.com:MohammadBnei/infra-bootstrap.git
     targetRevision: main
     path: gitops/platform/actions-runner
-    directory: {}
   destination:
     server: https://kubernetes.default.svc
     namespace: actions-runner

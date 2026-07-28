@@ -89,6 +89,8 @@ spec:
   template:
     metadata:
       name: 'platform-{{.name}}'
+      labels:
+        gitops.bnei.dev/tier: platform
       annotations:
         argocd.argoproj.io/sync-wave: '{{.syncWave}}'
       finalizers:
