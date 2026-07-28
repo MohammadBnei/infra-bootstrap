@@ -220,6 +220,25 @@
         proxmox_pvecm_status.rc != 0 or
         'Cluster information' not in proxmox_pvecm_status.stdout
 
+    # `pvecm create` returns before corosync/pmxcfs actually reach quorum —
+    # confirmed live: the very next task (the join attempt below) ran too
+    # soon after and got "cluster not ready - no quorum?" from proxmox, even
+    # though `pvecm create` itself had already succeeded. Same guard
+    # condition as the bootstrap task above: only need to wait right after
+    # we were the one who just created it.
+    - name: Wait for proxmox (.165) to reach quorum after cluster bootstrap
+      ansible.builtin.command: pvecm status
+      delegate_to: proxmox
+      run_once: true
+      register: proxmox_quorum_wait
+      until: "'Quorate:' in proxmox_quorum_wait.stdout and 'Yes' in proxmox_quorum_wait.stdout"
+      retries: 10
+      delay: 3
+      changed_when: false
+      when: >-
+        proxmox_pvecm_status.rc != 0 or
+        'Cluster information' not in proxmox_pvecm_status.stdout
+
     - name: Check current corosync membership
       ansible.builtin.command: pvecm status
       register: pvecm_status
