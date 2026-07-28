@@ -919,8 +919,61 @@ Separately, a parallel session moved `editable-blog`'s `values.yaml` to
 native `infisical.autoReload` field — both legitimate, folded in as part
 of getting this Application to sync.
 
+### Follow-up — sync status stuck `Unknown`/`Healthy` even with a working credential
+
+After merging the HTTPS+PAT fix and getting the manual `repo-creds-
+github-bnei` secret rebuilt correctly, the Application still couldn't
+reach `Synced`: repo-server logs showed a *new* error —
+`authentication required: Invalid username or token. Password
+authentication is not supported for Git operations.` — GitHub's own
+error text, meaning the request reached GitHub and was rejected, not a
+credential-lookup failure like before.
+
+This looked, for a while, like a genuine ArgoCD/go-git bug: the token
+was independently confirmed valid three separate ways (direct GitHub
+API check with `Authorization: Bearer`, `git ls-remote` with a
+hand-built `Authorization: Basic` header from a throwaway pod, twice
+with different usernames), and switching the secret between
+`repo-creds` (template) and `repository` (exact-URL) types, changing
+the username (`MohammadBnei` vs. GitHub's documented `x-access-token`
+convention for PAT auth), and fully restarting all three ArgoCD
+components (`repo-server`, `application-controller`, `server`) made no
+difference — the same error every time.
+
+**Actual root cause: self-inflicted, not ArgoCD's fault.** Every
+`repo-creds-github-bnei` secret rebuilt during this investigation was
+constructed by piping `infisical secrets get --plain | kubectl create
+secret ... --from-file=password=/dev/stdin` — and `infisical secrets
+get --plain`'s output ends with a trailing newline. `--from-file` on
+`/dev/stdin` captures that newline as part of the secret value
+byte-for-byte (confirmed via `od -c`: `... Y K \n`). Every *manual*
+verification test in this investigation used `$(cat ...)` shell command
+substitution to read the value first, which **silently strips trailing
+newlines** — so every hand-built test looked fine while the actual
+secret ArgoCD was reading had a corrupted (newline-suffixed) password
+the whole time. ArgoCD reads the Kubernetes Secret's raw bytes directly
+(no shell involved), so it faithfully preserved and used the broken
+value, produced a Basic-auth header GitHub couldn't parse as a valid
+token, and GitHub's backend responded with its generic "password auth
+not supported" message rather than a specific "malformed credential"
+one — which is what made this look like an upstream bug for so long.
+
+**Fix**: `tr -d '\n'` before piping into `--from-file=password=...` when
+rebuilding this secret by hand. The `ansible/playbooks/register-repos
+.yml` task added earlier already sources the PAT from an env var (not a
+piped CLI value), which doesn't carry this specific risk, but a
+defensive `| trim` Jinja filter was added to its tempfile-write task
+anyway, since the failure mode is silent, easy to reintroduce, and
+expensive to debug.
+
+**Lesson**: when a `kubectl`/API client fails against a secret that
+"looks right" in every manual check, verify using the exact same
+data-access path the failing consumer uses (raw bytes, not a shell that
+silently normalizes them) — `$(cat ...)`, `printf`, and similar all
+strip trailing newlines by design, which can hide exactly this class of
+bug.
+
 **End state**: `editable-blog` ArgoCD Application `Synced`/`Healthy`,
-pod serving `200` on port 3000, verified via `git ls-remote` with a
-hand-built `Authorization: Basic` header (not a URL) from inside a
-throwaway pod — confirms the HTTPS+PAT path works end to end without
-repeating the exposure mistake above.
+pod serving `200` on port 3000 continuously (`16` restarts total, `0`
+since the CPU fix, over 2.5 hours). HTTPS+PAT path confirmed fully
+working end to end.
