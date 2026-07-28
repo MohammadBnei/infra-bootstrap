@@ -1,0 +1,29 @@
+{{- range $name, $hook := .Values.hooks }}
+{{- $enabled := true }}
+{{- if hasKey $hook "enabled" }}
+{{- $enabled = $hook.enabled }}
+{{- end }}
+{{- if $enabled }}
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ $.Release.Name }}-{{ $name | lower }}
+  namespace: {{ $.Release.Namespace }}
+  labels:
+    {{- include "common-app-chart.labels" $ | nindent 4 }}
+  annotations:
+    argocd.argoproj.io/hook: {{ $hook.type | required (printf "hooks.%s.type is required (PreSync|PostSync|SyncFail)" $name) }}
+    argocd.argoproj.io/hook-delete-policy: {{ $hook.hookDeletePolicy | default "BeforeHookCreation" }}
+spec:
+  backoffLimit: 0
+  template:
+    metadata:
+      labels:
+        {{- include "common-app-chart.selectorLabels" $ | nindent 8 }}
+    spec:
+      restartPolicy: Never
+      containers:
+      {{- include "common-app-chart.jobContainer" (dict "root" $ "name" $name "job" $hook) | nindent 6 }}
+{{- end }}
+{{- end }}
