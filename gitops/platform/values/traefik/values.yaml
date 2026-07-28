@@ -3,7 +3,8 @@
 #
 # Key requirements (ADR-0001, docs/adr/0001-ingress-traefik-ingressroute-over-gateway-api.md):
 #   - Listeners on port 80 (web) and 443 (websecure)
-#   - ACME HTTP-01 cert resolver, acme.json on PVC (never emptyDir)
+#   - ACME cert resolver (TLS-ALPN-01, port 443 only — see below),
+#     acme.json on PVC (never emptyDir)
 #   - Per-app routing via Traefik IngressRoute, not Gateway API — Traefik's
 #     ACME resolver can't issue certs for Gateway API listeners without
 #     cert-manager as a Secret bridge (banned), so IngressRoute is the lock.
@@ -58,7 +59,7 @@ providers:
   kubernetesIngress:
     enabled: false
 
-# ACME HTTP-01 — acme.json must be on a PVC, never emptyDir (ADR-0001)
+# acme.json must be on a PVC, never emptyDir (ADR-0001)
 persistence:
   enabled: true
   name: data
@@ -67,13 +68,24 @@ persistence:
   path: /data
 
 # chart >=33.0.0 renamed this key from certResolvers and nested config under .acme
+#
+# Using tlsChallenge (TLS-ALPN-01, validated over port 443 only) instead of
+# httpChallenge (HTTP-01, port 80). Real-world debugging after the Freebox
+# cutover found that Let's Encrypt's external HTTP-01 validation requests
+# on port 80 got a 404 that never reached Traefik's own ACME handler code
+# path (confirmed via logs — an equivalent internal test against the same
+# handler logged "Cannot retrieve the ACME challenge", but nothing
+# equivalent ever appeared for the real external attempts), while port 443
+# was already confirmed working end-to-end externally. Root cause on the
+# port-80 path was never pinned down (suspected transparent ISP proxy/cache
+# mangling port 80) — tlsChallenge sidesteps it entirely. Still Traefik's
+# built-in ACME, no change to the cert-manager/DNS-01 rejection in ADR-0001.
 certificatesResolvers:
   le:
     acme:
       email: account@bnei.dev
       storage: /data/acme.json
-      httpChallenge:
-        entryPoint: web
+      tlsChallenge: {}
 
 # Dashboard via IngressRoute is disabled — expose via IngressRoute if needed
 ingressRoute:
