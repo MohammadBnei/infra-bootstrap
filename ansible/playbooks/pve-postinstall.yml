@@ -193,7 +193,33 @@
   hosts: pve_new
   gather_facts: false
   tags: corosync
+  vars:
+    pve_cluster_name: ukubi
   tasks:
+    # ADR-0020: "`.165` stays the founding member" — but nothing ever actually
+    # ran `pvecm create` on it, so every `pvecm add`/addnode attempt failed
+    # with "invalid corosync.conf" / "error0: no nodes found" (confirmed live
+    # via the task log: proxmox had no corosync cluster to add a node *to*).
+    # Guarded the same way as the ZFS-pool/join checks below: only creates
+    # once, safe to leave in place permanently. `run_once` because this only
+    # ever needs to happen a single time regardless of how many pve_new hosts
+    # this play targets.
+    - name: Check whether proxmox (.165) is already a corosync cluster
+      ansible.builtin.command: pvecm status
+      delegate_to: proxmox
+      run_once: true
+      register: proxmox_pvecm_status
+      changed_when: false
+      failed_when: false
+
+    - name: Bootstrap the corosync cluster on proxmox (.165), if not already done
+      ansible.builtin.command: "pvecm create {{ pve_cluster_name }}"
+      delegate_to: proxmox
+      run_once: true
+      when: >-
+        proxmox_pvecm_status.rc != 0 or
+        'Cluster information' not in proxmox_pvecm_status.stdout
+
     - name: Check current corosync membership
       ansible.builtin.command: pvecm status
       register: pvecm_status
