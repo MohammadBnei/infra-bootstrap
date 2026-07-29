@@ -1588,7 +1588,7 @@ dashboards:
               "datasource": { "type": "loki", "uid": "ds-loki" },
               "options": {
                 "showTime": true,
-                "showLabels": false,
+                "showLabels": true,
                 "wrapLogMessage": true,
                 "prettifyLogMessage": true,
                 "enableLogDetails": true,
