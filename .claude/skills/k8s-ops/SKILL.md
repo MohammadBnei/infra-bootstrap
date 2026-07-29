@@ -102,6 +102,71 @@ chart's own values are flat (`backend:`, `mongodb:`, etc. at top level, no
 wrapper), match that exactly — don't invent a wrapper key that "feels
 right."
 
+**Second confirmed instance (Loki, 2026-07-29)**: `lokiCanary` was nested
+under `monitoring:` in `gitops/platform/values/loki/values.yaml` — same
+silent-no-op failure mode as the Infisical case above, the canary
+DaemonSet kept deploying despite looking disabled. `helm show values` is
+what caught it; `yq`/YAML-lint alone never will, since the file is
+perfectly valid YAML, just structurally wrong for that chart.
+
+`helm template` against the real chart catches a different, narrower
+class of bug than the one above: **structural rejections the chart's own
+templates enforce**, not just unknown-key no-ops. Loki's `validate.yaml`
+hard-fails if `singleBinary.replicas` is nonzero alongside any nonzero
+SimpleScalable-mode replica (`write`/`read`/`backend` all default to
+`3`, not `0`) — `helm template` surfaces this immediately (`You have more
+than zero replicas configured for both the single binary and simple
+scalable targets`), `yq` does not. Zero all three explicitly when running
+SingleBinary mode.
+
+**`helm template` still isn't sufficient for everything** — see the
+Grafana contact-point gotcha below, which is an app-level runtime
+validation error, not a Helm templating error. `.github/workflows/lint.yml`'s
+`gitops` job only `helm template`s the local `common-app-chart`; it does
+not render the third-party charts (`loki`, `alloy`, `grafana`,
+`prometheus`, ...) that `platform.applicationset.yaml` actually deploys —
+worth doing by hand (`helm pull --untar` + `helm template -f
+gitops/platform/values/<name>/values.yaml`) before pushing a values
+change to any of those, not just trusting CI.
+
+## Grafana `slack` contact-point type: `url` goes under `settings`, not `secureSettings`
+
+Confirmed live (2026-07-29 incident, PRs #55/#56): this chart's Grafana
+version (11.4.0) rejects a contact point provisioning file outright at
+startup if `url` is under `secureSettings` for the `slack` integration
+type — `token must be specified when using the Slack chat API`,
+`CrashLoopBackOff`, real outage, not a warning. Verified by reproducing
+against a real local Grafana 11.4.0 container (`docker run
+grafana/grafana:11.4.0`, mount a `provisioning/alerting/contactpoints.yaml`)
+before touching the live cluster again — a plain literal URL under
+`secureSettings` failed identically, proving it wasn't a `$__file{}`/env-var
+interpolation problem, a field-placement one. `url` under plain `settings`
+fixed it; Grafana still redacts it in API responses despite the placement
+(confirmed via `GET /api/v1/provisioning/contact-points`), and `$__file{}`
+interpolation there does resolve correctly (confirmed by pointing the
+secret file at a local network listener and capturing the actual outbound
+POST, not just "it didn't crash").
+
+**General lesson**: an app's own runtime schema validation (this) is a
+different failure class from a Helm templating error (the Loki bugs
+above) — `helm template` will render this cleanly and still crash on
+first boot. For anything touching a chart's own non-trivial runtime
+config (secrets, notification channels, plugin-specific settings), a
+local `docker run` smoke test against the real image catches what
+template-rendering can't.
+
+## Loki `detected_level` is query-time structured metadata, not an indexed label
+
+`GET /loki/api/v1/label/detected_level/values` returns an empty result —
+confirmed live — even though `{...} | detected_level=~"error"` filters
+correctly. It's computed by Loki per-line at query time from common
+level-token heuristics (works across JSON, logfmt-ish, and plain-text
+logs alike — confirmed against real mixed-format app logs), not stored in
+the label index. Don't build a dashboard variable that tries to discover
+its values dynamically via `label_values(detected_level)` — it'll come
+back empty. Use a static/custom variable with the known fixed vocabulary
+instead: `critical,error,warn,info,debug,trace,unknown`.
+
 ## ArgoCD sync/refresh mechanics
 
 Force a re-evaluation of an Application after a live manifest re-apply or a

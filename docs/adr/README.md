@@ -37,3 +37,4 @@ ADR-000N` (replaced by a later decision).
 | [0024](0024-server1-single-disk-ext4-no-dedicated-zfs.md) | `server1` reinstalled single-disk, ext4 root, no dedicated ZFS pool | Accepted |
 | [0025](0025-repo-credential-shared-pat-not-ssh-deploy-key.md) | Repo credentials via shared HTTPS+PAT, not per-repo SSH deploy key | Accepted |
 | [0026](0026-nfs-shared-pve-storage-cross-host-clone.md) | NFS-backed shared PVE storage for cross-host VM template cloning | Accepted |
+| [0027](0027-logging-loki-alloy-over-clickhouse-promtail.md) | Centralized logging: Loki + Grafana Alloy over ClickHouse / Promtail | Accepted |
