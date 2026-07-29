@@ -1591,7 +1591,7 @@ dashboards:
                 "showLabels": true,
                 "wrapLogMessage": true,
                 "prettifyLogMessage": true,
-                "enableLogDetails": true,
+                "enableLogDetails": false,
                 "sortOrder": "Descending",
                 "showControls": true,
                 "controlsStorageKey": "app-logs-panel-controls",
