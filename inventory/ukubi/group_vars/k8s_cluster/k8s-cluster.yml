@@ -13,6 +13,15 @@ kube_apiserver_port: 6443
 kube_proxy_mode: ipvs
 kube_proxy_strict_arp: true
 
+# Bind on all interfaces (not just loopback) so kube-prometheus-stack's
+# kube-proxy/kube-etcd Prometheus targets can actually be scraped over the
+# node's real IP — kubespray defaults both to 127.0.0.1, which silently
+# breaks KubeProxyDown/etcdMembersDown/etcdInsufficientMembers/TargetDown
+# alerting (2026-07-29 incident: confirmed via `ss -tlnp` showing
+# 127.0.0.1-only binds on all 3 nodes, causing connection-refused scrapes).
+kube_proxy_metrics_bind_address: "0.0.0.0:10249"
+etcd_metrics_port: 2381
+
 # ukubi-cluster DNS domain (kubespray default; keeps kubelet join compatibility)
 cluster_name: cluster.local
 ndots: 2
