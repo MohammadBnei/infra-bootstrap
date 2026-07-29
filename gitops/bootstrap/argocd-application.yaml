@@ -61,6 +61,10 @@ spec:
             # sources) and has no credentials for. Skip submodule init entirely rather
             # than granting the deploy key access to a repo it doesn't use.
             "reposerver.enable.git.submodule": "false"
+            "server.log.format": "json"
+            "controller.log.format": "json"
+            "reposerver.log.format": "json"
+            "applicationsetcontroller.log.format": "json"
           secret:
             # GitHub webhook shared secret, for near-instant sync on push instead of
             # waiting out the ~3min poll interval. Deliberately committed, not

@@ -3,3 +3,4 @@
 
 args:
   - --kubelet-insecure-tls
+  - --logging-format=json

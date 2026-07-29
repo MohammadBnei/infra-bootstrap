@@ -83,6 +83,8 @@ datasources:
 grafana.ini:
   server:
     root_url: https://grafana.bnei.dev
+  log.console:
+    format: json
 
 # Mounts the K8s Secret produced by the sibling Alertmanager branch
 # (feat/alertmanager-discord-resource-governance)'s

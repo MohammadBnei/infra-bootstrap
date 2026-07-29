@@ -17,6 +17,10 @@ service:
   annotations:
     metallb.universe.tf/loadBalancerIPs: 192.168.1.233
 
+logs:
+  general:
+    format: json
+
 # Chart's default podSecurityContext (runAsUser/runAsGroup: 65532) has no
 # fsGroup, so the acme.json PVC mounts root:root/0755 — Traefik can't
 # create the file at all ("permission denied"), which permanently disables
