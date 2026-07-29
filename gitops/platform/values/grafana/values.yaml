@@ -1592,7 +1592,9 @@ dashboards:
                 "wrapLogMessage": true,
                 "prettifyLogMessage": true,
                 "enableLogDetails": true,
-                "sortOrder": "Descending"
+                "sortOrder": "Descending",
+                "showControls": true,
+                "controlsStorageKey": "app-logs-panel-controls"
               },
               "targets": [
                 {
