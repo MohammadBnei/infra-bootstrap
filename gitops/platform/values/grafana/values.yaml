@@ -182,7 +182,16 @@ alerting:
             labels:
               severity: warning
             annotations:
-              summary: "Elevated error-level log rate: {{ $labels.namespace }}/{{ $labels.pod }}"
+              # The chart's grafana.configData template runs the whole
+              # `alerting:` values block through Helm's `tpl` (see
+              # grafana/templates/_config.tpl) — confirmed live: it broke
+              # ArgoCD's manifest generation with "undefined variable
+              # $labels". Grafana's own alert-annotation templating
+              # ({{ $labels.x }}, evaluated by Grafana at alert-fire time,
+              # not by Helm at chart-render time) has to be escaped so
+              # Helm's tpl pass emits it as literal text instead of trying
+              # to resolve it as a Helm variable.
+              summary: "Elevated error-level log rate: {{`{{`}} $labels.namespace {{`}}`}}/{{`{{`}} $labels.pod {{`}}`}}"
             data:
               - refId: A
                 datasourceUid: ds-loki
