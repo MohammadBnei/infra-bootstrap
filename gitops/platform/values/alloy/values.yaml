@@ -14,6 +14,12 @@ controller:
   type: daemonset
 
 alloy:
+  # hostPath /var/log (incl. /var/log/pods, where kubelet/containerd write
+  # actual container log files) mounted into the container — required by
+  # local.file_match + loki.source.file below.
+  mounts:
+    varlog: true
+
   configMap:
     content: |
       logging {
@@ -28,6 +34,14 @@ alloy:
       discovery.relabel "pod_logs" {
         targets = discovery.kubernetes.pods.targets
 
+        rule {
+          // Restrict to pods scheduled on this node — this Alloy instance
+          // can only read log files that actually exist on its own host.
+          // K8S_NODE_NAME is injected by the chart itself, not a value we set.
+          source_labels = ["__meta_kubernetes_pod_node_name"]
+          regex         = sys.env("K8S_NODE_NAME")
+          action        = "keep"
+        }
         rule {
           source_labels = ["__meta_kubernetes_namespace"]
           target_label  = "namespace"
@@ -54,11 +68,35 @@ alloy:
           separator     = "/"
           target_label  = "job"
         }
+        rule {
+          // kubelet's fixed on-disk layout for containerd:
+          // /var/log/pods/<namespace>_<pod-name>_<pod-uid>/<container>/*.log
+          // — the leading "*" globs the "<namespace>_<pod-name>_" prefix so
+          // we only need the UID here.
+          source_labels = ["__meta_kubernetes_pod_uid", "__meta_kubernetes_pod_container_name"]
+          separator     = "/"
+          target_label  = "__path__"
+          replacement   = "/var/log/pods/*$1/*.log"
+        }
       }
 
-      loki.source.kubernetes "pod_logs" {
-        targets    = discovery.relabel.pod_logs.output
+      local.file_match "pod_logs" {
+        path_targets = discovery.relabel.pod_logs.output
+      }
+
+      loki.source.file "pod_logs" {
+        targets    = local.file_match.pod_logs.targets
+        forward_to = [loki.process.pod_logs.receiver]
+      }
+
+      // containerd log files are CRI-formatted ("<time> <stream> <flag>
+      // <content>", e.g. "2026-07-29T11:02:04Z stdout F {...}") — this
+      // strips that framing back down to the raw log line + stream label,
+      // same as loki.source.kubernetes did implicitly via the kubelet API.
+      loki.process "pod_logs" {
         forward_to = [loki.write.default.receiver]
+
+        stage.cri {}
       }
 
       loki.write "default" {
@@ -73,9 +111,9 @@ alloy:
         }
       }
 
-# loki.source.kubernetes needs `get` on pods/log — relies on the chart's
-# default rbac.create: true. If Alloy's logs show 403s against the k8s
-# API, that RBAC grant is the first thing to check; fallback is switching
-# to local.file_match + hostPath /var/log/pods tailing instead.
+# File tailing needs no pods/log RBAC (that was loki.source.kubernetes's
+# requirement) — discovery.kubernetes still needs get/list/watch on pods
+# for metadata, which the chart's default rbac.create: true already
+# grants.
 rbac:
   create: true
