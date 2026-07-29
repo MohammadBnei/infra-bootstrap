@@ -19,6 +19,9 @@ deploymentMode: SingleBinary
 loki:
   auth_enabled: false # single-tenant homelab — skip X-Scope-OrgID plumbing on the Alloy side
 
+  server:
+    log_format: json
+
   commonConfig:
     replication_factor: 1 # SingleBinary, one pod — Longhorn already replicates the PVC 3x underneath
 

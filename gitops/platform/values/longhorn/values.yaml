@@ -35,6 +35,10 @@ persistence:
   defaultClassReplicaCount: 3
   defaultFsType: ext4
 
+longhornManager:
+  log:
+    format: json
+
 defaultSettings:
   defaultDataPath: /var/lib/longhorn
   defaultReplicaCount: 3
