@@ -15,3 +15,14 @@ hostAPI: http://platform-infisical-backend.infisical.svc.cluster.local:8080/api
 # scopedNamespaces left at chart default ([], cluster-scoped) — InfisicalSecret
 # instances live across many namespaces (argocd, monitoring, and eventually
 # every user-app namespace), not just infisical.
+
+# Manager binary uses controller-runtime's zap.Options.BindFlags (confirmed
+# via Infisical/kubernetes-operator cmd/main.go) — --zap-encoder is the JSON
+# toggle. Chart default args restated here since Helm lists don't merge.
+controllerManager:
+  manager:
+    args:
+      - --metrics-bind-address=:8443
+      - --leader-elect
+      - --health-probe-bind-address=:8081
+      - --zap-encoder=json
