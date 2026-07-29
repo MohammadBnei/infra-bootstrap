@@ -1511,3 +1511,94 @@ dashboards:
               "transformations": [{ "id": "organize", "options": { "excludeByName": { "Time": true, "Value": true } } }] }
           ]
         }
+
+    app-logs:
+      json: |
+        {
+          "title": "App Logs",
+          "uid": "gitops-app-logs",
+          "tags": ["gitops", "logs"],
+          "timezone": "browser",
+          "schemaVersion": 39,
+          "version": 1,
+          "refresh": "30s",
+          "time": { "from": "now-1h", "to": "now" },
+          "templating": {
+            "list": [
+              {
+                "name": "namespace",
+                "label": "Namespace",
+                "type": "query",
+                "datasource": { "type": "loki", "uid": "ds-loki" },
+                "query": "label_values(namespace)",
+                "refresh": 2,
+                "multi": true,
+                "includeAll": true,
+                "allValue": ".+",
+                "current": { "text": "All", "value": "$__all" }
+              },
+              {
+                "name": "level",
+                "label": "Level",
+                "type": "custom",
+                "query": "critical,error,warn,info,debug,trace,unknown",
+                "multi": true,
+                "includeAll": true,
+                "allValue": ".+",
+                "current": { "text": "All", "value": "$__all" }
+              },
+              {
+                "name": "search",
+                "label": "Search (regex)",
+                "type": "textbox",
+                "query": ".*",
+                "current": { "text": ".*", "value": ".*" }
+              }
+            ]
+          },
+          "panels": [
+            {
+              "id": 1,
+              "type": "timeseries",
+              "title": "Log Volume by Level",
+              "gridPos": { "h": 7, "w": 24, "x": 0, "y": 0 },
+              "datasource": { "type": "loki", "uid": "ds-loki" },
+              "fieldConfig": {
+                "defaults": {
+                  "custom": { "drawStyle": "bars", "fillOpacity": 60, "stacking": { "mode": "normal" } }
+                },
+                "overrides": []
+              },
+              "targets": [
+                {
+                  "datasource": { "type": "loki", "uid": "ds-loki" },
+                  "expr": "sum by (detected_level) (count_over_time({namespace=~\"$namespace\"} | detected_level=~\"$level\" [$__auto]))",
+                  "legendFormat": "{{detected_level}}",
+                  "refId": "A"
+                }
+              ]
+            },
+            {
+              "id": 2,
+              "type": "logs",
+              "title": "App Logs",
+              "gridPos": { "h": 18, "w": 24, "x": 0, "y": 7 },
+              "datasource": { "type": "loki", "uid": "ds-loki" },
+              "options": {
+                "showTime": true,
+                "showLabels": false,
+                "wrapLogMessage": true,
+                "prettifyLogMessage": true,
+                "enableLogDetails": true,
+                "sortOrder": "Descending"
+              },
+              "targets": [
+                {
+                  "datasource": { "type": "loki", "uid": "ds-loki" },
+                  "expr": "{namespace=~\"$namespace\"} | detected_level=~\"$level\" |~ `(?i)$search`",
+                  "refId": "A"
+                }
+              ]
+            }
+          ]
+        }
