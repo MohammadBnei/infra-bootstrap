@@ -210,11 +210,24 @@ alerting:
                   expr: 'sum by (namespace, pod) (rate({namespace=~".+"} |~ "(?i)error" [5m]))'
                   intervalMs: 60000
                   maxDataPoints: 43200
+              # A Threshold expression fed directly by a range query (A has
+              # multiple points over the 5m window) errored at evaluation
+              # time: "frame cannot uniquely be identified by its labels:
+              # has duplicate results with labels {}" — Threshold needs one
+              # value per series, not a time series. Reduce collapses each
+              # series down to its last point first, which is what actually
+              # carries the namespace/pod labels into C.
+              - refId: B
+                datasourceUid: __expr__
+                model:
+                  type: reduce
+                  expression: A
+                  reducer: last
               - refId: C
                 datasourceUid: __expr__
                 model:
                   type: threshold
-                  expression: A
+                  expression: B
                   conditions:
                     - evaluator:
                         type: gt
