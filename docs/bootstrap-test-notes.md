@@ -403,3 +403,88 @@ never resets, existing members), `Ready` in the live cluster within ~70s,
 Cilium/kube-proxy/Longhorn manager+CSI already scheduled onto it via
 DaemonSets, all 18 ArgoCD Applications stayed `Synced`/`Healthy` throughout —
 no GitOps-side changes needed for a node-level join.
+
+## 2026-07-29 — Loki + Alloy + Grafana log alerting (PRs #54–#57)
+
+First deploy of centralized logging. Two rounds of live-only bugs, neither
+catchable from the PR review or from `yq`/YAML-lint alone — both
+root-caused and fixed by actually reproducing them (against the live
+cluster and, for the Grafana one, a local Docker container) rather than
+guessing from documentation. See ADR-0027 for the design rationale (Loki
+over ClickHouse, Alloy over Promtail).
+
+**Round 1 (PR #55), found via ArgoCD `ComparisonError`/`Unknown` sync
+status right after PR #54 merged:**
+
+- `platform-loki` never deployed. Loki's own `validate.yaml` rejects a
+  nonzero `singleBinary.replicas` alongside any nonzero SimpleScalable-mode
+  replica — `write`/`read`/`backend` all default to `3`, not `0`. Fixed by
+  zeroing all three explicitly.
+- `lokiCanary` was nested under `monitoring:` in the values file — wrong
+  key location, silent no-op (same failure class as the pre-existing
+  Infisical `values.yaml` incident this skill already documented), the
+  canary DaemonSet deployed anyway despite looking disabled.
+- `platform-grafana` stayed on its pre-PR config, stuck `Unknown` sync (no
+  outage, just a blocked rollout) — the chart's `grafana.configData`
+  template runs the whole `alerting:` values block through Helm's `tpl`,
+  and the alert rule's `{{ $labels.namespace }}` annotation (Grafana's own
+  alert-time templating) collided with Helm's chart-time templating.
+  Fixed with the `{{`{{`}}...{{`}}`}}` escape idiom so `tpl` emits it as
+  literal text.
+- All three fixes verified via `helm template` against the real pinned
+  chart versions before pushing (`helm pull --untar` + render), not just
+  re-reading the error message and guessing.
+
+**Round 2 (PR #56), found immediately after Round 1 merged and rolled
+out:**
+
+- `platform-grafana` went into `CrashLoopBackOff` — a real outage this
+  time, not a blocked rollout. `Failed to provision alerting ... failed to
+  validate integration "discord" ... token must be specified when using
+  the Slack chat API`. This is Grafana's own runtime schema validation,
+  not a Helm templating error — `helm template` rendered the file cleanly
+  and it still crashed on boot.
+- Reproduced against a real local `docker run grafana/grafana:11.4.0`
+  before touching the live cluster again (having already broken it once
+  on an unverified assumption). Tested `secureSettings.url` with
+  `$__file{}`, with a bare env var, and with a plain literal string — all
+  three failed identically, proving it was a field-placement bug, not an
+  interpolation one. `url` under plain `settings` fixed it.
+- Verified the fix two ways before shipping: confirmed Grafana still
+  redacts the value in `GET /api/v1/provisioning/contact-points` despite
+  the placement (no plaintext leak via the API), and confirmed `$__file{}`
+  interpolation actually resolves under `settings` — provisioned a real
+  always-firing test rule, pointed the secret file at a local network
+  listener (a second Docker container running `nc`), and captured the
+  actual outbound POST.
+
+**Follow-up (PR #57), App Logs dashboard:**
+
+- Confirmed live that Loki's `detected_level` (auto-computed per log
+  line) filters correctly via `| detected_level=~"..."` but is **not**
+  in the label index — `GET /loki/api/v1/label/detected_level/values`
+  returns empty. Used a static/custom dashboard variable
+  (`critical,error,warn,info,debug,trace,unknown`) instead of trying to
+  discover values dynamically.
+- Confirmed this matters in practice: tested `| json` and `| logfmt`
+  against real logs from all 4 running user apps before designing the
+  dashboard around `detected_level` specifically — none of them emitted
+  JSON at the time (`vos-monolith`'s Gin access logs, `vos-monolith-dev`'s
+  zerolog console output with embedded ANSI codes that broke even
+  `| logfmt` field extraction, `editable-blog`'s custom HTTP logger,
+  `dream-analyst`'s plain Node output). A JSON-only level filter would
+  have silently excluded every app until each one's logging was updated.
+- Dashboard JSON verified by actually provisioning it into a real local
+  Grafana container and fetching it back via the dashboard API to confirm
+  every panel and template variable survived intact, not just
+  JSON-syntax-checked.
+
+**Standing gap, not yet fixed**: `.github/workflows/lint.yml`'s `gitops`
+job only `helm template`s the local `common-app-chart` — it never renders
+the third-party charts (`loki`, `alloy`, `grafana`, `prometheus`, ...)
+that `platform.applicationset.yaml` actually deploys. That CI step would
+have caught the Round 1 bugs automatically, before merge. Not the Round 2
+bug (app-level runtime validation, not a Helm templating error) — that
+class needs an actual `docker run` against the rendered config, a bigger
+CI lift, probably only worth it for charts with non-trivial runtime
+config (secrets, notification channels).

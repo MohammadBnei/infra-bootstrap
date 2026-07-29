@@ -79,6 +79,12 @@ updated.
   `Job`s) and `oneOffJobs:` (suspended `CronJob`s + a git-committed ledger,
   triggered by a generic reusable workflow) — see
   [ADR-0023](docs/adr/0023-common-app-chart-hooks-and-oneoff-jobs.md).
+- **Centralized logging: Loki (SingleBinary, filesystem storage) + Grafana
+  Alloy (DaemonSet)** — over ClickHouse (too heavy for this cluster's log
+  volume, no native Grafana integration) and over Promtail (Alloy's OTLP
+  support is needed anyway for planned trace/metric instrumentation). Log
+  alerting is Grafana-native, not Loki's Ruler and not routed through
+  Alertmanager. See [ADR-0027](docs/adr/0027-logging-loki-alloy-over-clickhouse-promtail.md).
 
 ## 3. Do not propose (quick reference — see linked ADR for full reasoning)
 
@@ -145,6 +151,6 @@ them:
 
 ---
 
-_Last refreshed: 2026-07-28._
+_Last refreshed: 2026-07-29._
 _Source of truth: this file (`DECISION.md`) for WHY, `docs/adr/` for
 per-decision reasoning, `ARCHITECTURE.md` for WHAT._

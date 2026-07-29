@@ -366,10 +366,15 @@ Wildcard cert `*.bnei.dev` via Traefik ACME HTTP-01 (§4 above).
   SingleBinary mode with filesystem storage, Alloy DaemonSet shipping
   container logs from every node; Alloy chosen over Promtail since it's
   Grafana's OTel-Collector-based agent, needed anyway for planned OTLP
-  traces/metrics). A first Grafana-native alert rule (log error-rate
-  spike, routed to Discord) exists as a starting point — see
+  traces/metrics — see [ADR-0027](docs/adr/0027-logging-loki-alloy-over-clickhouse-promtail.md)).
+  A first Grafana-native alert rule (log error-rate spike, routed to
+  Discord) exists as a starting point — see
   `gitops/platform/values/grafana/values.yaml`'s `alerting:` key; more
-  targeted rules still need to be authored.
+  targeted rules still need to be authored. Grafana's "App Logs" dashboard
+  gives namespace/level/text-search filtering over Loki. User apps can
+  declare their own log alert rules from their own repo via
+  `common-app-chart`'s `logAlerts:` values block (picked up dynamically by
+  Grafana's alerts sidecar) — no platform-repo edit needed per app.
 - Alertmanager for critical alerts, routed to a Discord channel webhook via
   its native `slack_configs` receiver (see
   `gitops/platform/values/prometheus/values.yaml`). Postgres-down/disk-full

@@ -25,6 +25,7 @@ then here. When in doubt, open those files.
 | CI/CD | Self-hosted GitHub Actions runner, in-cluster (`gitops/platform/actions-runner/`), RBAC-scoped to `vos`/`vos-dev` only — see ADR-0022. Drives `common-app-chart`'s `hooks:`/`oneOffJobs:` (ArgoCD sync hooks + a ledger-driven reusable workflow for one-time scripts) — see ADR-0023 |
 | Secrets | Infisical (project `infra-bootstrap-1-ge1`, id `8a3fa54f-be22-488a-bf51-55158f65c0f2`, domain `https://infisical.bnei.dev`, env `dev` — see `docs/secrets.md`) |
 | Database | Pigsty (vendored in `pigsty/`, has its **own** `pigsty/CLAUDE.md` — don't edit it, it's upstream) |
+| Observability | Prometheus + Grafana (metrics/dashboards), Loki + Grafana Alloy (logs, SingleBinary/filesystem + DaemonSet — see ADR-0027), Alertmanager (routes to Discord). Grafana alerting is native (LogQL rules against Loki), not Loki's Ruler. `common-app-chart`'s `logAlerts:` block lets a user app declare its own log alert rules from its own repo |
 
 ## Directory map
 
