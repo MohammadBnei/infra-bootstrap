@@ -74,7 +74,7 @@ spec:
         namespace: monitoring
         syncWave: "5"
         chartRepoURL: https://grafana.github.io/helm-charts
-        chartRevision: "8.8.4"
+        chartRevision: "10.5.15" # Grafana 12.3.1 — bumped from 8.8.4/11.4.0, 2 majors behind
         chartName: grafana
         valuesPath: gitops/platform/values/grafana/values.yaml
 
