@@ -1,0 +1,77 @@
+# Loki Helm values for ukubi-cluster
+# Chart: https://grafana-community.github.io/helm-charts  name: loki
+#
+# The OSS Loki chart migrated off grafana.github.io/helm-charts to this
+# grafana-community repo around March 2026 (forked near chart v6.55.0).
+# Confirm the current chart revision with `helm search repo` before first
+# apply — same convention as longhorn/values.yaml's pinned-version comment
+# in platform.applicationset.yaml.
+#
+# SingleBinary mode + filesystem storage: homelab scale, no object storage
+# (minio/S3) exists in this cluster. Ingest/index/query/compaction all run
+# as one process, one StatefulSet replica, one PVC. Being a StatefulSet
+# (not a Deployment like Grafana), it does NOT need the `Recreate`-strategy
+# PVC-Multi-Attach workaround from commit 761c6216 — StatefulSet rolling
+# updates reuse the same PVC per ordinal, no double-attach.
+
+deploymentMode: SingleBinary
+
+loki:
+  auth_enabled: false # single-tenant homelab — skip X-Scope-OrgID plumbing on the Alloy side
+
+  commonConfig:
+    replication_factor: 1 # SingleBinary, one pod — Longhorn already replicates the PVC 3x underneath
+
+  storage:
+    type: filesystem
+
+  schemaConfig:
+    configs:
+      - from: "2024-01-01"
+        store: tsdb
+        object_store: filesystem
+        schema: v13
+        index:
+          prefix: index_
+          period: 24h
+
+  limits_config:
+    retention_period: 336h # 14d starting point — tunable, enforced by the compactor below
+
+  compactor:
+    retention_enabled: true
+    # Required for retention deletes to actually run in filesystem mode.
+    # Easy to omit and doesn't fail loudly — without it, retention_period
+    # is set but never enforced and the PVC just fills up silently.
+    delete_request_store: filesystem
+
+singleBinary:
+  replicas: 1
+  persistence:
+    enabled: true
+    # Sized against Prometheus's own 20Gi metrics volume as an anchor.
+    # Longhorn's default 3x replication (platform/values/longhorn/values.yaml)
+    # means this actually consumes ~60Gi raw disk — check real node disk
+    # sizes before merging if that's tight.
+    size: 20Gi
+    # no storageClassName — Longhorn is the default StorageClass, same as
+    # every other PVC in this repo.
+
+# Disabled: keep the footprint minimal for a homelab SingleBinary+filesystem deploy.
+gateway:
+  enabled: false # no nginx front door — Alloy/Grafana hit the loki Service directly
+minio:
+  enabled: false # filesystem storage, not S3
+test:
+  enabled: false # loki-canary / helm test suite
+monitoring:
+  serviceMonitor:
+    enabled: false # no self-scraping via kube-prometheus-stack yet — can flip on later
+  selfMonitoring:
+    enabled: false # pulls in Grafana Agent Operator CRDs this cluster doesn't have
+  lokiCanary:
+    enabled: false
+chunksCache:
+  enabled: false # memcached sidecar — not worth it at this log volume
+resultsCache:
+  enabled: false

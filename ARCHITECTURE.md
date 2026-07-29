@@ -362,8 +362,14 @@ Wildcard cert `*.bnei.dev` via Traefik ACME HTTP-01 (§4 above).
 - pg_exporter on Postgres (via Pigsty).
 - node_exporter on every host (Pi 4, ex-laptop, PVE hosts).
 - Hubble for Cilium L3/L4 observability.
-- Loki + Promtail for centralized logging (under consideration, not
-  yet committed).
+- Loki + Grafana Alloy for centralized logging (implemented — Loki
+  SingleBinary mode with filesystem storage, Alloy DaemonSet shipping
+  container logs from every node; Alloy chosen over Promtail since it's
+  Grafana's OTel-Collector-based agent, needed anyway for planned OTLP
+  traces/metrics). A first Grafana-native alert rule (log error-rate
+  spike, routed to Discord) exists as a starting point — see
+  `gitops/platform/values/grafana/values.yaml`'s `alerting:` key; more
+  targeted rules still need to be authored.
 - Alertmanager for critical alerts, routed to a Discord channel webhook via
   its native `slack_configs` receiver (see
   `gitops/platform/values/prometheus/values.yaml`). Postgres-down/disk-full

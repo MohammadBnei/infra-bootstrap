@@ -162,6 +162,28 @@ hooks: {}
 #                                 # when infisical.enabled, same as the Deployment
 #     resources: {}
 
+# Per-app Grafana log alert rules. Renders a ConfigMap labeled
+# grafana_alert: "1", picked up dynamically by Grafana's alerts sidecar
+# (sidecar.alerts, see gitops/platform/values/grafana/values.yaml) — apps
+# declare *when* to alert, routing stays owned by the platform (shared
+# Discord contact point + notification policy, defined once in Grafana's
+# own values, not repeated per app). `uid` only needs to be unique within
+# this app — the chart prefixes it with the release name so cluster-wide
+# collisions across apps aren't a footgun app authors have to think about.
+logAlerts:
+  enabled: false
+  # Loki datasource uid is fixed cluster-wide — see the `Loki` entry in
+  # gitops/platform/values/grafana/values.yaml's datasources list.
+  datasourceUid: ds-loki
+  rules: []
+  # rules:
+  #   - uid: high-5xx-rate               # unique within this app
+  #     title: High 5xx rate
+  #     expr: 'sum(rate({namespace="myapp"} |~ "(?i) 5\\d\\d " [5m]))'
+  #     threshold: 0.2
+  #     for: 5m                          # optional, defaults to 5m
+  #     severity: warning                # optional, defaults to warning
+
 # Irregular / one-time scripts. Rendered as suspended CronJobs (suspend:
 # true — a schedule is syntactically required but never fires on its own);
 # triggered on demand via `kubectl create job --from=cronjob/<release>-<name>

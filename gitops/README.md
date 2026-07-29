@@ -48,6 +48,8 @@ gitops/
 │       ├── longhorn/values.yaml
 │       ├── prometheus/values.yaml
 │       ├── grafana/values.yaml
+│       ├── loki/values.yaml
+│       ├── alloy/values.yaml
 │       ├── metrics-server/values.yaml
 │       ├── local-path-provisioner/values.yaml
 │       ├── searxng/values.yaml            # common-app-chart values, driven by platform-common-apps.applicationset.yaml
@@ -71,7 +73,7 @@ Everything is sequenced so each layer is ready before the next depends on it:
 | 0 | **Longhorn**, **local-path-provisioner** | Longhorn is the default StorageClass (ADR-0002); local-path-provisioner stays installed as a non-default fallback. Every PVC in the cluster (Traefik's acme.json, common-app-chart PVCs) needs a default StorageClass to bind at all |
 | 1 | **Infisical**, **infisical-operator** | Serves secrets to ArgoCD/apps via `InfisicalSecret` CRDs (the operator provides the CRD itself) — must be ready before any app that needs a private values repo or Infisical-backed secret |
 | 2 | **Traefik** (standalone `traefik-application.yaml`, not in the ApplicationSet) | Ingress — must be up before IngressRoutes resolve |
-| 5 | Prometheus, Grafana, metrics-server | Observability, no hard ordering constraint |
+| 5 | Prometheus, Grafana, Loki, Alloy, metrics-server | Observability, no hard ordering constraint |
 | 10 | User apps (`apps.applicationset.yaml`), platform-common-apps (`platform-common-apps.applicationset.yaml`), redirectors (`redirectors-application.yaml`) | Depend on Infisical (secrets) + Traefik (IngressRoutes) |
 
 Note: since [ADR-0021](../docs/adr/0021-self-syncing-bootstrap-directory.md) these Application/ApplicationSet manifests are all siblings inside the same `bootstrap` Application's resource list, but none of them carry a sync-wave annotation on their own metadata (only on the child app entries an ApplicationSet's `list` generator spawns) — so ArgoCD still doesn't order these siblings relative to each other. These numbers are the intended/documented order. In practice each Application's own `retry`/`selfHeal` policy converges regardless of exact creation order.
@@ -111,6 +113,8 @@ Everything else flows from Infisical once it's running.
 | 1 | infisical-operator | infisical/secrets-operator |
 | 5 | prometheus | prometheus-community/kube-prometheus-stack |
 | 5 | grafana | grafana/grafana |
+| 5 | loki | grafana-community/loki |
+| 5 | alloy | grafana/alloy |
 | 5 | metrics-server | metrics-server/metrics-server |
 
 Each platform app: public Helm chart + values from `infra-bootstrap` via the manually-injected SSH key (two Application sources: the external chart repo, plus infra-bootstrap for the values file).
@@ -147,6 +151,7 @@ A minimal Helm chart for standard web apps. Renders:
 - `InfisicalSecret` — optional, gated by `infisical.enabled`, auto-wired into the Deployment's `envFrom`
 - `hooks:` — guard-railed ArgoCD PreSync/PostSync `Job`s (schema migrations, etc. — see ADR-0023)
 - `oneOffJobs:` — suspended `CronJob`s for one-time scripts, triggered via `kubectl create job --from=cronjob/...` and a ledger-driven reusable CI workflow (see ADR-0022/0023)
+- `ConfigMap` (log alert rules) — optional, gated by `logAlerts.enabled`, labeled `grafana_alert: "1"` so Grafana's alerts sidecar picks it up dynamically (see `gitops/platform/values/grafana/values.yaml`'s `sidecar.alerts`) — routes through the platform's shared Discord contact point, the app only declares the LogQL condition/threshold
 
 Key values a per-app `values.yaml` must set:
 
@@ -170,6 +175,19 @@ readinessProbe:
   type: http
   path: /healthz
   initialDelaySeconds: 15
+```
+
+Log alert rule example (app's own Loki-based error condition):
+```yaml
+logAlerts:
+  enabled: true
+  rules:
+    - uid: high-5xx-rate      # only needs to be unique within this app
+      title: High 5xx rate
+      expr: 'sum(rate({namespace="myapp"} |~ "(?i) 5\\d\\d " [5m]))'
+      threshold: 0.2
+      for: 5m                 # optional, defaults to 5m
+      severity: warning       # optional, defaults to warning
 ```
 
 Annotations: `annotations` (Deployment), `podAnnotations` (pod template), `service.annotations` (Service), `ingress.annotations` (IngressRoute) — plain key/value maps, rendered as-is.

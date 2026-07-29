@@ -1,0 +1,67 @@
+# Alloy Helm values for ukubi-cluster
+# Chart: https://grafana.github.io/helm-charts  name: alloy
+#
+# This chart has NOT migrated to grafana-community (unlike Loki) — confirm
+# the current chart revision with `helm search repo` before first apply.
+#
+# DaemonSet, logs-only today. Chosen over Promtail specifically because
+# Alloy is Grafana's OTel-Collector-based unified agent — when there's an
+# app to instrument with OTLP traces/metrics later, add
+# otelcol.receiver.otlp components + a Service (4317/4318) to this same
+# config. Not wired up yet (YAGNI — nothing sends OTLP today).
+
+controller:
+  type: daemonset
+
+alloy:
+  configMap:
+    content: |
+      discovery.kubernetes "pods" {
+        role = "pod"
+      }
+
+      discovery.relabel "pod_logs" {
+        targets = discovery.kubernetes.pods.targets
+
+        rule {
+          source_labels = ["__meta_kubernetes_namespace"]
+          target_label  = "namespace"
+        }
+        rule {
+          source_labels = ["__meta_kubernetes_pod_name"]
+          target_label  = "pod"
+        }
+        rule {
+          source_labels = ["__meta_kubernetes_pod_container_name"]
+          target_label  = "container"
+        }
+        rule {
+          source_labels = ["__meta_kubernetes_namespace", "__meta_kubernetes_pod_name"]
+          separator     = "/"
+          target_label  = "job"
+        }
+      }
+
+      loki.source.kubernetes "pod_logs" {
+        targets    = discovery.relabel.pod_logs.output
+        forward_to = [loki.write.default.receiver]
+      }
+
+      loki.write "default" {
+        endpoint {
+          // Loki SingleBinary chart's fullname convention not yet
+          // confirmed — likely "platform-loki" since the chart name
+          // equals the release name (unlike kube-prometheus-stack's
+          // truncated "platform-prometheus-kube-p-*"). Confirmed live:
+          // `kubectl get svc -n monitoring` after first sync — same
+          // caveat as every other in-cluster Service URL in this repo.
+          url = "http://platform-loki.monitoring.svc.cluster.local:3100/loki/api/v1/push"
+        }
+      }
+
+# loki.source.kubernetes needs `get` on pods/log — relies on the chart's
+# default rbac.create: true. If Alloy's logs show 403s against the k8s
+# API, that RBAC grant is the first thing to check; fallback is switching
+# to local.file_match + hostPath /var/log/pods tailing instead.
+rbac:
+  create: true

@@ -1,0 +1,55 @@
+{{- if .Values.logAlerts.enabled }}
+{{- if not .Values.logAlerts.rules }}
+{{- fail "logAlerts.enabled is true but logAlerts.rules is empty" }}
+{{- end }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ .Release.Name }}-grafana-alerts
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "common-app-chart.labels" . | nindent 4 }}
+    grafana_alert: "1"
+data:
+  {{ .Release.Name }}-rules.yaml: |
+    apiVersion: 1
+    groups:
+      - orgId: 1
+        name: {{ .Release.Name }}-log-alerts
+        folder: GitOps Alerts
+        interval: 1m
+        rules:
+          {{- range .Values.logAlerts.rules }}
+          - uid: {{ printf "%s-%s" $.Release.Name (required "logAlerts rule: uid is required" .uid) }}
+            title: {{ required "logAlerts rule: title is required" .title | quote }}
+            condition: C
+            for: {{ .for | default "5m" }}
+            noDataState: OK
+            execErrState: Alerting
+            labels:
+              severity: {{ .severity | default "warning" }}
+              app: {{ $.Release.Name }}
+            annotations:
+              summary: {{ printf "%s (%s)" .title $.Release.Name | quote }}
+            data:
+              - refId: A
+                datasourceUid: {{ $.Values.logAlerts.datasourceUid }}
+                relativeTimeRange:
+                  from: 300
+                  to: 0
+                model:
+                  queryType: range
+                  expr: {{ required "logAlerts rule: expr is required" .expr | quote }}
+                  intervalMs: 60000
+                  maxDataPoints: 43200
+              - refId: C
+                datasourceUid: __expr__
+                model:
+                  type: threshold
+                  expression: A
+                  conditions:
+                    - evaluator:
+                        type: gt
+                        params: [{{ required "logAlerts rule: threshold is required" .threshold }}]
+          {{- end }}
+{{- end }}
