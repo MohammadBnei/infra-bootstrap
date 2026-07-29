@@ -364,7 +364,11 @@ Wildcard cert `*.bnei.dev` via Traefik ACME HTTP-01 (§4 above).
 - Hubble for Cilium L3/L4 observability.
 - Loki + Promtail for centralized logging (under consideration, not
   yet committed).
-- Alertmanager for critical alerts (Postgres down, disk full, etc.).
+- Alertmanager for critical alerts, routed to a Discord channel webhook via
+  its native `slack_configs` receiver (see
+  `gitops/platform/values/prometheus/values.yaml`). Postgres-down/disk-full
+  rules still need to be authored — the receiver/route plumbing is what's
+  implemented so far.
 
 ---
 

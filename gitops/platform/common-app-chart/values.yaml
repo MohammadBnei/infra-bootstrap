@@ -32,6 +32,34 @@ resources: {}
 # limits:
 #   memory: 256Mi
 
+# Namespace-wide fallback bound so an app that skips resources: above
+# doesn't end up fully unbounded — real risk on k8s-worker-02 (4vCPU/8GB,
+# shared with pg02 + nfs-storage). default/defaultRequest only fill the gap
+# for containers that don't set resources: themselves; max caps everyone,
+# including apps that do, as a backstop against a typo'd limit. On by
+# default — disable per-app only for a specific reason (e.g. the
+# GPU-passthrough worker's actual GPU workload).
+limitRange:
+  enabled: true
+  default:
+    cpu: 500m
+    memory: 512Mi
+  defaultRequest:
+    cpu: 100m
+    memory: 128Mi
+  max:
+    cpu: "2"
+    memory: 4Gi
+
+# PodDisruptionBudget — opt-in, NOT on by default. A PDB with
+# minAvailable >= replicaCount on the default single-replica app blocks
+# `kubectl drain`/node upgrades forever — only enable for apps actually
+# running replicaCount > 1.
+podDisruptionBudget:
+  enabled: false
+  minAvailable: null
+  maxUnavailable: 1
+
 # Raw env vars: [{name, value}] or [{name, valueFrom: {secretKeyRef: {name, key}}}]
 env: []
 

@@ -27,3 +27,6 @@ oneOffJobs:
   dbCheck:
     image:
       repository: ghcr.io/example/ci-check-job
+
+podDisruptionBudget:
+  enabled: true
