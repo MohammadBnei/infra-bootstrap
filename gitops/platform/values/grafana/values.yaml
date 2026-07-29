@@ -67,11 +67,145 @@ datasources:
       # sets the same uid on Pigsty's own bundled Grafana instance.
       uid: ds-prometheus
 
+    # Loki (gitops/platform/values/loki/values.yaml), SingleBinary mode.
+    # Chart fullname not confirmed until first sync — likely "platform-loki"
+    # since the chart name equals the release name (unlike kube-prometheus-
+    # stack's truncated "platform-prometheus-kube-p-*" above). Confirmed
+    # live: `kubectl get svc -n monitoring`.
+    - name: Loki
+      type: loki
+      url: http://platform-loki.monitoring.svc.cluster.local:3100
+      isDefault: false
+      uid: ds-loki # fixed, not auto-generated — referenced by the alert rule below
+
 # IngressRoute: gitops/bootstrap/grafana-ingressroute.yaml (Traefik
 # IngressRoute, ADR-0001 — not Gateway API/HTTPRoute).
 grafana.ini:
   server:
     root_url: https://grafana.bnei.dev
+
+# Mounts the K8s Secret produced by the sibling Alertmanager branch
+# (feat/alertmanager-discord-resource-governance)'s
+# gitops/bootstrap/alertmanager-discord-secret.yaml — NOT owned by this
+# branch, do not duplicate that InfisicalSecret CR here.
+#
+# KNOWN CROSS-BRANCH DEPENDENCY: this branch's Grafana pod will get stuck
+# in ContainerCreating if the `alertmanager-discord-webhook` Secret doesn't
+# exist in ns monitoring yet (missing secret mount fails pod scheduling,
+# it does not degrade gracefully). Deploy this branch together with, or
+# after, the Alertmanager branch — never alone first.
+extraSecretMounts:
+  - name: discord-webhook-secret-mount
+    secretName: alertmanager-discord-webhook
+    defaultMode: 0440
+    mountPath: /etc/secrets/discord
+    readOnly: true
+
+# Dynamic per-app alert rules: watches every namespace (user apps each
+# live in their own, not just `monitoring`) for ConfigMaps labeled
+# grafana_alert: "1" and loads them as extra alert-provisioning files
+# alongside the static ones below. Rendered by common-app-chart's
+# logAlerts values block (gitops/platform/common-app-chart/values.yaml +
+# templates/grafana-alertrules.yaml) — an app declares its own rules from
+# its own repo without touching this file. Read-only ConfigMap list/watch
+# across all namespaces (not Secrets) — standard for this chart's sidecar
+# family (same mechanism dashboards/datasources already could use), low
+# blast radius, but confirm the resulting ClusterRole after first sync
+# (`kubectl get clusterrole -l app.kubernetes.io/instance=platform-grafana`)
+# rather than assuming the chart wires it up exactly as expected.
+sidecar:
+  alerts:
+    enabled: true
+    label: grafana_alert
+    labelValue: "1"
+    searchNamespace: ALL
+    resource: configmap
+
+# Alerting-as-code: contact point, notification policy, and one platform-
+# wide starter rule stay static (same file-provisioning pattern as
+# datasources/dashboards above) — these are platform-owned, authored once,
+# here. Per-app rule *groups* arrive dynamically via the sidecar above;
+# both feed the same alerting engine, no conflict between the two.
+#
+# Contact point uses Grafana's native "slack" type (NOT "discord") against
+# the reused webhook's /slack-suffixed URL: that suffix is baked into the
+# secret specifically for Alertmanager's slack_configs receiver, which is
+# how it talks to Discord with no adapter container (see
+# alertmanager-discord-secret.yaml's header comment). Grafana's own
+# "discord" contact-point type sends Discord's native JSON shape, which
+# would be the wrong payload format against that same /slack endpoint — so
+# this uses the same Slack-compatibility trick from Grafana's side.
+# NEEDS A RUNTIME SMOKE TEST: use Grafana's contact-point "Test" button
+# and confirm a message actually lands in Discord — this is a design call
+# made from first principles, not confirmed against Grafana's own docs.
+# The $__file{} secure-setting interpolation below also needs the same
+# smoke test (confirm it resolves to the mounted file's contents rather
+# than being read as a literal string).
+alerting:
+  contactpoints.yaml:
+    apiVersion: 1
+    contactPoints:
+      - orgId: 1
+        name: discord
+        receivers:
+          - uid: discord-webhook
+            type: slack
+            settings:
+              recipient: "#alerts" # arbitrary, ignored by Discord's Slack-compat endpoint, required by the receiver's settings schema
+            secureSettings:
+              url: $__file{/etc/secrets/discord/webhook-url}
+
+  policies.yaml:
+    apiVersion: 1
+    policies:
+      - orgId: 1
+        receiver: discord
+        group_by: ["alertname"]
+        group_wait: 30s
+        group_interval: 5m
+        repeat_interval: 4h
+
+  rules.yaml:
+    apiVersion: 1
+    groups:
+      - orgId: 1
+        name: gitops-log-alerts
+        folder: GitOps Alerts
+        interval: 1m
+        rules:
+          - uid: log-error-rate-spike
+            title: Log error-rate spike
+            condition: C
+            for: 5m
+            noDataState: OK
+            execErrState: Alerting
+            labels:
+              severity: warning
+            annotations:
+              summary: "Elevated error-level log rate: {{ $labels.namespace }}/{{ $labels.pod }}"
+            data:
+              - refId: A
+                datasourceUid: ds-loki
+                relativeTimeRange:
+                  from: 300
+                  to: 0
+                model:
+                  queryType: range
+                  expr: 'sum by (namespace, pod) (rate({namespace=~".+"} |~ "(?i)error" [5m]))'
+                  intervalMs: 60000
+                  maxDataPoints: 43200
+              - refId: C
+                datasourceUid: __expr__
+                model:
+                  type: threshold
+                  expression: A
+                  conditions:
+                    - evaluator:
+                        type: gt
+                        # ~1 error-level line every 2s sustained over the 5m
+                        # window — starting point, not tuned per-app; refine
+                        # once real log volume is visible.
+                        params: [0.5]
 
 # Dashboards as code: the chart's own file-provisioning (no sidecar
 # container, no extra RBAC needed) — add a JSON dashboard under the
