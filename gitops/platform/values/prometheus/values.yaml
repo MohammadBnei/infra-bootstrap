@@ -3,9 +3,27 @@
 #
 # Migrated from k8s-cluster/prometheus/values.yml — trim to what's actually needed.
 
-# Disable components managed elsewhere or not needed
+# Alertmanager posts to a Discord channel webhook via its /slack
+# compatibility suffix (baked into the secret's templated value in
+# gitops/bootstrap/alertmanager-discord-secret.yaml) — native
+# slack_configs receiver, no adapter container needed.
 alertmanager:
-  enabled: false
+  enabled: true
+  alertmanagerSpec:
+    secrets:
+      - alertmanager-discord-webhook
+  config:
+    route:
+      receiver: discord
+      group_by: ["alertname"]
+      group_wait: 30s
+      group_interval: 5m
+      repeat_interval: 4h
+    receivers:
+      - name: discord
+        slack_configs:
+          - api_url_file: /etc/alertmanager/secrets/alertmanager-discord-webhook/webhook-url
+            send_resolved: true
 
 # Grafana is deployed as a separate platform app
 grafana:
