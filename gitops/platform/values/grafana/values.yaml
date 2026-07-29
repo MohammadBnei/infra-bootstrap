@@ -12,8 +12,16 @@ persistence:
 # one pod can attach the volume at a time — Multi-Attach error every time this
 # ConfigMap changes (e.g. adding a dashboard) and forces a rollout. Recreate
 # kills the old pod first.
+# rollingUpdate: null is required, not just omitted — the live Deployment
+# still carries a server-defaulted {maxSurge: 25%, maxUnavailable: 25%}
+# from when this was RollingUpdate. A patch that sets only `type` merges
+# into the existing strategy object instead of replacing it, leaving
+# rollingUpdate populated alongside type: Recreate, which the API rejects
+# ("may not be specified when strategy type is 'Recreate'"). Explicit null
+# forces the patch to clear that leftover field.
 deploymentStrategy:
   type: Recreate
+  rollingUpdate: null
 
 # Admin credentials from K8s Secret (created via InfisicalSecret CR, see
 # gitops/bootstrap/grafana-admin-secret.yaml)
