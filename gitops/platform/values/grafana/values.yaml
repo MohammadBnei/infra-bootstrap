@@ -1594,7 +1594,8 @@ dashboards:
                 "enableLogDetails": true,
                 "sortOrder": "Descending",
                 "showControls": true,
-                "controlsStorageKey": "app-logs-panel-controls"
+                "controlsStorageKey": "app-logs-panel-controls",
+                "displayedFields": ["app", "___LOG_LINE_BODY___"]
               },
               "targets": [
                 {
