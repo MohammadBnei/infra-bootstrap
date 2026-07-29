@@ -45,6 +45,19 @@ loki:
     # is set but never enforced and the PVC just fills up silently.
     delete_request_store: filesystem
 
+# The chart's own validate.yaml rejects a nonzero singleBinary.replicas
+# alongside any nonzero SimpleScalable-mode component replica (write/read/
+# backend all default to 3 in the chart) — confirmed live: ArgoCD's
+# comparison failed with "You have more than zero replicas configured for
+# both the single binary and simple scalable targets." SingleBinary mode
+# needs these explicitly zeroed, not just left at their chart defaults.
+write:
+  replicas: 0
+read:
+  replicas: 0
+backend:
+  replicas: 0
+
 singleBinary:
   replicas: 1
   persistence:
@@ -69,8 +82,12 @@ monitoring:
     enabled: false # no self-scraping via kube-prometheus-stack yet — can flip on later
   selfMonitoring:
     enabled: false # pulls in Grafana Agent Operator CRDs this cluster doesn't have
-  lokiCanary:
-    enabled: false
+# lokiCanary is a top-level key in this chart, NOT nested under monitoring:
+# — confirmed via `helm show values`. Nesting it there (an earlier version
+# of this file did) is a silent no-op: Helm accepts unknown keys without
+# error, so the canary DaemonSet still deployed despite looking disabled.
+lokiCanary:
+  enabled: false
 chunksCache:
   enabled: false # memcached sidecar — not worth it at this log volume
 resultsCache:
