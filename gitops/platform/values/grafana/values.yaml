@@ -135,12 +135,18 @@ sidecar:
 # "discord" contact-point type sends Discord's native JSON shape, which
 # would be the wrong payload format against that same /slack endpoint — so
 # this uses the same Slack-compatibility trick from Grafana's side.
-# NEEDS A RUNTIME SMOKE TEST: use Grafana's contact-point "Test" button
-# and confirm a message actually lands in Discord — this is a design call
-# made from first principles, not confirmed against Grafana's own docs.
-# The $__file{} secure-setting interpolation below also needs the same
-# smoke test (confirm it resolves to the mounted file's contents rather
-# than being read as a literal string).
+# CONFIRMED LIVE (2026-07-29, incident): `url` under secureSettings makes
+# this chart's Grafana version (11.4.0) reject the contact point outright
+# at startup — "token must be specified when using the Slack chat API" —
+# CrashLoopBackOff, real outage, not a cosmetic warning. Reproduced and
+# fixed against a real local Grafana 11.4.0 container before reapplying
+# here: `url` has to live under plain `settings`, not `secureSettings`,
+# for the "slack" integration type in this version. Grafana still treats
+# it as sensitive internally (redacted in API responses) despite the
+# placement. $__file{} interpolation there is confirmed working too — a
+# local test rule dispatched a real Slack-formatted POST to the exact
+# URL resolved from the mounted secret file, verified via a network
+# capture, not just a lack-of-crash inference.
 alerting:
   contactpoints.yaml:
     apiVersion: 1
@@ -152,7 +158,6 @@ alerting:
             type: slack
             settings:
               recipient: "#alerts" # arbitrary, ignored by Discord's Slack-compat endpoint, required by the receiver's settings schema
-            secureSettings:
               url: $__file{/etc/secrets/discord/webhook-url}
 
   policies.yaml:
