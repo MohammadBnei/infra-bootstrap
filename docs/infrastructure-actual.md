@@ -381,10 +381,12 @@ certainly no longer exists as described.)*
 - **pg_exporter** running on Postgres VM (user `dbuser_monitor`)
 - **No node-level monitoring** on hosts (no node_exporter)
 - **Centralized logging is live**: Loki (SingleBinary, filesystem storage)
-  + Grafana Alloy (DaemonSet, ships every node's container logs) — see
-  ADR-0027. Grafana's "App Logs" dashboard gives namespace/level/text-search
-  filtering over it; `common-app-chart`'s `logAlerts:` values block lets a
-  user app declare its own Loki-based alert rules, picked up dynamically by
+  + Grafana Alloy (DaemonSet, tails every node's container logs directly
+  off `/var/log/pods` — hostPath file tailing, not the kubelet API, since
+  2026-07-29/PR #67) — see ADR-0027 and ARCHITECTURE.md §9. Grafana's
+  "App Logs" dashboard gives namespace/level/text-search filtering over
+  it; `common-app-chart`'s `logAlerts:` values block lets a user app
+  declare its own Loki-based alert rules, picked up dynamically by
   Grafana's alerts sidecar. A cluster-wide starter alert (log error-rate
   spike) routes to the same Discord contact point Alertmanager uses.
 

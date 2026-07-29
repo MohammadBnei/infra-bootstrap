@@ -50,12 +50,16 @@ implementing (PRs #54–#57):
   nonzero `singleBinary.replicas` — not just left at chart defaults (all
   default to 3).
 - **Grafana Alloy**, DaemonSet, logs-only config today (`discovery.kubernetes`
-  → `discovery.relabel` → `loki.source.kubernetes` → `loki.write`) —
+  → `discovery.relabel` → `local.file_match` → `loki.source.file` →
+  `loki.process` (`stage.cri`) → `loki.write`) —
   `gitops/platform/values/alloy/values.yaml`. Picked specifically because
   OTel instrumentation (traces/metrics) is on this project's roadmap;
   choosing Alloy now avoids a second agent migration later. OTLP receiver
   components aren't wired up yet (YAGNI — nothing sends OTLP today), but
-  the same config file is where they'd go.
+  the same config file is where they'd go. See ARCHITECTURE.md §9 for the
+  detailed pipeline diagram — the original implementation used
+  `loki.source.kubernetes` (kubelet API proxy) instead of hostPath file
+  tailing; switched 2026-07-29, see Consequences below.
 - **Grafana-native alerting**, not Loki's own Ruler and not routed through
   k8s Alertmanager — alert rules query the Loki datasource directly via
   Grafana's unified alerting, routing through the same Discord contact
@@ -101,3 +105,19 @@ implementing (PRs #54–#57):
 - Retention is 14d (`compactor.retention_enabled` +
   `delete_request_store: filesystem`), tunable; PVC is 20Gi, ~60Gi raw
   disk once Longhorn's default 3x replication is accounted for.
+- **Update 2026-07-29** (PR #67): `loki.source.kubernetes` proxies log
+  reads through the kubelet API. When a pod is deleted — this cluster's
+  CI-driven app namespaces redeploy frequently — its tailer goroutine
+  could leak instead of tearing down, then loop forever re-requesting the
+  now-garbage-collected container's log and forwarding the kubelet's
+  literal `unable to retrieve container logs for containerd://<id>` error
+  text into Loki as if it were real application output (confirmed live
+  via a direct Loki query — 15+ duplicate garbage lines under a dead
+  pod's label set, polluting any query scoped to that namespace). Fixed
+  by switching to `local.file_match` + `loki.source.file` (hostPath
+  `/var/log/pods` tailing, filtered per-node via the chart's built-in
+  `K8S_NODE_NAME` env var) — this never touches the kubelet API, so a
+  deleted pod's log file just disappears instead of erroring. Also
+  bumped the alloy chart `0.12.0` → `1.11.0` while touching this file
+  (checked: no breaking changes in that range affect any component used
+  here). See ARCHITECTURE.md §9's whitebox section for the full pipeline.

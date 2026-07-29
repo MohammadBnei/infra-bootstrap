@@ -46,11 +46,18 @@ graph TD
         PG1 -- streaming replication --> PG2
     end
 
+    subgraph Obs["Observability"]
+        Alloy["Alloy — DaemonSet<br/>(black box, see §9)"]
+        Loki[Loki — log store]
+        Alloy --> Loki
+    end
+
     VM1 --> K8s
     Apps --> Traefik
     K8s --> GitOps
     VM2 --> Pigsty
     Apps -. reads/writes .-> Pigsty
+    Apps -. container logs .-> Alloy
 ```
 
 ---
@@ -380,6 +387,65 @@ Wildcard cert `*.bnei.dev` via Traefik ACME HTTP-01 (§4 above).
   `gitops/platform/values/prometheus/values.yaml`). Postgres-down/disk-full
   rules still need to be authored — the receiver/route plumbing is what's
   implemented so far.
+
+### Whitebox: Alloy's log-tailing pipeline
+
+The "Alloy" box in the diagram above is a DaemonSet — one pod per node,
+config in `gitops/platform/values/alloy/values.yaml`. Internally it's a
+5-stage pipeline, entirely file-based (no Kubernetes API calls to read log
+content — only to read pod *metadata*):
+
+```mermaid
+graph TD
+    DK["discovery.kubernetes<br/>role=pod — watches ALL pods cluster-wide<br/>(metadata only: namespace, name, uid, labels)"]
+    DR["discovery.relabel<br/>1. keep only __meta_kubernetes_pod_node_name == K8S_NODE_NAME<br/>2. derive namespace/pod/container/app/job labels<br/>3. build __path__ from pod uid + container name"]
+    LFM["local.file_match<br/>expands __path__ globs into concrete<br/>file targets, watches for create/delete"]
+    LSF["loki.source.file<br/>tails matched files from position markers"]
+    LP["loki.process<br/>stage.cri {} — strips CRI framing<br/>('&lt;time&gt; &lt;stream&gt; &lt;flag&gt; &lt;content&gt;')"]
+    LW["loki.write<br/>pushes to platform-loki:3100"]
+
+    DK --> DR --> LFM --> LSF --> LP --> LW
+```
+
+Why this shape, in order:
+
+1. **Node-local filtering first** (`discovery.relabel` step 1). Every
+   Alloy pod's `discovery.kubernetes` sees every pod in the cluster, but a
+   given node can only read log files that physically exist on its own
+   disk — so each Alloy instance immediately drops every target that
+   isn't scheduled locally, using `K8S_NODE_NAME` (injected by the Alloy
+   chart itself into every pod, not a value this repo sets) matched
+   against `__meta_kubernetes_pod_node_name`.
+2. **Path construction, not API lookup** (`discovery.relabel` step 3).
+   kubelet writes container logs to a fixed, predictable path for every
+   pod on containerd:
+   `/var/log/pods/<namespace>_<pod-name>_<pod-uid>/<container>/*.log`.
+   Alloy reconstructs this path directly from Kubernetes metadata
+   (`__meta_kubernetes_pod_uid` + `__meta_kubernetes_pod_container_name`,
+   globbing the `<namespace>_<pod-name>_` prefix) rather than asking the
+   API "give me this pod's logs." The whole node's `/var/log` is mounted
+   into the Alloy container read-only via the chart's `alloy.mounts.varlog:
+   true` (a hostPath volume) for this to be readable at all.
+3. **`local.file_match` + `loki.source.file`, not `loki.source.kubernetes`.**
+   This is the deliberate part: an earlier version of this pipeline used
+   `loki.source.kubernetes`, which proxies log reads through the kubelet
+   API instead of the filesystem. When a pod is deleted — this cluster's
+   CI-driven app namespaces redeploy constantly — that component's tailer
+   could leak instead of tearing down, then loop forever against a
+   container containerd had already garbage-collected, forwarding the
+   kubelet's literal `unable to retrieve container logs for
+   containerd://<id>` error text into Loki as if it were real application
+   output (see ADR-0027's 2026-07-29 update, PR #67). File-based tailing
+   doesn't have this failure mode: when a pod is deleted, its log file
+   simply stops existing, `local.file_match` drops the target cleanly,
+   and there's no API error body to ever misinterpret as log content.
+4. **`stage.cri` restores what the kubelet API used to do implicitly.**
+   Raw kubelet log files are CRI-framed (`2026-07-29T11:02:04Z stdout F
+   {"level":"info",...}` — timestamp, stream, partial/full flag, then the
+   actual line). `loki.source.kubernetes` stripped this automatically as
+   part of its API response; reading the file directly exposes it, so
+   `loki.process`'s `stage.cri {}` strips it back down to the real log
+   line + a `stream` label before `loki.write` pushes it to Loki.
 
 ---
 
