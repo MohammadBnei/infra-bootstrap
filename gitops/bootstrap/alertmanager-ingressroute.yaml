@@ -1,0 +1,27 @@
+# Alertmanager has no built-in auth (unlike Grafana), so it's gated by the
+# same shared basic-admin-auth Middleware pgweb uses — never expose it
+# without that middleware ref.
+#
+# Also fixes the "View in Alertmanager" links Discord alerts render with:
+# without externalUrl set (see gitops/platform/values/prometheus/values.yaml),
+# Alertmanager defaults that link to its internal ClusterIP DNS name, which
+# isn't reachable outside the cluster.
+apiVersion: traefik.io/v1alpha1
+kind: IngressRoute
+metadata:
+  name: alertmanager
+  namespace: monitoring
+spec:
+  entryPoints:
+  - websecure
+  routes:
+  - kind: Rule
+    match: Host(`alertmanager.bnei.dev`)
+    middlewares:
+    - name: basic-admin-auth
+      namespace: default
+    services:
+    - name: platform-prometheus-kube-p-alertmanager
+      port: 9093
+  tls:
+    certResolver: le
