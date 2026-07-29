@@ -20,6 +20,13 @@ alertmanager:
       group_interval: 5m
       repeat_interval: 4h
     receivers:
+      # Chart default route.routes silences the Watchdog heartbeat alert by
+      # sending it to a receiver literally named "null" — replacing
+      # receivers: as a list (Helm doesn't merge lists) drops the chart's
+      # own "null" receiver definition while that default route survives
+      # via map-merge, so it must be redeclared here or Alertmanager
+      # refuses to start ("undefined receiver \"null\" used in route").
+      - name: "null"
       - name: discord
         slack_configs:
           - api_url_file: /etc/alertmanager/secrets/alertmanager-discord-webhook/webhook-url
