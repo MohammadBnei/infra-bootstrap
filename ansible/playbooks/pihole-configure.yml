@@ -89,7 +89,12 @@
       - "192.168.1.199 garage.bnei.lan"
       - "192.168.1.198 nfs-storage.bnei.lan"
       - "192.168.1.110 k9s-dashboard.bnei.lan"
-      - "192.168.1.180 k8s.bnei.lan"
+      - "192.168.1.180 k8s.bnei.lan" # kube-vip control-plane VIP, ADR-0016 — use this, not any individual node below, for anything that needs the API server
+      - "192.168.1.201 k8s-cp-01.bnei.lan"
+      - "192.168.1.202 k8s-worker-01.bnei.lan"
+      - "192.168.1.203 k8s-worker-02.bnei.lan"
+      - "192.168.1.204 k8s-cp-02.bnei.lan"
+      - "192.168.1.206 k8s-cp-03.bnei.lan"
 
   tasks:
     # -------------------------------------------------------------------

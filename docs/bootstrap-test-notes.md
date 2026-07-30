@@ -488,3 +488,88 @@ bug (app-level runtime validation, not a Helm templating error) — that
 class needs an actual `docker run` against the rendered config, a bigger
 CI lift, probably only worth it for charts with non-trivial runtime
 config (secrets, notification channels).
+
+## 2026-07-30 — 3-CP/etcd HA rollout, kube-vip, Pi-hole bootstrap
+
+Same session, four separate real-run bugs, none of them foreseeable from
+the design alone (ADR-0016/0017's HA plan, `ansible/README.md`'s Pi-hole
+section). Also resized `k8s-worker-02` (4→6 vCPU, 8→16GB — server1 had
+most of its RAM idle) and added `k8s-cp-02`/`k8s-cp-03` for the 3-CP/etcd
+topology (2 members on the stable hosts, `.165` a deliberate minority
+voter since it's the host that gets rebooted for gaming).
+
+- **`kubespray-venv` didn't actually exist**, despite being documented
+  above as one-time-done reference setup. First `cluster.yml` attempt
+  used the Homebrew `ansible-playbook` on `PATH` (ansible-core 2.21.1) and
+  failed immediately at kubespray's own version-assertion task ("must be
+  between 2.18.0 and 2.19.0"). Recreated fresh:
+  `python3.12 -m venv kubespray-venv && pip install -r kubespray/requirements.txt`
+  (pins `ansible==11.13.0` → ansible-core 2.18.18). Lesson: this doc
+  documented the *requirement*, not a durable artifact — don't assume a
+  past session's local tooling setup survived, verify (`ansible-playbook
+  --version`) before trusting it.
+- **`local_file.kubespray_inventory` needs its own apply — recurrence of
+  the 2026-07-28 gotcha, hit again anyway.** The `-target`-scoped apply
+  for `k8s-cp-02`/`k8s-cp-03` (deliberately narrow, to avoid touching the
+  already-live `k8s-cp-01`/`k8s-worker-01`/`k8s-worker-02`) created the
+  VMs but left `inventory/ukubi/hosts.yaml` stale — caught by a
+  `terraform plan -target=local_file.kubespray_inventory` showing a
+  pending diff before `cluster.yml` ran against a `kube_control_plane`
+  group that didn't yet include the new nodes. Same fix as before
+  (`apply -target=local_file.kubespray_inventory`), but worth noting this
+  is a *repeatable* footgun of the `-target`-for-safety pattern, not a
+  one-off — check this every time a `k8s_nodes` entry is added via
+  `-target`.
+- **CoreDNS/nodelocaldns forward `policy` defaults to random, not
+  sequential** — added `upstream_dns_servers: [192.168.1.55, 1.1.1.1]`
+  (Pi-hole first, public fallback) so in-cluster pods could resolve
+  `bnei.lan` names (the Pigsty VIP, etc). First live test
+  (`kubectl run ... nslookup postgres.bnei.lan`) came back `NXDOMAIN` —
+  looked like a config or propagation-delay problem at first (tried a
+  `kubectl rollout restart daemonset nodelocaldns` on that theory, no
+  change). Root cause, found by testing the same query 5x in a row and
+  seeing it flip between success and `NXDOMAIN`: CoreDNS's `forward`
+  plugin's default policy picks an upstream **at random** per query, and
+  `1.1.1.1` gives a perfectly valid (if unhelpful) `NXDOMAIN` for a TLD
+  it's never heard of — a real, healthy answer, not a failure, so no
+  failover ever triggers. Fixed with kubespray's
+  `dns_upstream_forward_extra_opts: {policy: sequential}` (applies to
+  both CoreDNS and nodelocaldns, confirmed in
+  `roles/kubernetes-apps/ansible/defaults/main.yml`). Verified with 5
+  repeated in-cluster lookups post-fix, all correct, plus confirmed
+  public-domain resolution (`github.com`) still worked through the same
+  path. **General lesson**: a single successful test after a DNS/LB
+  config change proves nothing if the failure mode is *probabilistic*
+  upstream selection — repeat the test.
+- **`nmcli`'s `state: present` only touches the connection profile, not
+  the live interface.** Pinning Pi-hole's DHCP-dynamic IP static via
+  `community.general.nmcli` showed `changed` and set `ipv4.method:
+  manual` correctly, but `ip addr show` still showed the address as
+  `dynamic` afterward — would only have actually taken effect on next
+  reboot, silently. Added an explicit `nmcli device reapply eth0` step
+  (gated on the nmcli task reporting changed) to confirm it live instead
+  of trusting "correct on next reboot, unconfirmed until then."
+- **`pihole-FTL --config -q <key>` doesn't emit real JSON for array
+  values** (`[ 1.1.1.1, 1.0.0.1 ]`, unquoted elements) — a read-then-
+  compare idempotency check (`current.stdout | from_json`) for
+  `dns.hosts`/`dns.upstreams` worked on the very first run purely by
+  luck (empty array parses as valid JSON regardless of the quoting bug)
+  and broke on the second run once those lists were populated. Fixed by
+  dropping the read-then-compare entirely and setting both
+  unconditionally every run — simpler than parsing FTL's bespoke format,
+  and re-setting an unchanged value is harmless.
+- **Wrong assumption about Pi-hole's SSH key**: guessed
+  `~/.ssh/id_ed_pi` would be the dedicated local keypair (matching
+  `id_garage`/`id_nfs`'s convention) — wrong key, connection refused.
+  Unlike Garage/NFS (Terraform-provisioned, so their key's private half
+  naturally exists locally), the Pi is physical hardware set up by hand;
+  the actual working credential was Infisical's `SSH_PI4_KEY`. Fixed the
+  inventory/README to fetch-from-Infisical rather than assume a local
+  file.
+
+End state: `kubectl get nodes` shows all 5 nodes `Ready` (3 control-plane,
+2 worker), kube-vip's VIP (`192.168.1.180`) live and bound with both it
+and `k8s.bnei.lan` in the API server's cert SANs (confirmed via
+`openssl s_client` + `curl -k https://192.168.1.180:6443/version`),
+Pi-hole static/authoritative for `bnei.lan` with correct in-cluster
+forwarding confirmed by repeated live lookups.

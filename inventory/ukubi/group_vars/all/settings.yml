@@ -1,2 +1,25 @@
 kubelet_fail_swap_on: false
 etcd_deployment_type: kubeadm
+
+# CoreDNS's upstream forward, for anything outside the cluster's own
+# service domain — Pi-hole first so pods can resolve bnei.lan (the
+# Pigsty VIP, k9s-dashboard, etc.), 1.1.1.1 as a fallback so cluster DNS
+# doesn't go fully dark if Pi-hole itself is down. Deliberately explicit
+# rather than inheriting the node's own resolv.conf (Freebox) — DB
+# connectivity depends on this, not worth an extra hop for something
+# this critical.
+upstream_dns_servers:
+  - 192.168.1.55
+  - 1.1.1.1
+
+# Without this, CoreDNS/nodelocaldns's forward plugin picks an upstream
+# at random per query (its own default policy) — confirmed live: ~half
+# of in-cluster bnei.lan lookups got a real NXDOMAIN back from 1.1.1.1
+# (a legitimate answer from a healthy server that's simply never heard
+# of bnei.lan, so no failover kicks in) instead of ever reaching Pi-hole.
+# `sequential` makes it always try 192.168.1.55 first, only falling to
+# 1.1.1.1 if Pi-hole itself is actually unreachable. Applies to both
+# CoreDNS and nodelocaldns (same kubespray var, per
+# roles/kubernetes-apps/ansible/defaults/main.yml).
+dns_upstream_forward_extra_opts:
+  policy: sequential
