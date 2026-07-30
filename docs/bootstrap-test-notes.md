@@ -1000,3 +1000,103 @@ single member down, the actual goal of ADR-0029. **Not yet done**: the
 real proof — stop `.207` (current Leader) and confirm `.205` promotes
 automatically with the VIP following, while DCS quorum survives on the
 remaining 2 members. That's the next session's first priority.
+
+## 2026-07-30 — Real `.165` outage test: Postgres/etcd/K8s HA all confirmed live, several real gaps found and fixed
+
+User physically powered down `.165` for a real end-to-end test of
+everything built this session. Results, in order of what broke and what
+didn't:
+
+**Postgres/etcd: full success.** `.205` auto-promoted to Leader (timeline
+25→26, real Patroni failover, no manual intervention), the Pigsty VIP
+(`.232`) followed automatically, and etcd quorum survived on `.205`+`.197`
+(2 of 3) the whole time. This is the actual proof ADR-0029 set out to get.
+
+**K8s: full success, but a tooling gap looked like a cluster failure.**
+`k8s-cp-02`/`k8s-cp-03`/`k8s-worker-02` stayed `Ready`, kube-vip's VIP
+(`.180`) kept serving the API throughout. But `kubectl --kubeconfig
+/etc/kubernetes/admin.conf` on a surviving CP node failed with "no route
+to host" — that file hardcodes `k8s-cp-01`'s own IP (`.201`, on `.165`)
+as the `server:` address, not the VIP. `--server=https://192.168.1.180:6443`
+override fixed it immediately; the cluster itself was never actually
+down. Worth fixing `admin.conf` generation to target the VIP by default
+in a future session.
+
+**Real bug found: Infisical's own `REDIS_URL`/`DB_CONNECTION_URI` were
+stale, hardcoded IPs — a gap this session's own Redis relocation created
+and missed.** When Redis moved off `.207` earlier today, the check for
+consumers only looked at `gitops/platform/values/infisical/values.yaml`
+(`redis: enabled: false` — the Helm chart's *bundled* subchart toggle)
+and concluded Infisical wasn't affected. Wrong: Infisical's actual Redis
+connection is a separate env var, sourced from
+`ansible/playbooks/register-repos.env` (`REDIS_URL=redis://:Redis.Main@192.168.1.207:6379`)
+and rendered into the `infisical-secrets` K8s Secret — never touched
+during the relocation. Once `.165` went down, this hardcoded dead IP
+made the whole Infisical backend 503 (the exact same "backend runs on
+this same cluster" pattern from an earlier incident, but this time
+Postgres itself was fully failed-over and fine — this was a
+Redis-reference bug, not a repeat of the DCS gap). Also updated
+`DB_CONNECTION_URI` to use `postgres.bnei.lan` instead of the raw VIP IP,
+and `REDIS_URL` to `redis.bnei.lan`, matching the "DNS name, not a
+hardcoded IP" pattern already used elsewhere — both `register-repos.env`
+and `k8s-cluster/infisical/.env.secret` updated, and the live
+`infisical-secrets` Secret patched + `platform-infisical-backend`
+restarted directly (full `register-repos.yml` run wasn't possible: it
+targets `k8s-cp-01`, which was down, and needs unrelated prerequisites —
+`GITHUB_APPS_USERNAME`/`PAT` — not set in this environment). Confirmed
+fixed: `https://infisical.bnei.dev` back to `200`.
+
+**Real gap found: Grafana got stuck `Multi-Attach error for volume ...
+already used by pod(s)`.** This is not a bug specific to this cluster —
+it's how Kubernetes always behaves when a node with CSI-attached
+(Longhorn) storage goes away *ungracefully*. The default node-eviction
+timer reschedules pods (confirmed: new pods did get created on
+`k8s-worker-02` for everything, including Longhorn's own CSI sidecars,
+most of which had been concentrated on the two dead nodes) but never
+force-detaches a `ReadWriteOnce` volume from a node it can't confirm is
+gone — so Grafana's new pod couldn't attach the same PVC until `.165`
+came back. Chose not to force it via the K8s 1.28+ "out-of-service" taint
+this time (`.165` was expected back soon); instead built a permanent
+fix — see below.
+
+**Real gap found: the Freebox never knew about `bnei.lan` at all.**
+`bnei.lan` was only ever resolvable by querying Pi-hole directly or from
+inside the K8s cluster (CoreDNS forwards there) — any LAN device using
+the Freebox's own DNS (the default) got NXDOMAIN. User fixed this by
+pointing the Freebox's DHCP-handed-out DNS server at Pi-hole
+(`192.168.1.55`) directly, confirmed working on the operator Mac
+afterward (`scutil --dns` showed the new server, `k8s.bnei.lan` resolved
+clean). **Still open**: the `k9s-dashboard` LXC (`192.168.1.110`) still
+failed to resolve `bnei.lan` even after the Freebox fix — its
+`/etc/resolv.conf` is statically injected by Proxmox itself at the LXC
+level (`# --- BEGIN PVE ---` marker), completely bypassing DHCP-handed
+DNS. No Terraform `dns`/`nameserver` override exists for this container.
+Fix (`pct set 102 --nameserver 192.168.1.55 --searchdomain bnei.lan` on
+server1) is straightforward but wasn't applied this session — blocked on
+SSH access to `server1`'s own PVE host (port 2222 refused, port 22
+needed a passphrase not available, and Infisical was down at the exact
+moment this was attempted). Revisit next session.
+
+**Permanent fix built: `.165` now drains itself before every graceful
+shutdown.** New `ansible/playbooks/drain-165-configure.yml` installs a
+systemd oneshot service (`drain-165.service`, ordered `Before=shutdown.target`,
+`After=network-online.target`) that runs `kubectl drain k8s-cp-01
+k8s-worker-01` on every reboot/shutdown, using a dedicated
+least-privilege kubeconfig (`node-drainer` ServiceAccount,
+`gitops/bootstrap/node-drainer-rbac.yaml` — cordon + evict only, never
+cluster-admin, since this credential lives on a dual-boot gaming host
+rather than a dedicated infra host). This should make the *next* `.165`
+reboot fully clean — pods evicted and volumes detached before the node
+disappears, no Multi-Attach, no manual taint needed. Installed and
+verified live (`systemctl status` active/enabled) but not yet proven
+through a real reboot cycle — that's the actual test for next time
+`.165` goes down.
+
+**General lesson, same shape as several earlier ones this session**: a
+"we checked the consumers" pass is only as good as where you looked —
+the Infisical Redis-reference bug survived the original relocation
+specifically because the check stopped at one config file
+(`values.yaml`) without realizing a *different* file
+(`register-repos.env`) fed the same logical dependency through a
+separate path. When relocating any shared credential/endpoint, grep the
+whole repo for the old value, not just the "obvious" values file.

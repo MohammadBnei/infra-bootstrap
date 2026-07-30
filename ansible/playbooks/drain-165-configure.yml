@@ -1,0 +1,238 @@
+#!/usr/bin/env ansible-playbook
+---
+# Configures .165 (the PVE host that dual-boots into Windows for gaming) to
+# automatically drain k8s-cp-01/k8s-worker-01 before every graceful
+# shutdown/reboot. Confirmed live 2026-07-30: an ungraceful .165 outage
+# left Longhorn volumes stuck Multi-Attach (Grafana's pod couldn't start on
+# another node while the old one, stuck on the dead node, still "held" the
+# volume) — Kubernetes' default node-eviction timer reschedules *pods* but
+# never force-detaches CSI volumes from a node it can't confirm is gone.
+# Draining *before* the node disappears avoids this entirely: pods get
+# evicted and volumes cleanly detached while the node is still reachable.
+# See docs/bootstrap-test-notes.md's 2026-07-30 entries and
+# gitops/bootstrap/node-drainer-rbac.yaml (the scoped RBAC this depends on).
+#
+# WHY A DEDICATED, NON-ADMIN CREDENTIAL
+# .165 is a dual-boot consumer OS, more exposed than the other infra hosts
+# — the kubeconfig this playbook installs there is deliberately scoped to
+# just `kubectl drain` (cordon a node, evict its pods), never cluster-admin.
+# The actual bearer token is minted live via `kubectl create token` and
+# never committed to git or printed to a terminal — this playbook writes it
+# straight into the target kubeconfig file.
+#
+# WHY A SYSTEMD SERVICE, NOT A /usr/lib/systemd/system-shutdown/ SCRIPT
+# Scripts in system-shutdown/ run *after* the network is already torn
+# down — too late to reach the cluster. A oneshot service ordered
+# `Before=shutdown.target` + `After=network-online.target` runs its
+# `ExecStop` *during* the shutdown sequence but before networking goes
+# away. `TimeoutStopSec` bounds how long systemd waits for it, so a hung
+# drain can't block a real shutdown indefinitely — worst case, it times
+# out and shutdown proceeds anyway (no worse than not draining at all).
+#
+# LIMITATION (accepted, not fixable from here): only fires on a graceful,
+# systemd-initiated shutdown/reboot — not a hard power-cut. Acceptable
+# since switching to Windows on this dual-boot host normally goes through
+# a real `reboot`/`shutdown`, not a cold power-off.
+#
+# PREREQUISITES
+# - gitops/bootstrap/node-drainer-rbac.yaml already applied (self-syncs
+#   via ADR-0021's bootstrap Application once merged to main).
+# - Root SSH access to .165 (PVE_SSH_PRIVATE_KEY from Infisical) AND to a
+#   reachable K8s control-plane node (this repo's ~/.ssh/id_k8s_vms, user
+#   `core`) simultaneously — two different keys, so run this via an
+#   ssh-agent with both loaded rather than a single
+#   ANSIBLE_PRIVATE_KEY_FILE override:
+#     ssh-agent bash -c '
+#       ssh-add /tmp/pve_root_key
+#       ssh-add ~/.ssh/id_k8s_vms
+#       ansible-playbook -i ansible/inventories/proxmox/hosts.yml \
+#         -l proxmox ansible/playbooks/drain-165-configure.yml
+#     '
+# - k8s_control_plane_host below must be a *currently reachable* CP node —
+#   deliberately hardcoded to k8s-cp-02 (server1) rather than k8s-cp-01
+#   (.165 itself — can't delegate to the host being configured to reach
+#   its own cluster membership before this playbook has even run).
+
+- name: Configure .165's pre-shutdown drain automation
+  hosts: proxmox
+  become: false
+  gather_facts: false
+  vars:
+    k8s_control_plane_host: 192.168.1.204 # k8s-cp-02, server1 — any reachable CP works, this one just isn't .165 itself
+    k8s_vip: 192.168.1.180
+    kube_version: v1.35.4
+    node_drainer_namespace: kube-system
+    node_drainer_sa: node-drainer
+    drain_nodes: [k8s-cp-01, k8s-worker-01] # both physically on .165
+
+  tasks:
+    - name: Fetch cluster CA cert (delegated to a live CP node)
+      delegate_to: "{{ k8s_control_plane_host }}"
+      remote_user: core
+      become: true
+      ansible.builtin.command:
+        argv:
+          - kubectl
+          - --kubeconfig=/etc/kubernetes/admin.conf
+          - config
+          - view
+          - --raw
+          - -o
+          - jsonpath={.clusters[0].cluster.certificate-authority-data}
+      register: ca_cert_result
+      changed_when: false
+
+    - name: Mint a long-lived scoped token for node-drainer (delegated)
+      delegate_to: "{{ k8s_control_plane_host }}"
+      remote_user: core
+      become: true
+      no_log: true
+      ansible.builtin.command:
+        argv:
+          - kubectl
+          - --kubeconfig=/etc/kubernetes/admin.conf
+          - --server=https://{{ k8s_vip }}:6443
+          - create
+          - token
+          - "{{ node_drainer_sa }}"
+          - -n
+          - "{{ node_drainer_namespace }}"
+          - --duration=87600h
+      register: token_result
+      changed_when: true
+
+    - name: Ensure /etc/k8s-drain exists
+      become: true
+      ansible.builtin.file:
+        path: /etc/k8s-drain
+        state: directory
+        mode: "0700"
+        owner: root
+        group: root
+
+    - name: Write the scoped kubeconfig
+      become: true
+      no_log: true
+      ansible.builtin.copy:
+        dest: /etc/k8s-drain/kubeconfig
+        mode: "0600"
+        owner: root
+        group: root
+        content: |
+          apiVersion: v1
+          kind: Config
+          clusters:
+          - name: ukubi-cluster
+            cluster:
+              server: https://{{ k8s_vip }}:6443
+              certificate-authority-data: {{ ca_cert_result.stdout }}
+          contexts:
+          - name: node-drainer
+            context:
+              cluster: ukubi-cluster
+              user: node-drainer
+          current-context: node-drainer
+          users:
+          - name: node-drainer
+            user:
+              token: {{ token_result.stdout }}
+
+    - name: Check whether kubectl is already installed
+      become: true
+      ansible.builtin.stat:
+        path: /usr/local/bin/kubectl
+      register: kubectl_stat
+
+    - name: Install kubectl (matching cluster version)
+      become: true
+      when: not kubectl_stat.stat.exists
+      ansible.builtin.get_url:
+        url: "https://dl.k8s.io/release/{{ kube_version }}/bin/linux/amd64/kubectl"
+        dest: /usr/local/bin/kubectl
+        mode: "0755"
+
+    - name: Write the drain script
+      become: true
+      ansible.builtin.copy:
+        dest: /usr/local/bin/drain-165.sh
+        mode: "0755"
+        owner: root
+        group: root
+        content: |
+          #!/bin/bash
+          # Drains k8s-cp-01/k8s-worker-01 (both hosted on this PVE node) before a
+          # graceful shutdown/reboot — run by systemd (drain-165.service), never
+          # by hand. Bounded by the calling systemd unit's TimeoutStopSec, but also
+          # self-bounds via --timeout so it never hangs indefinitely on its own.
+          #
+          # Uses a scoped kubeconfig (/etc/k8s-drain/kubeconfig, ServiceAccount
+          # node-drainer, RBAC: gitops/bootstrap/node-drainer-rbac.yaml) — cordon +
+          # evict only, not cluster-admin, since this credential lives on a
+          # dual-boot gaming host.
+          set -uo pipefail
+
+          export KUBECONFIG=/etc/k8s-drain/kubeconfig
+          LOG_TAG="drain-165"
+
+          logger -t "$LOG_TAG" "starting drain of {{ drain_nodes | join(', ') }}"
+
+          /usr/local/bin/kubectl drain {{ drain_nodes | join(' ') }} \
+            --ignore-daemonsets \
+            --delete-emptydir-data \
+            --force \
+            --timeout=75s
+
+          rc=$?
+          if [ "$rc" -eq 0 ]; then
+            logger -t "$LOG_TAG" "drain completed cleanly"
+          else
+            logger -t "$LOG_TAG" "drain exited $rc (timed out or partially failed) — proceeding with shutdown anyway"
+          fi
+
+          exit 0
+
+    - name: Write the systemd unit
+      become: true
+      ansible.builtin.copy:
+        dest: /etc/systemd/system/drain-165.service
+        mode: "0644"
+        owner: root
+        group: root
+        content: |
+          [Unit]
+          Description=Drain k8s-cp-01/k8s-worker-01 before this hypervisor shuts down
+          Documentation=file:///usr/local/bin/drain-165.sh
+          DefaultDependencies=no
+          Before=shutdown.target reboot.target halt.target
+          After=network-online.target
+          Wants=network-online.target
+          Conflicts=shutdown.target reboot.target halt.target
+
+          [Service]
+          Type=oneshot
+          RemainAfterExit=yes
+          ExecStart=/bin/true
+          ExecStop=/usr/local/bin/drain-165.sh
+          TimeoutStopSec=90
+
+          [Install]
+          WantedBy=multi-user.target
+
+    - name: Enable and start drain-165.service
+      become: true
+      ansible.builtin.systemd:
+        name: drain-165.service
+        daemon_reload: true
+        enabled: true
+        state: started
+
+#--------------------------------------------------------------#
+# Usage
+#--------------------------------------------------------------#
+# First run (or to rotate the token): see PREREQUISITES above.
+# Verify: ssh root@192.168.1.165 systemctl status drain-165.service
+# Test without a real reboot: ssh root@192.168.1.165 systemctl stop drain-165.service
+#   (this fires ExecStop — the actual drain — without shutting the host down;
+#   re-run `systemctl start drain-165.service` after, and remember to
+#   `kubectl uncordon k8s-cp-01 k8s-worker-01` once you're done testing).
+...

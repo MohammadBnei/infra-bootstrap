@@ -153,6 +153,25 @@ RTX 2070 SUPER at PCI `0b:00.0`, all 4 functions passed with
 toolkit inside the VM; NVIDIA Device Plugin via Helm; GPU workloads
 scheduled via taints/tolerations.
 
+### Pre-shutdown drain automation on `.165`
+
+A real, ungraceful `.165` outage (2026-07-30, see
+`docs/bootstrap-test-notes.md`) proved that Kubernetes' default
+node-eviction timer reschedules pods but never force-detaches CSI
+(Longhorn) volumes from a node it can't confirm is gone — a
+`ReadWriteOnce` PVC's pod got stuck `Multi-Attach error` until the node
+came back. Fix: `ansible/playbooks/drain-165-configure.yml` installs a
+systemd oneshot service on `.165` (`drain-165.service`, ordered
+`Before=shutdown.target`, `After=network-online.target`) that runs
+`kubectl drain k8s-cp-01 k8s-worker-01` on every graceful reboot/shutdown
+— pods evicted and volumes detached *before* the node disappears, not
+after. Uses a dedicated, least-privilege kubeconfig (`node-drainer`
+ServiceAccount, `gitops/bootstrap/node-drainer-rbac.yaml` — cordon +
+evict only), since this credential lives on a dual-boot gaming host
+rather than a dedicated infra host. Only fires on a graceful,
+systemd-initiated shutdown (not a hard power-cut) — accepted, since
+switching to Windows on this host normally goes through a real `reboot`.
+
 ### App stack
 
 The deployed app list is **not** duplicated here — it changes
