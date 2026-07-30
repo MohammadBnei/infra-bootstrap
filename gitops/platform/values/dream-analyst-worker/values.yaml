@@ -18,6 +18,9 @@ image:
 service:
   port: 8080 # unused (no HTTP server), required by the chart schema
 
+podLabels:
+  app.kubernetes.io/part-of: agent-fleet
+
 resources:
   requests:
     cpu: 250m
