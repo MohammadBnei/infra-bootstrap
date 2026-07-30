@@ -10,10 +10,14 @@
 > `ansible/inventories/proxmox/hosts.yml`). A full OS reinstall wipes
 > whatever ran directly on the prior Debian 12/libvirt install — §2's
 > "K8s nodes" row and §3's node table are now confirmed live (real QEMU
-> `ukubi-cluster` nodes, not the old libvirt ones). **Still not
-> re-verified this pass:** the NFS export in §5 and the HAProxy entry in
-> §7 (both hosted on server1's *old* OS, almost certainly gone too) —
-> treat those as needing a fresh state scan before relying on them.
+> `ukubi-cluster` nodes, not the old libvirt ones). **Resolved
+> 2026-07-30 (this pass):** §3's K8s cluster is now the real 3-CP/etcd
+> HA topology, confirmed live via `kubectl get nodes` + kube-vip; §4's
+> Postgres/etcd is now a real 3-node DCS quorum, confirmed live via
+> `etcdctl`/`patronictl` (ADR-0029). **Still not re-verified:** the NFS
+> export in §5 and the HAProxy entry in §7 (both hosted on server1's
+> *old* OS, almost certainly gone too) — treat those as needing a fresh
+> state scan before relying on them.
 
 This document describes the **current, as-is** state of the homelab infrastructure.
 For the target architecture, see [`../ARCHITECTURE.md`](../ARCHITECTURE.md).
@@ -54,8 +58,12 @@ For the target architecture, see [`../ARCHITECTURE.md`](../ARCHITECTURE.md).
     layout applied, `k8s-longhorn-backup`/`pg-backup` buckets + S3 keys
     created — see `ansible/playbooks/garage-configure.yml`)
 - Running VMs (Postgres):
-  - VMID 205 `pg01` (2 vCPU / 4GB / 40GB) — IP: 192.168.1.205 — Pigsty PG 18 primary
-  - VMID 207 `pg02` (2 vCPU / 4GB / 40GB) — IP: 192.168.1.207 — Pigsty PG 18 replica + Redis
+  - VMID 207 `pg02` (2 vCPU / 4GB / 40GB) — IP: 192.168.1.207 — Pigsty PG 18
+    **Leader/primary** (current live role — see ADR-0029, roles flipped
+    from the original static pg01/pg02 naming at some point via
+    unattended Patroni failover) + Redis + etcd DCS member (`etcd-1` of
+    3). `pg01` (VMID 205) is **no longer on this host** — migrated to
+    server1 2026-07-30, see §2/§4.
 - Template: VMID 9001 `ubuntu-24.04-ci-template` (Golden cloud-init
   template, rebuilt 2026-07-12 with qemu-guest-agent fix — see
   docs/bootstrap-test-notes.md). VMID 9000 is the original hand-created
@@ -132,8 +140,9 @@ is deliberately not vGPU-style sharing across multiple VMs.
 | Layer | Actual | Notes |
 | --- | --- | --- |
 | PVE nodes | 3 (proxmox .165, server1 .200, ex-laptop .161) | All reinstalled/joined the corosync cluster — see ADR-0020, ADR-0024 |
-| K8s nodes | 5 QEMU VMs, confirmed live 2026-07-30 via `pvesh`/PVE API | `k8s-cp-01`/`k8s-worker-01` (.165), `k8s-worker-02` (server1, resized to 6 vCPU/16GB), `k8s-cp-02` (server1, vmid 204), `k8s-cp-03` (ex-laptop, vmid 206) — last 2 just created via `terraform apply` (ADR-0017's 3-CP/etcd HA), **not yet joined** to the cluster, that needs a `cluster.yml` run (not `scale.yml`) |
-| Postgres | QEMU VMs on proxmox PVE (.165) | pg01 VMID 205 (.205) + pg02 VMID 207 (.207) |
+| K8s nodes | 5 QEMU VMs, **joined and confirmed live 2026-07-30 via `kubectl get nodes`** | 3 control-plane+etcd (`k8s-cp-01` `.165`/minority voter, `k8s-cp-02` server1, `k8s-cp-03` ex-laptop) + 2 workers (`k8s-worker-01` `.165`+GPU, `k8s-worker-02` server1) — real 3-CP/etcd HA per ADR-0017, fronted by kube-vip VIP `192.168.1.180`/`k8s.bnei.lan` (ADR-0016) |
+| Postgres | QEMU VMs split across 2 hosts | pg02 VMID 207 (.207, on `.165`) — **Leader**; pg01 VMID 205 (.205, migrated to server1 2026-07-30) — Replica. See §4 |
+| Postgres DCS (etcd) | 3-node quorum, **live 2026-07-30** | `etcd-1`/.207 (`.165`), `etcd-2`/.205 (server1), `etcd-3`/pg-etcd-witness `.197` (ex-laptop, VMID 303, etcd-only, no PG data) — ADR-0029 |
 | Garage | LXC on proxmox PVE (.165) | VMID 301, running, configured (v2.3.0, 192.168.1.199) |
 
 ---
@@ -141,64 +150,51 @@ is deliberately not vGPU-style sharing across multiple VMs.
 ## 3. Kubernetes Cluster (Current)
 
 **Cluster name:** `ukubi-cluster`
-**API endpoint:** `https://192.168.1.181:6443`
+**API endpoint:** kube-vip VIP `192.168.1.180` / `k8s.bnei.lan` (ADR-0016) —
+confirmed live: API server cert SANs carry both, `kubectl` against the
+VIP works.
 **K8s version:** v1.35.4
-**Container runtime:** containerd 2.2.3
-**CNI:** Cilium (with Hubble)
-**GitOps:** ArgoCD
-**Manifests repo:** github.com/MohammadBnei/k8s-cluster
+**Container runtime:** containerd
+**CNI:** Cilium, chaining mode, kube-proxy retained (`ipvs`,
+`kube_proxy_strict_arp: true` — ADR-0003)
+**GitOps:** ArgoCD, Pattern C
+**Manifests repo:** github.com/MohammadBnei/k8s-cluster (submodule `k8s-cluster/` + `gitops/`)
 
-### Nodes (current)
+### Nodes (current — confirmed live 2026-07-30 via `kubectl get nodes`)
 
-The `node1`/`node4` libvirt-era entries formerly here are gone — wiped by
-server1/ex-laptop's PVE reinstall (ADR-0024), superseded by the real
-QEMU-based `ukubi-cluster` below. Joined/active nodes, confirmed live:
+Real 3-control-plane/etcd HA topology (ADR-0017) — deliberately not 2
+(etcd quorum at N=2 is still 2, strictly worse than 1 member).
+Placement: 2 members on the stable hosts (server1, ex-laptop),
+`k8s-cp-01` (`.165`, the host that gets rebooted for gaming) kept a
+deliberate minority voter, so losing it never costs quorum.
 
 | Node | Role | IP | Host | Notes |
 | --- | --- | --- | --- | --- |
-| k8s-cp-01 | control-plane + etcd + worker | 192.168.1.201 | `.165` | joined, active |
-| k8s-worker-01 | worker + GPU | 192.168.1.202 | `.165` | joined, active |
+| k8s-cp-01 | control-plane + etcd | 192.168.1.201 | `.165` | joined, active, minority voter |
+| k8s-cp-02 | control-plane + etcd | 192.168.1.204 | server1 | joined, active |
+| k8s-cp-03 | control-plane + etcd | 192.168.1.206 | ex-laptop | joined, active |
+| k8s-worker-01 | worker + GPU | 192.168.1.202 | `.165` | joined, active — RTX 2070 SUPER passthrough |
 | k8s-worker-02 | worker | 192.168.1.203 | server1 | joined, active — resized 4→6 vCPU, 8→16GB 2026-07-30 |
-
-Created but **not yet joined** (bare VMs only, `terraform apply` ran
-2026-07-30, `cluster.yml` hasn't):
-
-| Node | Role (intended) | IP | Host |
-| --- | --- | --- | --- |
-| k8s-cp-02 | control-plane + etcd + worker | 192.168.1.204 | server1 |
-| k8s-cp-03 | control-plane + etcd + worker | 192.168.1.206 | ex-laptop |
-
-**Status:** the API endpoint/workload list below and the "Known issues"
-section still describe the pre-migration/libvirt-era cluster in places —
-not re-verified live in this pass (this pass only confirmed the node/VM
-layer via `pvesh`/PVE API + `terraform.tfvars`, not `kubectl get nodes`
-or the actual running workload set) — treat those as needing their own
-fresh scan before relying on them. A cluster-wide kube-vip VIP
-(`192.168.1.180`/`k8s.bnei.lan`, ADR-0016) and API-server SAN update are
-staged in `inventory/ukubi/group_vars/k8s_cluster/addons.yml` but not
-yet applied either — both land together with the `cluster.yml` run that
-joins `k8s-cp-02`/`k8s-cp-03`.
 
 ### Workloads
 
-- **GitOps:** ArgoCD (multiple pods)
-- **Ingress:** Traefik
-- **TLS:** cert-manager + Let's Encrypt (legacy; new cluster will use Traefik ACME HTTP-01)
-- **LoadBalancer:** MetalLB
+- **GitOps:** ArgoCD (Pattern C — registry + `list`-generator ApplicationSets)
+- **Ingress:** Traefik + `IngressRoute` only (no cert-manager, no Gateway API, no plain Ingress)
+- **TLS:** Traefik built-in ACME (HTTP-01 → switched to TLS-ALPN-01, see `docs/bootstrap-test-notes.md` 2026-07-28)
+- **LoadBalancer:** MetalLB, L2 only, pool `192.168.1.233-250`
 - **Monitoring:** Prometheus + Grafana
-- **Networking:** Cilium + Hubble
+- **Logging:** Loki + Grafana Alloy (see §10)
+- **Networking:** Cilium (chaining) + Hubble, kube-vip (control-plane VIP), CoreDNS forwarding to Pi-hole for `bnei.lan`
 - **Secrets:** Infisical
-- **Storage:** NFS subdir provisioner (mounted from server1)
-- **Apps:** openweb-ui, n8n, firecrawl, wekan, editableblog, dream-analyst, ukubi-ai, etc.
+- **Storage:** local-path-provisioner (hostPath stopgap; NFS/Longhorn is separate stage-2 work, see §5)
+- **Apps:** see `gitops/apps/registry.yaml` (live source of truth), not duplicated here — changes independently of cluster architecture
 
 ### Known issues
 
-- **No dedicated workers** — workloads run on control-plane nodes (libvirt VMs acting as both CP + worker)
-- **No GPU support yet** — `k8s-worker-01` (the new cluster's GPU
-  passthrough target, see "GPU passthrough" under Proxmox host details
-  above) doesn't exist yet; the host side is passthrough-ready
-- **Legacy runtime** — K8s nodes are libvirt VMs on .200/.161; new cluster will use QEMU VMs on PVE
-- **New cluster not yet cut over** — kubespray v2.23/v2.31 mismatch (Q-D) fixed 2026-07-12; smoke tests pass but no permanent cluster exists yet
+- **GPU support live** — `k8s-worker-01` carries the RTX 2070 SUPER via
+  direct PCI passthrough (no separate GPU-only VM).
+- **CI/CD:** self-hosted GitHub Actions runner in-cluster, RBAC-scoped
+  to `vos`/`vos-dev` only (ADR-0022/0023).
 
 ### Access (current)
 
@@ -217,16 +213,25 @@ joins `k8s-cp-02`/`k8s-cp-03`.
 
 | Node | VMID | IP | Host | Role |
 | --- | --- | --- | --- | --- |
-| pg01 | 205 | 192.168.1.205 | proxmox .165 | Pigsty primary |
-| pg02 | 207 | 192.168.1.207 | proxmox .165 | Pigsty replica + Redis |
+| pg02 | 207 | 192.168.1.207 | proxmox `.165` | Pigsty **Leader/primary** (current live role, ADR-0029 — roles flipped from the original static pg01/pg02 naming via an unattended Patroni failover at some point) + etcd DCS member (`etcd-1` of 3) |
+| pg01 | 205 | 192.168.1.205 | server1 `.200` | Replica, streaming, lag 0 — migrated off `.165` 2026-07-30; etcd DCS member (`etcd-2` of 3) + Redis (relocated here 2026-07-30, see below) |
+| pg-etcd-witness | 303 | 192.168.1.197 | ex-laptop `.161` | etcd DCS member only (`etcd-3` of 3), no PG data — provisioned + joined 2026-07-30 |
 
-Both VMs are QEMU on the same PVE host (.165) — **single point of failure for the DB tier until pg02 moves to server1 PVE.**
+**Resolved 2026-07-30**: the DB tier's single-point-of-failure on `.165`
+is closed. `pg01` moved to server1 (live migration), and DCS is now a
+real 3-node etcd quorum (`etcd-1`/`.207`, `etcd-2`/`.205`,
+`etcd-3`/`.197`) — `floor(3/2)+1` = 2, tolerates any single member
+(and therefore `.165` itself) going down. See ADR-0029 and
+`docs/bootstrap-test-notes.md`'s 2026-07-30 entries for the full
+incident/fix history (including two real quorum-loss incidents during
+`.205`'s join, both recovered via `etcdutl snapshot restore`).
 
 ### HA status
 
-- **Replication:** streaming replication active (master → replica)
-- **Topology:** simple primary/replica, no witness node
-- **Failover:** manual only; no quorum-based automatic failover
+- **Replication:** streaming replication active (Leader `.207` → Replica `.205`), lag 0
+- **Topology:** primary/replica + **real 3-node etcd DCS quorum** (ADR-0029)
+- **Failover:** automatic via Patroni + etcd (accepted behavior — reverses the earlier "no automatic failover" stance, see `DECISION.md` §2)
+- **Not yet done**: the actual end-to-end proof (stop `.207`, confirm `.205` promotes + the VIP follows + DCS survives on 2 of 3) hasn't been performed
 
 ### Monitoring: VictoriaMetrics, not Prometheus
 
@@ -272,9 +277,28 @@ cluster and Postgres/Pigsty metrics are now visible from one Grafana.
 | dream_analyst_db | 11MB | dbuser_dreamAnalyst | Dream Analyst app |
 | (4 more, ~9MB each) | | | Metabase, Jaeger, etc. |
 
-### Additional services on pg02
+### Redis
 
-- **Redis** — co-located on pg02 (192.168.1.207); purpose TBD
+**Relocated 2026-07-30** from pg02 (`192.168.1.207`, on `.165`) to pg01's
+VM (`192.168.1.205`, server1). It's a single Redis instance, no
+replica/Sentinel/cluster mode — real usage is ArgoCD's `externalRedis`
+cache (`gitops/bootstrap/argocd-application.yaml`), not "purpose TBD" as
+previously noted here. The old placement was a real gap: `.207`/`.165`
+is the host that gets rebooted for gaming, and ArgoCD's sync pipeline
+degrades/errors without Redis reachable — unlike Postgres (which now
+survives `.165` reboots via the 3-node etcd quorum above), losing Redis
+meant ArgoCD couldn't sync/deploy anything for the outage window (running
+app pods were unaffected — Kubernetes itself doesn't need ArgoCD to keep
+serving traffic).
+
+**Still no real failover** — this is a relocation (off the reboot-prone
+host), not HA. Consumers should resolve `redis.bnei.lan` (Pi-hole DNS,
+`ansible/playbooks/pihole-configure.yml`), not a hardcoded IP, so the
+next host move is a DNS-record change only.
+
+Persistence: RDB snapshots every 1200s (`redis_aof_enabled: false`) — an
+ungraceful reboot of Redis's host can still lose up to ~20 minutes of
+writes, acceptable for a cache workload.
 
 ### Users
 
@@ -286,7 +310,8 @@ Standard set: pg_stat_statements, pg_trgm, pg_repack, postgres_fdw, etc. (17 tot
 
 ### Next steps
 
-- After server1 (.200) PVE reinstall: migrate pg02 to server1 (splits data tier across 2 hosts)
+- **Done** (2026-07-30): PG data tier split across `.165`/server1, 3-node etcd DCS quorum live. See ADR-0029.
+- **Still open**: the real end-to-end failover proof (stop `.207`, confirm promotion + VIP + DCS survive) — next session's priority.
 
 ---
 
@@ -335,8 +360,22 @@ certainly no longer exists as described.)*
 
 ### DNS
 
-- **Primary:** Freebox (192.168.1.254) — basic, no wildcards, no internal zones
-- **Local resolver:** None — relies on Freebox
+- **External/WAN:** Freebox (192.168.1.254) — basic, no wildcards, no internal zones. `bnei.dev` stays external via Cloudflare, unrelated to the below.
+- **Local resolver, live since 2026-07-30**: Pi-hole on the Pi 4
+  (`192.168.1.55`, static IP pinned via `nmcli`, `ansible/playbooks/pihole-configure.yml`),
+  authoritative for `bnei.lan` (`DECISION.md` §2). Two consumers,
+  differently configured: the LAN generally still gets DNS from the
+  Freebox; in-cluster pods resolve `bnei.lan` via CoreDNS/nodelocaldns
+  forwarding to Pi-hole first (`policy: sequential`, not the default
+  random — random upstream selection silently broke this once, see
+  `docs/bootstrap-test-notes.md` 2026-07-30).
+- **Records** (`pihole_hosts_records` in `pihole-configure.yml`, mirrors
+  `ARCHITECTURE.md` §3): all PVE hosts, Postgres nodes + HA VIP
+  (`postgres.bnei.lan` → `.232`), `pg-etcd-witness.bnei.lan`,
+  `redis.bnei.lan` (added 2026-07-30, so future Redis host moves are a
+  DNS-record change only — see §4/§6), `garage.bnei.lan`,
+  `nfs-storage.bnei.lan`, `k9s-dashboard.bnei.lan`, `k8s.bnei.lan`
+  (kube-vip control-plane VIP, `.180`), all 5 K8s node names.
 
 ### Load Balancer / Reverse Proxy
 
@@ -399,8 +438,13 @@ certainly no longer exists as described.)*
 ## 10. Observability (Current)
 
 - **Prometheus + Grafana** running in K8s (in `ukubi-cluster`)
-- **pg_exporter** running on Postgres VM (user `dbuser_monitor`)
-- **No node-level monitoring** on hosts (no node_exporter)
+- **Pigsty's own stack (VictoriaMetrics, not classic Prometheus)** on
+  `.205` (the `infra` node) — `pg_exporter` on both Postgres VMs,
+  `node_exporter`/`node_monitor` (vector for logs) on every Pigsty-managed
+  node including `pg-etcd-witness`, all confirmed `up` via
+  `/api/v1/targets` (2026-07-30, ADR-0029 rollout). Wired into the K8s
+  cluster's own Grafana as a second datasource (`ds-prometheus` UID) —
+  see §4.
 - **Centralized logging is live**: Loki (SingleBinary, filesystem storage)
   + Grafana Alloy (DaemonSet, tails every node's container logs directly
   off `/var/log/pods` — hostPath file tailing, not the kubelet API, since

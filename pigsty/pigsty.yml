@@ -236,7 +236,7 @@ all:
     #----------------------------------------------#
     redis-main:
       hosts:
-        192.168.1.207: { redis_node: 1, redis_instances: { 6379: {} } }
+        192.168.1.205: { redis_node: 1, redis_instances: { 6379: {} } } # relocated off .207/.165 2026-07-30 — sole Redis instance had zero HA (no replica/Sentinel) and sat on the host that gets rebooted for gaming, taking ArgoCD's externalRedis cache down with it. Co-located on pg01's existing VM (server1) rather than a new VM — same multi-role pattern .207 already used (pg+etcd+redis on one host). Consumers should use redis.bnei.lan (Pi-hole DNS), not this IP directly, so future host moves are a DNS-record change only.
       vars:
         redis_cluster: redis-main
         redis_password: 'Redis.Main'

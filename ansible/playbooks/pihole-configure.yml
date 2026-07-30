@@ -86,6 +86,8 @@
       - "192.168.1.205 postgres-1.bnei.lan"
       - "192.168.1.207 postgres-2.bnei.lan"
       - "192.168.1.232 postgres.bnei.lan" # Pigsty HA floating VIP (vip-manager) — the address apps/tests should actually use, follows whichever node is primary
+      - "192.168.1.197 pg-etcd-witness.bnei.lan" # 3rd Patroni DCS/etcd-only member, ex-laptop — ADR-0029
+      - "192.168.1.205 redis.bnei.lan" # shared Pigsty Redis (redis-main) — deliberately NOT a static VM IP reference anywhere else (ArgoCD's externalRedis, etc.); relocated off .207/.165 2026-07-30 (single point of failure on the gaming-reboot host) — update this record, not consumers, next time Redis moves host
       - "192.168.1.199 garage.bnei.lan"
       - "192.168.1.198 nfs-storage.bnei.lan"
       - "192.168.1.110 k9s-dashboard.bnei.lan"
