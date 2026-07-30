@@ -1,20 +1,19 @@
 # Infrastructure — Actual State
 
 > **Source of truth** for what is currently running.
-> Last updated: 2026-07-28
+> Last updated: 2026-07-30
 > Owner: hermesagent (this AI)
 >
-> **Stale-sections flag (2026-07-28):** `server1` and `ex-laptop` were
-> both reinstalled to PVE and joined the corosync cluster with `.165`
-> this week (see ADR-0024, `ansible/inventories/proxmox/hosts.yml`). A
-> full OS reinstall wipes whatever ran directly on the prior Debian
-> 12/libvirt install — so §2's "K8s nodes" row, §3's `node1`/`node4`
-> entries, the NFS export in §5, and the HAProxy entry in §7 (all
-> hosted on server1's *old* OS) are almost certainly gone, not just
-> "legacy". This pass updates the confirmed facts (host OS, PVE
-> cluster membership) but does **not** re-verify §3/§5/§7's remaining
-> claims live — treat those as needing a fresh state scan before relying
-> on them.
+> **Stale-sections flag (2026-07-28, §2/§3 K8s-nodes part resolved
+> 2026-07-30):** `server1` and `ex-laptop` were both reinstalled to PVE
+> and joined the corosync cluster with `.165` (see ADR-0024,
+> `ansible/inventories/proxmox/hosts.yml`). A full OS reinstall wipes
+> whatever ran directly on the prior Debian 12/libvirt install — §2's
+> "K8s nodes" row and §3's node table are now confirmed live (real QEMU
+> `ukubi-cluster` nodes, not the old libvirt ones). **Still not
+> re-verified this pass:** the NFS export in §5 and the HAProxy entry in
+> §7 (both hosted on server1's *old* OS, almost certainly gone too) —
+> treat those as needing a fresh state scan before relying on them.
 
 This document describes the **current, as-is** state of the homelab infrastructure.
 For the target architecture, see [`../ARCHITECTURE.md`](../ARCHITECTURE.md).
@@ -133,7 +132,7 @@ is deliberately not vGPU-style sharing across multiple VMs.
 | Layer | Actual | Notes |
 | --- | --- | --- |
 | PVE nodes | 3 (proxmox .165, server1 .200, ex-laptop .161) | All reinstalled/joined the corosync cluster — see ADR-0020, ADR-0024 |
-| K8s nodes | none confirmed running | Legacy libvirt nodes (node1/node4) were hosted on server1/ex-laptop's prior OS, wiped by the PVE reinstall — see stale-sections flag above. No new QEMU K8s VMs created yet either |
+| K8s nodes | 5 QEMU VMs, confirmed live 2026-07-30 via `pvesh`/PVE API | `k8s-cp-01`/`k8s-worker-01` (.165), `k8s-worker-02` (server1, resized to 6 vCPU/16GB), `k8s-cp-02` (server1, vmid 204), `k8s-cp-03` (ex-laptop, vmid 206) — last 2 just created via `terraform apply` (ADR-0017's 3-CP/etcd HA), **not yet joined** to the cluster, that needs a `cluster.yml` run (not `scale.yml`) |
 | Postgres | QEMU VMs on proxmox PVE (.165) | pg01 VMID 205 (.205) + pg02 VMID 207 (.207) |
 | Garage | LXC on proxmox PVE (.165) | VMID 301, running, configured (v2.3.0, 192.168.1.199) |
 
@@ -151,12 +150,34 @@ is deliberately not vGPU-style sharing across multiple VMs.
 
 ### Nodes (current)
 
-| Node | Role | IP | OS | Where it runs |
-| --- | --- | --- | --- | --- |
-| node1 | control-plane + worker | 192.168.1.181 | Debian 12 | *(gone — was a libvirt VM on server1, wiped by server1's PVE reinstall; not re-verified)* |
-| node4 | control-plane + worker | 192.168.1.191 | Debian 12 | *(gone — was a libvirt VM on ex-laptop, wiped by ex-laptop's PVE reinstall; not re-verified)* |
+The `node1`/`node4` libvirt-era entries formerly here are gone — wiped by
+server1/ex-laptop's PVE reinstall (ADR-0024), superseded by the real
+QEMU-based `ukubi-cluster` below. Joined/active nodes, confirmed live:
 
-**Status:** The legacy libvirt cluster's host OS (server1, ex-laptop) has been reinstalled to PVE, so `node1`/`node4` and everything that ran on them are believed gone — **no K8s cluster is currently confirmed running** (not re-verified live in this pass, see stale-sections flag above). No new QEMU K8s VMs have been created on the PVE cluster yet either. The kubespray v2.23/v2.31 mismatch (Q-D) that previously blocked new-cluster provisioning was fixed 2026-07-12 — see `docs/bootstrap-test-notes.md`; multiple full `cluster.yml` smoke-test bootstraps (07-12 through 07-14) ran clean end-to-end pre-reinstall, but each was test/teardown, not a permanent cutover.
+| Node | Role | IP | Host | Notes |
+| --- | --- | --- | --- | --- |
+| k8s-cp-01 | control-plane + etcd + worker | 192.168.1.201 | `.165` | joined, active |
+| k8s-worker-01 | worker + GPU | 192.168.1.202 | `.165` | joined, active |
+| k8s-worker-02 | worker | 192.168.1.203 | server1 | joined, active — resized 4→6 vCPU, 8→16GB 2026-07-30 |
+
+Created but **not yet joined** (bare VMs only, `terraform apply` ran
+2026-07-30, `cluster.yml` hasn't):
+
+| Node | Role (intended) | IP | Host |
+| --- | --- | --- | --- |
+| k8s-cp-02 | control-plane + etcd + worker | 192.168.1.204 | server1 |
+| k8s-cp-03 | control-plane + etcd + worker | 192.168.1.206 | ex-laptop |
+
+**Status:** the API endpoint/workload list below and the "Known issues"
+section still describe the pre-migration/libvirt-era cluster in places —
+not re-verified live in this pass (this pass only confirmed the node/VM
+layer via `pvesh`/PVE API + `terraform.tfvars`, not `kubectl get nodes`
+or the actual running workload set) — treat those as needing their own
+fresh scan before relying on them. A cluster-wide kube-vip VIP
+(`192.168.1.180`/`k8s.bnei.lan`, ADR-0016) and API-server SAN update are
+staged in `inventory/ukubi/group_vars/k8s_cluster/addons.yml` but not
+yet applied either — both land together with the `cluster.yml` run that
+joins `k8s-cp-02`/`k8s-cp-03`.
 
 ### Workloads
 

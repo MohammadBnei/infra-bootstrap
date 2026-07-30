@@ -8,6 +8,8 @@ allowed-tools:
   - Bash(ssh -i ~/.ssh/id_k8s_vms core@* sudo kubectl --kubeconfig /etc/kubernetes/admin.conf describe *)
   - Bash(ssh -i ~/.ssh/id_k8s_vms core@* sudo kubectl --kubeconfig /etc/kubernetes/admin.conf logs *)
   - Bash(ssh -i ~/.ssh/id_k8s_vms core@* sudo kubectl --kubeconfig /etc/kubernetes/admin.conf annotate application * argocd.argoproj.io/refresh=hard --overwrite)
+  - Bash(ssh -i ~/.ssh/id_k8s_vms core@* sudo kubectl --kubeconfig /etc/kubernetes/admin.conf rollout restart *)
+  - Bash(ssh -i ~/.ssh/id_k8s_vms core@* sudo kubectl --kubeconfig /etc/kubernetes/admin.conf rollout status *)
   - Bash(helm show values *)
   - Bash(helm pull * --untar *)
   - Bash(git status *)
@@ -34,6 +36,24 @@ ssh -i ~/.ssh/id_k8s_vms core@<node-ip> "sudo kubectl --kubeconfig /etc/kubernet
 The key path comes from `inventory/ukubi/hosts.yaml`'s
 `ansible_ssh_private_key_file` — read it from there, don't guess a path or
 scan `~/.ssh` for candidates.
+
+**3 control-plane nodes as of 2026-07-30** (`k8s-cp-01`/`.201`,
+`k8s-cp-02`/`.204`, `k8s-cp-03`/`.206` — ADR-0017), any of them works as
+the SSH target for the pattern above. There's also now a kube-vip VIP,
+`192.168.1.180`/`k8s.bnei.lan` (ADR-0016) — confirmed live, cert SANs
+include both — but that's an *API server* endpoint (`:6443`, for a real
+kubeconfig/`kubectl` client), not an SSH target; this skill's pattern
+still SSHes to a specific node and runs `kubectl` there.
+
+**A ConfigMap change doesn't apply to running pods just because `kubectl
+apply` succeeded.** DaemonSets/Deployments read their mounted ConfigMap
+via kubelet's own sync (can take a while) or a `reload`-plugin-style
+in-process poll (CoreDNS/nodelocaldns have one, still not instant). If you
+need to *confirm* a config change took effect now rather than "eventually,
+unconfirmed" — `kubectl rollout restart <daemonset|deployment>/<name> -n
+<ns>` then `kubectl rollout status ... --timeout=60s`, and re-test.
+Confirmed this the hard way 2026-07-30 (CoreDNS/nodelocaldns `dns_upstream_forward_extra_opts`
+change) — see `docs/bootstrap-test-notes.md`.
 
 **Never materialize `/etc/kubernetes/admin.conf` (or any cluster
 credential) on the local machine.** Every `kubectl`/`helm` call runs

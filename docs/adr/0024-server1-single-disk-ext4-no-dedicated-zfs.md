@@ -34,7 +34,11 @@ which the play already guards on).
   `template_storage_id` via the existing `coalesce`, which is wrong for a
   cross-host VM — any `server1`-targeted Terraform VM must set
   `datastore_id: local-lvm` explicitly.
-- `ex-laptop`'s `zfs-exlaptop` pool (ADR-0014) is untouched by this — that
-  host has since been reinstalled to PVE and joined the corosync cluster
-  too, keeping its SSD 238GB as a dedicated ZFS pool (unlike `server1`,
-  which lost its second disk before reinstall).
+- ~~`ex-laptop`'s `zfs-exlaptop` pool (ADR-0014) is untouched by this —
+  that host has since been reinstalled to PVE and joined the corosync
+  cluster too, keeping its SSD 238GB as a dedicated ZFS pool (unlike
+  `server1`, which lost its second disk before reinstall).~~ **Wrong —
+  see [ADR-0028](0028-ex-laptop-no-dedicated-zfs-pool.md):** confirmed
+  live 2026-07-30 that `ex-laptop` has no dedicated ZFS pool either, same
+  `local-lvm` outcome as `server1`. This assertion was never actually
+  checked against the live host when written.

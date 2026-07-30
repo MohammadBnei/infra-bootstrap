@@ -24,10 +24,10 @@ ADR-000N` (replaced by a later decision).
 | [0011](0011-reject-multi-region-dr-service-mesh.md) | Multi-region / DR / GPU multi-tenancy / service mesh | Rejected |
 | [0012](0012-reject-gitops-for-proxmox.md) | GitOps-managed Proxmox | Rejected |
 | [0013](0013-pve-node-161-sleep-risk-mitigation.md) | `.161` sleep-risk mitigation | Accepted |
-| [0014](0014-pve-storage-layout-zfs-vs-local-zfs.md) | PVE storage layout: ZFS pool vs `local-zfs` | Accepted |
+| [0014](0014-pve-storage-layout-zfs-vs-local-zfs.md) | PVE storage layout: ZFS pool vs `local-zfs` | Accepted (both host portions since amended — server1 by 0024, ex-laptop by 0028) |
 | [0015](0015-kubespray-inventory-submodule-version-alignment.md) | Kubespray inventory ↔ submodule version alignment | Accepted |
-| [0016](0016-k8s-endpoint-naming.md) | K8s API endpoint naming | Proposed |
-| [0017](0017-second-control-plane-member.md) | Second control-plane / etcd member | Proposed |
+| [0016](0016-k8s-endpoint-naming.md) | K8s API endpoint naming | Accepted |
+| [0017](0017-second-control-plane-member.md) | Second **and third** control-plane / etcd member | Accepted |
 | [0018](0018-cilium-ebpf-offload-flip.md) | Cilium eBPF offload flip | Proposed |
 | [0019](0019-longhorn-rollout-specifics.md) | Longhorn rollout specifics | Accepted |
 | [0020](0020-pve-corosync-cluster.md) | PVE corosync cluster (not 3 independent standalone hosts) | Accepted |
@@ -38,3 +38,4 @@ ADR-000N` (replaced by a later decision).
 | [0025](0025-repo-credential-shared-pat-not-ssh-deploy-key.md) | Repo credentials via shared HTTPS+PAT, not per-repo SSH deploy key | Accepted |
 | [0026](0026-nfs-shared-pve-storage-cross-host-clone.md) | NFS-backed shared PVE storage for cross-host VM template cloning | Accepted |
 | [0027](0027-logging-loki-alloy-over-clickhouse-promtail.md) | Centralized logging: Loki + Grafana Alloy over ClickHouse / Promtail | Accepted |
+| [0028](0028-ex-laptop-no-dedicated-zfs-pool.md) | `ex-laptop` also has no dedicated ZFS pool | Accepted |

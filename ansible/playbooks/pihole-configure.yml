@@ -1,0 +1,284 @@
+---
+# Install and configure Pi-hole on the Pi 4 (raspberry, 192.168.1.55) as
+# the authoritative resolver for `bnei.lan` (DECISION.md §2). Safe to
+# re-run — see the idempotency notes below.
+#
+# WHY THIS PLAYBOOK EXISTS
+# We're accumulating enough real internal hostnames (kube-vip's
+# k8s.bnei.lan, the pg/garage/nfs/k9s-dashboard VMs, the 3 PVE hosts
+# themselves) that raw IPs stopped being convenient — ARCHITECTURE.md §3
+# already reserves a `bnei.lan` record set for this, it just never had
+# anything to resolve it. Pi 4 was reinstalled clean (fresh Debian 13
+# trixie) specifically to host this.
+#
+# GROUNDING — Pi-hole v6 install/config mechanics verified against actual
+# upstream source (not just docs, which were thin/inconsistent for the v6
+# config surface): `pi-hole/pi-hole`'s `automated install/basic-install.sh`
+# + `advanced/Scripts/utils.sh`, and `pi-hole/FTL`'s `src/config/config.c`.
+# Key findings that shape this playbook:
+# - The installer's interactive whiptail dialogs (chooseInterface, setDNS,
+#   chooseBlocklists, setLogging, setPrivacyLevel) are gated on
+#   `fresh_install==true`, which is decided purely by
+#   `[[ -f /etc/pihole/setupVars.conf ]] || [[ -f /etc/pihole/pihole.toml ]]`
+#   — no env var skips them once that branch is taken. `--unattended` on
+#   its own does NOT suppress these on a truly fresh box (it only quiets
+#   debconf noise on the non-fresh branch). So the reliable unattended path
+#   is: pre-touch an empty setupVars.conf (forces the "already configured,
+#   just migrate to v6" branch, which needs zero content — `pihole-FTL
+#   migrate v6` fills in defaults for anything unset), then explicitly set
+#   every value we care about afterward via the real, stable v6 CLI:
+#   `pihole-FTL --config <key> <value>` (config.c's own setter, used
+#   internally by the installer's `setFTLConfigValue`) and
+#   `pihole setpassword <password>`.
+# - Local DNS records: `dns.hosts` (confirmed in FTL's config.c, exact
+#   format `"IP HOSTNAME [HOSTNAME ...]"`, a JSON string array) — this is
+#   what makes Pi-hole authoritative for `bnei.lan`, not a separate zone
+#   file.
+#
+# PREREQUISITES
+# - Pi 4 reachable per docs/secrets.md's SSH_PI4_*. Unlike garage-storage/
+#   nfs-storage (Terraform-provisioned, so their dedicated keypair's
+#   private half naturally exists locally), the Pi is physical hardware
+#   set up by hand — there's no local Terraform-generated equivalent.
+#   Fetch SSH_PI4_KEY from Infisical to a local file first and pass it via
+#   `-e ansible_ssh_private_key_file=<path>` (see ansible/README.md).
+# - Infisical CLI session already authenticated in the invoking shell
+#   (source ~/.hermes/cache/inf-env.sh) — writes PIHOLE_WEBPASSWORD there.
+# - ansible-galaxy collection install -r ansible/requirements.yml
+#   (community.general, for the nmcli static-IP task below).
+#
+# RE-RUN SAFETY
+# - Install itself only runs `when: not pihole_already_installed`.
+# - Password is only generated/set/written to Infisical on that same
+#   first-install branch — v6 stores it as a one-way hash, there's no
+#   config-file value to recover on a later run (unlike Garage's
+#   rpc_secret), so re-runs deliberately leave an already-set password
+#   alone rather than resetting it.
+# - `dns.hosts`/`dns.upstreams` are set unconditionally every run (these
+#   are meant to be declared, living lists — new hosts get added here
+#   over time; re-setting an unchanged value is harmless).
+# - `dns.interface`/`misc.privacylevel`/`dns.queryLogging` are simple,
+#   rarely-changing scalars — set unconditionally each run, harmless if
+#   already correct.
+- name: Install and configure Pi-hole on the Pi 4
+  hosts: pihole
+  become: true
+  gather_facts: false
+  vars:
+    infisical_project_id: "{{ lookup('env', 'INFISICAL_PROJECT_ID') | default('8a3fa54f-be22-488a-bf51-55158f65c0f2', true) }}"
+    infisical_env: "{{ lookup('env', 'INFISICAL_ENV') | default('dev', true) }}"
+    pihole_interface: eth0
+    pihole_static_ip: 192.168.1.55/24
+    pihole_gateway: 192.168.1.254
+    pihole_upstream_dns:
+      - "1.1.1.1"
+      - "1.0.0.1"
+    pihole_query_logging: true
+    pihole_privacy_level: 0
+    # bnei.lan zone — ARCHITECTURE.md §3's target record set, filled in
+    # with real, currently-assigned IPs (never guessed/placeholder — add
+    # a line here as each new host actually gets provisioned).
+    pihole_hosts_records:
+      - "192.168.1.165 proxmox.bnei.lan"
+      - "192.168.1.200 server1.bnei.lan"
+      - "192.168.1.161 ex-laptop.bnei.lan"
+      - "192.168.1.55 pi4.bnei.lan"
+      - "192.168.1.205 postgres-1.bnei.lan"
+      - "192.168.1.207 postgres-2.bnei.lan"
+      - "192.168.1.232 postgres.bnei.lan" # Pigsty HA floating VIP (vip-manager) — the address apps/tests should actually use, follows whichever node is primary
+      - "192.168.1.199 garage.bnei.lan"
+      - "192.168.1.198 nfs-storage.bnei.lan"
+      - "192.168.1.110 k9s-dashboard.bnei.lan"
+      - "192.168.1.180 k8s.bnei.lan" # kube-vip control-plane VIP, ADR-0016 — use this, not any individual node below, for anything that needs the API server
+      - "192.168.1.201 k8s-cp-01.bnei.lan"
+      - "192.168.1.202 k8s-worker-01.bnei.lan"
+      - "192.168.1.203 k8s-worker-02.bnei.lan"
+      - "192.168.1.204 k8s-cp-02.bnei.lan"
+      - "192.168.1.206 k8s-cp-03.bnei.lan"
+
+  tasks:
+    # -------------------------------------------------------------------
+    # Preflight
+    # -------------------------------------------------------------------
+    - name: Check Infisical CLI session is authenticated
+      delegate_to: localhost
+      become: false
+      ansible.builtin.command:
+        argv:
+          - infisical
+          - secrets
+          - get
+          - PVE_API_TOKEN
+          - --projectId={{ infisical_project_id }}
+          - --env={{ infisical_env }}
+          - --plain
+      register: infisical_check
+      changed_when: false
+      failed_when: false
+
+    - name: Fail if Infisical session isn't authenticated
+      ansible.builtin.assert:
+        that: infisical_check.rc == 0
+        fail_msg: "Infisical CLI not authenticated in this shell — run `source ~/.hermes/cache/inf-env.sh` first"
+
+    - name: Check whether Pi-hole is already installed
+      ansible.builtin.stat:
+        path: /etc/pihole/pihole.toml
+      register: pihole_toml_stat
+
+    - name: Set install-state fact
+      ansible.builtin.set_fact:
+        pihole_already_installed: "{{ pihole_toml_stat.stat.exists }}"
+
+    # -------------------------------------------------------------------
+    # 0. Static IP — self-contained (on the Pi itself, not a Freebox DHCP
+    #    reservation). Was DHCP-dynamic (confirmed live 2026-07-30 via
+    #    `ip addr` showing `dynamic`) — a real problem once the whole LAN's
+    #    DNS depends on this address staying put. NetworkManager is the
+    #    confirmed-live renderer here (not plain netplan/systemd-networkd —
+    #    `nmcli` shows the `netplan-eth0` profile as the active one, and
+    #    the on-disk netplan YAML is itself just NM's passthrough dump, not
+    #    the source of truth), so `nmcli`/community.general.nmcli is the
+    #    correct tool, not hand-editing netplan files directly.
+    # -------------------------------------------------------------------
+    - name: Pin a static IP on eth0 (same address as the current DHCP lease)
+      community.general.nmcli:
+        type: ethernet
+        conn_name: netplan-eth0
+        ifname: "{{ pihole_interface }}"
+        ip4: "{{ pihole_static_ip }}"
+        gw4: "{{ pihole_gateway }}"
+        dns4: "{{ pihole_upstream_dns }}"
+        state: present
+      register: pin_static_ip
+
+    # `nmcli`'s `state: present` only ensures the connection *profile* —
+    # confirmed live that an already-active connection keeps running under
+    # its old DHCP-obtained lease (kernel still shows the address as
+    # `dynamic`) until reapplied. `device reapply` pushes the new profile
+    # onto the live interface without a full down/up, the least disruptive
+    # way to confirm it now rather than leaving it "correct on next reboot,
+    # unconfirmed until then."
+    - name: Reapply eth0 so the static config takes effect now, not just on next reboot
+      ansible.builtin.command: nmcli device reapply {{ pihole_interface }}
+      when: pin_static_ip is changed
+
+    # -------------------------------------------------------------------
+    # 1. Unattended install (first run only)
+    # -------------------------------------------------------------------
+    - name: Create /etc/pihole
+      ansible.builtin.file:
+        path: /etc/pihole
+        state: directory
+        mode: "0755"
+      when: not pihole_already_installed
+
+    - name: Pre-touch setupVars.conf so the installer takes the non-interactive migrate-to-v6 path
+      ansible.builtin.file:
+        path: /etc/pihole/setupVars.conf
+        state: touch
+        mode: "0644"
+      when: not pihole_already_installed
+
+    - name: Download the Pi-hole installer
+      ansible.builtin.get_url:
+        url: https://install.pi-hole.net
+        dest: /tmp/pihole-basic-install.sh
+        mode: "0755"
+        force: true
+      when: not pihole_already_installed
+
+    - name: Run the unattended installer
+      ansible.builtin.command: /tmp/pihole-basic-install.sh --unattended
+      when: not pihole_already_installed
+
+    - name: Wait for pihole-FTL to be responsive
+      ansible.builtin.command: pihole-FTL --config -q dns.interface
+      register: ftl_ready
+      until: ftl_ready.rc == 0
+      retries: 10
+      delay: 3
+      changed_when: false
+
+    # -------------------------------------------------------------------
+    # 2. Web admin password (first install only — v6 stores a one-way
+    #    hash, nothing to recover from config on later runs)
+    # -------------------------------------------------------------------
+    - name: Generate a random web admin password
+      ansible.builtin.set_fact:
+        pihole_webpassword: "{{ lookup('pipe', 'openssl rand -hex 16') }}"
+      when: not pihole_already_installed
+      no_log: true
+
+    - name: Set the web admin password
+      ansible.builtin.command:
+        argv:
+          - pihole
+          - setpassword
+          - "{{ pihole_webpassword }}"
+      when: not pihole_already_installed
+      no_log: true
+
+    - name: Write PIHOLE_WEBPASSWORD to Infisical
+      delegate_to: localhost
+      become: false
+      no_log: true
+      ansible.builtin.command:
+        argv:
+          - infisical
+          - secrets
+          - set
+          - --projectId={{ infisical_project_id }}
+          - --env={{ infisical_env }}
+          - --type=shared
+          - PIHOLE_WEBPASSWORD={{ pihole_webpassword }}
+      when: not pihole_already_installed
+      changed_when: true
+
+    # -------------------------------------------------------------------
+    # 3. Scalar config — simple, rarely-changing, set unconditionally
+    # -------------------------------------------------------------------
+    - name: Set DNS-facing interface
+      ansible.builtin.command:
+        argv: [pihole-FTL, --config, dns.interface, "{{ pihole_interface }}"]
+      changed_when: true
+
+    - name: Set query logging
+      ansible.builtin.command:
+        argv: [pihole-FTL, --config, dns.queryLogging, "{{ pihole_query_logging | lower }}"]
+      changed_when: true
+
+    - name: Set privacy level
+      ansible.builtin.command:
+        argv: [pihole-FTL, --config, misc.privacylevel, "{{ pihole_privacy_level }}"]
+      changed_when: true
+
+    # -------------------------------------------------------------------
+    # 4. Declared lists — set unconditionally every run (re-setting an
+    #    unchanged value is harmless). NOT read-then-compare: confirmed
+    #    live that `pihole-FTL --config -q <key>` doesn't emit real JSON
+    #    for arrays — it's `[ 1.1.1.1, 1.0.0.1 ]` (unquoted elements), so
+    #    `from_json` only ever parsed by luck when the array was empty.
+    # -------------------------------------------------------------------
+    - name: Set dns.upstreams
+      ansible.builtin.command:
+        argv: [pihole-FTL, --config, dns.upstreams, "{{ pihole_upstream_dns | to_json }}"]
+      changed_when: true
+
+    - name: Set dns.hosts (bnei.lan zone)
+      ansible.builtin.command:
+        argv: [pihole-FTL, --config, dns.hosts, "{{ pihole_hosts_records | to_json }}"]
+      changed_when: true
+
+    # -------------------------------------------------------------------
+    # Done
+    # -------------------------------------------------------------------
+    - name: Pi-hole configured
+      ansible.builtin.debug:
+        msg:
+          - "Pi-hole is up and authoritative for bnei.lan."
+          - "Web UI: http://192.168.1.55/admin — password in Infisical as PIHOLE_WEBPASSWORD (set once, on first install only)."
+          - ""
+          - "Still manual, out of scope for this playbook:"
+          - "  - Point LAN devices/DHCP at 192.168.1.55 for DNS (Freebox config, not automatable from here)."
+          - "  - Add a new pihole_hosts_records entry here as each new host is actually provisioned."

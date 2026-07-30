@@ -88,25 +88,27 @@ Full eBPF hardware support (AMD Ryzen). ~3GB PVE overhead reserved.
 | --- | --- | --- | --- | --- | --- |
 | pg02 | VM (Q35, OVMF) | 2 | 4GB | 40GB | Target home for the Pigsty replica after migration off `.165` |
 | nfs-storage | VM (Q35, OVMF) | 1 | 1GB | 120GB | Shared PVE storage for cross-host VM template cloning — [ADR-0026](docs/adr/0026-nfs-shared-pve-storage-cross-host-clone.md), never mounted by K8s |
-| k8s-worker-02 | VM (Q35, OVMF) | 4 | 8GB | 60GB | First cross-host K8s worker (Stage 2 Phase C), `192.168.1.203` |
+| k8s-worker-02 | VM (Q35, OVMF) | 6 | 16GB | 60GB | First cross-host K8s worker (Stage 2 Phase C), `192.168.1.203` — resized 4→6 vCPU/8→16GB 2026-07-30, server1 had most of its RAM idle |
+| k8s-cp-02 | VM (Q35, OVMF) | 2 | 4GB | 40GB | 2nd control-plane + etcd member, `192.168.1.204` — [ADR-0017](docs/adr/0017-second-control-plane-member.md) |
 
 CPU **lacks** eBPF hardware support — one reason Cilium chaining mode is
 locked cluster-wide (see [ADR-0003](docs/adr/0003-cni-cilium-chaining-over-kube-proxy-replacement.md)).
 
-### ex-laptop PVE (192.168.1.161, after reinstall) — 15GB RAM, 4 threads, SSD 238GB
+### ex-laptop PVE (192.168.1.161, after reinstall) — 15GB RAM, 4 threads, SSD 238GB, `local-lvm` only ([ADR-0028](docs/adr/0028-ex-laptop-no-dedicated-zfs-pool.md) — no dedicated ZFS pool)
 
 | VM/LXC | Type | vCPU | RAM | Disk | Notes |
 | --- | --- | --- | --- | --- | --- |
-| k8s burst/utility node | VM (Q35, OVMF) | TBD | TBD | TBD | Optional future placement, subject to sleep-risk mitigation |
+| k8s-cp-03 | VM (Q35, OVMF) | 2 | 4GB | 40GB | 3rd control-plane + etcd member, `192.168.1.206` — [ADR-0017](docs/adr/0017-second-control-plane-member.md) |
 
-Treat as lower-trust capacity until suspend behavior is hardened
-([ADR-0013](docs/adr/0013-pve-node-161-sleep-risk-mitigation.md)).
+Sleep-risk mitigation applied and confirmed ([ADR-0013](docs/adr/0013-pve-node-161-sleep-risk-mitigation.md)) — still deliberately kept a
+*minority* etcd/CP voter (not the majority), so losing this host never
+costs quorum even though it's the least-trusted of the 3.
 
 ### Pi 4 (192.168.1.55) — fresh Debian 13 install, 1.8GB RAM, 4 cores, microSD 238GB
 
 | Service | Notes |
 | --- | --- |
-| Pi-hole | Local DNS, authoritative for `*.bnei.lan`, ~50MB RAM |
+| Pi-hole | Static IP (pinned via `nmcli`, was DHCP-dynamic), authoritative for `bnei.lan`, ~50MB RAM — see §3 DNS below |
 | node_exporter | Optional, ~10MB RAM |
 
 Clean install — no pre-existing state to migrate (the prior failed PG18
@@ -117,22 +119,31 @@ install on this Pi 4 held no data).
 ## 2. Kubernetes Cluster
 
 - **Cluster name:** `ukubi-cluster`. DNS domain: `cluster.local`.
-- **Topology:** 1 control plane + 1 worker (single CP accepted for
-  homelab scale; see [ADR-0017](docs/adr/0017-second-control-plane-member.md)
-  for the open question on adding a 2nd). The worker carries the GPU
-  passthrough directly — no separate `k8s-worker-gpu` VM.
+- **Topology:** 3 control-plane/etcd members, live and joined
+  2026-07-30 ([ADR-0017](docs/adr/0017-second-control-plane-member.md)) —
+  deliberately **not** 2 (etcd quorum at N=2 is still 2, strictly worse
+  than 1 member). Placement is the whole point: 2 members on the stable
+  hosts (server1, ex-laptop), `k8s-cp-01` (`.165`, the host that gets
+  rebooted for gaming) kept a minority voter, so losing it never costs
+  quorum. Fronted by a kube-vip VIP, `192.168.1.180`/`k8s.bnei.lan` —
+  [ADR-0016](docs/adr/0016-k8s-endpoint-naming.md), confirmed live (API
+  server cert SANs carry both, `kubectl` against the VIP works). The
+  worker carries the GPU passthrough directly — no separate
+  `k8s-worker-gpu` VM.
 - **K8s version:** v1.35.4. **Container runtime:** containerd.
 - **CNI:** Cilium, chaining mode, kube-proxy retained (`ipvs`,
   `kube_proxy_strict_arp: true`) — see [ADR-0003](docs/adr/0003-cni-cilium-chaining-over-kube-proxy-replacement.md).
 - **OS:** Ubuntu 24.04 cloud-init, template VMID 9001, user `core`.
 
-### Nodes (target)
+### Nodes (current — confirmed live 2026-07-30 via `kubectl get nodes`)
 
 | Node | Host | IP | Resources | Notes |
 | --- | --- | --- | --- | --- |
-| k8s-cp-01 | proxmox | 192.168.1.201 | 2 vCPU / 4GB | Control plane (sole) |
-| k8s-worker-01 | proxmox | 192.168.1.202 | 6 vCPU / 15GB | Standard workloads + GPU passthrough, NVIDIA device plugin |
-| k8s-worker-02 | server1 | 192.168.1.203 | 4 vCPU / 8GB | Standard workloads, first cross-host worker (Stage 2 Phase C) |
+| k8s-cp-01 | `.165` | 192.168.1.201 | 2 vCPU / 4GB | Control plane + etcd (minority voter) |
+| k8s-cp-02 | server1 | 192.168.1.204 | 2 vCPU / 4GB | Control plane + etcd |
+| k8s-cp-03 | ex-laptop | 192.168.1.206 | 2 vCPU / 4GB | Control plane + etcd |
+| k8s-worker-01 | `.165` | 192.168.1.202 | 6 vCPU / 15GB | Standard workloads + GPU passthrough, NVIDIA device plugin |
+| k8s-worker-02 | server1 | 192.168.1.203 | 6 vCPU / 16GB | Standard workloads, first cross-host worker (Stage 2 Phase C) |
 
 ### GPU passthrough
 
@@ -180,22 +191,62 @@ graph LR
 - **Controller:** 2 replicas, pod anti-affinity keyed on
   `app=metallb,component=controller` / `topologyKey=kubernetes.io/hostname`.
 
-### DNS (target records)
+### DNS
+
+**Authority:** Pi-hole on the Pi 4 (`192.168.1.55`,
+`ansible/playbooks/pihole-configure.yml`), authoritative for `bnei.lan`
+per `DECISION.md` §2. Triggered once there were enough real internal
+hostnames (kube-vip's endpoint, the pg/garage/nfs/k9s-dashboard VMs) that
+raw IPs stopped being convenient. `bnei.dev` stays external via
+Cloudflare, unrelated to this.
+
+**Static IP:** Pi-hole's own address is pinned via `nmcli` (was
+DHCP-dynamic — a real risk once other things depend on it staying put),
+self-contained on the Pi rather than a Freebox DHCP reservation.
+
+**Two separate consumers, deliberately configured differently:**
+- **The LAN generally** (PVE hosts, laptops, phones) — inherits DNS from
+  whatever the Freebox hands out. Pointing the Freebox itself at Pi-hole
+  (as its own upstream and/or the DHCP-advertised server) is the
+  low-effort, high-coverage fix for this tier — one-time change, covers
+  every device including ones added later, operator-applied (not
+  automatable from this repo).
+- **The K8s cluster's CoreDNS** — forwards upstream via
+  `upstream_dns_servers` (`inventory/ukubi/group_vars/all/settings.yml`):
+  Pi-hole first, `1.1.1.1` as fallback. Set **explicitly** rather than
+  inherited from the node's own resolv.conf/Freebox — DB connectivity
+  (pods resolving the Pigsty VIP by name) depends on this, not worth an
+  extra Freebox-relay hop for something this critical. Confirmed live via
+  a `cluster.yml` re-run after the 3-CP join.
+
+### Records
 
 ```text
 A    proxmox.bnei.lan        → 192.168.1.165
 A    server1.bnei.lan        → 192.168.1.200
+A    ex-laptop.bnei.lan      → 192.168.1.161
 A    pi4.bnei.lan            → 192.168.1.55
-A    postgres-1.bnei.lan     → 192.168.1.205
-A    postgres-2.bnei.lan     → <assigned after server1 rejoin>
-A    garage.bnei.lan         → <assigned>
+A    postgres-1.bnei.lan     → 192.168.1.205  (pg01 VM — Patroni role can differ from this name, see ADR-0017/patronictl)
+A    postgres-2.bnei.lan     → 192.168.1.207  (pg02 VM — both still on .165 pending the HA migration, ADR-0017)
+A    postgres.bnei.lan       → 192.168.1.232  (Pigsty HA floating VIP — apps/tests should use this, not postgres-1/2 directly)
+A    garage.bnei.lan         → 192.168.1.199
 A    nfs-storage.bnei.lan    → 192.168.1.198
-A    k8s.bnei.lan            → 192.168.1.180  (reserved, see ADR-0016)
+A    k9s-dashboard.bnei.lan  → 192.168.1.110
+A    k8s.bnei.lan            → 192.168.1.180  (kube-vip control-plane VIP, confirmed live — see ADR-0016)
+A    k8s-cp-01.bnei.lan      → 192.168.1.201
+A    k8s-cp-02.bnei.lan      → 192.168.1.204
+A    k8s-cp-03.bnei.lan      → 192.168.1.206
+A    k8s-worker-01.bnei.lan  → 192.168.1.202
+A    k8s-worker-02.bnei.lan  → 192.168.1.203
 A    *.bnei.dev              → public IP / router port-forward
 ```
 
-Endpoint naming (`k8s-proxmox-gpu.bnei.lan` vs `k8s.bnei.lan`) is still
-open — see [ADR-0016](docs/adr/0016-k8s-endpoint-naming.md).
+Endpoint naming (`k8s-proxmox-gpu.bnei.lan` vs `k8s.bnei.lan`) is resolved
+in favor of `k8s.bnei.lan` — see
+[ADR-0016](docs/adr/0016-k8s-endpoint-naming.md). This list is declared,
+reconciled-every-run state (`pihole_hosts_records` in
+`ansible/playbooks/pihole-configure.yml`) — add a line there (and here)
+as each new host is actually provisioned, never speculatively.
 
 ---
 
@@ -295,8 +346,12 @@ for the full backup matrix across all data types.
 ### Longhorn (K8s app PVs)
 
 Default StorageClass, in-cluster, distributed across each K8s VM's
-dedicated `scsi1` disk. Replica count 3 (chart default), degraded (2/3)
-until Stage 2 adds a 3rd schedulable node. Postgres is **not** on
+dedicated `scsi1` disk. Replica count 3 (chart default) — was degraded
+(2/3) with only `k8s-cp-01`/`k8s-worker-01` schedulable; now 5 nodes are
+schedulable (`k8s-cp-01/02/03`, `k8s-worker-01/02`, all `worker: true`
+per `terraform/variables.tf`'s `k8s_nodes` map), so full 3/3 replication
+is achievable — not yet re-verified live post-join (check
+`kubectl get volumes.longhorn.io -A` before relying on this). Postgres is **not** on
 Longhorn — local on each data VM. Why Longhorn over Ceph/NFS:
 [ADR-0002](docs/adr/0002-storage-longhorn-over-ceph-nfs.md). Rollout
 specifics (sizing, replica count on `k8s-cp-01`, `local-path-provisioner`
