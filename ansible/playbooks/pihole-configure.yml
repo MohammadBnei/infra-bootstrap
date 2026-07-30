@@ -67,6 +67,7 @@
   vars:
     infisical_project_id: "{{ lookup('env', 'INFISICAL_PROJECT_ID') | default('8a3fa54f-be22-488a-bf51-55158f65c0f2', true) }}"
     infisical_env: "{{ lookup('env', 'INFISICAL_ENV') | default('dev', true) }}"
+    infisical_domain: "{{ lookup('env', 'INFISICAL_DOMAIN') | default('https://infisical.bnei.dev', true) }}" # self-hosted instance — every `infisical` CLI call needs this explicitly, it defaults to app.infisical.com's cloud endpoint otherwise
     pihole_interface: eth0
     pihole_static_ip: 192.168.1.55/24
     pihole_gateway: 192.168.1.254
@@ -82,6 +83,9 @@
       - "192.168.1.165 proxmox.bnei.lan"
       - "192.168.1.200 server1.bnei.lan"
       - "192.168.1.161 ex-laptop.bnei.lan"
+      - "192.168.1.165 pve.bnei.lan" # round-robin across all 3 corosync cluster members, any one of which manages the whole cluster's web UI/API — DNS-level convenience, NOT a health-aware VIP (no failover logic, a dead member's IP is still returned; client retry-on-failure behavior varies). Added 2026-07-30 during a live .165-down test.
+      - "192.168.1.200 pve.bnei.lan"
+      - "192.168.1.161 pve.bnei.lan"
       - "192.168.1.55 pi4.bnei.lan"
       - "192.168.1.205 postgres-1.bnei.lan"
       - "192.168.1.207 postgres-2.bnei.lan"
@@ -113,6 +117,7 @@
           - PVE_API_TOKEN
           - --projectId={{ infisical_project_id }}
           - --env={{ infisical_env }}
+          - --domain={{ infisical_domain }}
           - --plain
       register: infisical_check
       changed_when: false
@@ -232,6 +237,7 @@
           - set
           - --projectId={{ infisical_project_id }}
           - --env={{ infisical_env }}
+          - --domain={{ infisical_domain }}
           - --type=shared
           - PIHOLE_WEBPASSWORD={{ pihole_webpassword }}
       when: not pihole_already_installed
