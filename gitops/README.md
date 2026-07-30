@@ -53,10 +53,7 @@ gitops/
 │       ├── metrics-server/values.yaml
 │       ├── local-path-provisioner/values.yaml
 │       ├── searxng/values.yaml            # common-app-chart values, driven by platform-common-apps.applicationset.yaml
-│       ├── pgweb/values.yaml              # ditto
-│       ├── agent-fleet-bot/values.yaml    # ditto — owns the shared fleet PVC via extraManifests
-│       ├── dream-analyst-worker/values.yaml  # ditto
-│       └── vos-monolith-worker/values.yaml   # ditto
+│       └── pgweb/values.yaml              # ditto
 ├── redirectors/                           # Plain manifests, no chart — TLS-terminating redirects to out-of-cluster hosts
 │   └── proxmox.yaml                       # Namespace+Service(ExternalName)+ServersTransport+IngressRoute → proxmox.bnei.dev (192.168.1.165:8006)
 └── apps/
@@ -128,18 +125,13 @@ Each platform app: public Helm chart + values from `infra-bootstrap` via the man
 
 **`platform-common-apps.applicationset.yaml`** — simple containerized tools with no app-specific code (public image, no CI/CD of their own), all at wave 10:
 
-searxng · pgweb · agent-fleet-bot · dream-analyst-worker · vos-monolith-worker
+searxng · pgweb
 
 Unlike the two ApplicationSets above, both the chart (`common-app-chart`) and the values file live in `infra-bootstrap` itself — a single Application source, no external repo or SSH key needed. Add one: append a list element + `gitops/platform/values/<name>/values.yaml`.
 
-The three `agent-fleet-*` apps are the exception to "no app-specific code" —
-their image is built from the `agent-fleet` submodule/repo, not a public
-upstream image, but their *deployment* has no app-specific values repo of its
-own (unlike `apps.applicationset.yaml`'s user apps), so they're driven as
-platform-common-apps rather than added to `gitops/apps/registry.yaml`. See
-`agent-fleet/README.md`.
+**`apps.applicationset.yaml`** — user apps that need their own private repo (app-specific code/CI, own release cadence), all at wave 10. Currently: `editable-blog`, `dream-analyst`, `vos-monolith`, `vos-monolith-dev`, `agent-fleet-bot`, `dream-analyst-worker`, `vos-monolith-worker` (see `gitops/apps/registry.yaml`). n8n, openweb-ui(+pipelines), whodb, api, and ukubi-ai are still deferred until each has a real per-app repo (see `docs/bootstrap-test-notes.md`).
 
-**`apps.applicationset.yaml`** — user apps that need their own private repo (app-specific code/CI, own release cadence), all at wave 10. Currently: `editable-blog`, `dream-analyst`, `vos-monolith`, `vos-monolith-dev` (see `gitops/apps/registry.yaml`). n8n, openweb-ui(+pipelines), whodb, api, and ukubi-ai are still deferred until each has a real per-app repo (see `docs/bootstrap-test-notes.md`).
+The three `agent-fleet-*` apps moved here from `platform-common-apps` 2026-07-31: their image is built from the `agent-fleet` repo, and that repo's own CI (`docker.yml`) needs to bump the pinned `image.tag` in its `k8s/*.yaml` on every release — the platform-common pattern's infra-bootstrap-only single source can't support a self-contained CI tag bump, so they need the same two-source shape as any other user app, even though they serve no HTTP (`hostname: ""`, no ingress rendered). See `agent-fleet/README.md`.
 
 Each user app: `common-app-chart` from infra-bootstrap + per-app `values.yaml` from the app's own private repo (two Application sources, `GITHUB_APPS_SSH_KEY` required).
 

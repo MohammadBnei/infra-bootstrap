@@ -51,6 +51,33 @@ spec:
         targetRevision: dev
         hostname: dev.api.voconsteroid.com
 
+      # agent-fleet: moved here from platform-common-apps 2026-07-31 — see
+      # gitops/apps/registry.yaml's comment for why (self-contained CI tag
+      # bump needs a real per-app repo source).
+      - name: agent-fleet-bot
+        namespace: agent-fleet
+        syncWave: "10"
+        repoURL: https://github.com/MohammadBnei/agent-fleet.git
+        valuesPath: [k8s/agent-fleet-bot.yaml]
+        targetRevision: main
+        hostname: ""
+
+      - name: dream-analyst-worker
+        namespace: agent-fleet
+        syncWave: "10"
+        repoURL: https://github.com/MohammadBnei/agent-fleet.git
+        valuesPath: [k8s/dream-analyst-worker.yaml]
+        targetRevision: main
+        hostname: ""
+
+      - name: vos-monolith-worker
+        namespace: agent-fleet
+        syncWave: "10"
+        repoURL: https://github.com/MohammadBnei/agent-fleet.git
+        valuesPath: [k8s/vos-monolith-worker.yaml]
+        targetRevision: main
+        hostname: ""
+
   template:
     metadata:
       name: '{{.name}}'

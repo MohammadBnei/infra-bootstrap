@@ -83,6 +83,38 @@
   targetRevision: dev
   hostname: dev.api.voconsteroid.com
 
+# agent-fleet: Discord bot + one persistent worker pod per target repo
+# (dream-analyst, vos-monolith). Moved here from platform-common-apps 2026-07-31
+# — unlike searxng/pgweb, this repo's own CI needs to bump the pinned image
+# tag on every release (k8s/*.yaml), so it needs a real per-app repo source,
+# not the platform pattern's infra-bootstrap-only single source. Same
+# namespace on all three so the shared fleet-wide PVC (owned by
+# agent-fleet-bot, see its values.yaml) can be mounted by every app via
+# extraVolumes. No hostname/ingress — none of the three serve HTTP.
+- name: agent-fleet-bot
+  namespace: agent-fleet
+  syncWave: "10"
+  repoURL: https://github.com/MohammadBnei/agent-fleet.git
+  valuesPath: [k8s/agent-fleet-bot.yaml]
+  targetRevision: main
+  hostname: ""
+
+- name: dream-analyst-worker
+  namespace: agent-fleet
+  syncWave: "10"
+  repoURL: https://github.com/MohammadBnei/agent-fleet.git
+  valuesPath: [k8s/dream-analyst-worker.yaml]
+  targetRevision: main
+  hostname: ""
+
+- name: vos-monolith-worker
+  namespace: agent-fleet
+  syncWave: "10"
+  repoURL: https://github.com/MohammadBnei/agent-fleet.git
+  valuesPath: [k8s/vos-monolith-worker.yaml]
+  targetRevision: main
+  hostname: ""
+
 # searxng and pgweb are NOT here: they're public-image tools with no
 # app-specific code, so they're driven as platform apps instead — see
 # gitops/bootstrap/platform-common-apps.applicationset.yaml and
