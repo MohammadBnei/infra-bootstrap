@@ -305,9 +305,9 @@
         enabled: true
         state: started
 
-#--------------------------------------------------------------#
+# --------------------------------------------------------------#
 # Usage
-#--------------------------------------------------------------#
+# --------------------------------------------------------------#
 # Re-running this playbook re-applies both services idempotently on both
 # nodes — `state: started` on uncordon-self.service also means a re-run
 # immediately tries to uncordon a node that's currently cordoned-but-Ready.
