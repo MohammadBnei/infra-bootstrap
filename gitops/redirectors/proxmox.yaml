@@ -23,7 +23,7 @@ spec:
   type: ExternalName
   # pve.bnei.lan round-robins across all 3 corosync members (Pi-hole DNS,
   # not a health-aware VIP) - see ansible/playbooks/pihole-configure.yml.
-  externalName: "pve.bnei.lan"
+  externalName: "192.168.1.200"
   ports:
   - port: 8006
     protocol: TCP
