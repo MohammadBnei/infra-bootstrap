@@ -333,9 +333,12 @@ scripts — ADR-0022 / ADR-0023).
 Roles are the opposite of pg01/pg02's original static naming — a Patroni
 failover already promoted `.207` at some point before anyone checked live
 state, which is exactly the behavior ADR-0029 now accepts rather than
-fights. Redis is currently co-located on the current leader VM (`.207`).
-Migration from the original source (`.193`, PG 16.4) is complete; source
-VM decommissioned.
+fights. **Redis relocated 2026-07-30** from `.207`/`.165` (zero HA, sat on
+the host that gets rebooted for gaming, took ArgoCD's `externalRedis`
+cache down with it) to pg01's VM (`.205`, server1) — consumers resolve
+`redis.bnei.lan` (Pi-hole DNS), not a hardcoded IP, so future moves are a
+DNS-record change only. Migration from the original source (`.193`, PG
+16.4) is complete; source VM decommissioned.
 
 `pg01`'s migration to server1 (2026-07-30) hit a kernel panic on first
 boot on the new host — the VM was an old, hand-built import (not one of
