@@ -185,17 +185,21 @@ graph LR
 ```text
 A    proxmox.bnei.lan        → 192.168.1.165
 A    server1.bnei.lan        → 192.168.1.200
+A    ex-laptop.bnei.lan      → 192.168.1.161
 A    pi4.bnei.lan            → 192.168.1.55
-A    postgres-1.bnei.lan     → 192.168.1.205
-A    postgres-2.bnei.lan     → <assigned after server1 rejoin>
-A    garage.bnei.lan         → <assigned>
+A    postgres-1.bnei.lan     → 192.168.1.205  (pg01 VM — Patroni role can differ from this name, see ADR-0017/patronictl)
+A    postgres-2.bnei.lan     → 192.168.1.207  (pg02 VM — both still on .165 pending the HA migration, ADR-0017)
+A    garage.bnei.lan         → 192.168.1.199
 A    nfs-storage.bnei.lan    → 192.168.1.198
-A    k8s.bnei.lan            → 192.168.1.180  (reserved, see ADR-0016)
+A    k9s-dashboard.bnei.lan  → 192.168.1.110
+A    k8s.bnei.lan            → 192.168.1.180  (kube-vip control-plane VIP, see ADR-0016)
 A    *.bnei.dev              → public IP / router port-forward
 ```
 
-Endpoint naming (`k8s-proxmox-gpu.bnei.lan` vs `k8s.bnei.lan`) is still
-open — see [ADR-0016](docs/adr/0016-k8s-endpoint-naming.md).
+Served by Pi-hole on the Pi 4 (`ansible/playbooks/pihole-configure.yml`),
+authoritative for `bnei.lan` per `DECISION.md` §2. Endpoint naming
+(`k8s-proxmox-gpu.bnei.lan` vs `k8s.bnei.lan`) is resolved in favor of
+`k8s.bnei.lan` — see [ADR-0016](docs/adr/0016-k8s-endpoint-naming.md).
 
 ---
 

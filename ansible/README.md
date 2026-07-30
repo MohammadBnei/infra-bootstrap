@@ -16,10 +16,12 @@ Custom playbooks for things kubespray and pigsty don't cover:
 | `playbooks/garage-configure.yml` | Install/configure Garage on the bare LXC terraform/garage.tf creates — drafted, see below |
 | `playbooks/nfs-configure.yml` | Format + export NFS on the bare VM terraform/nfs.tf creates — drafted, see below |
 | `playbooks/k9s-dashboard-configure.yml` | Install kubectl/k9s + write a cluster-admin kubeconfig on the bare k9s-dashboard LXC terraform/k9s-dashboard.tf creates — drafted, see below |
+| `playbooks/pihole-configure.yml` | Install/configure Pi-hole on the Pi 4, authoritative for `bnei.lan` — drafted, see below |
 | `inventories/proxmox/hosts.yml` | Proxmox host inventory for `pve-postinstall.yml` (`.200`/`.161` — `.165` is a delegation target only) |
 | `inventories/garage/hosts.yml` | Single-host inventory for `garage-configure.yml` (`garage-storage` LXC) |
 | `inventories/nfs/hosts.yml` | Single-host inventory for `nfs-configure.yml` (`nfs-storage` VM) |
 | `inventories/k9s-dashboard/hosts.yml` | Single-host inventory for `k9s-dashboard-configure.yml` (`k9s-dashboard` LXC) |
+| `inventories/pihole/hosts.yml` | Single-host inventory for `pihole-configure.yml` (Pi 4, physical hardware) |
 | `requirements.yml` | Ansible collections needed by these playbooks (`ansible-galaxy collection install -r ansible/requirements.yml`) |
 
 ## Status
@@ -29,6 +31,7 @@ Custom playbooks for things kubespray and pigsty don't cover:
 - [x] `garage-configure.yml` drafted — see below
 - [x] `nfs-configure.yml` drafted — see below
 - [x] `k9s-dashboard-configure.yml` drafted — see below
+- [x] `pihole-configure.yml` drafted — see below
 - [ ] `vm-provision.yml` drafted
 - [ ] `k8s-node-prereqs.yml` drafted (may not be needed if kubespray covers it)
 
@@ -277,6 +280,58 @@ Safe to re-run: ServiceAccount/ClusterRoleBinding creation is
 `apply`-based, `kubectl`/`k9s` installs are checksum-gated. Token minting
 mints a fresh token every run (rotates, not a bug) and the kubeconfig is
 overwritten to match.
+
+## `playbooks/pihole-configure.yml`
+
+Installs Pi-hole on the Pi 4 (`192.168.1.55`) and makes it authoritative
+for `bnei.lan` (`DECISION.md` §2), triggered once there were enough real
+internal hostnames (kube-vip's `k8s.bnei.lan`, the pg/garage/nfs/
+k9s-dashboard VMs) that raw IPs stopped being convenient.
+
+**Unattended install, the hard way it actually works:** Pi-hole v6's
+installer shows interactive whiptail dialogs (interface, upstream DNS,
+blocklists, logging, privacy level) whenever it detects a fresh install —
+gated purely on `/etc/pihole/setupVars.conf`/`pihole.toml` not existing
+yet, with no env var to skip them once that branch is taken (confirmed
+against `pi-hole/pi-hole`'s actual installer source, not just docs, which
+were thin/inconsistent for v6). So this playbook pre-touches an empty
+`setupVars.conf` first — that flips the installer onto its "already
+configured, just migrate to v6 defaults" path, skipping every dialog —
+then explicitly sets everything we actually want afterward via the real
+v6 CLI: `pihole-FTL --config <key> <value>` (confirmed keys: `dns.hosts`
+for local A records — format `"IP HOSTNAME"`, a JSON string array, per
+`pi-hole/FTL`'s `config.c` — plus `dns.upstreams`, `dns.interface`,
+`dns.queryLogging`, `misc.privacylevel`) and `pihole setpassword`.
+
+The `bnei.lan` record set (`pihole_hosts_records` var) mirrors
+`ARCHITECTURE.md` §3's target list, filled in with real currently-assigned
+IPs. Add a line there as each new host actually gets provisioned — it's a
+declared, reconciled-every-run list, not a one-time seed.
+
+### Prerequisites
+
+- Pi 4 freshly reinstalled (Debian 13 trixie) and reachable at
+  `ansible/inventories/pihole/hosts.yml`'s `ansible_host`, via
+  `~/.ssh/id_ed_pi`
+- Infisical CLI session authenticated (`source ~/.hermes/cache/inf-env.sh`)
+  — writes `PIHOLE_WEBPASSWORD` there on first install
+
+### How to run
+
+```bash
+ansible-playbook -i ansible/inventories/pihole/hosts.yml \
+  ansible/playbooks/pihole-configure.yml
+```
+
+Safe to re-run: install itself only happens once (`pihole.toml` existence
+check). Password is only generated/set on that same first-install branch
+— v6 stores it as a one-way hash, nothing to recover from config on a
+later run, so re-runs deliberately leave an already-set password alone.
+`dns.hosts`/`dns.upstreams` are reconciled every run (read-then-compare,
+only written if different).
+
+**Not automated here:** pointing LAN devices/DHCP at `192.168.1.55` for
+DNS — that's a Freebox router config change, no API access assumed.
 
 ### Other playbooks (not yet drafted)
 
