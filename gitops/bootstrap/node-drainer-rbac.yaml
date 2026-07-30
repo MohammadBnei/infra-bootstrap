@@ -1,0 +1,50 @@
+# Scoped credential for .165's pre-shutdown drain automation
+# (ansible/playbooks/drain-165-configure.yml). .165 dual-boots into Windows
+# for gaming — a systemd unit on that host drains k8s-cp-01/k8s-worker-01
+# before every graceful reboot, so a planned .165 shutdown doesn't leave
+# Longhorn volumes stuck Multi-Attach on a node Kubernetes can't confirm is
+# gone (confirmed live 2026-07-30: Grafana got stuck exactly this way
+# during an ungraceful .165 outage test — see docs/bootstrap-test-notes.md).
+#
+# Deliberately NOT cluster-admin: this credential lives on a dual-boot
+# consumer OS, more exposed than the other infra hosts, so it's scoped to
+# only what `kubectl drain` actually needs — cordon a node (nodes patch)
+# and evict its pods (pods/eviction create). No secret material here; the
+# actual bearer token is minted live via `kubectl create token` and never
+# committed (see the playbook).
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: node-drainer
+  namespace: kube-system
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: node-drainer
+rules:
+  - apiGroups: [""]
+    resources: ["nodes"]
+    verbs: ["get", "list", "patch", "update"]
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["get", "list"]
+  - apiGroups: [""]
+    resources: ["pods/eviction"]
+    verbs: ["create"]
+  - apiGroups: ["policy"]
+    resources: ["poddisruptionbudgets"]
+    verbs: ["get", "list"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: node-drainer
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: node-drainer
+subjects:
+  - kind: ServiceAccount
+    name: node-drainer
+    namespace: kube-system
