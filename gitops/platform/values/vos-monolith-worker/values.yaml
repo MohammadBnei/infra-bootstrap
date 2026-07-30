@@ -1,0 +1,49 @@
+# vos-monolith-worker — persistent Claude Code worker pod scoped to the
+# vos-monolith repo (github.com/MohammadBnei/vos-monolith.git). Same shape as
+# dream-analyst-worker/values.yaml — see that file's comments for the full
+# design rationale.
+
+image:
+  repository: mohammaddocker/agent-fleet-worker
+  tag: "latest" # not pinned yet — see agent-fleet-bot/values.yaml's comment
+
+service:
+  port: 8080 # unused (no HTTP server), required by the chart schema
+
+resources:
+  requests:
+    cpu: 250m
+    memory: 512Mi
+  limits:
+    cpu: 2000m
+    memory: 2Gi
+
+env:
+  - name: TARGET_REPO
+    value: "vos-monolith"
+  - name: TARGET_REPO_URL
+    value: "https://github.com/MohammadBnei/vos-monolith.git"
+  - name: WORKER_NAME
+    value: "vos-monolith-worker"
+  - name: BASE_BRANCH
+    value: "dev" # vos-monolith's actual default/dev branch — main only gets prod tag bumps, see gitops/apps/registry.yaml
+
+persistence:
+  enabled: true
+  size: 10Gi
+  mountPath: /workspace
+  accessMode: ReadWriteOnce
+
+extraVolumes:
+  - name: fleet-shared
+    persistentVolumeClaim:
+      claimName: agent-fleet-shared-pvc
+
+extraVolumeMounts:
+  - name: fleet-shared
+    mountPath: /mnt/fleet-shared
+
+infisical:
+  enabled: true
+  projectSlug: "agent-fleet-nygh"
+  envSlug: dev

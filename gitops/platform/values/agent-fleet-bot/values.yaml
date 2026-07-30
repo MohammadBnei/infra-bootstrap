@@ -1,0 +1,84 @@
+# agent-fleet-bot — Discord ingress for the agent fleet. Driven directly from
+# infra-bootstrap via common-app-chart (source lives in the agent-fleet
+# submodule/repo, but the deployed values/registration live here — see
+# agent-fleet/README.md and this repo's gitops/README.md).
+#
+# Watches a Discord channel for `!task <repo>: <description>`, opens a
+# thread, queues a row in the shared `tasks` table (agentfleetdb, Pigsty),
+# and relays thread replies into the task's Redis planning transcript so the
+# proposer/critic/human conversation in the worker pod is visible to all
+# three. No k8s API access needed — no RBAC, plain common-app-chart app.
+
+image:
+  repository: mohammaddocker/agent-fleet-bot
+  # "latest", not a pinned version: docker.yml only pushes on a git tag push
+  # (release-it creates that tag on merge to main), so no fixed version tag
+  # exists in Docker Hub yet to pin to — pin once the first real release has
+  # run and follow actions-runner's precedent of moving to a manual bump.
+  tag: "latest"
+
+service:
+  port: 8080 # unused (no HTTP server), required by the chart schema
+
+resources:
+  requests:
+    cpu: 100m
+    memory: 128Mi
+  limits:
+    cpu: 250m
+    memory: 256Mi
+
+# Owns the shared fleet-wide PVC's lifecycle (RWX Longhorn) — both worker
+# apps mount the same claim by name via extraVolumes, since PVCs can only be
+# referenced by pods in the same namespace (all three apps share ns
+# agent-fleet). Holds: common skills/helper scripts, the append-only
+# knowledge journal mirror, and shared MCP configs, at /mnt/fleet-shared.
+extraManifests:
+  - |
+    apiVersion: v1
+    kind: PersistentVolumeClaim
+    metadata:
+      name: agent-fleet-shared-pvc
+      namespace: {{ .Release.Namespace }}
+    spec:
+      accessModes: ["ReadWriteMany"]
+      resources:
+        requests:
+          storage: 5Gi
+
+extraVolumes:
+  - name: fleet-shared
+    persistentVolumeClaim:
+      claimName: agent-fleet-shared-pvc
+
+extraVolumeMounts:
+  - name: fleet-shared
+    mountPath: /mnt/fleet-shared
+
+# Dedicated Infisical project (per docs/secrets.md's per-app-project
+# convention) — DISCORD_BOT_TOKEN, DISCORD_TRIGGER_CHANNEL_ID,
+# AGENTFLEET_DB_HOST/PORT/NAME/USER/PASSWORD, REDIS_HOST/PORT/MAIN_PASSWORD
+# (all populated 2026-07-30 — DISCORD_TRIGGER_CHANNEL_ID isn't secret, kept
+# here anyway for one source of truth instead of splitting config across two
+# systems). Distinct from the
+# read-only INFISICAL_TOKEN used by agent-fleet's own CI (docker.yml) — this
+# in-cluster path goes through the shared universal-auth-credentials machine
+# identity (ns infisical), which needs its own separate grant to this
+# project in the Infisical UI, same as every other per-app project.
+infisical:
+  enabled: true
+  projectSlug: "agent-fleet-nygh"
+  envSlug: dev
+
+# Applies db/schema.sql (idempotent) before the bot/workers can insert rows.
+# Reuses the bot's own image (ADR-0023 pattern) rather than a separate
+# migration runner.
+hooks:
+  migrate:
+    type: PreSync
+    image:
+      repository: mohammaddocker/agent-fleet-bot
+      tag: "latest"
+    command: ["sh", "-c"]
+    args:
+      - "PGPASSWORD=$AGENTFLEET_DB_PASSWORD psql -h $AGENTFLEET_DB_HOST -p $AGENTFLEET_DB_PORT -U $AGENTFLEET_DB_USER -d $AGENTFLEET_DB_NAME -f /app/db/schema.sql"

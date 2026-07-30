@@ -114,6 +114,15 @@ all:
             roles: [dbrole_readwrite] # optional, belonged roles. default roles are: dbrole_{admin,readonly,readwrite,offline}
             pool_connlimit: -1 # optional, max database connections at user level, default -1 disable limit
 
+          - name: dbuser_agentfleet # REQUIRED, `name` is the only mandatory field of a user definition
+            password: wmEpOFW0+nurL8MzLkOCNd3tT0G/oHp4r+0wAe4XSxk= # optional, password, can be a scram-sha-256 hash string or plain text
+            pgbouncer: true # optional, add this user to pgbouncer user-list? false by default (production user should be true explicitly)
+            connlimit: -1 # optional, user connection limit, default -1 disable limit
+            expire_in: 3650 # optional, now + n days when this role is expired (OVERWRITE expire_at)
+            comment: agent-fleet shared database (dream-analyst-worker, vos-monolith-worker, agent-fleet-bot) # optional, comment string for this user/role
+            roles: [dbrole_admin] # full access per Mohammad's requirement — owns its own DB/schema freely, not cluster-wide superuser
+            pool_connlimit: -1 # optional, max database connections at user level, default -1 disable limit
+
         # define business databases : https://pigsty.io/docs/pgsql/config/db
         pg_databases:
           - name: meta
@@ -160,6 +169,10 @@ all:
           - name: whododb # REQUIRED, `name` is the only mandatory field of a database definition
             comment: whodb database # optional, comment string for this database
             owner: dbuser_whodb # optional, database owner, postgres by default
+
+          - name: agentfleetdb # REQUIRED, `name` is the only mandatory field of a database definition
+            comment: agent-fleet shared task queue + knowledge journal # optional, comment string for this database
+            owner: dbuser_agentfleet # optional, database owner, postgres by default
 
         pg_hba_rules:   # https://pigsty.io/docs/pgsql/config/hba
           - { user: all ,db: all ,addr: intra ,auth: pwd ,title: 'everyone intranet access with password' ,order: 800 }

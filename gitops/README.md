@@ -53,7 +53,10 @@ gitops/
 │       ├── metrics-server/values.yaml
 │       ├── local-path-provisioner/values.yaml
 │       ├── searxng/values.yaml            # common-app-chart values, driven by platform-common-apps.applicationset.yaml
-│       └── pgweb/values.yaml              # ditto
+│       ├── pgweb/values.yaml              # ditto
+│       ├── agent-fleet-bot/values.yaml    # ditto — owns the shared fleet PVC via extraManifests
+│       ├── dream-analyst-worker/values.yaml  # ditto
+│       └── vos-monolith-worker/values.yaml   # ditto
 ├── redirectors/                           # Plain manifests, no chart — TLS-terminating redirects to out-of-cluster hosts
 │   └── proxmox.yaml                       # Namespace+Service(ExternalName)+ServersTransport+IngressRoute → proxmox.bnei.dev (192.168.1.165:8006)
 └── apps/
@@ -125,9 +128,16 @@ Each platform app: public Helm chart + values from `infra-bootstrap` via the man
 
 **`platform-common-apps.applicationset.yaml`** — simple containerized tools with no app-specific code (public image, no CI/CD of their own), all at wave 10:
 
-searxng · pgweb
+searxng · pgweb · agent-fleet-bot · dream-analyst-worker · vos-monolith-worker
 
 Unlike the two ApplicationSets above, both the chart (`common-app-chart`) and the values file live in `infra-bootstrap` itself — a single Application source, no external repo or SSH key needed. Add one: append a list element + `gitops/platform/values/<name>/values.yaml`.
+
+The three `agent-fleet-*` apps are the exception to "no app-specific code" —
+their image is built from the `agent-fleet` submodule/repo, not a public
+upstream image, but their *deployment* has no app-specific values repo of its
+own (unlike `apps.applicationset.yaml`'s user apps), so they're driven as
+platform-common-apps rather than added to `gitops/apps/registry.yaml`. See
+`agent-fleet/README.md`.
 
 **`apps.applicationset.yaml`** — user apps that need their own private repo (app-specific code/CI, own release cadence), all at wave 10. Currently: `editable-blog`, `dream-analyst`, `vos-monolith`, `vos-monolith-dev` (see `gitops/apps/registry.yaml`). n8n, openweb-ui(+pipelines), whodb, api, and ukubi-ai are still deferred until each has a real per-app repo (see `docs/bootstrap-test-notes.md`).
 
