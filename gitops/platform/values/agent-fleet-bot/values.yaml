@@ -24,10 +24,6 @@ resources:
     cpu: 250m
     memory: 256Mi
 
-env:
-  - name: DISCORD_TRIGGER_CHANNEL_ID
-    value: "REPLACE_ME" # the Discord channel ID humans post `!task` in
-
 # Owns the shared fleet-wide PVC's lifecycle (RWX Longhorn) — both worker
 # apps mount the same claim by name via extraVolumes, since PVCs can only be
 # referenced by pods in the same namespace (all three apps share ns
@@ -56,9 +52,15 @@ extraVolumeMounts:
     mountPath: /mnt/fleet-shared
 
 # Dedicated Infisical project (per docs/secrets.md's per-app-project
-# convention) — DISCORD_BOT_TOKEN, AGENTFLEET_DB_HOST/PORT/NAME/USER/PASSWORD,
-# REDIS_MAIN_PASSWORD. universal-auth-credentials needs a grant to this
-# project in the Infisical UI (see manual prerequisites).
+# convention) — DISCORD_BOT_TOKEN, DISCORD_TRIGGER_CHANNEL_ID,
+# AGENTFLEET_DB_HOST/PORT/NAME/USER/PASSWORD, REDIS_HOST/PORT/MAIN_PASSWORD
+# (all populated 2026-07-30 — DISCORD_TRIGGER_CHANNEL_ID isn't secret, kept
+# here anyway for one source of truth instead of splitting config across two
+# systems). Distinct from the
+# read-only INFISICAL_TOKEN used by agent-fleet's own CI (docker.yml) — this
+# in-cluster path goes through the shared universal-auth-credentials machine
+# identity (ns infisical), which needs its own separate grant to this
+# project in the Infisical UI, same as every other per-app project.
 infisical:
   enabled: true
   projectSlug: "agent-fleet-nygh"
