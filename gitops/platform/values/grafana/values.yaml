@@ -45,18 +45,18 @@ datasources:
       url: http://platform-prometheus-kube-p-prometheus.monitoring.svc.cluster.local:9090
       isDefault: true
 
-    # Pigsty's own metrics backend (pg01, 192.168.1.205) — actually
+    # Pigsty's own metrics backend (pg01, postgres-1.bnei.lan) — actually
     # VictoriaMetrics (v2.24.0), not classic Prometheus, but it implements
     # the same HTTP API so Grafana's "prometheus" datasource type works
     # against it unchanged. Reached via Pigsty's nginx portal on :80
     # (confirmed live: no vhost/Host-header routing is actually configured
     # beyond the "home" catch-all, so any Host header lands on the same
-    # backend — /vmetrics is the only path that matters). Direct LAN
-    # IP:port, same pattern as longhorn-backup-secret.yaml's S3 endpoint —
-    # no ingress/DNS exists for this yet.
+    # backend — /vmetrics is the only path that matters). Resolved via
+    # Pi-hole (ansible/playbooks/pihole-configure.yml), not a static IP —
+    # follows the host if pg01 ever moves.
     - name: Pigsty (VictoriaMetrics)
       type: prometheus
-      url: http://192.168.1.205/vmetrics
+      url: http://postgres-1.bnei.lan/vmetrics
       isDefault: false
       # Fixed uid, not left to auto-generate: Pigsty's own vendored
       # dashboard JSON (pigsty/files/grafana/pgsql/*.json) hardcodes
@@ -307,7 +307,7 @@ dashboards:
             {"collapsed":false,"gridPos":{"h":1,"w":24,"x":0,"y":0},"id":147,"title":"Overview","type":"row"},
             {
               "datasource":{"type":"prometheus","uid":"ds-prometheus"},
-              "fieldConfig":{"defaults":{"color":{"mode":"thresholds"},"links":[{"title":"Node Overview","url":"http://192.168.1.205/ui/d/node-overview?${__url_time_range}"}],"thresholds":{"mode":"absolute","steps":[{"color":"#3e668f","value":0}]}}},
+              "fieldConfig":{"defaults":{"color":{"mode":"thresholds"},"links":[{"title":"Node Overview","url":"http://postgres-1.bnei.lan/ui/d/node-overview?${__url_time_range}"}],"thresholds":{"mode":"absolute","steps":[{"color":"#3e668f","value":0}]}}},
               "gridPos":{"h":3,"w":8,"x":0,"y":1},
               "id":99,
               "options":{"colorMode":"background","graphMode":"none","justifyMode":"center","orientation":"auto","percentChangeColorMode":"standard","reduceOptions":{"calcs":["lastNotNull"],"fields":"","values":false},"showPercentChange":false,"text":{},"textMode":"name","wideLayout":true},
@@ -322,9 +322,9 @@ dashboards:
               "fieldConfig":{
                 "defaults":{"color":{"mode":"thresholds"},"max":2.5,"min":0,"thresholds":{"mode":"absolute","steps":[{"color":"#3e668f","value":0}]}},
                 "overrides":[
-                  { "matcher":{"id":"byRegexp","options":"/Mem|Disk|Data/"},"properties":[{"id":"unit","value":"bytes"},{"id":"decimals","value":0}]                                         },{ "matcher":{"id":"byName","options":"Cluster"}          ,"properties":[{"id":"links","value":[{"title":"PGSQL Cluster","url":"http://192.168.1.205/ui/d/pgsql-cluster?${__url_time_range}"}]}]   },
-                  { "matcher":{"id":"byName","options":"Instance"}         ,"properties":[{"id":"links","value":[{"title":"PGSQL Instance","url":"http://192.168.1.205/ui/d/pgsql-instance?${__url_time_range}"}]}] },{ "matcher":{"id":"byName","options":"Service"}          ,"properties":[{"id":"links","value":[{"title":"PGSQL Service","url":"http://192.168.1.205/ui/d/pgsql-service?${__url_time_range}"}]}]   },
-                  { "matcher":{"id":"byName","options":"Node"}             ,"properties":[{"id":"links","value":[{"title":"PGSQL Node","url":"http://192.168.1.205/ui/d/node-instance?${__url_time_range}"}]}]      },{ "matcher":{"id":"byName","options":"DB"}               ,"properties":[{"id":"links","value":[{"title":"PGSQL Database","url":"http://192.168.1.205/ui/d/pgsql-database?${__url_time_range}"}]}] }
+                  { "matcher":{"id":"byRegexp","options":"/Mem|Disk|Data/"},"properties":[{"id":"unit","value":"bytes"},{"id":"decimals","value":0}]                                         },{ "matcher":{"id":"byName","options":"Cluster"}          ,"properties":[{"id":"links","value":[{"title":"PGSQL Cluster","url":"http://postgres-1.bnei.lan/ui/d/pgsql-cluster?${__url_time_range}"}]}]   },
+                  { "matcher":{"id":"byName","options":"Instance"}         ,"properties":[{"id":"links","value":[{"title":"PGSQL Instance","url":"http://postgres-1.bnei.lan/ui/d/pgsql-instance?${__url_time_range}"}]}] },{ "matcher":{"id":"byName","options":"Service"}          ,"properties":[{"id":"links","value":[{"title":"PGSQL Service","url":"http://postgres-1.bnei.lan/ui/d/pgsql-service?${__url_time_range}"}]}]   },
+                  { "matcher":{"id":"byName","options":"Node"}             ,"properties":[{"id":"links","value":[{"title":"PGSQL Node","url":"http://postgres-1.bnei.lan/ui/d/node-instance?${__url_time_range}"}]}]      },{ "matcher":{"id":"byName","options":"DB"}               ,"properties":[{"id":"links","value":[{"title":"PGSQL Database","url":"http://postgres-1.bnei.lan/ui/d/pgsql-database?${__url_time_range}"}]}] }
                 ]
               },
               "gridPos":{"h":3,"w":16,"x":8,"y":1},
@@ -350,7 +350,7 @@ dashboards:
               "datasource":{"type":"prometheus","uid":"ds-prometheus"},
               "description":"ETCD Health server ratio, and number of Postgres cluster in Failsafe mode",
               "fieldConfig":{
-                "defaults":{"color":{"mode":"thresholds"},"links":[{"title":"ETCD Overview","url":"http://192.168.1.205/ui/d/etcd-overview?${__url_time_range}"}],"noValue":"N/A","thresholds":{"mode":"absolute","steps":[{"color":"red","value":0}]},"unit":"none"},
+                "defaults":{"color":{"mode":"thresholds"},"links":[{"title":"ETCD Overview","url":"http://postgres-1.bnei.lan/ui/d/etcd-overview?${__url_time_range}"}],"noValue":"N/A","thresholds":{"mode":"absolute","steps":[{"color":"red","value":0}]},"unit":"none"},
                 "overrides":[
                   {
                     "matcher":{"id":"byName","options":"ETCD Status"},
@@ -386,7 +386,7 @@ dashboards:
               "fieldConfig":{
                 "defaults":{
                   "color":{"mode":"thresholds"},
-                  "links":[{"title":"PGSQL Alert: CPU","url":"http://192.168.1.205/ui/d/pgsql-alert?viewPanel=43&${__url_time_range}"}],
+                  "links":[{"title":"PGSQL Alert: CPU","url":"http://postgres-1.bnei.lan/ui/d/pgsql-alert?viewPanel=43&${__url_time_range}"}],
                   "mappings":[{"options":{"match":"null+nan","result":{"color":"gray","index":0,"text":"\u2205"}},"type":"special"}],
                   "min":0,
                   "thresholds":{"mode":"absolute","steps":[{"color":"#3e668f","value":0},{"color":"#346f36cc","value":0.1},{"color":"#fcdb72","value":0.3},{"color":"#f79f64","value":0.5},{"color":"red","value":0.7},{"color":"#b783af","value":0.9},{"color":"text","value":1}]},
@@ -403,7 +403,7 @@ dashboards:
             },
             {
               "datasource":{"type":"prometheus","uid":"ds-prometheus"},
-              "fieldConfig":{"defaults":{"color":{"mode":"thresholds"},"links":[{"title":"PGSQL Alert: Backend Session","url":"http://192.168.1.205/ui/d/pgsql-alert?viewPanel=101&${__url_time_range}"}],"mappings":[{"options":{"match":"null+nan","result":{"color":"gray","index":0,"text":"\u2205"}},"type":"special"}],"min":0,"thresholds":{"mode":"absolute","steps":[{"color":"#346f36cc","value":0}]},"unit":"none"}},
+              "fieldConfig":{"defaults":{"color":{"mode":"thresholds"},"links":[{"title":"PGSQL Alert: Backend Session","url":"http://postgres-1.bnei.lan/ui/d/pgsql-alert?viewPanel=101&${__url_time_range}"}],"mappings":[{"options":{"match":"null+nan","result":{"color":"gray","index":0,"text":"\u2205"}},"type":"special"}],"min":0,"thresholds":{"mode":"absolute","steps":[{"color":"#346f36cc","value":0}]},"unit":"none"}},
               "gridPos":{"h":3,"w":2,"x":6,"y":4},
               "id":76,
               "options":{"colorMode":"background","graphMode":"area","justifyMode":"auto","orientation":"auto","percentChangeColorMode":"standard","reduceOptions":{"calcs":["lastNotNull"],"fields":"","values":false},"showPercentChange":false,"text":{"titleSize":12,"valueSize":18},"textMode":"value_and_name","wideLayout":true},
@@ -414,7 +414,7 @@ dashboards:
             },
             {
               "datasource":{"type":"prometheus","uid":"ds-prometheus"},
-              "fieldConfig":{"defaults":{"color":{"mode":"thresholds"},"links":[{"title":"PGSQL Alert: Xact Commit","url":"http://192.168.1.205/ui/d/pgsql-alert?viewPanel=98&${__url_time_range}"}],"mappings":[{"options":{"match":"null+nan","result":{"color":"gray","index":0,"text":"\u2205"}},"type":"special"}],"min":0,"thresholds":{"mode":"absolute","steps":[{"color":"#346f36cc","value":0}]},"unit":"none"}},
+              "fieldConfig":{"defaults":{"color":{"mode":"thresholds"},"links":[{"title":"PGSQL Alert: Xact Commit","url":"http://postgres-1.bnei.lan/ui/d/pgsql-alert?viewPanel=98&${__url_time_range}"}],"mappings":[{"options":{"match":"null+nan","result":{"color":"gray","index":0,"text":"\u2205"}},"type":"special"}],"min":0,"thresholds":{"mode":"absolute","steps":[{"color":"#346f36cc","value":0}]},"unit":"none"}},
               "gridPos":{"h":3,"w":2,"x":8,"y":4},
               "id":72,
               "options":{"colorMode":"background","graphMode":"area","justifyMode":"auto","orientation":"auto","percentChangeColorMode":"standard","reduceOptions":{"calcs":["lastNotNull"],"fields":"","values":false},"showPercentChange":false,"text":{"titleSize":12,"valueSize":18},"textMode":"value_and_name","wideLayout":true},
@@ -425,7 +425,7 @@ dashboards:
             },
             {
               "datasource":{"type":"prometheus","uid":"ds-prometheus"},
-              "fieldConfig":{"defaults":{"color":{"mode":"thresholds"},"links":[{"title":"PGSQL Alert: Rollback","url":"http://192.168.1.205/ui/d/pgsql-alert?viewPanel=99&${__url_time_range}"}],"mappings":[{"options":{"match":"null+nan","result":{"color":"gray","index":0,"text":"\u2205"}},"type":"special"}],"min":0,"thresholds":{"mode":"absolute","steps":[{"color":"#346f36cc","value":0},{"color":"#EAB839","value":10}]},"unit":"none"}},
+              "fieldConfig":{"defaults":{"color":{"mode":"thresholds"},"links":[{"title":"PGSQL Alert: Rollback","url":"http://postgres-1.bnei.lan/ui/d/pgsql-alert?viewPanel=99&${__url_time_range}"}],"mappings":[{"options":{"match":"null+nan","result":{"color":"gray","index":0,"text":"\u2205"}},"type":"special"}],"min":0,"thresholds":{"mode":"absolute","steps":[{"color":"#346f36cc","value":0},{"color":"#EAB839","value":10}]},"unit":"none"}},
               "gridPos":{"h":3,"w":2,"x":10,"y":4},
               "id":73,
               "options":{"colorMode":"background","graphMode":"area","justifyMode":"auto","orientation":"auto","percentChangeColorMode":"standard","reduceOptions":{"calcs":["lastNotNull"],"fields":"","values":false},"showPercentChange":false,"text":{"titleSize":12,"valueSize":18},"textMode":"value_and_name","wideLayout":true},
@@ -439,7 +439,7 @@ dashboards:
               "fieldConfig":{
                 "defaults":{
                   "color":{"mode":"thresholds"},
-                  "links":[{"title":"Node Alert: FS Space","url":"http://192.168.1.205/ui/d/node-alert?viewPanel=23&${__url_time_range}"}],
+                  "links":[{"title":"Node Alert: FS Space","url":"http://postgres-1.bnei.lan/ui/d/node-alert?viewPanel=23&${__url_time_range}"}],
                   "mappings":[{"options":{"match":"null+nan","result":{"color":"gray","index":0,"text":"\u2205"}},"type":"special"}],
                   "max":1,
                   "min":0,
@@ -462,7 +462,7 @@ dashboards:
                 "defaults":{
                   "color":{"mode":"thresholds"},
                   "decimals":2,
-                  "links":[{"title":"PGSQL Alert: Age","url":"http://192.168.1.205/ui/d/pgsql-alert?viewPanel=82&${__url_time_range}"}],
+                  "links":[{"title":"PGSQL Alert: Age","url":"http://postgres-1.bnei.lan/ui/d/pgsql-alert?viewPanel=82&${__url_time_range}"}],
                   "mappings":[{"options":{"match":"null+nan","result":{"color":"gray","index":0,"text":"\u2205"}},"type":"special"}],
                   "max":1,
                   "min":0,
@@ -484,7 +484,7 @@ dashboards:
               "fieldConfig":{
                 "defaults":{
                   "color":{"mode":"thresholds"},
-                  "links":[{"title":"PGSQL Alert: Lag in Bytes","url":"http://192.168.1.205/ui/d/pgsql-alert?viewPanel=86&${__url_time_range}"}],
+                  "links":[{"title":"PGSQL Alert: Lag in Bytes","url":"http://postgres-1.bnei.lan/ui/d/pgsql-alert?viewPanel=86&${__url_time_range}"}],
                   "mappings":[{"options":{"match":"null+nan","result":{"color":"gray","index":0,"text":"Lag = \u2205"}},"type":"special"}],
                   "min":0,
                   "thresholds":{"mode":"absolute","steps":[{"color":"#346f36cc","value":0},{"color":"#fcdb72","value":1000},{"color":"#f79f64","value":100000},{"color":"red","value":1000000},{"color":"#b783af","value":10000000},{"color":"text","value":100000000}]},
@@ -504,7 +504,7 @@ dashboards:
               "fieldConfig":{
                 "defaults":{
                   "color":{"mode":"thresholds"},
-                  "links":[{"title":"PGSQL Alert: Idle in Transaction","url":"http://192.168.1.205/ui/d/pgsql-alert?viewPanel=79&${__url_time_range}"}],
+                  "links":[{"title":"PGSQL Alert: Idle in Transaction","url":"http://postgres-1.bnei.lan/ui/d/pgsql-alert?viewPanel=79&${__url_time_range}"}],
                   "mappings":[{"options":{"match":"null+nan","result":{"color":"gray","index":0,"text":"\u2205"}},"type":"special"}],
                   "min":0,
                   "thresholds":{"mode":"absolute","steps":[{"color":"#346f36cc","value":0},{"color":"#f79f64","value":1},{"color":"red","value":8}]},
@@ -524,7 +524,7 @@ dashboards:
               "fieldConfig":{
                 "defaults":{
                   "color":{"mode":"thresholds"},
-                  "links":[{"title":"PGSQL Alert: Waiting Clients","url":"http://192.168.1.205/ui/d/pgsql-alert?viewPanel=89&${__url_time_range}"}],
+                  "links":[{"title":"PGSQL Alert: Waiting Clients","url":"http://postgres-1.bnei.lan/ui/d/pgsql-alert?viewPanel=89&${__url_time_range}"}],
                   "mappings":[{"options":{"match":"null+nan","result":{"color":"#808080","index":0,"text":"Queue Nowait"}},"type":"special"}],
                   "min":0,
                   "thresholds":{"mode":"absolute","steps":[{"color":"#346f36cc","value":0},{"color":"#f79f64","value":1},{"color":"red","value":8}]},
@@ -545,7 +545,7 @@ dashboards:
                 "defaults":{
                   "color":{"mode":"thresholds"},
                   "decimals":1,
-                  "links":[{"title":"PGSQL Alert: Connection Usage","url":"http://192.168.1.205/ui/d/pgsql-alert?viewPanel=76&${__url_time_range}"}],
+                  "links":[{"title":"PGSQL Alert: Connection Usage","url":"http://postgres-1.bnei.lan/ui/d/pgsql-alert?viewPanel=76&${__url_time_range}"}],
                   "mappings":[{"options":{"match":"null+nan","result":{"color":"#808080","index":0,"text":"\u2205"}},"type":"special"}],
                   "max":1,
                   "min":0,
@@ -566,19 +566,19 @@ dashboards:
               "fieldConfig":{
                 "defaults":{"color":{"mode":"thresholds"},"decimals":1,"mappings":[{"options":{"-1":{"color":"gray","index":1,"text":"N/A"}},"type":"value"},{"options":{"match":"null+nan","result":{"color":"#3e668f","index":0,"text":"No Clusters"}},"type":"special"}],"min":0,"thresholds":{"mode":"absolute","steps":[{"color":"#3e668f","value":0}]},"unit":"percentunit"},
                 "overrides":[
-                  {"matcher":{"id":"byFrameRefID","options":"A"},"properties":[{"id":"links","value":[{"title":"PGSQL Cluster ${__field.labels.cls}","url":"http://192.168.1.205/ui/d/pgsql-cluster?var-cls=${__field.labels.cls}&${__url_time_range}"}]},{"id":"color","value":{"fixedColor":"#3e668f","mode":"fixed"}}]},
-                  {"matcher":{"id":"byFrameRefID","options":"B"},"properties":[{"id":"links","value":[{"title":"Redis Cluster ${__field.labels.cls}","url":"http://192.168.1.205/ui/d/redis-cluster?var-cls=${__field.labels.cls}&${__url_time_range}"}]},{"id":"color","value":{"fixedColor":"#cc4637d9","mode":"fixed"}}]},
-                  {"matcher":{"id":"byFrameRefID","options":"C"},"properties":[{"id":"links","value":[{"title":"Node Cluster : ${__field.labels.cls}","url":"http://192.168.1.205/ui/d/node-cluster?var-cls=${__field.labels.cls}&${__url_time_range}"}]},{"id":"color","value":{"fixedColor":"#e6b03ee6","mode":"fixed"}}]},
+                  {"matcher":{"id":"byFrameRefID","options":"A"},"properties":[{"id":"links","value":[{"title":"PGSQL Cluster ${__field.labels.cls}","url":"http://postgres-1.bnei.lan/ui/d/pgsql-cluster?var-cls=${__field.labels.cls}&${__url_time_range}"}]},{"id":"color","value":{"fixedColor":"#3e668f","mode":"fixed"}}]},
+                  {"matcher":{"id":"byFrameRefID","options":"B"},"properties":[{"id":"links","value":[{"title":"Redis Cluster ${__field.labels.cls}","url":"http://postgres-1.bnei.lan/ui/d/redis-cluster?var-cls=${__field.labels.cls}&${__url_time_range}"}]},{"id":"color","value":{"fixedColor":"#cc4637d9","mode":"fixed"}}]},
+                  {"matcher":{"id":"byFrameRefID","options":"C"},"properties":[{"id":"links","value":[{"title":"Node Cluster : ${__field.labels.cls}","url":"http://postgres-1.bnei.lan/ui/d/node-cluster?var-cls=${__field.labels.cls}&${__url_time_range}"}]},{"id":"color","value":{"fixedColor":"#e6b03ee6","mode":"fixed"}}]},
                   {
                     "matcher":{"id":"byFrameRefID","options":"D"},
                     "properties":[
-                      { "id":"color"     ,"value":{"fixedColor":"#5b9cd5","mode":"thresholds"}                                                                                                           },{ "id":"links"     ,"value":[{"title":"ETCD Overview","url":"http://192.168.1.205/ui/d/etcd-overview?${__url_time_range}"}]                                                                               },
+                      { "id":"color"     ,"value":{"fixedColor":"#5b9cd5","mode":"thresholds"}                                                                                                           },{ "id":"links"     ,"value":[{"title":"ETCD Overview","url":"http://postgres-1.bnei.lan/ui/d/etcd-overview?${__url_time_range}"}]                                                                               },
                       { "id":"thresholds","value":{"mode":"absolute","steps":[{"color":"text","value":0},{"color":"#b783af","value":0.5},{"color":"red","value":0.66666},{"color":"#5b9cd5","value":1}]} },{ "id":"decimals"  ,"value":0                                                                                                                                                      },
                       { "id":"mappings"  ,"value":[{"options":{"0":{"color":"text","index":1,"text":"Dead"},"1":{"color":"#5b9cd5","index":0,"text":"Healthy"}},"type":"value"}]                         }
                     ]
                   },
-                  {"matcher":{"id":"byFrameRefID","options":"E"},"properties":[{"id":"color","value":{"fixedColor":"#d0475799","mode":"fixed"}},{"id":"links","value":[{"title":"Minio Overview","url":"http://192.168.1.205/ui/d/minio-overview?${__url_time_range}"}]}]},
-                  {"matcher":{"id":"byFrameRefID","options":"R"},"properties":[{"id":"color","value":{"fixedColor":"#6986a3","mode":"fixed"}},{"id":"unit","value":"tps"},{"id":"decimals","value":0},{"id":"links","value":[{"title":"PGRDS Cluster : ${__field.labels.cls}","url":"http://192.168.1.205/ui/d/pgrds-cluster?var-cls=${__field.labels.cls}&${__url_time_range}"}]}]}
+                  {"matcher":{"id":"byFrameRefID","options":"E"},"properties":[{"id":"color","value":{"fixedColor":"#d0475799","mode":"fixed"}},{"id":"links","value":[{"title":"Minio Overview","url":"http://postgres-1.bnei.lan/ui/d/minio-overview?${__url_time_range}"}]}]},
+                  {"matcher":{"id":"byFrameRefID","options":"R"},"properties":[{"id":"color","value":{"fixedColor":"#6986a3","mode":"fixed"}},{"id":"unit","value":"tps"},{"id":"decimals","value":0},{"id":"links","value":[{"title":"PGRDS Cluster : ${__field.labels.cls}","url":"http://postgres-1.bnei.lan/ui/d/pgrds-cluster?var-cls=${__field.labels.cls}&${__url_time_range}"}]}]}
                 ]
               },
               "gridPos":{"h":14,"w":8,"x":0,"y":7},
@@ -599,14 +599,14 @@ dashboards:
               "fieldConfig":{
                 "defaults":{"color":{"mode":"thresholds"},"mappings":[{"options":{"match":"null+nan","result":{"index":0,"text":"No Instances"}},"type":"special"}],"max":1.1,"min":0,"thresholds":{"mode":"absolute","steps":[{"color":"#3e668f","value":0},{"color":"#aaaaaa","value":1}]}},
                 "overrides":[
-                  { "matcher":{"id":"byFrameRefID","options":"A"},"properties":[{"id":"thresholds","value":{"mode":"absolute","steps":[{"color":"text","value":0},{"color":"#3e668f","value":1}]}},{"id":"links","value":[{"title":"PGSQL Instance: ${__field.labels.ins}","url":"http://192.168.1.205/ui/d/pgsql-instance?var-ins=${__field.labels.ins}&${__url_time_range}"}]}]          },
-                  { "matcher":{"id":"byFrameRefID","options":"B"},"properties":[{"id":"thresholds","value":{"mode":"absolute","steps":[{"color":"#13212fd6","value":0},{"color":"#346f36cc","value":1}]}},{"id":"links","value":[{"title":"PGSQL Pgbouncer: ${__field.labels.ins}","url":"http://192.168.1.205/ui/d/pgsql-pgbouncer?var-ins=${__field.labels.ins}&${__url_time_range}"}]}] },
-                  { "matcher":{"id":"byFrameRefID","options":"C"},"properties":[{"id":"thresholds","value":{"mode":"absolute","steps":[{"color":"text","value":0},{"color":"#5b9cd5","value":1}]}},{"id":"links","value":[{"title":"PGSQL Patroni : ${__field.labels.cls}","url":"http://192.168.1.205/ui/d/pgsql-patroni?var-cls=${__field.labels.cls}&${__url_time_range}"}]}]           },
-                  { "matcher":{"id":"byFrameRefID","options":"V"},"properties":[{"id":"thresholds","value":{"mode":"absolute","steps":[{"color":"#1c151b","value":0},{"color":"#f79f64","value":1}]}},{"id":"links","value":[{"title":"PGSQL VIP : ${__field.labels.vip}","url":"http://192.168.1.205/ui/d/node-vip?var-vip=${__field.labels.vip}&${__url_time_range}"}]}]                 },
-                  { "matcher":{"id":"byFrameRefID","options":"R"},"properties":[{"id":"thresholds","value":{"mode":"absolute","steps":[{"color":"#252f34","value":0},{"color":"#6a8d9d","value":1}]}},{"id":"links","value":[{"title":"PGRDS Instance : ${__field.labels.ins}","url":"http://192.168.1.205/ui/d/pgrds-instance?var-ins=${__field.labels.ins}&${__url_time_range}"}]}]      },
-                  { "matcher":{"id":"byFrameRefID","options":"D"},"properties":[{"id":"thresholds","value":{"mode":"absolute","steps":[{"color":"#24292e","value":0},{"color":"#b783af","value":1}]}},{"id":"links","value":[{"title":"PGSQL Exporter : ${__field.labels.ins}","url":"http://192.168.1.205/ui/d/pgsql-exporter?var-ins=${__field.labels.ins}&${__url_time_range}"}]}]      },
-                  { "matcher":{"id":"byFrameRefID","options":"E"},"properties":[{"id":"thresholds","value":{"mode":"absolute","steps":[{"color":"#24292e","value":0},{"color":"#7771a4","value":1}]}},{"id":"links","value":[{"title":"PGSQL Exporter : ${__field.labels.ins}","url":"http://192.168.1.205/ui/d/pgsql-exporter?var-ins=${__field.labels.ins}&${__url_time_range}"}]}]      },
-                  { "matcher":{"id":"byFrameRefID","options":"S"},"properties":[{"id":"links","value":[{"title":"PGSQL Backup : ${__field.labels.cls}","url":"http://192.168.1.205/ui/d/pgsql-pitr?var-cls=${__field.labels.cls}&${__url_time_range}"}]},{"id":"thresholds","value":{"mode":"absolute","steps":[{"color":"#252f34","value":0},{"color":"#42606b","value":1}]}}]            }
+                  { "matcher":{"id":"byFrameRefID","options":"A"},"properties":[{"id":"thresholds","value":{"mode":"absolute","steps":[{"color":"text","value":0},{"color":"#3e668f","value":1}]}},{"id":"links","value":[{"title":"PGSQL Instance: ${__field.labels.ins}","url":"http://postgres-1.bnei.lan/ui/d/pgsql-instance?var-ins=${__field.labels.ins}&${__url_time_range}"}]}]          },
+                  { "matcher":{"id":"byFrameRefID","options":"B"},"properties":[{"id":"thresholds","value":{"mode":"absolute","steps":[{"color":"#13212fd6","value":0},{"color":"#346f36cc","value":1}]}},{"id":"links","value":[{"title":"PGSQL Pgbouncer: ${__field.labels.ins}","url":"http://postgres-1.bnei.lan/ui/d/pgsql-pgbouncer?var-ins=${__field.labels.ins}&${__url_time_range}"}]}] },
+                  { "matcher":{"id":"byFrameRefID","options":"C"},"properties":[{"id":"thresholds","value":{"mode":"absolute","steps":[{"color":"text","value":0},{"color":"#5b9cd5","value":1}]}},{"id":"links","value":[{"title":"PGSQL Patroni : ${__field.labels.cls}","url":"http://postgres-1.bnei.lan/ui/d/pgsql-patroni?var-cls=${__field.labels.cls}&${__url_time_range}"}]}]           },
+                  { "matcher":{"id":"byFrameRefID","options":"V"},"properties":[{"id":"thresholds","value":{"mode":"absolute","steps":[{"color":"#1c151b","value":0},{"color":"#f79f64","value":1}]}},{"id":"links","value":[{"title":"PGSQL VIP : ${__field.labels.vip}","url":"http://postgres-1.bnei.lan/ui/d/node-vip?var-vip=${__field.labels.vip}&${__url_time_range}"}]}]                 },
+                  { "matcher":{"id":"byFrameRefID","options":"R"},"properties":[{"id":"thresholds","value":{"mode":"absolute","steps":[{"color":"#252f34","value":0},{"color":"#6a8d9d","value":1}]}},{"id":"links","value":[{"title":"PGRDS Instance : ${__field.labels.ins}","url":"http://postgres-1.bnei.lan/ui/d/pgrds-instance?var-ins=${__field.labels.ins}&${__url_time_range}"}]}]      },
+                  { "matcher":{"id":"byFrameRefID","options":"D"},"properties":[{"id":"thresholds","value":{"mode":"absolute","steps":[{"color":"#24292e","value":0},{"color":"#b783af","value":1}]}},{"id":"links","value":[{"title":"PGSQL Exporter : ${__field.labels.ins}","url":"http://postgres-1.bnei.lan/ui/d/pgsql-exporter?var-ins=${__field.labels.ins}&${__url_time_range}"}]}]      },
+                  { "matcher":{"id":"byFrameRefID","options":"E"},"properties":[{"id":"thresholds","value":{"mode":"absolute","steps":[{"color":"#24292e","value":0},{"color":"#7771a4","value":1}]}},{"id":"links","value":[{"title":"PGSQL Exporter : ${__field.labels.ins}","url":"http://postgres-1.bnei.lan/ui/d/pgsql-exporter?var-ins=${__field.labels.ins}&${__url_time_range}"}]}]      },
+                  { "matcher":{"id":"byFrameRefID","options":"S"},"properties":[{"id":"links","value":[{"title":"PGSQL Backup : ${__field.labels.cls}","url":"http://postgres-1.bnei.lan/ui/d/pgsql-pitr?var-cls=${__field.labels.cls}&${__url_time_range}"}]},{"id":"thresholds","value":{"mode":"absolute","steps":[{"color":"#252f34","value":0},{"color":"#42606b","value":1}]}}]            }
                 ]
               },
               "gridPos":{"h":14,"w":16,"x":8,"y":7},
@@ -630,7 +630,7 @@ dashboards:
               "datasource":{"type":"prometheus","uid":"ds-prometheus"},
               "fieldConfig":{
                 "defaults":{"color":{"mode":"thresholds"},"decimals":0,"max":1,"min":0,"noValue":"OK","thresholds":{"mode":"absolute","steps":[{"color":"#3e668f","value":0},{"color":"#fcdb72","value":1},{"color":"#f79f64","value":4},{"color":"#b783af","value":8},{"color":"text","value":16}]},"unit":"none"},
-                "overrides":[{"matcher":{"id":"byFrameRefID","options":"A"},"properties":[{"id":"links","value":[{"targetBlank":true,"title":"Pigsty Alertmanager","url":"/alertmgr/"}]}]},{"matcher":{"id":"byFrameRefID","options":"B"},"properties":[{"id":"links","value":[{"title":"PGSQL Alert","url":"http://192.168.1.205/ui/d/pgsql-alert?${__url_time_range}"}]}]}]
+                "overrides":[{"matcher":{"id":"byFrameRefID","options":"A"},"properties":[{"id":"links","value":[{"targetBlank":true,"title":"Pigsty Alertmanager","url":"/alertmgr/"}]}]},{"matcher":{"id":"byFrameRefID","options":"B"},"properties":[{"id":"links","value":[{"title":"PGSQL Alert","url":"http://postgres-1.bnei.lan/ui/d/pgsql-alert?${__url_time_range}"}]}]}]
               },
               "gridPos":{"h":6,"w":4,"x":0,"y":21},
               "id":118,
@@ -699,7 +699,7 @@ dashboards:
                   "links":[
                     { "targetBlank":true,"title":"AlertInfo ${__field.labels.alertname} on Cluster ${__field.labels.cls}","url":"/alertmgr/#/alerts?filter=%7Bcls%3D%22${__field.labels.cls}%22%2C%20alertname%3D%22${__field.labels.alertname}%22%7D"       },
                     { "targetBlank":true,"title":"Silence ${__field.labels.alertname} on Cluster ${__field.labels.cls}"  ,"url":"/alertmgr/#/silences/new?filter=%7Bcls%3D%22${__field.labels.cls}%22%2C%20alertname%3D%22${__field.labels.alertname}%22%7D" },
-                    {                    "title":"PGSQL Cluster for ${__field.labels.cls} : Alerts"                      ,"url":"http://192.168.1.205/ui/d/pgsql-cluster?var-cls=${__field.labels.cls}&viewPanel=78&${__url_time_range}"                                            }
+                    {                    "title":"PGSQL Cluster for ${__field.labels.cls} : Alerts"                      ,"url":"http://postgres-1.bnei.lan/ui/d/pgsql-cluster?var-cls=${__field.labels.cls}&viewPanel=78&${__url_time_range}"                                            }
                   ],
                   "min":0,
                   "noValue":"No Alert",
@@ -748,7 +748,7 @@ dashboards:
                     "stacking":{"group":"A","mode":"none"},
                     "thresholdsStyle":{"mode":"area"}
                   },
-                  "links":[{"title":"PGSQL Cluster ${__field.labels.cls}","url":"http://192.168.1.205/ui/d/pgsql-cluster?var-cls=${__field.labels.cls}&${__url_time_range}"}],
+                  "links":[{"title":"PGSQL Cluster ${__field.labels.cls}","url":"http://postgres-1.bnei.lan/ui/d/pgsql-cluster?var-cls=${__field.labels.cls}&${__url_time_range}"}],
                   "mappings":[{"options":{"-1":{"color":"gray","index":1,"text":"N/A"}},"type":"value"},{"options":{"match":"null+nan","result":{"color":"gray","index":0,"text":"No Data"}},"type":"special"}],
                   "min":0,
                   "thresholds":{"mode":"absolute","steps":[{"color":"#3e668f","value":0},{"color":"green","value":0.1},{"color":"yellow","value":0.3},{"color":"orange","value":0.5},{"color":"red","value":0.7},{"color":"purple","value":0.9},{"color":"text","value":1}]},
@@ -797,8 +797,8 @@ dashboards:
                   "unit":"short"
                 },
                 "overrides":[
-                  { "matcher":{"id":"byFrameRefID","options":"A"},"properties":[{"id":"links","value":[{"title":"PGSQL Instance : ${__field.labels.ins}","url":"http://192.168.1.205/ui/d/pgsql-instance?var-ins=${__field.labels.ins}&${__url_time_range}"}]}] },
-                  { "matcher":{"id":"byFrameRefID","options":"B"},"properties":[{"id":"links","value":[{"title":"PGRDS Instance : ${__field.labels.ins}","url":"http://192.168.1.205/ui/d/pgrds-instance?var-ins=${__field.labels.ins}&${__url_time_range}"}]}] }
+                  { "matcher":{"id":"byFrameRefID","options":"A"},"properties":[{"id":"links","value":[{"title":"PGSQL Instance : ${__field.labels.ins}","url":"http://postgres-1.bnei.lan/ui/d/pgsql-instance?var-ins=${__field.labels.ins}&${__url_time_range}"}]}] },
+                  { "matcher":{"id":"byFrameRefID","options":"B"},"properties":[{"id":"links","value":[{"title":"PGRDS Instance : ${__field.labels.ins}","url":"http://postgres-1.bnei.lan/ui/d/pgrds-instance?var-ins=${__field.labels.ins}&${__url_time_range}"}]}] }
                 ]
               },
               "gridPos":{"h":6,"w":16,"x":8,"y":27},
@@ -819,15 +819,15 @@ dashboards:
               "fieldConfig":{
                 "defaults":{"color":{"mode":"thresholds"},"custom":{"align":"center","cellOptions":{"type":"auto"},"footer":{"reducers":[]},"inspect":false},"max":1.2,"min":0,"thresholds":{"mode":"absolute","steps":[{"color":"#e3e3e3e0","value":0}]}},
                 "overrides":[
-                  {"matcher":{"id":"byName","options":"Instance"},"properties":[{"id":"links","value":[{"title":"PGSQL Instance ${__data.fields.Instance}","url":"http://192.168.1.205/ui/d/pgsql-instance?var-ins=${__data.fields.Instance}&${__url_time_range}"}]}]},
-                  {"matcher":{"id":"byName","options":"IP"},"properties":[{"id":"custom.width","value":110},{"id":"links","value":[{"title":"PGSQL Node for ${__data.fields.IP}","url":"http://192.168.1.205/ui/d/node-instance?var-id=${__data.fields.IP}&${__url_time_range}"}]}]},
+                  {"matcher":{"id":"byName","options":"Instance"},"properties":[{"id":"links","value":[{"title":"PGSQL Instance ${__data.fields.Instance}","url":"http://postgres-1.bnei.lan/ui/d/pgsql-instance?var-ins=${__data.fields.Instance}&${__url_time_range}"}]}]},
+                  {"matcher":{"id":"byName","options":"IP"},"properties":[{"id":"custom.width","value":110},{"id":"links","value":[{"title":"PGSQL Node for ${__data.fields.IP}","url":"http://postgres-1.bnei.lan/ui/d/node-instance?var-id=${__data.fields.IP}&${__url_time_range}"}]}]},
                   {
                     "matcher":{"id":"byName","options":"Role"},
                     "properties":[
                       { "id":"custom.width"      ,"value":80                                                                                                                                                                                                                                  },
                       { "id":"mappings"          ,"value":[{"options":{"0":{"color":"#3e668f","index":1,"text":"primary"},"1":{"color":"#346f36cc","index":0,"text":"replica"}},"type":"value"},{"options":{"match":"null+nan","result":{"color":"transparent","index":2}},"type":"special"}] },
                       { "id":"custom.cellOptions","value":{"mode":"gradient","type":"color-background"}                                                                                                                                                                                       },
-                      { "id":"links"             ,"value":[{"title":"PGSQL Service for ${cls}-${__data.fields.Status}","url":"http://192.168.1.205/ui/d/pgsql-service?var-svc=${__data.fields.Cluster}-${__data.fields.Status}&${__url_time_range}"}]                                                                },
+                      { "id":"links"             ,"value":[{"title":"PGSQL Service for ${cls}-${__data.fields.Status}","url":"http://postgres-1.bnei.lan/ui/d/pgsql-service?var-svc=${__data.fields.Cluster}-${__data.fields.Status}&${__url_time_range}"}]                                                                },
                       { "id":"custom.filterable" ,"value":true                                                                                                                                                                                                                                }
                     ]
                   },{
@@ -842,7 +842,7 @@ dashboards:
                       { "id":"mappings"          ,"value":[{"options":{"-1":{"color":"#80808080","index":0,"text":"N/A"}},"type":"value"},{"options":{"match":"null+nan","result":{"color":"transparent","index":1}},"type":"special"}]                                                                        }
                     ]
                   },
-                  {"matcher":{"id":"byName","options":"Cluster"},"properties":[{"id":"links","value":[{"title":"PGSQL Cluster for ${__data.fields.Cluster}","url":"http://192.168.1.205/ui/d/pgsql-cluster?var-cls=${__data.fields.Cluster}&${__url_time_range}"}]},{"id":"custom.filterable","value":true}]},
+                  {"matcher":{"id":"byName","options":"Cluster"},"properties":[{"id":"links","value":[{"title":"PGSQL Cluster for ${__data.fields.Cluster}","url":"http://postgres-1.bnei.lan/ui/d/pgsql-cluster?var-cls=${__data.fields.Cluster}&${__url_time_range}"}]},{"id":"custom.filterable","value":true}]},
                   {
                     "matcher":{"id":"byName","options":"Space"},
                     "properties":[
@@ -1028,7 +1028,7 @@ dashboards:
                 "defaults":{
                   "color":{"mode":"thresholds"},
                   "decimals":2,
-                  "links":[{"title":"PGSQL Instance: ${__field.labels.ins}","url":"http://192.168.1.205/ui/d/pgsql-instance?var-ins=${__field.labels.ins}&${__url_time_range}"}],
+                  "links":[{"title":"PGSQL Instance: ${__field.labels.ins}","url":"http://postgres-1.bnei.lan/ui/d/pgsql-instance?var-ins=${__field.labels.ins}&${__url_time_range}"}],
                   "mappings":[{"options":{"-1":{"color":"gray","index":1,"text":"N/A"}},"type":"value"},{"options":{"match":"null+nan","result":{"color":"gray","index":0,"text":"No Data"}},"type":"special"}],
                   "thresholds":{"mode":"absolute","steps":[{"color":"#3e668f","value":0},{"color":"#346f36cc","value":0.1},{"color":"#fcdb72","value":0.3},{"color":"#f79f64","value":0.5},{"color":"red","value":0.7},{"color":"#b783af","value":0.9},{"color":"text","value":1}]},
                   "unit":"percentunit"
@@ -1052,9 +1052,9 @@ dashboards:
               "fieldConfig":{
                 "defaults":{"color":{"mode":"thresholds"},"custom":{"align":"center","cellOptions":{"type":"auto"},"footer":{"reducers":[]},"inspect":false},"mappings":[{"options":{"match":"null+nan","result":{"color":"transparent","index":1}},"type":"special"}],"thresholds":{"mode":"absolute","steps":[{"color":"#346f36cc","value":0}]}},
                 "overrides":[
-                  {"matcher":{"id":"byName","options":"Instance"},"properties":[{"id":"links","value":[{"title":"PGSQL Instance: ${__data.fields.Instance}","url":"http://192.168.1.205/ui/d/pgsql-instance?var-ins=${__data.fields.Instance}&${__url_time_range}"}]},{"id":"custom.minWidth","value":120}]},
-                  {"matcher":{"id":"byName","options":"Cluster"},"properties":[{"id":"links","value":[{"title":"PGSQL Patroni Cluster: ${__data.fields.Cluster}","url":"http://192.168.1.205/ui/d/pgsql-patroni?var-cls=${__data.fields.Cluster}&${__url_time_range}"}]},{"id":"custom.minWidth","value":120},{"id":"custom.filterable","value":true}]},
-                  {"matcher":{"id":"byName","options":"Shard"},"properties":[{"id":"links","value":[{"title":"PGSQL Shard : ${__data.fields.Shard}","url":"http://192.168.1.205/ui/d/pgsql-shard?var-shard=${__data.fields.Shard}&${__url_time_range}"}]},{"id":"custom.width","value":100},{"id":"custom.filterable","value":true}]},
+                  {"matcher":{"id":"byName","options":"Instance"},"properties":[{"id":"links","value":[{"title":"PGSQL Instance: ${__data.fields.Instance}","url":"http://postgres-1.bnei.lan/ui/d/pgsql-instance?var-ins=${__data.fields.Instance}&${__url_time_range}"}]},{"id":"custom.minWidth","value":120}]},
+                  {"matcher":{"id":"byName","options":"Cluster"},"properties":[{"id":"links","value":[{"title":"PGSQL Patroni Cluster: ${__data.fields.Cluster}","url":"http://postgres-1.bnei.lan/ui/d/pgsql-patroni?var-cls=${__data.fields.Cluster}&${__url_time_range}"}]},{"id":"custom.minWidth","value":120},{"id":"custom.filterable","value":true}]},
+                  {"matcher":{"id":"byName","options":"Shard"},"properties":[{"id":"links","value":[{"title":"PGSQL Shard : ${__data.fields.Shard}","url":"http://postgres-1.bnei.lan/ui/d/pgsql-shard?var-shard=${__data.fields.Shard}&${__url_time_range}"}]},{"id":"custom.width","value":100},{"id":"custom.filterable","value":true}]},
                   {
                     "matcher":{"id":"byName","options":"Role"},
                     "properties":[
@@ -1090,7 +1090,7 @@ dashboards:
                     "properties":[{"id":"custom.width","value":100},{"id":"unit","value":"s"},{"id":"thresholds","value":{"mode":"absolute","steps":[{"color":"#346f36cc","value":0},{"color":"#f79f64","value":20},{"color":"#cc4637d9","value":30},{"color":"#b783af","value":60},{"color":"text","value":300}]}},{"id":"custom.cellOptions","value":{"mode":"gradient","type":"color-background"}}]
                   },
                   {"matcher":{"id":"byName","options":"Up"},"properties":[{"id":"custom.width","value":90},{"id":"mappings","value":[{"options":{"0":{"color":"#cc4637d9","index":0,"text":"Dead"},"1":{"color":"#346f36cc","index":1,"text":"Alive"}},"type":"value"}]},{"id":"custom.cellOptions","value":{"type":"color-background"}},{"id":"custom.filterable","value":true}]},
-                  {"matcher":{"id":"byName","options":"IP"},"properties":[{"id":"custom.width","value":110},{"id":"links","value":[{"title":"Node Instance : ${__data.fields.IP}","url":"http://192.168.1.205/ui/d/node-instance?var-id=${__data.fields.IP}&${__url_time_range}"}]}]}
+                  {"matcher":{"id":"byName","options":"IP"},"properties":[{"id":"custom.width","value":110},{"id":"links","value":[{"title":"Node Instance : ${__data.fields.IP}","url":"http://postgres-1.bnei.lan/ui/d/node-instance?var-id=${__data.fields.IP}&${__url_time_range}"}]}]}
                 ]
               },
               "gridPos":{"h":10,"w":17,"x":0,"y":46},
@@ -1133,7 +1133,7 @@ dashboards:
                 {
                   "datasource":{"type":"prometheus","uid":"ds-prometheus"},
                   "fieldConfig":{
-                    "defaults":{"color":{"mode":"thresholds"},"links":[{"title":"ETCD Overview","url":"http://192.168.1.205/ui/d/etcd-overview?${__url_time_range}"}],"noValue":"N/A","thresholds":{"mode":"absolute","steps":[{"color":"red","value":null}]},"unit":"none"},
+                    "defaults":{"color":{"mode":"thresholds"},"links":[{"title":"ETCD Overview","url":"http://postgres-1.bnei.lan/ui/d/etcd-overview?${__url_time_range}"}],"noValue":"N/A","thresholds":{"mode":"absolute","steps":[{"color":"red","value":null}]},"unit":"none"},
                     "overrides":[
                       {
                         "matcher":{"id":"byName","options":"ETCD Health"},
@@ -1173,7 +1173,7 @@ dashboards:
                   },
                   "gridPos":{"h":7,"w":13,"x":4,"y":57},
                   "id":125,
-                  "links":[{"title":"ETCD Overview","url":"http://192.168.1.205/ui/d/etcd-overview?${__url_time_range}"}],
+                  "links":[{"title":"ETCD Overview","url":"http://postgres-1.bnei.lan/ui/d/etcd-overview?${__url_time_range}"}],
                   "options":{"alignValue":"left","legend":{"displayMode":"list","placement":"bottom","showLegend":false},"mergeValues":true,"rowHeight":0.96,"showValue":"never","tooltip":{"hideZeros":false,"mode":"single","sort":"none"}},
                   "pluginVersion":"12.0.2",
                   "targets":[
@@ -1187,7 +1187,7 @@ dashboards:
                   "datasource":{"type":"prometheus","uid":"ds-prometheus"},
                   "description":"How long since patroni the HA agent successfully connect to DCS:etcd.\nMax amoung cluster\n\nvalue larger than 20s needs extra attention",
                   "fieldConfig":{
-                    "defaults":{"color":{"mode":"thresholds"},"decimals":1,"links":[{"title":"PGSQL Patroni : ${__field.labels.cls}","url":"http://192.168.1.205/ui/d/pgsql-patroni?var-cls=${__field.labels.cls}&${__url_time_range}"}],"thresholds":{"mode":"absolute","steps":[{"color":"#346f36cc","value":null}]}},
+                    "defaults":{"color":{"mode":"thresholds"},"decimals":1,"links":[{"title":"PGSQL Patroni : ${__field.labels.cls}","url":"http://postgres-1.bnei.lan/ui/d/pgsql-patroni?var-cls=${__field.labels.cls}&${__url_time_range}"}],"thresholds":{"mode":"absolute","steps":[{"color":"#346f36cc","value":null}]}},
                     "overrides":[{"matcher":{"id":"byName","options":"Value"},"properties":[{"id":"unit","value":"s"},{"id":"thresholds","value":{"mode":"absolute","steps":[{"color":"#346f36cc"},{"color":"#346f36cc","value":1},{"color":"#f79f64","value":20},{"color":"red","value":30},{"color":"#b783af","value":60},{"color":"text","value":300}]}}]}]
                   },
                   "gridPos":{"h":14,"w":7,"x":17,"y":57},
@@ -1272,7 +1272,7 @@ dashboards:
                         "stacking":{"group":"A","mode":"none"},
                         "thresholdsStyle":{"mode":"off"}
                       },
-                      "links":[{"title":"PGSQL Service : ${__field.labels.proxy}","url":"http://192.168.1.205/ui/d/pgsql-service?var-svc=${__field.labels.proxy}&${__url_time_range}"}],
+                      "links":[{"title":"PGSQL Service : ${__field.labels.proxy}","url":"http://postgres-1.bnei.lan/ui/d/pgsql-service?var-svc=${__field.labels.proxy}&${__url_time_range}"}],
                       "mappings":[{"options":{"match":"null+nan","result":{"color":"#808080","index":1}},"type":"special"}],
                       "thresholds":{"mode":"absolute","steps":[{"color":"#cc4637d9","value":null},{"color":"#346f36cc","value":1}]}
                     }
@@ -1290,7 +1290,7 @@ dashboards:
                     "defaults":{
                       "color":{"mode":"thresholds"},
                       "custom":{"fillOpacity":60,"hideFrom":{"legend":false,"tooltip":false,"viz":false},"insertNulls":false,"lineWidth":0,"spanNulls":false},
-                      "links":[{"title":"PGSQL Service : ${__field.labels.proxy}","url":"http://192.168.1.205/ui/d/pgsql-service?var-svc=${__field.labels.proxy}&${__url_time_range}"}],
+                      "links":[{"title":"PGSQL Service : ${__field.labels.proxy}","url":"http://postgres-1.bnei.lan/ui/d/pgsql-service?var-svc=${__field.labels.proxy}&${__url_time_range}"}],
                       "mappings":[{"options":{"match":"null+nan","result":{"color":"#808080","index":1}},"type":"special"}],
                       "thresholds":{"mode":"absolute","steps":[{"color":"#cc4637d9","value":null},{"color":"#346f36cc","value":1}]}
                     }
@@ -1309,7 +1309,7 @@ dashboards:
                     "defaults":{
                       "color":{"mode":"thresholds"},
                       "decimals":4,
-                      "links":[{"title":"PGSQL Service : ${__field.labels.proxy}","url":"http://192.168.1.205/ui/d/pgsql-service?var-svc=${__field.labels.proxy}&${__url_time_range}"}],
+                      "links":[{"title":"PGSQL Service : ${__field.labels.proxy}","url":"http://postgres-1.bnei.lan/ui/d/pgsql-service?var-svc=${__field.labels.proxy}&${__url_time_range}"}],
                       "thresholds":{"mode":"absolute","steps":[{"color":"text","value":null},{"color":"#7771a4","value":0.9},{"color":"#b783af","value":0.95},{"color":"#cc4637d9","value":0.99},{"color":"#f79f64","value":0.999},{"color":"#fcdb72","value":0.9999},{"color":"#3e668f","value":0.99999},{"color":"#346f36cc","value":1}]},
                       "unit":"percentunit"
                     }
@@ -1340,7 +1340,7 @@ dashboards:
                       {
                         "matcher":{"id":"byName","options":"Database"},
                         "properties":[
-                          { "id":"links"             ,"value":[{"title":"PGSQL Database : ${__data.fields.Instance}.${__data.fields.Database}","url":"http://192.168.1.205/ui/d/pgsql-database?var-ins=${__data.fields.Instance}&var-datname=${__data.fields.Database}&${__url_time_range}"}] },
+                          { "id":"links"             ,"value":[{"title":"PGSQL Database : ${__data.fields.Instance}.${__data.fields.Database}","url":"http://postgres-1.bnei.lan/ui/d/pgsql-database?var-ins=${__data.fields.Instance}&var-datname=${__data.fields.Database}&${__url_time_range}"}] },
                           { "id":"mappings"          ,"value":[{"options":{"postgres":{"color":"#3e668f","index":2},"template0":{"color":"#f79f64","index":0},"template1":{"color":"#fcdb72","index":1}},"type":"value"}]                                              },
                           { "id":"custom.cellOptions","value":{"type":"auto"}                                                                                                                                                                                          },
                           { "id":"color"             ,"value":{"fixedColor":"text","mode":"fixed"}                                                                                                                                                                     },
@@ -1395,9 +1395,9 @@ dashboards:
                           { "id":"mappings"          ,"value":[{"options":{"-1":{"color":"#3e668f","index":1,"text":"NO LIMIT"}},"type":"value"},{"options":{"match":"null+nan","result":{"color":"gray","index":0,"text":"N/A"}},"type":"special"},{"options":{"from":0,"result":{"color":"#f79f64","index":2},"to":99999999},"type":"range"}] }
                         ]
                       },
-                      {"matcher":{"id":"byName","options":"Instance"},"properties":[{"id":"custom.minWidth","value":150},{"id":"links","value":[{"title":"PGSQL Instance : ${__data.fields.Instance}","url":"http://192.168.1.205/ui/d/pgsql-instance?var-ins=${__data.fields.Instance}&${__url_time_range}"}]},{"id":"custom.filterable","value":true}]},
-                      {"matcher":{"id":"byName","options":"Catalog"},"properties":[{"id":"custom.minWidth","value":100},{"id":"links","value":[{"title":"PGCAT Database : ${__data.fields.Instance}.${__data.fields.Database}","url":"http://192.168.1.205/ui/d/pgcat-database?var-dsn=${__data.fields.Instance}.${__data.fields.Database}"}]}]},
-                      {"matcher":{"id":"byName","options":"Cluster"},"properties":[{"id":"links","value":[{"title":"PGSQL Databases : ${cls}.${datname}","url":"http://192.168.1.205/ui/d/pgsql-databases?var-cls=${__data.fields.Cluster}&var-datname=${__data.fields.Database}"}]},{"id":"custom.minWidth","value":120},{"id":"custom.filterable","value":true}]}
+                      {"matcher":{"id":"byName","options":"Instance"},"properties":[{"id":"custom.minWidth","value":150},{"id":"links","value":[{"title":"PGSQL Instance : ${__data.fields.Instance}","url":"http://postgres-1.bnei.lan/ui/d/pgsql-instance?var-ins=${__data.fields.Instance}&${__url_time_range}"}]},{"id":"custom.filterable","value":true}]},
+                      {"matcher":{"id":"byName","options":"Catalog"},"properties":[{"id":"custom.minWidth","value":100},{"id":"links","value":[{"title":"PGCAT Database : ${__data.fields.Instance}.${__data.fields.Database}","url":"http://postgres-1.bnei.lan/ui/d/pgcat-database?var-dsn=${__data.fields.Instance}.${__data.fields.Database}"}]}]},
+                      {"matcher":{"id":"byName","options":"Cluster"},"properties":[{"id":"links","value":[{"title":"PGSQL Databases : ${cls}.${datname}","url":"http://postgres-1.bnei.lan/ui/d/pgsql-databases?var-cls=${__data.fields.Cluster}&var-datname=${__data.fields.Database}"}]},{"id":"custom.minWidth","value":120},{"id":"custom.filterable","value":true}]}
                     ]
                   },
                   "gridPos":{"h":11,"w":24,"x":0,"y":59},

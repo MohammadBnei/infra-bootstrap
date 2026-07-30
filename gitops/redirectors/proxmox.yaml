@@ -13,8 +13,7 @@ metadata:
 # control-plane-managed ones) - so a hand-authored Endpoints/EndpointSlice
 # pair is silently dropped on every sync, leaving Traefik with no backend
 # ("no available server"). ExternalName needs neither - Traefik's
-# kubernetesCRD provider resolves spec.externalName directly, IP literals
-# included.
+# kubernetesCRD provider resolves spec.externalName directly.
 apiVersion: v1
 kind: Service
 metadata:
@@ -22,7 +21,9 @@ metadata:
   namespace: proxmox
 spec:
   type: ExternalName
-  externalName: "192.168.1.165"
+  # pve.bnei.lan round-robins across all 3 corosync members (Pi-hole DNS,
+  # not a health-aware VIP) - see ansible/playbooks/pihole-configure.yml.
+  externalName: "pve.bnei.lan"
   ports:
   - port: 8006
     protocol: TCP
