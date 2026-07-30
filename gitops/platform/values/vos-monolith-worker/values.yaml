@@ -25,6 +25,8 @@ env:
     value: "https://github.com/MohammadBnei/vos-monolith.git"
   - name: WORKER_NAME
     value: "vos-monolith-worker"
+  - name: BASE_BRANCH
+    value: "dev" # vos-monolith's actual default/dev branch — main only gets prod tag bumps, see gitops/apps/registry.yaml
 
 persistence:
   enabled: true
