@@ -46,6 +46,11 @@ updated.
   `ARCHITECTURE.md` §1 for the host table.
 - **MetalLB is L2-only** — the Freebox blocks BGP, so there was never a
   real BGP option to weigh. See `ARCHITECTURE.md` §3 for the pool/VIP.
+- **K8s control plane is 3-CP/etcd (not 1, not 2), deliberately placed:**
+  2 members on the stable hosts (server1, ex-laptop), `k8s-cp-01` (`.165`,
+  the host that gets rebooted for gaming) as the minority 3rd — see
+  `ADR-0017`. Fronted by a kube-vip VIP at `k8s.bnei.lan`/`192.168.1.180`
+  — see `ADR-0016`.
 - **Secrets policy:** all secrets flow through Infisical, fetched at run
   time, per the schema in `docs/secrets.md`. Never committed to
   this repo.
