@@ -10,7 +10,7 @@
 # three. No k8s API access needed — no RBAC, plain common-app-chart app.
 
 image:
-  repository: ghcr.io/mohammadbnei/agent-fleet-bot
+  repository: mohammaddocker/agent-fleet-bot
   tag: "0.1.0"
 
 service:
@@ -61,7 +61,7 @@ extraVolumeMounts:
 # project in the Infisical UI (see manual prerequisites).
 infisical:
   enabled: true
-  projectSlug: "agent-fleet-h3kd"
+  projectSlug: "agent-fleet-nygh"
   envSlug: dev
 
 # Applies db/schema.sql (idempotent) before the bot/workers can insert rows.
@@ -71,7 +71,7 @@ hooks:
   migrate:
     type: PreSync
     image:
-      repository: ghcr.io/mohammadbnei/agent-fleet-bot
+      repository: mohammaddocker/agent-fleet-bot
       tag: "0.1.0"
     command: ["sh", "-c"]
     args:

@@ -4,7 +4,7 @@
 # design rationale.
 
 image:
-  repository: ghcr.io/mohammadbnei/agent-fleet-worker
+  repository: mohammaddocker/agent-fleet-worker
   tag: "0.1.0"
 
 service:
@@ -45,5 +45,5 @@ extraVolumeMounts:
 
 infisical:
   enabled: true
-  projectSlug: "agent-fleet-h3kd"
+  projectSlug: "agent-fleet-nygh"
   envSlug: dev
