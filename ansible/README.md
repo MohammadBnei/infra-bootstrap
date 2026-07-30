@@ -17,8 +17,8 @@ Custom playbooks for things kubespray and pigsty don't cover:
 | `playbooks/nfs-configure.yml` | Format + export NFS on the bare VM terraform/nfs.tf creates — drafted, see below |
 | `playbooks/k9s-dashboard-configure.yml` | Install kubectl/k9s + write a cluster-admin kubeconfig on the bare k9s-dashboard LXC terraform/k9s-dashboard.tf creates — drafted, see below |
 | `playbooks/pihole-configure.yml` | Install/configure Pi-hole on the Pi 4, authoritative for `bnei.lan` — drafted, see below |
-| `playbooks/drain-165-configure.yml` | Install a pre-shutdown drain automation on `.165` (cordons/evicts k8s-cp-01/k8s-worker-01 before a graceful reboot) — drafted and run, see below |
-| `inventories/proxmox/hosts.yml` | Proxmox host inventory for `pve-postinstall.yml` (`.200`/`.161`) and now also `drain-165-configure.yml` (`.165`, `-l proxmox`) |
+| `playbooks/self-drain-configure.yml` | Configure k8s-cp-01/k8s-worker-01 to drain + uncordon themselves around their own graceful reboot — drafted and run, see below |
+| `inventories/proxmox/hosts.yml` | Proxmox host inventory for `pve-postinstall.yml` (`.200`/`.161` — `.165` is a delegation target only) |
 | `inventories/garage/hosts.yml` | Single-host inventory for `garage-configure.yml` (`garage-storage` LXC) |
 | `inventories/nfs/hosts.yml` | Single-host inventory for `nfs-configure.yml` (`nfs-storage` VM) |
 | `inventories/k9s-dashboard/hosts.yml` | Single-host inventory for `k9s-dashboard-configure.yml` (`k9s-dashboard` LXC) |
@@ -33,7 +33,7 @@ Custom playbooks for things kubespray and pigsty don't cover:
 - [x] `nfs-configure.yml` drafted — see below
 - [x] `k9s-dashboard-configure.yml` drafted — see below
 - [x] `pihole-configure.yml` drafted — see below
-- [x] `drain-165-configure.yml` drafted and run (2026-07-30) — see below
+- [x] `self-drain-configure.yml` drafted and run (2026-07-30) — see below
 - [ ] `vm-provision.yml` drafted
 - [ ] `k8s-node-prereqs.yml` drafted (may not be needed if kubespray covers it)
 
@@ -360,76 +360,93 @@ infisical run --projectId=<infra-bootstrap-project-id> --env=dev -- \
     ansible/playbooks/vm-provision.yml
 ```
 
-## `playbooks/drain-165-configure.yml`
+## `playbooks/self-drain-configure.yml`
 
-Installs a pre-shutdown drain automation on `.165` — the PVE host that
-dual-boots into Windows for gaming. A systemd oneshot service
-(`drain-165.service`) fires `kubectl drain k8s-cp-01 k8s-worker-01` on
-every graceful shutdown/reboot, using a dedicated, scoped (not
-cluster-admin) kubeconfig at `/etc/k8s-drain/kubeconfig`.
+Configures `k8s-cp-01`/`k8s-worker-01` (both hosted on `.165`, the PVE
+host that dual-boots into Windows for gaming) to drain and uncordon
+**themselves** around their own graceful shutdown/reboot — two systemd
+units per node, `drain-self.service` (fires on shutdown) and
+`uncordon-self.service` (fires on boot).
 
 **Why this exists**: confirmed live 2026-07-30 (`docs/bootstrap-test-notes.md`)
 — an ungraceful `.165` outage left a Longhorn-backed Grafana pod stuck
 `Multi-Attach error`, because Kubernetes' default node-eviction timer
-reschedules *pods* but never force-detaches CSI volumes from a node it
+reschedules pods but never force-detaches CSI volumes from a node it
 can't confirm is gone. Draining *before* the node disappears sidesteps
-this: pods get evicted and volumes cleanly detached while the node is
-still reachable.
+this entirely.
 
-**Why a systemd service, not a `/usr/lib/systemd/system-shutdown/`
-script**: those run after the network is already torn down — too late
-to reach the cluster. This unit is ordered `Before=shutdown.target` +
-`After=network-online.target`, so its `ExecStop` (the actual drain)
-fires *during* the shutdown sequence, before networking goes away.
-`TimeoutStopSec=90` bounds how long systemd waits, so a hung drain can't
-block a real shutdown — worst case it times out and shutdown proceeds
-anyway, no worse than not draining at all.
+**Superseded `drain-165-configure.yml`** (deleted), which ran a single
+credential on `.165` itself draining both nodes from outside. Abandoned
+after two real test failures:
+1. Ordering `.165`'s unit `Before=pve-guests.service` (Proxmox's own
+   guest-shutdown service) was backwards — systemd stops units in the
+   *reverse* of their start order, so `Before=X` means "stop *after* X,"
+   the opposite of what was intended. Confirmed in the journal:
+   `pve-guests.service` fully stopped (all VMs powered off) *before*
+   the drain script's `ExecStop` even ran.
+2. Even with correct ordering, coordinating against a host-level Proxmox
+   service is more fragile than necessary. Proxmox's own `qmshutdown`
+   already sends each guest an ACPI shutdown signal and waits per-VM
+   (confirmed 180s timeout) for a graceful shutdown — a far more natural
+   trigger than fighting `pve-guests.service`'s ordering from outside.
+   Each node now drains itself using that same signal, via the same
+   `Before=shutdown.target`/`After=network-online.target` idiom as
+   before, just inside the guest's own systemd instead of the
+   hypervisor's.
 
-**Known limitation, accepted**: only fires on a graceful, systemd-initiated
-shutdown/reboot, not a hard power-cut — acceptable since switching to
-Windows on this host normally goes through a real `reboot`, not a cold
-power-off.
-
-**Credential scope**: the kubeconfig uses a dedicated `node-drainer`
-ServiceAccount (`gitops/bootstrap/node-drainer-rbac.yaml`) scoped to just
-`nodes: get/list/patch/update`, `pods: get/list`, `pods/eviction: create`,
-`poddisruptionbudgets: get/list` — never cluster-admin, since this
-credential lives on a dual-boot consumer OS, more exposed than the other
-infra hosts. The bearer token is minted live via `kubectl create token`
-and never committed to git or printed to a terminal.
+**Credential scope**: same `node-drainer` ServiceAccount as before
+(`gitops/bootstrap/node-drainer-rbac.yaml`) — cordon + evict only, never
+cluster-admin, even though `k8s-cp-01` already has
+`/etc/kubernetes/admin.conf` sitting there. Smaller blast radius, and one
+consistent identity across both nodes rather than "CP uses full admin,
+worker uses scoped" (`k8s-worker-01` has no admin-level credential
+locally at all). The RBAC's first version was also missing
+`daemonsets: get/list` — `kubectl drain --ignore-daemonsets` needs that
+just to recognize and skip DaemonSet-owned pods; without it every node
+failed `"cannot get resource daemonsets... forbidden"`.
 
 ### Prerequisites
 
 - `gitops/bootstrap/node-drainer-rbac.yaml` already applied (self-syncs
   via ADR-0021's bootstrap Application once merged to `main`).
-- Root SSH to `.165` (`PVE_SSH_PRIVATE_KEY` from Infisical) **and** a
-  reachable K8s control-plane node's key (`~/.ssh/id_k8s_vms`, user
-  `core`) available simultaneously — two different credentials, so run
-  via an `ssh-agent` with both loaded rather than a single
-  `ANSIBLE_PRIVATE_KEY_FILE`.
+- `inventory/ukubi/hosts.yaml` (the K8s VM inventory, `~/.ssh/id_k8s_vms`,
+  user `core`) — not `ansible/inventories/proxmox/` (that's for the PVE
+  hosts themselves).
 
 ### How to run
 
 ```bash
-infisical secrets get PVE_SSH_PRIVATE_KEY --projectId=<infra-bootstrap-project-id> --env=dev --plain --domain=<infisical-domain> > /tmp/pve_root_key
-chmod 600 /tmp/pve_root_key
-eval "$(ssh-agent -s)"
-ssh-add /tmp/pve_root_key
-ssh-add ~/.ssh/id_k8s_vms
-ansible-playbook -i ansible/inventories/proxmox/hosts.yml -l proxmox \
-  ansible/playbooks/drain-165-configure.yml
+ansible-playbook -i inventory/ukubi/hosts.yaml -l k8s-cp-01,k8s-worker-01 \
+  ansible/playbooks/self-drain-configure.yml
 ```
+
+Safe to re-run: idempotent, and a re-run's `state: started` on
+`uncordon-self.service` immediately tries to uncordon a node that's
+currently cordoned-but-Ready — useful right after a botched manual test.
 
 ### Verify / test
 
 ```bash
-ssh -i /tmp/pve_root_key root@192.168.1.165 systemctl status drain-165.service
-# Trigger a real drain without actually rebooting the host:
-ssh -i /tmp/pve_root_key root@192.168.1.165 systemctl stop drain-165.service
-# ... confirm k8s-cp-01/k8s-worker-01 cordoned + pods evicted, then:
-ssh -i /tmp/pve_root_key root@192.168.1.165 systemctl start drain-165.service
-kubectl uncordon k8s-cp-01 k8s-worker-01   # drain-165.service doesn't uncordon on its own
+# from either node, or via ansible ad-hoc:
+ansible k8s-cp-01,k8s-worker-01 -i inventory/ukubi/hosts.yaml --become \
+  -m shell -a "systemctl status drain-self.service uncordon-self.service"
+
+# trigger a real drain without a real reboot (run ON the target node):
+sudo systemctl stop drain-self.service    # fires ExecStop — the actual drain
+sudo systemctl start drain-self.service   # re-arm for the next real shutdown
+
+# trigger the uncordon (safe any time, no-op if already schedulable):
+sudo systemctl restart uncordon-self.service
 ```
+
+**Not yet extended to future/replacement nodes**: this only configures
+the 2 existing VMs — a brand-new K8s node (from Terraform) doesn't get
+this automatically. Considered baking it into the shared cloud-init
+snippet (`terraform/cloud-init.tf`) for true zero-touch automation, but
+that needs a pre-minted, long-lived token threaded through as a
+Terraform variable (cloud-init can't call `kubectl create token` against
+a live cluster at first-boot time) — deferred; run this playbook by hand
+against any new node instead, same as today.
 
 ## See also
 

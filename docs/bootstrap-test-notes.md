@@ -1100,3 +1100,78 @@ specifically because the check stopped at one config file
 (`register-repos.env`) fed the same logical dependency through a
 separate path. When relocating any shared credential/endpoint, grep the
 whole repo for the old value, not just the "obvious" values file.
+
+## 2026-07-30 — `.165` drain automation: two real bugs found via actual reboot tests, redesigned around self-drain
+
+The `drain-165.service` design above looked right on paper and passed a
+manual `systemctl stop` test, but two *real* `.165` reboot cycles (not
+just the manual test) exposed it was broken in two separate ways —
+worth recording both, since neither was guessable without actually
+watching a real shutdown happen.
+
+**Bug 1 — the systemd ordering was backwards.** `Before=pve-guests.service`
+was meant to make the drain run *before* Proxmox stopped the guest VMs.
+It did the opposite: systemd stops units in the *reverse* of their start
+order, so `Before=X` means "start before X, stop *after* X." Confirmed
+directly in `.165`'s journal: `pve-guests.service` fully stopped (all
+VMs powered off, timestamped) — *then* `drain-165.service`'s `ExecStop`
+finally ran, cordoning two already-dead nodes and failing to evict
+anything (kubelet was already gone). First real test: only ~1 of 34
+pods got cleanly evicted before the nodes went `NotReady` with no
+cordon at all (the unit hadn't even started yet). Second test, after
+tightening timeouts alone (not the ordering): cordon happened, but
+still against nodes already powered off.
+
+**Bug 2 — the RBAC was missing a permission the whole time.** Once the
+ordering bug was understood and the drain script actually got a chance
+to run against *live* nodes, it still failed cleanly: `kubectl drain
+--ignore-daemonsets` needs `get`/`list` on `daemonsets` just to
+recognize and skip DaemonSet-owned pods (Longhorn, Cilium, kube-proxy,
+MetalLB's speaker, etc.) — without it, every node failed `"cannot get
+resource daemonsets... forbidden"` and drain never completed. This had
+been wrong since the RBAC was first written; the ordering bug just
+meant it was never actually exercised against live nodes until now.
+
+**Redesign, not a patch**: rather than keep fighting `pve-guests.service`
+ordering (a host-level Proxmox service neither this repo nor the user
+fully controls), moved the whole mechanism *into* the two K8s guest VMs
+themselves. Proxmox's own `qmshutdown` already sends each guest an ACPI
+shutdown signal and waits per-VM (confirmed 180s timeout in the
+journal) for a graceful shutdown — a far more natural trigger than
+racing a hypervisor-level service. `k8s-cp-01`/`k8s-worker-01` now each
+run `drain-self.service`/`uncordon-self.service` (new
+`ansible/playbooks/self-drain-configure.yml`, superseding
+`drain-165-configure.yml`, deleted), draining/uncordoning *themselves*
+using the identical `Before=shutdown.target`/`After=network-online.target`
+idiom — just inside the guest's own systemd instead of the hypervisor's,
+sidestepping the ordering question entirely. `.165` itself was cleaned
+up (both old units, scripts, and the kubeconfig removed).
+
+**Also discussed and deliberately declined**: full etcd decommission/
+recommission on every `.165` reboot ("cattle not pets" for a routine,
+recurring event) — rejected as overkill and actively risky, since it
+would mean removing/re-adding `k8s-cp-01`'s etcd membership on every
+gaming reboot, exactly the kind of operation this same session's earlier
+etcd quorum work (ADR-0029) proved fragile. Drain-and-return (cordon →
+evict → reboot → rejoin → uncordon) is the correct pattern for a
+routine, recurring reboot; decommission/recommission is for a
+deliberate, infrequent rebuild — different problem.
+
+**Also discussed and deliberately declined**: automating this via
+Terraform/cloud-init for zero-touch coverage of future/replacement
+nodes. Terraform has no mechanism to configure an already-running VM's
+guest OS (its only guest-level touchpoint is cloud-init, which runs
+once at first boot) — cloud-init *could* bake this in for brand-new
+nodes, but can't mint its own live cluster token at first-boot time
+without threading a long-lived, pre-minted token through as a
+Terraform variable. Deferred as a real but non-urgent follow-up; new
+nodes get this via a manual `self-drain-configure.yml` run for now.
+
+**Verified this round**: after the redesign, re-running
+`self-drain-configure.yml` correctly (a) applied cleanly on both nodes,
+(b) immediately uncordoned both (they were still cordoned-but-Ready
+from the earlier failed tests) within ~15s, and (c) the scoped
+`node-drainer` credential was confirmed still least-privilege
+(`kubectl get secrets` → `Forbidden`) even with the new `daemonsets`
+permission added. **Not yet re-proven through a full, real `.165`
+reboot cycle** with the corrected design — that's the next real test.

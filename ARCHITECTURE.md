@@ -153,24 +153,32 @@ RTX 2070 SUPER at PCI `0b:00.0`, all 4 functions passed with
 toolkit inside the VM; NVIDIA Device Plugin via Helm; GPU workloads
 scheduled via taints/tolerations.
 
-### Pre-shutdown drain automation on `.165`
+### Self-drain on `k8s-cp-01`/`k8s-worker-01`
 
 A real, ungraceful `.165` outage (2026-07-30, see
 `docs/bootstrap-test-notes.md`) proved that Kubernetes' default
 node-eviction timer reschedules pods but never force-detaches CSI
 (Longhorn) volumes from a node it can't confirm is gone — a
 `ReadWriteOnce` PVC's pod got stuck `Multi-Attach error` until the node
-came back. Fix: `ansible/playbooks/drain-165-configure.yml` installs a
-systemd oneshot service on `.165` (`drain-165.service`, ordered
-`Before=shutdown.target`, `After=network-online.target`) that runs
-`kubectl drain k8s-cp-01 k8s-worker-01` on every graceful reboot/shutdown
-— pods evicted and volumes detached *before* the node disappears, not
-after. Uses a dedicated, least-privilege kubeconfig (`node-drainer`
-ServiceAccount, `gitops/bootstrap/node-drainer-rbac.yaml` — cordon +
-evict only), since this credential lives on a dual-boot gaming host
-rather than a dedicated infra host. Only fires on a graceful,
-systemd-initiated shutdown (not a hard power-cut) — accepted, since
-switching to Windows on this host normally goes through a real `reboot`.
+came back. Fix: `ansible/playbooks/self-drain-configure.yml` installs
+`drain-self.service`/`uncordon-self.service` on both nodes hosted on
+`.165` — each node cordons + evicts *itself* on its own graceful
+shutdown (triggered by Proxmox's ACPI `qmshutdown` signal, which already
+waits up to 180s per VM), and uncordons itself once it rejoins the
+cluster on boot. Uses a dedicated, least-privilege kubeconfig
+(`node-drainer` ServiceAccount, `gitops/bootstrap/node-drainer-rbac.yaml`
+— cordon/evict/read-daemonsets only), not `k8s-cp-01`'s own
+`admin.conf`, for a smaller blast radius and one consistent identity
+across both nodes. Only fires on a graceful, systemd-initiated
+shutdown/reboot (not a hard power-cut) — accepted, since switching to
+Windows on this host normally goes through a real `reboot`.
+
+An earlier version ran a single credential on `.165` itself (the
+hypervisor), draining both nodes from outside — abandoned after
+confirming live that ordering it against Proxmox's own guest-shutdown
+service was backwards (systemd stops in the *reverse* of start order),
+and that racing a host-level Proxmox service is inherently more fragile
+than each node just draining itself using its own shutdown sequence.
 
 ### App stack
 

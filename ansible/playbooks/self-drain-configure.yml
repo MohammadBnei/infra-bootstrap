@@ -1,0 +1,324 @@
+#!/usr/bin/env ansible-playbook
+---
+# Configures k8s-cp-01/k8s-worker-01 to drain and uncordon THEMSELVES around
+# their own graceful shutdown/reboot. Both VMs live on .165, which
+# dual-boots into Windows for gaming — this is the fix for a real,
+# confirmed-live problem (docs/bootstrap-test-notes.md, 2026-07-30):
+# Kubernetes' default node-eviction timer reschedules pods but never
+# force-detaches CSI (Longhorn) volumes from a node it can't confirm is
+# gone, so an ungraceful .165 outage left a Grafana pod stuck
+# `Multi-Attach error` until the node came back.
+#
+# SUPERSEDES ansible/playbooks/drain-165-configure.yml (deleted) — that
+# version ran a single credential on .165 itself, draining both nodes from
+# outside. Abandoned after two real test failures, both instructive:
+#
+# 1. Ordering .165's drain unit `Before=pve-guests.service` (Proxmox's own
+#    guest-shutdown service) was backwards. systemd stops units in the
+#    *reverse* of their start order — `Before=X` means "start before X,
+#    stop after X" — so the drain script actually ran *after* Proxmox had
+#    already powered off the very VMs it was supposed to drain. Confirmed
+#    in the journal: `pve-guests.service` fully stopped (all VMs down)
+#    *then* `drain-165.service`'s ExecStop finally ran, against nodes that
+#    were already gone.
+# 2. Even with correct ordering, coordinating against a *host-level*
+#    Proxmox service neither of us fully controls is fragile. Proxmox's
+#    own `qmshutdown` already sends each guest an ACPI shutdown signal and
+#    waits per-VM (confirmed 180s timeout) for a graceful shutdown — that's
+#    a far more natural, already-existing trigger than fighting
+#    `pve-guests.service`'s ordering from outside.
+#
+# So: each node now drains *itself*, inside its own systemd, using the
+# same `Before=shutdown.target`/`After=network-online.target` idiom as
+# before — but this time the "shutdown" being ordered against is the
+# guest's own OS shutdown (triggered by Proxmox's ACPI signal), not a
+# hypervisor-level service. No cross-service ordering to get wrong.
+#
+# WHY STILL A SCOPED, NON-ADMIN CREDENTIAL (not reusing k8s-cp-01's
+# existing /etc/kubernetes/admin.conf)
+# Being a cluster member doesn't grant broad API permissions — kubelet's
+# own identity is deliberately restricted by the NodeRestriction admission
+# controller to just "manage my own status and pods," nowhere near enough
+# for `kubectl drain` (cordon, evict, read daemonsets/PDBs). k8s-cp-01
+# happens to already have a full cluster-admin admin.conf sitting there
+# (kubeadm's default), but using it here would mean a bigger blast radius
+# than necessary and an inconsistent story vs k8s-worker-01 (which has no
+# admin-level credential locally at all — it would need this scoped one
+# regardless). One consistent, least-privilege identity for both.
+#
+# PREREQUISITES
+# - gitops/bootstrap/node-drainer-rbac.yaml already applied (self-syncs
+#   via ADR-0021's bootstrap Application once merged to main) — includes
+#   the daemonsets get/list permission (missing in the first version,
+#   confirmed live 2026-07-30: every drain failed "cannot get resource
+#   daemonsets... forbidden" without it).
+# - Uses inventory/ukubi/hosts.yaml (the K8s VM inventory, ~/.ssh/id_k8s_vms,
+#   user `core`) — NOT ansible/inventories/proxmox/ (that's for the PVE
+#   hosts themselves, a different target entirely).
+# - k8s_control_plane_host below is used only to mint tokens/fetch the CA
+#   cert — deliberately a *different* CP node (k8s-cp-02) than the ones
+#   being configured, so this playbook doesn't depend on its own targets
+#   already being fully set up.
+#
+# HOW TO RUN
+#   ansible-playbook -i inventory/ukubi/hosts.yaml -l k8s-cp-01,k8s-worker-01 \
+#     ansible/playbooks/self-drain-configure.yml
+
+- name: Configure k8s-cp-01/k8s-worker-01 to drain and uncordon themselves
+  hosts: k8s-cp-01,k8s-worker-01
+  become: true
+  gather_facts: false
+  vars:
+    k8s_control_plane_host: k8s-cp-02 # any CP node other than the ones being configured
+    k8s_vip: 192.168.1.180
+    kube_version: v1.35.4
+    node_drainer_namespace: kube-system
+    node_drainer_sa: node-drainer
+    drain_timeout: 180s # generous — evicting real pods with normal termination grace periods needs real wall-clock time
+    drain_stop_timeout_sec: 240 # > drain_timeout, gives the script room to hit its own internal timeout and exit cleanly before systemd gives up on it
+    uncordon_max_wait_sec: 300 # this node uncordoning only needs to wait on ITSELF being Ready, not another node — shorter than the old cross-node version
+    uncordon_poll_interval_sec: 10
+
+  tasks:
+    - name: Fetch cluster CA cert (delegated to a live CP node)
+      delegate_to: "{{ k8s_control_plane_host }}"
+      run_once: false
+      ansible.builtin.command:
+        argv:
+          - kubectl
+          - --kubeconfig=/etc/kubernetes/admin.conf
+          - config
+          - view
+          - --raw
+          - -o
+          - jsonpath={.clusters[0].cluster.certificate-authority-data}
+      register: ca_cert_result
+      changed_when: false
+
+    - name: Mint a long-lived scoped token for node-drainer (delegated)
+      delegate_to: "{{ k8s_control_plane_host }}"
+      no_log: true
+      ansible.builtin.command:
+        argv:
+          - kubectl
+          - --kubeconfig=/etc/kubernetes/admin.conf
+          - --server=https://{{ k8s_vip }}:6443
+          - create
+          - token
+          - "{{ node_drainer_sa }}"
+          - -n
+          - "{{ node_drainer_namespace }}"
+          - --duration=87600h
+      register: token_result
+      changed_when: true
+
+    - name: Ensure /etc/k8s-drain exists
+      ansible.builtin.file:
+        path: /etc/k8s-drain
+        state: directory
+        mode: "0700"
+        owner: root
+        group: root
+
+    - name: Write the scoped kubeconfig
+      no_log: true
+      ansible.builtin.copy:
+        dest: /etc/k8s-drain/kubeconfig
+        mode: "0600"
+        owner: root
+        group: root
+        content: |
+          apiVersion: v1
+          kind: Config
+          clusters:
+          - name: ukubi-cluster
+            cluster:
+              server: https://{{ k8s_vip }}:6443
+              certificate-authority-data: {{ ca_cert_result.stdout }}
+          contexts:
+          - name: node-drainer
+            context:
+              cluster: ukubi-cluster
+              user: node-drainer
+          current-context: node-drainer
+          users:
+          - name: node-drainer
+            user:
+              token: {{ token_result.stdout }}
+
+    - name: Check whether kubectl is already installed
+      ansible.builtin.stat:
+        path: /usr/local/bin/kubectl
+      register: kubectl_stat
+
+    - name: Install kubectl (matching cluster version)
+      when: not kubectl_stat.stat.exists
+      ansible.builtin.get_url:
+        url: "https://dl.k8s.io/release/{{ kube_version }}/bin/linux/amd64/kubectl"
+        dest: /usr/local/bin/kubectl
+        mode: "0755"
+
+    - name: Write the self-drain script
+      ansible.builtin.copy:
+        dest: /usr/local/bin/drain-self.sh
+        mode: "0755"
+        owner: root
+        group: root
+        content: |
+          #!/bin/bash
+          # Drains THIS node before its own graceful shutdown/reboot — run
+          # by systemd (drain-self.service), never by hand. Bounded by the
+          # calling systemd unit's TimeoutStopSec, but also self-bounds via
+          # --timeout so it never hangs indefinitely on its own.
+          #
+          # Uses a scoped kubeconfig (/etc/k8s-drain/kubeconfig, ServiceAccount
+          # node-drainer, RBAC: gitops/bootstrap/node-drainer-rbac.yaml) —
+          # cordon + evict only, not cluster-admin, even though this node may
+          # already have /etc/kubernetes/admin.conf sitting here too.
+          set -uo pipefail
+
+          export KUBECONFIG=/etc/k8s-drain/kubeconfig
+          NODE_NAME=$(hostname)
+          LOG_TAG="drain-self"
+
+          logger -t "$LOG_TAG" "starting self-drain of $NODE_NAME"
+
+          /usr/local/bin/kubectl drain "$NODE_NAME" \
+            --ignore-daemonsets \
+            --delete-emptydir-data \
+            --force \
+            --timeout={{ drain_timeout }}
+
+          rc=$?
+          if [ "$rc" -eq 0 ]; then
+            logger -t "$LOG_TAG" "drain of $NODE_NAME completed cleanly"
+          else
+            logger -t "$LOG_TAG" "drain of $NODE_NAME exited $rc (timed out or partially failed) — proceeding with shutdown anyway"
+          fi
+
+          exit 0
+
+    - name: Write the drain-self systemd unit
+      ansible.builtin.copy:
+        dest: /etc/systemd/system/drain-self.service
+        mode: "0644"
+        owner: root
+        group: root
+        content: |
+          [Unit]
+          Description=Drain this node before it shuts down
+          Documentation=file:///usr/local/bin/drain-self.sh
+          DefaultDependencies=no
+          Before=shutdown.target reboot.target halt.target
+          After=network-online.target
+          Wants=network-online.target
+          Conflicts=shutdown.target reboot.target halt.target
+
+          [Service]
+          Type=oneshot
+          RemainAfterExit=yes
+          ExecStart=/bin/true
+          ExecStop=/usr/local/bin/drain-self.sh
+          TimeoutStopSec={{ drain_stop_timeout_sec }}
+
+          [Install]
+          WantedBy=multi-user.target
+
+    - name: Enable and start drain-self.service
+      ansible.builtin.systemd:
+        name: drain-self.service
+        daemon_reload: true
+        enabled: true
+        state: started
+
+    - name: Write the uncordon-self script (startup counterpart)
+      ansible.builtin.copy:
+        dest: /usr/local/bin/uncordon-self.sh
+        mode: "0755"
+        owner: root
+        group: root
+        content: |
+          #!/bin/bash
+          # Counterpart to drain-self.sh: draining cordons this node but
+          # never uncordons it, so every boot would otherwise leave it
+          # permanently unschedulable even once healthy. Polls because
+          # this node finishing its own boot doesn't mean kubelet has
+          # finished rejoining the cluster yet — run by systemd
+          # (uncordon-self.service) on every boot, never by hand.
+          set -uo pipefail
+
+          export KUBECONFIG=/etc/k8s-drain/kubeconfig
+          NODE_NAME=$(hostname)
+          LOG_TAG="uncordon-self"
+          MAX_WAIT={{ uncordon_max_wait_sec }}
+          INTERVAL={{ uncordon_poll_interval_sec }}
+          elapsed=0
+
+          logger -t "$LOG_TAG" "waiting for $NODE_NAME to report Ready"
+
+          self_ready() {
+            local status
+            status=$(/usr/local/bin/kubectl get node "$NODE_NAME" \
+              -o jsonpath='{.status.conditions[?(@.type=="Ready")].status}' 2>/dev/null)
+            [ "$status" = "True" ]
+          }
+
+          while [ "$elapsed" -lt "$MAX_WAIT" ]; do
+            if self_ready; then
+              logger -t "$LOG_TAG" "$NODE_NAME Ready, uncordoning"
+              /usr/local/bin/kubectl uncordon "$NODE_NAME"
+              exit $?
+            fi
+            sleep "$INTERVAL"
+            elapsed=$((elapsed + INTERVAL))
+          done
+
+          logger -t "$LOG_TAG" "gave up after ${MAX_WAIT}s waiting for $NODE_NAME to be Ready — uncordon manually: kubectl uncordon $NODE_NAME"
+          exit 1
+
+    - name: Write the uncordon-self systemd unit
+      ansible.builtin.copy:
+        dest: /etc/systemd/system/uncordon-self.service
+        mode: "0644"
+        owner: root
+        group: root
+        content: |
+          [Unit]
+          Description=Uncordon this node once it rejoins the cluster after boot
+          Documentation=file:///usr/local/bin/uncordon-self.sh
+          After=network-online.target
+          Wants=network-online.target
+
+          [Service]
+          Type=oneshot
+          RemainAfterExit=yes
+          ExecStart=/usr/local/bin/uncordon-self.sh
+          TimeoutStartSec={{ uncordon_max_wait_sec | int + 30 }}
+
+          [Install]
+          WantedBy=multi-user.target
+
+    - name: Enable and start uncordon-self.service
+      ansible.builtin.systemd:
+        name: uncordon-self.service
+        daemon_reload: true
+        enabled: true
+        state: started
+
+#--------------------------------------------------------------#
+# Usage
+#--------------------------------------------------------------#
+# Re-running this playbook re-applies both services idempotently on both
+# nodes — `state: started` on uncordon-self.service also means a re-run
+# immediately tries to uncordon a node that's currently cordoned-but-Ready.
+#
+# Verify: ansible k8s-cp-01,k8s-worker-01 -i inventory/ukubi/hosts.yaml \
+#   -m shell -a "systemctl status drain-self.service uncordon-self.service" --become
+#
+# Test the drain without a real reboot (run ON the target node):
+#   sudo systemctl stop drain-self.service    # fires ExecStop — the actual drain
+#   sudo systemctl start drain-self.service   # re-arm for the next real shutdown
+#
+# Test the uncordon without a real reboot (safe any time, no-op if already
+# schedulable): sudo systemctl restart uncordon-self.service
+...
