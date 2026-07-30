@@ -5,7 +5,7 @@
 
 image:
   repository: mohammaddocker/agent-fleet-worker
-  tag: "0.1.0"
+  tag: "latest" # not pinned yet — see agent-fleet-bot/values.yaml's comment
 
 service:
   port: 8080 # unused (no HTTP server), required by the chart schema

@@ -11,7 +11,11 @@
 
 image:
   repository: mohammaddocker/agent-fleet-bot
-  tag: "0.1.0"
+  # "latest", not a pinned version: docker.yml only pushes on a git tag push
+  # (release-it creates that tag on merge to main), so no fixed version tag
+  # exists in Docker Hub yet to pin to — pin once the first real release has
+  # run and follow actions-runner's precedent of moving to a manual bump.
+  tag: "latest"
 
 service:
   port: 8080 # unused (no HTTP server), required by the chart schema
@@ -74,7 +78,7 @@ hooks:
     type: PreSync
     image:
       repository: mohammaddocker/agent-fleet-bot
-      tag: "0.1.0"
+      tag: "latest"
     command: ["sh", "-c"]
     args:
       - "PGPASSWORD=$AGENTFLEET_DB_PASSWORD psql -h $AGENTFLEET_DB_HOST -p $AGENTFLEET_DB_PORT -U $AGENTFLEET_DB_USER -d $AGENTFLEET_DB_NAME -f /app/db/schema.sql"
