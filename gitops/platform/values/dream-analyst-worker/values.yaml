@@ -55,10 +55,12 @@ extraVolumeMounts:
     mountPath: /mnt/fleet-shared
 
 # Same dedicated Infisical project as agent-fleet-bot (docs/secrets.md) —
-# ANTHROPIC_API_KEY, GH_TOKEN (dedicated bot GitHub account, added as a
-# collaborator on dream-analyst/vos-monolith — `gh auth setup-git` wires it
-# into git's credential helper for push, and gh CLI reads it directly for
-# `gh pr create`), DISCORD_BOT_TOKEN, AGENTFLEET_DB_*, REDIS_MAIN_PASSWORD.
+# CLAUDE_CODE_OAUTH_TOKEN (Claude Code auths via OAuth token, not a raw
+# Anthropic API key — minted with `claude setup-token`), GH_TOKEN (dedicated
+# bot GitHub account, collaborator on dream-analyst/vos-monolith —
+# `gh auth setup-git` wires it into git's credential helper for push, and gh
+# CLI reads it directly for `gh pr create`), DISCORD_BOT_TOKEN,
+# AGENTFLEET_DB_*, REDIS_MAIN_PASSWORD.
 infisical:
   enabled: true
   projectSlug: "agent-fleet-nygh"
