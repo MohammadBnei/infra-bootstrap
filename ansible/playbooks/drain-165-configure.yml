@@ -29,6 +29,30 @@
 # drain can't block a real shutdown indefinitely — worst case, it times
 # out and shutdown proceeds anyway (no worse than not draining at all).
 #
+# REAL BUG FOUND 2026-07-30, FIXED HERE: the first version of this unit
+# only ordered itself against shutdown.target/network-online.target — it
+# never raced against Proxmox's OWN guest-shutdown service
+# (pve_guests_service below, confirmed as `pve-guests.service` on this
+# host), which stops every running VM/LXC (including k8s-cp-01 and
+# k8s-worker-01 THEMSELVES) as part of .165's own shutdown sequence. Live
+# test: cordon succeeded instantly, but eviction only got through ~1 of 34
+# pods before the nodes went NotReady — the guest VMs were being powered
+# off concurrently with (or before) the drain script's eviction loop,
+# killing kubelet mid-drain. Fixed with an explicit
+# `Before=pve-guests.service` so the full drain completes before Proxmox
+# even starts stopping the guest VMs, and generous timeouts (well above
+# how long evicting ~30+ pods with real termination grace periods takes)
+# rather than the original, too-tight 75s/90s.
+#
+# COUNTERPART NEEDED ON THE WAY BACK UP: draining cordons the nodes but
+# never uncordons them — without uncordon-165.service (below), every
+# `.165` boot leaves k8s-cp-01/k8s-worker-01 permanently unschedulable
+# even once they're healthy and rejoined. That service polls until both
+# nodes report Ready, then uncordons — it can't just run unconditionally
+# at boot, since `.165` finishing its own boot doesn't mean the guest VMs
+# (which ARE these two K8s nodes) have finished booting and rejoining the
+# cluster yet.
+#
 # LIMITATION (accepted, not fixable from here): only fires on a graceful,
 # systemd-initiated shutdown/reboot — not a hard power-cut. Acceptable
 # since switching to Windows on this dual-boot host normally goes through
@@ -64,6 +88,11 @@
     node_drainer_namespace: kube-system
     node_drainer_sa: node-drainer
     drain_nodes: [k8s-cp-01, k8s-worker-01] # both physically on .165
+    pve_guests_service: pve-guests.service # confirmed live 2026-07-30 via `systemctl list-units | grep pve` — Proxmox's own guest-shutdown unit; drain-165.service MUST order Before= this
+    drain_timeout: 180s # generous — evicting ~30+ real pods with normal termination grace periods needs real wall-clock time; the original 75s only got through ~1 pod before losing the node
+    drain_stop_timeout_sec: 240 # > drain_timeout, gives the script room to hit its own internal timeout and exit cleanly before systemd gives up on it
+    uncordon_max_wait_sec: 600 # how long uncordon-165.service polls for both nodes to report Ready before giving up (manual `kubectl uncordon` remains the fallback)
+    uncordon_poll_interval_sec: 10
 
   tasks:
     - name: Fetch cluster CA cert (delegated to a live CP node)
@@ -180,7 +209,7 @@
             --ignore-daemonsets \
             --delete-emptydir-data \
             --force \
-            --timeout=75s
+            --timeout={{ drain_timeout }}
 
           rc=$?
           if [ "$rc" -eq 0 ]; then
@@ -203,7 +232,7 @@
           Description=Drain k8s-cp-01/k8s-worker-01 before this hypervisor shuts down
           Documentation=file:///usr/local/bin/drain-165.sh
           DefaultDependencies=no
-          Before=shutdown.target reboot.target halt.target
+          Before=shutdown.target reboot.target halt.target {{ pve_guests_service }}
           After=network-online.target
           Wants=network-online.target
           Conflicts=shutdown.target reboot.target halt.target
@@ -213,7 +242,7 @@
           RemainAfterExit=yes
           ExecStart=/bin/true
           ExecStop=/usr/local/bin/drain-165.sh
-          TimeoutStopSec=90
+          TimeoutStopSec={{ drain_stop_timeout_sec }}
 
           [Install]
           WantedBy=multi-user.target
@@ -226,13 +255,107 @@
         enabled: true
         state: started
 
+    - name: Write the uncordon script (startup counterpart)
+      become: true
+      ansible.builtin.copy:
+        dest: /usr/local/bin/uncordon-165.sh
+        mode: "0755"
+        owner: root
+        group: root
+        content: |
+          #!/bin/bash
+          # Counterpart to drain-165.sh: draining cordons k8s-cp-01/k8s-worker-01
+          # but never uncordons them, so every .165 boot would otherwise leave
+          # both nodes permanently unschedulable even once healthy. Polls
+          # because .165 finishing its own boot doesn't mean the guest VMs
+          # (which ARE these two K8s nodes) have finished booting and
+          # rejoining the cluster yet — run by systemd (uncordon-165.service)
+          # on every boot, never by hand.
+          set -uo pipefail
+
+          export KUBECONFIG=/etc/k8s-drain/kubeconfig
+          LOG_TAG="uncordon-165"
+          MAX_WAIT={{ uncordon_max_wait_sec }}
+          INTERVAL={{ uncordon_poll_interval_sec }}
+          elapsed=0
+
+          logger -t "$LOG_TAG" "waiting for {{ drain_nodes | join(', ') }} to report Ready"
+
+          both_ready() {
+            local status
+            status=$(/usr/local/bin/kubectl get nodes {{ drain_nodes | join(' ') }} \
+              -o jsonpath='{range .items[*]}{.status.conditions[?(@.type=="Ready")].status}{"\n"}{end}' 2>/dev/null)
+            [ "$(printf '%s\n' "$status" | sort -u)" = "True" ]
+          }
+
+          while [ "$elapsed" -lt "$MAX_WAIT" ]; do
+            if both_ready; then
+              logger -t "$LOG_TAG" "both nodes Ready, uncordoning"
+              /usr/local/bin/kubectl uncordon {{ drain_nodes | join(' ') }}
+              exit $?
+            fi
+            sleep "$INTERVAL"
+            elapsed=$((elapsed + INTERVAL))
+          done
+
+          logger -t "$LOG_TAG" "gave up after ${MAX_WAIT}s waiting for {{ drain_nodes | join(', ') }} to be Ready — uncordon manually: kubectl uncordon {{ drain_nodes | join(' ') }}"
+          exit 1
+
+    - name: Write the uncordon systemd unit
+      become: true
+      ansible.builtin.copy:
+        dest: /etc/systemd/system/uncordon-165.service
+        mode: "0644"
+        owner: root
+        group: root
+        content: |
+          [Unit]
+          Description=Uncordon k8s-cp-01/k8s-worker-01 once they rejoin after this hypervisor boots
+          Documentation=file:///usr/local/bin/uncordon-165.sh
+          After=network-online.target
+          Wants=network-online.target
+
+          [Service]
+          Type=oneshot
+          RemainAfterExit=yes
+          ExecStart=/usr/local/bin/uncordon-165.sh
+          TimeoutStartSec={{ uncordon_max_wait_sec | int + 30 }}
+
+          [Install]
+          WantedBy=multi-user.target
+
+    - name: Enable and start uncordon-165.service
+      become: true
+      ansible.builtin.systemd:
+        name: uncordon-165.service
+        daemon_reload: true
+        enabled: true
+        state: started
+
 #--------------------------------------------------------------#
 # Usage
 #--------------------------------------------------------------#
-# First run (or to rotate the token): see PREREQUISITES above.
-# Verify: ssh root@192.168.1.165 systemctl status drain-165.service
-# Test without a real reboot: ssh root@192.168.1.165 systemctl stop drain-165.service
-#   (this fires ExecStop — the actual drain — without shutting the host down;
-#   re-run `systemctl start drain-165.service` after, and remember to
-#   `kubectl uncordon k8s-cp-01 k8s-worker-01` once you're done testing).
+# First run (or to rotate the token): see PREREQUISITES above. Re-running
+# this playbook (e.g. after editing timeouts/ordering) re-applies both
+# services idempotently — `state: started` on uncordon-165.service also
+# means a re-run immediately tries to uncordon k8s-cp-01/k8s-worker-01 if
+# they're currently cordoned-but-Ready, useful right after a botched
+# manual drain test.
+#
+# Verify: ssh root@192.168.1.165 systemctl status drain-165.service uncordon-165.service
+#
+# Test the drain without a real reboot:
+#   ssh root@192.168.1.165 systemctl stop drain-165.service
+#   (fires ExecStop — the actual drain — without shutting the host down;
+#   re-run `systemctl start drain-165.service` after)
+#
+# Test the uncordon without a real reboot:
+#   ssh root@192.168.1.165 systemctl restart uncordon-165.service
+#   (safe to run any time — it only acts once both nodes report Ready,
+#   and uncordon is a no-op if they're already schedulable)
+#
+# Confirm pve_guests_service is the right name on THIS host before
+# trusting the ordering fix: `systemctl list-units | grep -i pve` — if
+# Proxmox ever renames/replaces this unit, update the var at the top of
+# this playbook, don't hardcode a fix elsewhere.
 ...
