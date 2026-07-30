@@ -72,6 +72,22 @@ resource "proxmox_virtual_environment_vm" "k8s_node" {
     full      = true
   }
 
+  # down_delay doubles as Proxmox's own ACPI shutdown timeout for this VM
+  # (used by qmshutdown/pve-guests.service when no explicit --timeout is
+  # given) — default is 180s. Confirmed live 2026-07-30
+  # (docs/bootstrap-test-notes.md): with the default, Proxmox force-killed
+  # k8s-cp-01/k8s-worker-01 mid-eviction — ansible/playbooks/
+  # self-drain-configure.yml's own drain got through only 2-3 of 34 pods
+  # before the whole VM vanished with zero further logging, since its
+  # graceful drain_stop_timeout_sec (240s) never got a chance to run out
+  # on its own. 300s here gives that drain real headroom to finish before
+  # Proxmox's patience does. Harmless for nodes without self-drain
+  # configured — this only affects how long a graceful shutdown/reboot is
+  # allowed to take, not normal operation.
+  startup {
+    down_delay = 300
+  }
+
   cpu {
     cores = each.value.cpu_cores
     # Default (unset) resolves to Proxmox's "qemu64" baseline, which lacks

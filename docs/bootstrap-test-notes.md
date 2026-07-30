@@ -1175,3 +1175,51 @@ from the earlier failed tests) within ~15s, and (c) the scoped
 (`kubectl get secrets` → `Forbidden`) even with the new `daemonsets`
 permission added. **Not yet re-proven through a full, real `.165`
 reboot cycle** with the corrected design — that's the next real test.
+
+## 2026-07-30 — Third `.165` reboot test: real root cause finally found — Proxmox's own shutdown timeout, not systemd ordering
+
+After the self-drain redesign above, a third real `.165` reboot test
+still only evicted 2-3 of 34 pods per node before they went `NotReady`.
+This time the journal made the actual cause unambiguous:
+`drain-self.service`'s `ExecStop` starts, cordons the node, issues a
+handful of evictions — then **the log simply stops mid-stream**, no
+completion message, no timeout message, no error, straight to the next
+`-- Boot --` marker roughly 5 minutes later.
+
+That silence is the tell: it means the VM itself was killed while the
+script was still running, not that the script's own logic gave up.
+Cross-referencing the earlier `pve-guests` journal entries
+(`"Stopping VM 201 (timeout = 180 seconds)"`) confirmed it — **Proxmox's
+own per-VM ACPI shutdown timeout (180s) was shorter than the drain
+script's systemd `TimeoutStopSec` (240s)**, so Proxmox always force-killed
+the guest before the drain's own timeout could ever fire, let alone
+before 34 real pods could finish evicting. Two prior "fixes" (tightening
+timeouts, fixing the ordering) never touched this because it's a
+third, independent constraint — the *hypervisor's* patience, not
+anything inside the guest.
+
+**Fix**: `terraform/k8s-vms.tf`'s shared `k8s_node` resource now sets
+`startup { down_delay = 300 }` on every K8s VM — this Proxmox VM option
+doubles as the guest's ACPI shutdown timeout when `qmshutdown` is called
+without an explicit `--timeout` (which is how a normal `.165` reboot
+invokes it), so 300s comfortably exceeds both the drain script's own
+180s `kubectl drain --timeout` and its 240s `TimeoutStopSec`. Applied
+in-place via `terraform apply -target=...` (0 add/destroy, 5 changed,
+no VM restart needed — confirmed via `qm config 201/202 | grep startup`
+showing `startup: down=300` immediately). Harmless on nodes that never
+use self-drain; it only affects how long a graceful shutdown is allowed
+to take.
+
+**Lesson, same shape as the `pve-guests.service` ordering bug**: a
+completely silent failure (no error, no timeout message, log just
+stops) is itself a strong signal — it means something *external* to
+the failing process killed it, not that the process's own logic hit a
+dead end. Cross-referencing a *different* service's journal
+(`pve-guests`, from an unrelated earlier debugging session) is what
+actually cracked this one, not staring harder at `drain-self.service`'s
+own output.
+
+**Not yet re-tested with all three fixes in place** (self-drain
+redesign + RBAC fix + this timeout fix) — that combination has never
+been through a real `.165` reboot cycle yet. Next real test is the
+actual proof.
