@@ -308,18 +308,34 @@ The `bnei.lan` record set (`pihole_hosts_records` var) mirrors
 IPs. Add a line there as each new host actually gets provisioned — it's a
 declared, reconciled-every-run list, not a one-time seed.
 
+**Static IP:** the Pi's `192.168.1.55` was confirmed live (2026-07-30) to
+be a DHCP-dynamic lease, not static — a real risk once the whole LAN's DNS
+depends on that address staying put. Pinned self-contained on the Pi
+itself (not a Freebox DHCP reservation) via `community.general.nmcli`,
+targeting the `netplan-eth0` NetworkManager connection profile — confirmed
+live that NetworkManager is the actual renderer here (the on-disk netplan
+YAML is just NM's own passthrough dump, not the source of truth), so
+`nmcli` is the correct tool rather than hand-editing netplan files.
+
 ### Prerequisites
 
 - Pi 4 freshly reinstalled (Debian 13 trixie) and reachable at
-  `ansible/inventories/pihole/hosts.yml`'s `ansible_host`, via
-  `~/.ssh/id_ed_pi`
+  `ansible/inventories/pihole/hosts.yml`'s `ansible_host`. Unlike garage/
+  nfs, there's no local Terraform-generated keypair for physical
+  hardware — fetch `SSH_PI4_KEY` from Infisical first (see the inventory
+  file's header comment for the exact commands)
 - Infisical CLI session authenticated (`source ~/.hermes/cache/inf-env.sh`)
   — writes `PIHOLE_WEBPASSWORD` there on first install
+- `ansible-galaxy collection install -r ansible/requirements.yml`
+  (`community.general`, for the `nmcli` static-IP task)
 
 ### How to run
 
 ```bash
+infisical secrets get SSH_PI4_KEY --projectId=<infra-bootstrap-project-id> --env=dev --plain > /tmp/pi4_key
+chmod 600 /tmp/pi4_key
 ansible-playbook -i ansible/inventories/pihole/hosts.yml \
+  -e ansible_ssh_private_key_file=/tmp/pi4_key \
   ansible/playbooks/pihole-configure.yml
 ```
 
@@ -327,8 +343,9 @@ Safe to re-run: install itself only happens once (`pihole.toml` existence
 check). Password is only generated/set on that same first-install branch
 — v6 stores it as a one-way hash, nothing to recover from config on a
 later run, so re-runs deliberately leave an already-set password alone.
-`dns.hosts`/`dns.upstreams` are reconciled every run (read-then-compare,
-only written if different).
+`dns.hosts`/`dns.upstreams` are set unconditionally every run (re-setting
+an unchanged value is harmless — `pihole-FTL --config -q` doesn't emit
+real JSON for arrays, so a read-then-compare isn't worth the parsing).
 
 **Not automated here:** pointing LAN devices/DHCP at `192.168.1.55` for
 DNS — that's a Freebox router config change, no API access assumed.

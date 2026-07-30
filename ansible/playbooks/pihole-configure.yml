@@ -36,11 +36,16 @@
 #   file.
 #
 # PREREQUISITES
-# - Pi 4 reachable per docs/secrets.md's SSH_PI4_* (this inventory uses
-#   the local ~/.ssh/id_ed_pi keypair, matching id_garage/id_nfs's
-#   convention of a locally-held dedicated key for single-host inventories).
+# - Pi 4 reachable per docs/secrets.md's SSH_PI4_*. Unlike garage-storage/
+#   nfs-storage (Terraform-provisioned, so their dedicated keypair's
+#   private half naturally exists locally), the Pi is physical hardware
+#   set up by hand — there's no local Terraform-generated equivalent.
+#   Fetch SSH_PI4_KEY from Infisical to a local file first and pass it via
+#   `-e ansible_ssh_private_key_file=<path>` (see ansible/README.md).
 # - Infisical CLI session already authenticated in the invoking shell
 #   (source ~/.hermes/cache/inf-env.sh) — writes PIHOLE_WEBPASSWORD there.
+# - ansible-galaxy collection install -r ansible/requirements.yml
+#   (community.general, for the nmcli static-IP task below).
 #
 # RE-RUN SAFETY
 # - Install itself only runs `when: not pihole_already_installed`.
@@ -49,9 +54,9 @@
 #   config-file value to recover on a later run (unlike Garage's
 #   rpc_secret), so re-runs deliberately leave an already-set password
 #   alone rather than resetting it.
-# - `dns.hosts`/`dns.upstreams` are reconciled every run (read current
-#   value, only write if different) since these are meant to be declared,
-#   living lists — new hosts get added here over time.
+# - `dns.hosts`/`dns.upstreams` are set unconditionally every run (these
+#   are meant to be declared, living lists — new hosts get added here
+#   over time; re-setting an unchanged value is harmless).
 # - `dns.interface`/`misc.privacylevel`/`dns.queryLogging` are simple,
 #   rarely-changing scalars — set unconditionally each run, harmless if
 #   already correct.
@@ -63,6 +68,8 @@
     infisical_project_id: "{{ lookup('env', 'INFISICAL_PROJECT_ID') | default('8a3fa54f-be22-488a-bf51-55158f65c0f2', true) }}"
     infisical_env: "{{ lookup('env', 'INFISICAL_ENV') | default('dev', true) }}"
     pihole_interface: eth0
+    pihole_static_ip: 192.168.1.55/24
+    pihole_gateway: 192.168.1.254
     pihole_upstream_dns:
       - "1.1.1.1"
       - "1.0.0.1"
@@ -117,6 +124,39 @@
     - name: Set install-state fact
       ansible.builtin.set_fact:
         pihole_already_installed: "{{ pihole_toml_stat.stat.exists }}"
+
+    # -------------------------------------------------------------------
+    # 0. Static IP — self-contained (on the Pi itself, not a Freebox DHCP
+    #    reservation). Was DHCP-dynamic (confirmed live 2026-07-30 via
+    #    `ip addr` showing `dynamic`) — a real problem once the whole LAN's
+    #    DNS depends on this address staying put. NetworkManager is the
+    #    confirmed-live renderer here (not plain netplan/systemd-networkd —
+    #    `nmcli` shows the `netplan-eth0` profile as the active one, and
+    #    the on-disk netplan YAML is itself just NM's passthrough dump, not
+    #    the source of truth), so `nmcli`/community.general.nmcli is the
+    #    correct tool, not hand-editing netplan files directly.
+    # -------------------------------------------------------------------
+    - name: Pin a static IP on eth0 (same address as the current DHCP lease)
+      community.general.nmcli:
+        type: ethernet
+        conn_name: netplan-eth0
+        ifname: "{{ pihole_interface }}"
+        ip4: "{{ pihole_static_ip }}"
+        gw4: "{{ pihole_gateway }}"
+        dns4: "{{ pihole_upstream_dns }}"
+        state: present
+      register: pin_static_ip
+
+    # `nmcli`'s `state: present` only ensures the connection *profile* —
+    # confirmed live that an already-active connection keeps running under
+    # its old DHCP-obtained lease (kernel still shows the address as
+    # `dynamic`) until reapplied. `device reapply` pushes the new profile
+    # onto the live interface without a full down/up, the least disruptive
+    # way to confirm it now rather than leaving it "correct on next reboot,
+    # unconfirmed until then."
+    - name: Reapply eth0 so the static config takes effect now, not just on next reboot
+      ansible.builtin.command: nmcli device reapply {{ pihole_interface }}
+      when: pin_static_ip is changed
 
     # -------------------------------------------------------------------
     # 1. Unattended install (first run only)
@@ -209,27 +249,21 @@
       changed_when: true
 
     # -------------------------------------------------------------------
-    # 4. Declared lists — reconciled every run, only written if different
+    # 4. Declared lists — set unconditionally every run (re-setting an
+    #    unchanged value is harmless). NOT read-then-compare: confirmed
+    #    live that `pihole-FTL --config -q <key>` doesn't emit real JSON
+    #    for arrays — it's `[ 1.1.1.1, 1.0.0.1 ]` (unquoted elements), so
+    #    `from_json` only ever parsed by luck when the array was empty.
     # -------------------------------------------------------------------
-    - name: Read current dns.upstreams
-      ansible.builtin.command: pihole-FTL --config -q dns.upstreams
-      register: current_upstreams
-      changed_when: false
-
     - name: Set dns.upstreams
       ansible.builtin.command:
         argv: [pihole-FTL, --config, dns.upstreams, "{{ pihole_upstream_dns | to_json }}"]
-      when: (current_upstreams.stdout | from_json) != pihole_upstream_dns
-
-    - name: Read current dns.hosts
-      ansible.builtin.command: pihole-FTL --config -q dns.hosts
-      register: current_hosts
-      changed_when: false
+      changed_when: true
 
     - name: Set dns.hosts (bnei.lan zone)
       ansible.builtin.command:
         argv: [pihole-FTL, --config, dns.hosts, "{{ pihole_hosts_records | to_json }}"]
-      when: (current_hosts.stdout | from_json) != pihole_hosts_records
+      changed_when: true
 
     # -------------------------------------------------------------------
     # Done

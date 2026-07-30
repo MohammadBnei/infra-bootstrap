@@ -2,3 +2,4 @@
 # Install with: ansible-galaxy collection install -r ansible/requirements.yml
 collections:
   - name: ansible.posix
+  - name: community.general # nmcli module — pihole-configure.yml's static IP task
