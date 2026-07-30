@@ -57,9 +57,14 @@ updated.
 - **DNS authority:** Pi-hole on Pi 4 (`.55`) is authoritative for
   `bnei.lan`; `bnei.dev` is external via Cloudflare. See
   `ARCHITECTURE.md` §3 for target records.
-- **Postgres has no witness node and no automatic failover** in the
-  current design — 2 data VMs in primary/replica mode only, no 3-node
-  Patroni quorum. Simplicity over full HA at this scale.
+- **Postgres HA: automatic failover via Patroni + etcd is accepted
+  behavior, DCS is a 3-node etcd quorum.** Reverses the earlier "no
+  automatic failover" stance once a live check (2026-07-30) showed
+  Patroni had already auto-promoted the replica for real — the roles in
+  every doc were flipped from live reality until then. 2 PG data VMs
+  (`.165` + server1) + a 3rd etcd-only witness VM on ex-laptop for real
+  DCS quorum, mirroring the k8s 3-CP/etcd placement logic. See
+  `ADR-0029`.
 - **K8s nodes are always QEMU VMs, never LXC** — kernel isolation, GPU
   passthrough, CNI compatibility, and debuggability all need a real
   kernel per node.
@@ -131,13 +136,18 @@ them:
 
 - **`inventory/mycluster/`** exists as a separate inventory (legacy).
   Under greenfield it is obsolete — flag for deletion in a later PR.
-- **Postgres auto-failover vs. §2's "no automatic failover" decision:**
-  `pigsty/pigsty.yml`'s `patroni_mode` is left at its unmodified
-  default, which performs auto-failover/promotion via etcd — that looks
-  like it contradicts the "no witness node and no automatic failover"
-  line in §2. Not resolved here — needs a check against the actually
-  running Pigsty deployment (not just the config file) before deciding
-  which side is wrong.
+- **Resolved (2026-07-30):** `pigsty.yml`/`ARCHITECTURE.md`'s PG role
+  labels previously didn't match live reality (`.207` is the current
+  Leader, `.205` the Replica, opposite of the old static "pg01/pg02"
+  naming) — docs corrected to describe live role rather than static
+  naming. See `ADR-0029`.
+- **Resolved (2026-07-30): real 3-node etcd DCS quorum is live.**
+  `pg-etcd-witness` (`.197`, ex-laptop) applied and joined alongside
+  `.205`; all 3 members (`.207`/`.205`/`.197`) confirmed healthy,
+  `floor(3/2)+1` = 2 tolerance. See `ADR-0029` and
+  `docs/bootstrap-test-notes.md`'s 2026-07-30 entries. **Still open**:
+  the end-to-end failover proof (stop `.207`, confirm `.205` promotes +
+  VIP follows + DCS survives on 2 of 3) hasn't been performed yet.
 
 ## 5. Maintenance
 
@@ -156,6 +166,6 @@ them:
 
 ---
 
-_Last refreshed: 2026-07-29._
+_Last refreshed: 2026-07-30._
 _Source of truth: this file (`DECISION.md`) for WHY, `docs/adr/` for
 per-decision reasoning, `ARCHITECTURE.md` for WHAT._

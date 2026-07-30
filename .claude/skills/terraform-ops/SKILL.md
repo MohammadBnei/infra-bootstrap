@@ -40,6 +40,16 @@ sleep-risk mitigation is applied (ADR-0013) and it's now proven reliable
 enough in practice to host a real HA voter, not just best-effort
 capacity.
 
+`pg-etcd-witness.tf` (2026-07-30) adds a small dedicated VM on
+`ex-laptop` (`.197`, vm_id 303) — a 3rd, etcd-only Patroni DCS member,
+mirroring ADR-0017's quorum logic for Postgres (ADR-0029). Applied and
+joined the same day — real 3-node etcd quorum is live. A live check
+that day also found `pg01`(`.205`)/`pg02`(`.207`)'s
+actual Patroni roles are swapped from every doc (`.207` is the current
+Leader) — Terraform doesn't care about Patroni role, only VM specs, so no
+`imported.tf` change was needed for that, just docs (`ARCHITECTURE.md`,
+`DECISION.md`, `pigsty.yml`'s own comments).
+
 ## Invocation pattern (from `terraform/README.md`)
 
 ```bash

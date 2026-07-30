@@ -111,6 +111,24 @@ variable "nfs_ssh_public_key_file" {
   default     = "~/.ssh/id_nfs.pub"
 }
 
+variable "pg_etcd_witness_vm_id" {
+  description = "VMID for the pg-etcd-witness VM (ex-laptop) — 3rd Patroni DCS/etcd-only member, ADR-0029."
+  type        = number
+  default     = 303
+}
+
+variable "pg_etcd_witness_ip" {
+  description = "Static IP for pg-etcd-witness. No VMID/IP was locked for it anywhere else — pick one on first apply and treat as provisional, same precedent as garage_ip/nfs_ip."
+  type        = string
+  default     = "192.168.1.197"
+}
+
+variable "pg_etcd_witness_ssh_public_key_file" {
+  description = "Path to the public half of pg-etcd-witness's dedicated SSH key — new, separate keypair (own blast radius: one DCS-only VM, no PG data). Consumed by whatever ansible step joins it to Pigsty's etcd cluster."
+  type        = string
+  default     = "~/.ssh/id_pg_etcd_witness.pub"
+}
+
 variable "template_shared_storage_id" {
   description = <<-EOT
     PVE storage pool for the golden template's (VMID 9001) disk +

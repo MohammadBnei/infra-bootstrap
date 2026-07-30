@@ -30,6 +30,13 @@ all:
     # PGSQL : https://pigsty.io/docs/pgsql
     #----------------------------------------------#
     # this is an example single-node postgres cluster with pgvector installed, with one biz database & two biz users
+    # NOTE (2026-07-30, ADR-0029): `patronictl list` shows the LIVE roles
+    # are the opposite of pg_seq/pg_role below — .207 is the current
+    # Leader, .205 the current Replica. A Patroni failover already
+    # promoted .207 at some point; this config's pg_seq/pg_role only seeded
+    # the original bootstrap and isn't reconciled by Pigsty afterward, so
+    # it's stale metadata, not a live bug — left as-is rather than
+    # "corrected" to avoid implying a config change would move anything.
     pg-proxmox:
       hosts:
         192.168.1.205: { pg_seq: 1, pg_role: primary } # <---- primary instance with read-write capability
@@ -179,9 +186,34 @@ all:
     #----------------------------------------------#
     # ETCD : https://pigsty.io/docs/etcd
     #----------------------------------------------#
+    # Real 3-node DCS quorum per ADR-0029 — LIVE as of 2026-07-30
+    # (`etcd-1`/.207, `etcd-2`/.205, `etcd-3`/.197). `floor(3/2)+1` = 2,
+    # tolerates any single member down. Got here after a real incident
+    # (docs/bootstrap-test-notes.md, 2026-07-30): with only `.207` as a
+    # DCS member, stopping it for unrelated maintenance took the whole
+    # cluster's ability to fail over down with it, even though `.205`
+    # was fully healthy.
+    #
+    # IMPORTANT (learned the hard way, same day): only declare hosts
+    # here that are ACTUALLY LIVE right now. `etcd.yml`'s config
+    # generation bakes every host currently listed in this group into
+    # each member's `initial-cluster` value at bootstrap time —
+    # declaring a not-yet-provisioned host here breaks the *other*
+    # members' bootstrap (timeout dialing a peer that doesn't exist).
+    # Add each new member to this list only immediately before running
+    # `etcd.yml`/`bin/etcd-add` against it, not ahead of time. Each
+    # `etcd.yml -l <host>` run is a real DCS membership change — the
+    # user's own explicit action per pigsty/CLAUDE.md, not applied
+    # unattended.
+    #
+    # Still open: the real end-to-end proof (stop `.207`, confirm `.205`
+    # promotes + VIP follows + DCS survives on the remaining 2 of 3) —
+    # see ADR-0029's "still open" note.
     etcd:
       hosts:
         192.168.1.207: { etcd_seq: 1 }
+        192.168.1.205: { etcd_seq: 2 } # pg01/replica, server1 — joined 2026-07-30 (3rd attempt). Root cause of the first 2 failures: .205's /data/etcd retained a stale WAL from an earlier botched bootstrap (self-genesis cluster ID), so every restart just resumed that wrong local state regardless of flags — etcd only does real join/discovery against an empty data dir. Fix was `rm -rf /data/etcd/member` on .205 before retrying `bin/etcd-add`. See docs/bootstrap-test-notes.md 2026-07-30 entries and ADR-0029.
+        192.168.1.197: { etcd_seq: 3, ansible_user: core } # pg-etcd-witness, ex-laptop — VM applied 2026-07-30 (terraform/pg-etcd-witness.tf), etcd-only, no PG data (ADR-0029). ansible_user override: this host's cloud-init user is `core`, not the `vagrant` default the other pg-proxmox hosts use. Being joined now — see runbook Phase 3.5.
       vars:
         etcd_cluster: etcd
         etcd_safeguard: false             # prevent purging running etcd instance?

@@ -75,7 +75,7 @@ graph TD
 
 | VM/LXC | Type | vCPU | RAM | Disk | Notes |
 | --- | --- | --- | --- | --- | --- |
-| pg01 | VM (Q35, OVMF) | 2 | 4GB | 40GB | Pigsty PG primary, `192.168.1.205` |
+| pg02 | VM (Q35, OVMF) | 2 | 4GB | 40GB | Pigsty PG **leader/primary** (current live role), `192.168.1.207` + etcd DCS member (`etcd-1` of 3) — stays on `.165`, [ADR-0029](docs/adr/0029-postgres-automatic-failover-3-node-etcd-quorum.md) |
 | k8s-cp-01 | VM (Q35, OVMF) | 2 | 4GB | 40GB | Control plane + etcd + worker, Ubuntu 24.04 |
 | k8s-worker-01 | VM (Q35, OVMF) | 6 | 15GB | 100GB | Ubuntu 24.04, RTX 2070 SUPER PCIe passthrough |
 | garage-storage | LXC | 2 | 2GB | 200GB | S3-compatible, NVMe-backed |
@@ -86,7 +86,7 @@ Full eBPF hardware support (AMD Ryzen). ~3GB PVE overhead reserved.
 
 | VM/LXC | Type | vCPU | RAM | Disk | Notes |
 | --- | --- | --- | --- | --- | --- |
-| pg02 | VM (Q35, OVMF) | 2 | 4GB | 40GB | Target home for the Pigsty replica after migration off `.165` |
+| pg01 | VM (Q35, OVMF) | 2 | 4GB | 40GB | Pigsty PG **replica**, `192.168.1.205` — migrated off `.165` 2026-07-30 via live migration ([ADR-0029](docs/adr/0029-postgres-automatic-failover-3-node-etcd-quorum.md)); hit a kernel panic on first boot here, recovered cleanly with a reboot, confirmed streaming/lag-0 afterward |
 | nfs-storage | VM (Q35, OVMF) | 1 | 1GB | 120GB | Shared PVE storage for cross-host VM template cloning — [ADR-0026](docs/adr/0026-nfs-shared-pve-storage-cross-host-clone.md), never mounted by K8s |
 | k8s-worker-02 | VM (Q35, OVMF) | 6 | 16GB | 60GB | First cross-host K8s worker (Stage 2 Phase C), `192.168.1.203` — resized 4→6 vCPU/8→16GB 2026-07-30, server1 had most of its RAM idle |
 | k8s-cp-02 | VM (Q35, OVMF) | 2 | 4GB | 40GB | 2nd control-plane + etcd member, `192.168.1.204` — [ADR-0017](docs/adr/0017-second-control-plane-member.md) |
@@ -99,6 +99,7 @@ locked cluster-wide (see [ADR-0003](docs/adr/0003-cni-cilium-chaining-over-kube-
 | VM/LXC | Type | vCPU | RAM | Disk | Notes |
 | --- | --- | --- | --- | --- | --- |
 | k8s-cp-03 | VM (Q35, OVMF) | 2 | 4GB | 40GB | 3rd control-plane + etcd member, `192.168.1.206` — [ADR-0017](docs/adr/0017-second-control-plane-member.md) |
+| pg-etcd-witness | VM (Q35, OVMF) | 1 | 1GB | 10GB | 3rd Patroni DCS/etcd-only member, `192.168.1.197` — no PG data, dedicated VM (not co-located on k8s-cp-03) so PG quorum survives k8s control-plane restarts — [ADR-0029](docs/adr/0029-postgres-automatic-failover-3-node-etcd-quorum.md) |
 
 Sleep-risk mitigation applied and confirmed ([ADR-0013](docs/adr/0013-pve-node-161-sleep-risk-mitigation.md)) — still deliberately kept a
 *minority* etcd/CP voter (not the majority), so losing this host never
@@ -226,9 +227,10 @@ A    proxmox.bnei.lan        → 192.168.1.165
 A    server1.bnei.lan        → 192.168.1.200
 A    ex-laptop.bnei.lan      → 192.168.1.161
 A    pi4.bnei.lan            → 192.168.1.55
-A    postgres-1.bnei.lan     → 192.168.1.205  (pg01 VM — Patroni role can differ from this name, see ADR-0017/patronictl)
-A    postgres-2.bnei.lan     → 192.168.1.207  (pg02 VM — both still on .165 pending the HA migration, ADR-0017)
+A    postgres-1.bnei.lan     → 192.168.1.205  (pg01 VM — current live role is Replica, not Primary; now on server1, migrated 2026-07-30, ADR-0029/patronictl)
+A    postgres-2.bnei.lan     → 192.168.1.207  (pg02 VM — current live Leader, stays on .165, ADR-0029)
 A    postgres.bnei.lan       → 192.168.1.232  (Pigsty HA floating VIP — apps/tests should use this, not postgres-1/2 directly)
+A    pg-etcd-witness.bnei.lan → 192.168.1.197  (ex-laptop — 3rd etcd DCS member, live 2026-07-30, ADR-0029)
 A    garage.bnei.lan         → 192.168.1.199
 A    nfs-storage.bnei.lan    → 192.168.1.198
 A    k9s-dashboard.bnei.lan  → 192.168.1.110
@@ -314,23 +316,65 @@ scripts — ADR-0022 / ADR-0023).
 ## 6. Database / Pigsty
 
 - **Stack:** PostgreSQL + Pigsty (primary/replica + PgBouncer + pgBackRest).
-- **Topology:** 2 data VM nodes, primary/replica. No witness node, no
-  automatic failover (see `DECISION.md` §2).
+- **Topology:** 2 PG data VM nodes, primary/replica, **automatic failover
+  via Patroni + etcd accepted** (reverses the earlier "no automatic
+  failover" stance — see `DECISION.md` §2, [ADR-0029](docs/adr/0029-postgres-automatic-failover-3-node-etcd-quorum.md)).
+  **DCS is a real, live 3-node etcd quorum** (as of 2026-07-30): the 2
+  data-node hosts plus a dedicated witness-only VM on ex-laptop,
+  mirroring the k8s 3-CP/etcd placement logic (ADR-0017). `floor(3/2)+1`
+  = 2 — tolerates any single member going down.
 
-| Node | Host | Role |
+| Node | Host | Role (live, confirmed 2026-07-30) |
 | --- | --- | --- |
-| pg01 | proxmox PVE | Primary — `192.168.1.205` |
-| pg02 | server1 PVE (currently on `.165`, temporary) | Replica |
+| pg02 (`192.168.1.207`) | proxmox PVE (`.165`) | **Leader/primary**, etcd DCS member (`etcd-1`) |
+| pg01 (`192.168.1.205`) | server1 (`.200`) | Replica, streaming, lag 0 — migrated off `.165` via live migration; etcd DCS member (`etcd-2`) |
+| pg-etcd-witness (`192.168.1.197`) | ex-laptop | etcd DCS member only (`etcd-3`), no PG data |
 
-Redis is currently co-located on pg02. Migration from the original
-source (`.193`, PG 16.4) is complete; source VM decommissioned.
+Roles are the opposite of pg01/pg02's original static naming — a Patroni
+failover already promoted `.207` at some point before anyone checked live
+state, which is exactly the behavior ADR-0029 now accepts rather than
+fights. Redis is currently co-located on the current leader VM (`.207`).
+Migration from the original source (`.193`, PG 16.4) is complete; source
+VM decommissioned.
+
+`pg01`'s migration to server1 (2026-07-30) hit a kernel panic on first
+boot on the new host — the VM was an old, hand-built import (not one of
+this repo's cloud-init clones), and a real Proxmox live migration doesn't
+give the guest a fresh boot to reset any host-specific state. Recovered
+cleanly with a reboot; confirmed healthy afterward (`patronictl list`:
+`streaming`, timeline matches the leader, lag 0). See
+`docs/bootstrap-test-notes.md`'s 2026-07-30 entry.
+
+**Historical note, now resolved**: DCS was briefly a single etcd node
+(`.207`, on `.165`) mid-rollout, and that gap was confirmed live, not
+just theoretical — stopping `.207` for an unrelated maintenance task
+(guest agent install) took the sole DCS node down with it, and `.205`
+sat healthy-but-unable-to-promote for the whole outage because Patroni
+had no DCS to coordinate through. The Pigsty VIP (`.232`, what every
+client actually connects to) follows the Patroni Leader and can only
+move there via etcd — so **client-facing access went down with `.207`,
+not just internal replication state**, even though `.205` was fully
+healthy the entire time. See `docs/bootstrap-test-notes.md`'s 2026-07-30
+entries. The 3-node quorum above closes this gap — a single host going
+down (any of the 3) no longer takes DCS with it.
+
+**Still open**: the end-to-end proof this ADR exists to enable — stop
+`.207` (current Leader) and confirm `.205` promotes automatically with
+the VIP following, while DCS quorum survives on the remaining 2 of 3
+members — hasn't been performed yet.
 
 ```mermaid
 graph LR
     subgraph Pigsty
-        P1[pg01 — primary] -- streaming replication --> P2[pg02 — replica]
+        P1[pg02 .207 — leader] -- streaming replication --> P2[pg01 .205 — replica, on server1]
         P1 --> Bouncer[PgBouncer]
         P1 --> Exporter[pg_exporter → Grafana]
+        P1 -.->|etcd DCS| E1[.207 etcd-1]
+        P2 -.->|etcd DCS| E2[.205 etcd-2]
+        W[pg-etcd-witness .197, ex-laptop] -.->|etcd DCS| E3[.197 etcd-3]
+        E1 <-.-> E2
+        E2 <-.-> E3
+        E1 <-.-> E3
     end
     P1 -- pgBackRest, local --> LocalBackup[local disk, each VM]
     P1 -.->|pgBackRest, off-host target: open, see ADR-0024| Open[no backup target defined yet]

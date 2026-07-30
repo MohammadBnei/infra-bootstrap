@@ -39,6 +39,9 @@ build against — expect it to change:
 | `nfs-storage` | VM | 302 | new-create on `server1`, built directly from cloud image (not cloned) — shared PVE storage, ADR-0026 |
 | `k8s-worker-02` | VM | 203 | new-create on `server1`, cloned cross-host from the golden template via `shared-templates` |
 | `k9s-dashboard` | LXC | 102 | new-create on `server1`, ops-only convenience box (k9s + kubectl against ukubi-cluster), no application workload, no import needed |
+| `k8s-cp-02` | VM | 204 | new-create on `server1`, cloned cross-host — 2nd control-plane/etcd member, ADR-0017 |
+| `k8s-cp-03` | VM | 206 | new-create on `ex-laptop`, cloned cross-host — 3rd control-plane/etcd member, ADR-0017 |
+| `pg-etcd-witness` | VM | 303 | new-create on `ex-laptop`, cloned cross-host — 3rd Patroni DCS/etcd-only member, no PG data, ADR-0029 |
 
 ## Prerequisites (one-time, by hand)
 

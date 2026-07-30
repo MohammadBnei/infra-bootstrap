@@ -77,8 +77,14 @@ variable "hermesagent_unprivileged" {
 # outside what Terraform can manage here, not an oversight.
 
 resource "proxmox_virtual_environment_vm" "pg01" {
-  name      = "pg01"
-  node_name = var.pve_node_name
+  name = "pg01"
+  # Migrated off .165 to server1 2026-07-30 (ADR-0029) via a real Proxmox
+  # live migration (`qmigrate` task, confirmed OK in the PVE task log) —
+  # hit a kernel panic on first boot on the new host, recovered cleanly
+  # with a reboot (confirmed healthy: `patronictl list` shows Replica/
+  # streaming, timeline matches the leader, lag 0). IP/MAC/disk unchanged,
+  # only the physical host moved.
+  node_name = "server1"
   vm_id     = 205
   started   = true
   machine   = "q35"
@@ -146,13 +152,18 @@ resource "proxmox_virtual_environment_vm" "pg01" {
     # disk[0].size is NOT ignored here on purpose: live is 52.5G (a
     # previous manual resize left it fractional), 53 is a safe round-UP
     # grow (never shrinks, no data risk) that also fixes the weird value.
-    # agent/smbios/operating_system/ipv6 ARE ignored: import's refresh
+    # smbios/operating_system/ipv6 ARE ignored: import's refresh
     # showed these don't match live (see docs/bootstrap-test-notes.md /
     # 2026-07-26 import run) and none of them are read back reliably
     # enough to guess a correct value for a live prod VM — leave live
     # reality untouched rather than push a guessed change.
+    #
+    # agent removed from this list 2026-07-30: the guest agent was
+    # actually installed + enabled live (ADR-0029 rollout), so
+    # `agent.enabled = true` now matches reality instead of being
+    # aspirational drift — confirmed zero-diff via `terraform plan
+    # -target=` after the change.
     ignore_changes = [
-      agent,
       smbios,
       operating_system,
       initialization[0].ip_config[0].ipv6,
@@ -215,9 +226,9 @@ resource "proxmox_virtual_environment_vm" "pg02" {
 
   lifecycle {
     prevent_destroy = true
-    # see pg01's lifecycle comment — same reasoning, same fields.
+    # see pg01's lifecycle comment — same reasoning, same fields. `agent`
+    # removed 2026-07-30, same as pg01 — installed + enabled live.
     ignore_changes = [
-      agent,
       smbios,
       operating_system,
       initialization[0].ip_config[0].ipv6,

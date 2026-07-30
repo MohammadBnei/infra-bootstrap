@@ -573,3 +573,430 @@ and `k8s.bnei.lan` in the API server's cert SANs (confirmed via
 `openssl s_client` + `curl -k https://192.168.1.180:6443/version`),
 Pi-hole static/authoritative for `bnei.lan` with correct in-cluster
 forwarding confirmed by repeated live lookups.
+
+## 2026-07-30 — Pigsty live-check: roles flipped, auto-failover already live (ADR-0029)
+
+Before touching anything, checked `pigsty.yml`'s claims against the
+actually-running Patroni cluster (per `pigsty/CLAUDE.md`'s own "trust but
+verify" line) — good thing, since the live state contradicted the docs on
+two separate points:
+
+- **`patronictl -c /etc/patroni/patroni.yml list` shows the roles
+  reversed** from every doc: `192.168.1.207` ("pg02", documented as
+  replica) is the current **Leader**; `192.168.1.205` ("pg01", documented
+  as primary) is the current **Replica**. No record of when/why this
+  flipped — most likely an unattended Patroni-driven failover, given the
+  next finding.
+- **Automatic failover is live, not a config-file relic.** No pause/
+  maintenance mode set; normal `ttl: 30`/`loop_wait: 5`/
+  `maximum_lag_on_failover` are all active in `/etc/patroni/patroni.yml`.
+  This directly contradicts `DECISION.md` §2's old "no automatic
+  failover" line, which §4 had already flagged as unresolved drift
+  pending exactly this kind of live check. Resolved by accepting reality
+  instead of fighting it — see ADR-0029.
+- Also confirmed via `terraform.tfvars`: both PG data VMs are still
+  physically on `.165` (the dual-boot host), and DCS is a single etcd
+  node (`.207`) — same total-outage-on-`.165`-shutdown risk the k8s
+  topology already solved via ADR-0017, still open for Postgres until the
+  server1 migration + witness VM (`pg-etcd-witness`, ex-laptop) actually
+  land.
+- Command used (via Infisical's `SSH_OLDPG_KEY`/`SSH_OLDPG_USER`, which
+  — surprisingly — also authenticates against the *new* `pg-proxmox`
+  nodes despite the name/docs implying it's scoped to the old, superseded
+  `.193` box; see `docs/secrets.md`'s note on that row):
+  ```bash
+  ssh -i <SSH_OLDPG_KEY file> vagrant@192.168.1.205 \
+    "sudo patronictl -c /etc/patroni/patroni.yml list"
+  ```
+- **General lesson, same shape as the CoreDNS one above**: a doc/config
+  file describing a system's intended state is not evidence of its
+  actual live state, especially anything with autonomous
+  reconciliation (Patroni, Kubernetes, Argo). Check live before designing
+  the next change on top of it.
+
+## 2026-07-30 — pg01 replica migration to server1: kernel panic, recovered
+
+Part of ADR-0029's rollout. `.205` (pg01, the replica) was migrated from
+`.165` to server1 via a real Proxmox live migration (confirmed via the
+PVE task log: `qmigrate OK` on `.165` immediately followed by `qmstart OK`
+on server1 — a true live migration, no forced shutdown in between).
+
+- **Post-migration, the guest was completely dark**: no ICMP, no SSH
+  (control ping to the still-healthy `.207` from the same machine worked
+  fine, ruling out a client-side network issue), and — more telling —
+  `patronictl list` on the surviving leader (`.207`) didn't just show it
+  as unreachable, it dropped the member from the list entirely. No QEMU
+  guest agent is configured on this VM (an old hand-imported production
+  disk, never had the agent installed, unlike this repo's cloud-init-built
+  VMs), so there was no way to inspect it short of the Proxmox console.
+  Root cause once the user checked the console: **kernel panic**.
+- Rather than trying to repair the panicked disk, the plan (had it
+  persisted) was destroy-and-recreate as a fresh clone + Pigsty
+  add-replica, matching how `pg-etcd-witness` was built — reusing an old
+  hand-built disk that just kernel-panicked isn't worth the trust. In the
+  end, a plain **reboot recovered it cleanly** — `patronictl list`
+  afterward showed `Replica`/`streaming`, timeline 23 (matching the
+  leader, so no split-brain), lag 0. SSH host key changed after the
+  reboot (expected — treated as a one-off `ssh-keygen -R`, not
+  investigated further since the box is back to fully healthy).
+- **Lesson**: a live migration transplants full running guest state onto
+  different physical hardware without ever giving the guest a fresh boot
+  to reset anything host-specific — for a VM that was never built through
+  this repo's own cloud-init path (i.e., no guest agent, unknown exact
+  provenance), that's a real risk, not just a Terraform-level "did the
+  disk move" question. A plain reboot is the first thing to try before
+  reaching for destroy-and-recreate — cheaper, and worked here.
+- End state: `.205` on server1, streaming, lag 0;
+  `terraform/imported.tf`'s `pg01.node_name` updated to `"server1"`,
+  confirmed zero-diff via `terraform plan -target=`. DCS quorum is still
+  single-node (`.207` only) — the witness VM and a 2nd etcd instance on
+  server1 are still pending, per ADR-0029.
+
+## 2026-07-30 — Guest agent install + a real, live demonstration of the single-node DCS gap
+
+Installed `qemu-guest-agent` on both `pg01`/`pg02` (user request). Two
+sub-findings, then one real incident:
+
+- **Blocked apt on both hosts**: `/etc/apt/sources.list.d/node.list`
+  (Pigsty-generated) declares the *same* `archive.ubuntu.com` URI as the
+  standard deb822 `ubuntu.sources`, but marks it `[trusted=yes]` — apt
+  refuses with "Conflicting values set for option Trusted" and won't read
+  *any* source until resolved. Fixed by renaming it to `.disabled`
+  (reversible) rather than deleting; it's a pure duplicate of an already-
+  trusted mirror, so disabling it costs nothing.
+- **A guest-triggered `reboot` does not apply a pending Proxmox hardware
+  config change** (here: the new `agent: 1` flag, needed for the
+  virtio-serial channel qemu-guest-agent uses). Only a full API-level
+  stop + start picks it up — confirmed by testing both: `sudo reboot`
+  left `qemu-guest-agent.service` unable to start ("dependency job
+  failed", no device present); a cold stop/start immediately after fixed
+  it (`agent/ping` returns real data).
+- **The incident**: `pg01` (replica) was cold-stopped/started first —
+  safe, already-proven-recoverable, no issue. `pg02` (the live Leader)
+  was then stopped the same way. Since etcd is *still single-node*,
+  co-located on `.207` (not yet resolved — ADR-0029's witness VM /
+  2nd etcd member aren't live yet), stopping `.207` took the sole DCS
+  node down with the primary. Patroni on `.205` logged continuous
+  "No route to host" against `192.168.1.207:2379` for the entire outage
+  window — with no DCS reachable at all, Patroni **cannot** promote a
+  replica, no matter how healthy it is. The Pigsty VIP (`.232`) stayed
+  down the whole time; nothing failed over. This is not a bug, it's
+  exactly the single-point-of-failure ADR-0029 already named — now
+  reproduced live instead of theoretical.
+- **Compounding factor**: `infisical.bnei.dev` started 503ing within
+  seconds of `.207` going down and stayed down for the whole outage
+  window — strongly suggesting Infisical's own backend runs on this same
+  `pg-proxmox` cluster. That's worth confirming properly outside this
+  incident: if true, Infisical (the credential source for basically every
+  tool used to operate this repo, including the PVE API token needed to
+  *restart* `.207`) has a hard dependency on the exact database whose HA
+  this session exists to build. During the outage, no PVE API/SSH
+  credentials could be fetched at all — a human had to restart `.207`
+  directly in the Proxmox console.
+- **Resolved**: `.207` restarted, rejoined as Leader (timeline bumped
+  23→24, no divergence — `.205` matched at lag 0 immediately after). Both
+  VMs now have working guest agents (`agent/ping` returns data on both).
+  `terraform/imported.tf`'s `agent` field removed from both `pg01`/`pg02`'s
+  `ignore_changes` (now real, matches config, confirmed zero-diff).
+- **Lesson**: don't restart the *only* DCS node for *any* reason —
+  including maintenance that looks unrelated to Postgres, like enabling a
+  guest agent — until the 3-node etcd quorum in ADR-0029 is actually live.
+  Until then, the sole etcd node is a single point of failure for the
+  entire cluster's ability to do anything, not just for the primary's own
+  uptime.
+
+## 2026-07-30 — INCIDENT: CA rotation + first etcd quorum expansion attempt
+
+Executing `docs/runbook-pg-ca-rotation-etcd-quorum.md`. Phases 3.0–3.3
+(backup, new CA generated + backed up to Infisical, certs re-issued on
+both nodes, `.207`'s etcd restarted onto the new cert) went exactly as
+planned and verified clean. Phase 3.4 (`bin/etcd-add 192.168.1.205`) is
+where this went wrong — a chain of three separate mistakes, each one
+compounding the last, ending in a real quorum-loss incident on the
+**live primary's** DCS. Postgres itself was never down at any point.
+
+**Mistake 1 — declared the full target state in `pigsty.yml` too early.**
+`.197` (pg-etcd-witness, not yet provisioned) was already listed in the
+`etcd:` inventory group from earlier documentation work. `etcd.yml`
+bakes *every currently-declared* host into each member's
+`initial-cluster` config value at generation time — it doesn't know
+"planned" from "live." `.205`'s first bootstrap attempt failed
+immediately ("member count is unequal", then a timeout dialing
+`.197:2380`, which doesn't exist). Fix: only declare a host in this
+group immediately before actually joining it, never ahead of time — now
+called out explicitly in `pigsty.yml`'s own comment.
+
+**Mistake 2 — fragmented the retry into separate `-t` tag runs.**
+After fixing the inventory, re-running just `-t etcd_config` to
+regenerate `.205`'s config (instead of re-running the *same* combined
+command as `bin/etcd-add`) silently dropped `-e etcd_init=existing` —
+that flag was only ever passed by the wrapper script, not persisted
+anywhere. `.205`'s config regenerated with the *default*
+`initial-cluster-state: "new"`, so it began bootstrapping its own
+standalone cluster instead of joining `.207`'s. Symptom: `cluster ID
+mismatch` warnings, `.205` computing its own local cluster ID from a
+2-member list, `.207` computing (and keeping, permanently) its real ID
+from its original 1-member genesis — these can never match by
+definition. **Lesson: re-run the exact same command, don't split a
+multi-step Pigsty operation into hand-picked tags once flags are
+involved — the wrapper scripts exist for a reason.**
+
+**Mistake 3 (the actual incident) — stopped `.205`'s etcd to relieve
+load on `.207`, not realizing `.207`'s own `etcdctl member add
+etcd-2 ...` (the earlier successful part of the same failed attempt)
+had already durably committed a 2-voter configuration to `.207`'s own
+raft log** — trivial to commit at the time (a 1-node cluster has quorum
+of 1). With `.205` down, `.207` now believed it needed 2-of-2 votes and
+had only itself: real quorum loss on the *live primary's* DCS.
+`patronictl`/`etcdctl` calls against `.207` started timing out
+(`ReadIndex` requires a quorum round-trip). The VIP stayed up only
+because Patroni's existing leader lock hadn't expired yet — this was a
+live risk window, not yet a realized outage, but close.
+
+**Wrong recovery attempt**: `etcd --force-new-cluster` on `.207`,
+assumed (from memory, not verified) that it discards prior membership
+and reforms as a true single-node cluster. It doesn't — it replays the
+node's own *committed* raft history, which still included the `.205`
+member-add. Same endless pre-vote loop, now against a manually-run
+process instead of systemd. Also hit a real footgun retrying the
+cleanup: `pkill -f 'force-new-cluster'` matched its own invoking shell's
+command line (which contained that literal string) and killed the SSH
+session executing it, not just the target process — use a PID-specific
+kill, not a `pkill -f` pattern that could match your own command.
+
+**Correct recovery**: `etcdutl snapshot restore` — the actually-documented
+tool for "one healthy member, rebuild a clean single-member data
+directory from its real data, discarding confused membership history."
+Procedure used:
+1. Backed up `.207`'s full `/data/etcd` (tarball, kept both remotely and
+   downloaded locally) before touching anything.
+2. Copied the live backend db file out (`/data/etcd/member/snap/db`),
+   ran `etcdutl snapshot restore <db> --data-dir /data/etcd-restored
+   --name etcd-1 --initial-cluster 'etcd-1=https://192.168.1.207:2380'
+   --initial-cluster-token etcd --initial-advertise-peer-urls
+   'https://192.168.1.207:2380' --skip-hash-check` — restored into a
+   **separate** directory, not overwriting the live one, so the original
+   (with its confused-but-real history) stayed available as a fallback
+   the whole time.
+3. Verified the restore log explicitly: `"Trimming membership
+   information from the backend"` then `"added member ... local-member-id:
+   0, added-peer-id: e8387d5fe083034c"` — exactly one member, same
+   cluster ID (`f7cc4f0446bbe8b5`) and same member ID `.207` already had,
+   meaning Patroni's existing etcd3 config needed zero changes.
+4. Only after that verified cleanly: `mv /data/etcd
+   /data/etcd-broken-2026-07-30` (kept, not deleted) → `mv
+   /data/etcd-restored /data/etcd` → `chown -R etcd:etcd` → normal
+   `systemctl start etcd` (no special flags — the config file was
+   already correct single-member the whole time, it was the *data*
+   that needed fixing, not the config).
+5. Verified: `etcdctl member list` (1 member), `etcdctl endpoint health`
+   (real committed write succeeded), `patronictl list` (both members
+   healthy, **same leader, no re-election, no timeline bump** — the
+   actual DCS key data survived the restore intact, only membership
+   metadata was reset), VIP responsive throughout the verification.
+
+**General lessons**:
+- A `member add` that "succeeds" is not reversible by restarting the new
+  member differently — it's already durably committed on the *existing*
+  member's side the moment it returns success. If the new member never
+  actually comes up healthy, that's a real quorum-math problem on the
+  existing cluster, not a cosmetic loose end.
+- Don't recall disaster-recovery command semantics from memory under
+  time pressure — verify with `--help`/docs against the actual installed
+  version before running anything on a live primary's DCS. Got
+  `--force-new-cluster`'s behavior wrong once already this incident.
+- Postgres itself tolerated a fully-down DCS for several minutes without
+  any data-plane impact (direct `psql` queries kept working the entire
+  time) — the real risk was Patroni's leader-lock TTL eventually expiring
+  mid-incident, not an instant outage. That gave enough headroom to fix
+  this properly instead of panicking into a worse action.
+
+### Second occurrence — same failure, plus a genuinely reassuring discovery
+
+Retried `.205`'s join as a single atomic `bin/etcd-add` call (not
+fragmented tags this time — `initial-cluster-state` confirmed correctly
+`"existing"` beforehand). **Failed the exact same way regardless**:
+`.205` computed its own local cluster ID from its 2-member
+`initial-cluster` config and rejected all of `.207`'s raft messages as a
+"cluster ID mismatch," while `.207`'s side had — again — durably
+committed the `member add`. Same quorum-loss consequence on `.207` as
+the first occurrence, recovered with the identical `etcdutl snapshot
+restore` procedure (backup → restore into a new dir → verify → swap in
+→ normal `systemctl start`), second time faster and with more confidence
+since the procedure was now proven.
+
+**Conclusion: this is not a one-off mistake, it's a real gap in
+understanding how to statically join a new member to an etcd cluster
+whose real cluster ID was fixed at a *single-member* genesis long ago.**
+`initial-cluster-state: existing` alone does not make a new member defer
+to the peer's real ID — in this etcd version, with this static
+(non-discovery-URL) join method, the new member still computes its own
+candidate ID locally at first boot from its own `initial-cluster` value,
+and there's no way for a 2-entry list to hash to the same ID as the
+original 1-entry genesis. Needs actual etcd documentation research
+before a 3rd attempt, not another guess — this was called out and
+paused rather than repeated a third time.
+
+**Reassuring discovery**: Patroni has a built-in **DCS failsafe mode**
+for exactly this situation. When it can't reach etcd at all but can
+directly reach the other member's Patroni REST API (`.205`'s
+`:8008/failsafe` from `.207`'s side), it logs `"continue to run as a
+leader because failsafe mode is enabled and all members are
+accessible"` and deliberately does **not** self-demote. This is why
+Postgres/the VIP were never actually at risk through any of this,
+confirmed directly: `pg_is_in_recovery()` returned `false` on `.207`
+throughout. The one loose end after each etcd recovery: Patroni's own
+DCS client got stuck (`EtcdConnectionFailed('No more machines in the
+cluster')`) even after etcd itself was confirmed healthy again — a
+plain `systemctl restart patroni` (not postgres) on each node cleanly
+reset it. End state: both `pg-proxmox-1`/`-2` healthy, streaming, lag 0,
+same timeline (25).
+
+**Cleanup left on `.207`** (not yet removed, kept as a safety net):
+`/data/etcd-broken-2026-07-30`, `/data/etcd-broken-2026-07-30-b`,
+`/tmp/etcd-datadir-backup*.tgz`, `/tmp/etcd-restore-work*`. Safe to
+delete once the cluster's been stable for a while and nobody needs to
+diff against the pre-incident state.
+
+**Decision: stopped here for the night.** Cluster is stable (2 real
+members, Postgres/VIP fine, DCS healthy). The `.205`/witness join work
+resumes next session, after actually reading etcd's join/discovery
+documentation properly instead of continuing to trial-and-error the
+same failing mechanism on production a third time.
+
+## 2026-07-30 — `.205` etcd join: root cause found, 3rd attempt succeeds
+
+Resumed the paused join. Rather than guessing a 3rd time, checked live
+evidence first (all read-only, no risk): `.207`'s `etcdctl member list`
+confirmed single-member (`etcd-1`, cluster ID `f7cc4f0446bbe8b5`,
+matching ADR-0029's documented "still open" state) — but `.205`'s
+`/data/etcd/member/{wal,snap}` was **not empty**, and its last journal
+entries showed it booting with `local-member-cluster-id:
+c35a5b635c65e63f`, a different, self-generated ID, rejecting every
+packet from `.207` as a cluster ID mismatch.
+
+**Root cause, confirmed rather than inferred**: the earlier botched
+bootstrap (the one that regenerated with `initial-cluster-state: new`,
+described above) had already written a real WAL to `/data/etcd` with
+its own self-genesis cluster ID baked in. etcd only performs actual
+join/discovery logic against `--initial-cluster`/
+`--initial-cluster-state` when the data directory is *empty* — once a
+WAL exists, every subsequent restart just resumes that persisted
+identity, completely ignoring what the flags/config say. Both prior
+retries used correct flags (`initial-cluster-state: existing`) but
+neither had wiped the stale data directory first, so both were doomed
+regardless — this is a more precise mechanism than ADR-0029's original
+"computes its own candidate cluster ID" wording, now corrected there.
+
+**Fix**: `systemctl stop etcd` (already stopped) + `rm -rf
+/data/etcd/member` on `.205`, confirmed the directory came back empty,
+then re-ran `ANSIBLE_PRIVATE_KEY_FILE=<key> bin/etcd-add
+192.168.1.205` unchanged. Joined clean on the first try — no cluster ID
+mismatch, no quorum-loss incident, `patronictl list` identical
+before/after (same leader, same timeline 25, lag 0 throughout). Ran the
+rest of the runbook's 3.4 tail (`etcd_config,etcd_launch` on `.207`,
+`pg_conf,patroni_reload`, `pg_vip`) with no issues.
+
+**Two more real gaps found immediately after**, both via the user
+noticing Grafana's etcd dashboards showed both hosts `down` despite
+`etcdctl endpoint health`/`patronictl list` confirming otherwise:
+
+1. `/etc/pki/infra.crt` — the infra/monitoring node's own mTLS client
+   cert for scraping (`roles/infra/tasks/cert.yml`, tag `infra_cert`) —
+   was never reissued from the new CA during the CA-rotation runbook
+   (which only covered `etcd_cert`/`pg_cert`). Fixed with `./infra.yml
+   -l 192.168.1.205 -t infra_cert`. Didn't fully fix it alone — see next.
+2. `/etc/pki/ca.crt` — the **node-wide** CA trust bundle
+   (`roles/node/tasks/cert.yml`, tag `node_ca`), a separate file from
+   `/etc/etcd/ca.crt` — was still the pre-rotation CA on both `.205`/
+   `.207`. VictoriaMetrics' scrape client didn't trust etcd's
+   now-new-CA-signed server certificate and rejected the TLS handshake
+   client-side; etcd's own log showed this as `rejected connection on
+   client endpoint ... remote error: tls: bad certificate` (misleading
+   at first glance — reads like etcd rejecting *something*, but the
+   "remote error" is the client's alert, logged from etcd's side).
+   Fixed with `./node.yml -l 192.168.1.205,192.168.1.207 -t node_ca`,
+   then `systemctl restart vmetrics vmalert` on `.205` (cert files are
+   read once at process start, not hot-reloaded). Confirmed via
+   VictoriaMetrics' own `/api/v1/targets` API: both etcd targets `up`
+   immediately after, journal quiet.
+
+**Lesson, same shape as the Round 1/2 logging bugs**: a live incident's
+own root cause (WAL persistence surviving flag changes) is diagnosable
+by directly reading the affected host's actual on-disk state and logs
+rather than re-guessing at the Ansible/config layer — the fix here was
+one `rm -rf` once the real mechanism was understood, not a config
+change at all.
+
+End state: real 2-member etcd quorum (`.205` + `.207`), Postgres/VIP
+unaffected throughout, monitoring dashboards accurate again. Still
+open: `pg-etcd-witness` (`.197`) provisioning + join — runbook Phase
+3.5, next session's priority. 2-member quorum is `floor(2/2)+1` = 2,
+still no better than single-node for actual fault tolerance.
+
+## 2026-07-30 — `pg-etcd-witness` provisioned + joined: real 3-node etcd quorum live
+
+Same session, continuing straight to runbook Phase 3.5. Generated a
+dedicated keypair (`~/.ssh/id_pg_etcd_witness`), backed up to Infisical
+(`SSH_PG_ETCD_WITNESS_HOST/KEY/PORT/USER`, `docs/secrets.md`).
+`terraform apply -target=proxmox_virtual_environment_vm.pg_etcd_witness`
+succeeded clean (`vm_id=303`, cross-host clone `.165`→`ex-laptop`,
+7m14s, plan had shown 1 to add / 0 to change — matched exactly). VM
+reachable immediately (`core@192.168.1.197`, cloud-init keys applied).
+
+**Two real bugs hit getting `node.yml` to complete, neither foreseeable
+from the design**:
+
+1. `node_monitor`'s ping/vector-registration tasks delegate to the
+   `infra` group host (`.205`) — which needs `.205`'s own key
+   (`SSH_OLDPG_KEY`, user `vagrant`), not `.197`'s
+   (`SSH_PG_ETCD_WITNESS_KEY`, user `core`). A single
+   `ANSIBLE_PRIVATE_KEY_FILE` env var can't serve both simultaneously.
+   Fixed by running a throwaway `ssh-agent -a <fixed-socket-path>` with
+   both keys loaded via `ssh-add`, then invoking ansible with
+   `SSH_AUTH_SOCK=<that-socket>` and no `ANSIBLE_PRIVATE_KEY_FILE`
+   override — ssh/ansible tries each identity per host automatically.
+   Needed a *fixed* socket path (`ssh-agent -a /tmp/....sock`), not
+   `eval "$(ssh-agent -s)"`, since shell environment doesn't persist
+   between separate tool invocations in this session.
+2. `node.yml` failed outright on `node_monitor`'s vector setup:
+   `roles/node_monitor/templates/vector.env` doesn't exist in this
+   checkout. Root cause: `pigsty/.gitignore`'s blanket `*.env` rule
+   swallows this file too, even though it's a static, non-secret asset
+   Pigsty ships with upstream (a literal one-liner,
+   `VECTOR_OPTS="--config-dir /etc/vector"`, no Jinja variables) — it's
+   just never been tracked in this repo's checkout. Never hit before
+   because `.205`/`.207` already had it deployed from whenever they
+   were first bootstrapped (outside this checkout's history); `.197` is
+   the first node ever bootstrapped *through* this exact checkout.
+   Fixed by recreating the file locally with the same content already
+   live on `.207` (confirmed via `cat /etc/default/vector` there first,
+   not guessed) — intentionally left gitignored, same precedent as
+   `files/pki/ca/ca.key` being present-locally-but-untracked by design.
+
+With both fixed, `node.yml`, `etcd.yml -t etcd_cert`, and
+`bin/etcd-add 192.168.1.197` all completed clean on first retry — no
+quorum-loss incident this time (unlike `.205`, `.197` is a brand-new
+node with an empty data directory from the start, so none of the
+earlier stale-WAL failure mode applies). `etcdctl member list` showed
+3 started members immediately; `patronictl list` never changed
+(same leader, same timeline 25, lag 0) through the whole sequence.
+Ran the remaining runbook tail
+(`etcd_config,etcd_launch -f 1` on `.205`/`.207`,
+`pg_conf,patroni_reload`, `pg_vip`) with zero issues — `-f 1` kept the
+two restarts sequential, never both down at once.
+
+Final verification: `etcdctl endpoint health --cluster` true on all 3
+members, VictoriaMetrics `/api/v1/targets` shows all 3 `etcd`+`node`
+jobs `up`, CA fingerprint on `.197` matches `.207` exactly (confirms
+the fresh node picked up the current post-rotation CA automatically —
+the `infra_cert`/`node_ca` gap from the earlier entry only affects
+nodes that predated the CA rotation, not new ones), VIP (`.232`)
+responsive.
+
+**End state: real 3-node etcd DCS quorum live** (`etcd-1`/`.207`,
+`etcd-2`/`.205`, `etcd-3`/`.197`), `floor(3/2)+1` = 2 — tolerates any
+single member down, the actual goal of ADR-0029. **Not yet done**: the
+real proof — stop `.207` (current Leader) and confirm `.205` promotes
+automatically with the VIP following, while DCS quorum survives on the
+remaining 2 members. That's the next session's first priority.
