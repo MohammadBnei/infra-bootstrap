@@ -31,10 +31,14 @@ see `terraform.tfvars.example`'s worked example and the live
 `k8s-worker-02` entry in `terraform.tfvars` (server1) for the pattern.
 Since the template only exists on `.165`, cross-host VM creation
 clone-then-migrates unless `docs/adr/0026`'s shared-templates NFS pool is
-set up first. `.161` (ex-laptop) has no VM provisioned yet, but nothing
-blocks adding one — it's PVE-joined and its sleep-risk mitigation is
-already applied (ADR-0013), just still treated as best-effort/
-non-critical-path capacity.
+set up first (confirmed live/mounted on all 3 hosts as of 2026-07-30).
+Both `server1` and `ex-laptop` now carry real VMs — `k8s-cp-02`
+(server1, `.204`) and `k8s-cp-03` (ex-laptop, `.206`), the 2nd/3rd
+control-plane+etcd members (ADR-0017), on top of the earlier
+`k8s-worker-02` (server1) and `nfs-storage` (server1). `ex-laptop`'s
+sleep-risk mitigation is applied (ADR-0013) and it's now proven reliable
+enough in practice to host a real HA voter, not just best-effort
+capacity.
 
 ## Invocation pattern (from `terraform/README.md`)
 
@@ -91,6 +95,16 @@ to run it now in this session.
 
 ## Known gotchas worth surfacing proactively
 
+- **`local_file.kubespray_inventory` doesn't regenerate from a `-target`ed
+  apply.** It's a sibling resource to the VM (both depend on
+  `var.k8s_nodes`, neither depends on the other) — a `-target`-scoped
+  apply for a new `k8s_nodes` entry (recommended, to avoid touching
+  already-live nodes) creates the VM but leaves `inventory/ukubi/
+  hosts.yaml` stale, silently. Before handing off a `cluster.yml` command
+  for a freshly-added node, check
+  `terraform plan -target=local_file.kubespray_inventory` first — hit
+  this twice already (2026-07-28, 2026-07-30), it's a repeatable footgun
+  of the `-target`-for-safety pattern, not a one-off.
 - `k8s-worker-gpu`'s `hostpci` block uses a PCI Resource `mapping`, not a
   raw PCI `id` — `id` requires root-password auth and breaks under the
   token-based provider config here. If asked about GPU passthrough errors,
