@@ -1,0 +1,31 @@
+---
+# Standalone K8s-node prereqs that kubespray itself doesn't cover.
+#
+# WHY THIS PLAYBOOK EXISTS
+# kubespray's own preinstall role handles everything kubelet/containerd/CNI
+# need (kernel modules, cgroup config, conntrack, socat, etc.) — checked
+# kubespray's roles directly, confirmed no generic "extra packages" hook
+# exists for anything beyond that fixed list. Third-party CSI driver
+# dependencies fall outside its scope by design.
+#
+# First (and so far only) real need: Longhorn's ReadWriteMany volumes are
+# NFS under the hood — the share-manager pod re-exports the volume over
+# NFS, and every other pod mounting that RWX PVC gets there via a genuine
+# host-level `mount -t nfs` call from Longhorn's CSI node-plugin. Without
+# nfs-common (`/sbin/mount.nfs`), that mount fails with "bad option; you
+# might need a /sbin/mount.<type> helper program" — hit this for real
+# 2026-07-30 provisioning agent-fleet's shared PVC, the cluster's first-ever
+# RWX volume. RWO volumes (iSCSI-backed) never needed this, which is why it
+# went unnoticed until now.
+#
+# Safe to re-run — apt install is naturally idempotent.
+
+- name: Install K8s node prerequisites not covered by kubespray
+  hosts: k8s_cluster
+  become: true
+  tasks:
+    - name: Install nfs-common (required for Longhorn ReadWriteMany volumes)
+      ansible.builtin.apt:
+        name: nfs-common
+        state: present
+        update_cache: true

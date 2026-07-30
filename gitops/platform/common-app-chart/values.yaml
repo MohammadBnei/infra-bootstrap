@@ -117,6 +117,11 @@ readinessProbe:
   failureThreshold: 3
 
 podAnnotations: {}
+# Extra labels on the pod template only (not the Deployment object) — this is
+# what log-shipping label discovery (Alloy/Promtail k8s_sd) actually reads,
+# so use this rather than `annotations` when the goal is grouping/querying
+# (e.g. Loki label filters), not just metadata.
+podLabels: {}
 nodeSelector: {}
 tolerations: []
 affinity: {}
