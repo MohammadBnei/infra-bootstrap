@@ -27,6 +27,20 @@ spec:
         namespace: pgweb
         hostname: pgweb.bnei.dev
 
+      # agent-fleet: Discord bot + one persistent worker pod per target repo
+      # (dream-analyst, vos-monolith). Same namespace on all three so the
+      # shared fleet-wide PVC (owned by agent-fleet-bot, see its values.yaml)
+      # can be mounted by every app via extraVolumes. No hostname/ingress —
+      # none of the three serve HTTP. See agent-fleet/README.md.
+      - name: agent-fleet-bot
+        namespace: agent-fleet
+
+      - name: dream-analyst-worker
+        namespace: agent-fleet
+
+      - name: vos-monolith-worker
+        namespace: agent-fleet
+
   template:
     metadata:
       name: '{{.name}}'
