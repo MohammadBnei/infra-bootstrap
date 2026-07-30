@@ -106,19 +106,26 @@ spec:
         notifications:
           enabled: false
 
-        # Use the shared Pigsty Redis (pg02, redis-main cluster) instead of
-        # the chart's bundled single-node Redis — one less thing to run/back
-        # up. Password comes from the argocd-redis Secret (argocd-redis-secret.yaml,
+        # Use the shared Pigsty Redis (redis-main cluster) instead of the
+        # chart's bundled single-node Redis — one less thing to run/back up.
+        # Password comes from the argocd-redis Secret (argocd-redis-secret.yaml,
         # InfisicalSecret → REDIS_MAIN_PASSWORD; no username, just requirepass).
         # ArgoCD always uses Redis db 0 (no db-index param) and namespaces its
         # own keys, so sharing the instance with other consumers (e.g.
         # Infisical) is safe.
+        #
+        # host is the DNS name (redis.bnei.lan, via Pi-hole — CoreDNS
+        # forwards bnei.lan there, ADR/bootstrap-test-notes 2026-07-30),
+        # not a hardcoded IP — deliberately, so the next time this instance
+        # relocates (as it just did, off .207/.165, a single point of
+        # failure on the gaming-reboot host, onto pg01's VM on server1),
+        # only the Pi-hole DNS record needs updating, not this file.
         redis:
           enabled: false
         redisSecretInit:
           enabled: false
         externalRedis:
-          host: "192.168.1.207"
+          host: "redis.bnei.lan"
           port: 6379
           existingSecret: argocd-redis
   destination:
