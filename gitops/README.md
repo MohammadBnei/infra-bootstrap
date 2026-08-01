@@ -209,8 +209,9 @@ dashboards:
   provisioning, `editable: false`, lives in this repo.
 - **Per-app** dashboard (belongs to one app): use the `dashboards:` block
   above in that app's own `values.yaml` — dynamic, ConfigMap + sidecar,
-  lives in the app's own repo, lands in the shared "GitOps Dashboards"
-  folder.
+  lives in the app's own repo, lands in Grafana's default ("General")
+  folder (no dedicated folder yet — see the `sidecar.dashboards` comment
+  in `grafana/values.yaml` for why one isn't set).
 
 Annotations: `annotations` (Deployment), `podAnnotations` (pod template), `service.annotations` (Service), `ingress.annotations` (IngressRoute) — plain key/value maps, rendered as-is.
 

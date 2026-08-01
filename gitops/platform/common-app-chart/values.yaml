@@ -194,8 +194,9 @@ logAlerts:
 # sidecar (sidecar.dashboards, see
 # gitops/platform/values/grafana/values.yaml) — apps ship their own
 # dashboard JSON from their own repo without touching platform files. All
-# synced dashboards land in one shared "GitOps Dashboards" folder — no
-# per-app folder structure until someone actually needs it.
+# synced dashboards land in Grafana's default ("General") folder — no
+# per-app or dedicated folder until someone sets one up with a way to
+# guarantee it exists first (see the sidecar.dashboards comment).
 dashboards:
   enabled: false
   items: {}

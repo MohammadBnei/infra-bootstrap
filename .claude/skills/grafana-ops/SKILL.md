@@ -46,9 +46,12 @@ dashboards:
 ```
 Renders a ConfigMap labeled `grafana_dashboard: "1"`, picked up dynamically
 by Grafana's dashboards sidecar (`sidecar.dashboards` in
-`gitops/platform/values/grafana/values.yaml`). Lands in the shared
-"GitOps Dashboards" folder — no per-app folder structure exists (add one
-only if it's actually needed).
+`gitops/platform/values/grafana/values.yaml`). Lands in Grafana's default
+("General") folder — deliberately no dedicated folder (a `defaultFolderName`
+broke Grafana's own provisioning walk on 2026-08-01, logging "failed to
+walk provisioned dashboards: stat ...: no such file or directory", because
+that subdirectory only gets created on first matching ConfigMap, not
+upfront; see the comment in that values file before reintroducing one).
 
 ## 3. Platform alert
 
