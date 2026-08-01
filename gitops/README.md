@@ -154,6 +154,7 @@ A minimal Helm chart for standard web apps. Renders:
 - `hooks:` — guard-railed ArgoCD PreSync/PostSync `Job`s (schema migrations, etc. — see ADR-0023)
 - `oneOffJobs:` — suspended `CronJob`s for one-time scripts, triggered via `kubectl create job --from=cronjob/...` and a ledger-driven reusable CI workflow (see ADR-0022/0023)
 - `ConfigMap` (log alert rules) — optional, gated by `logAlerts.enabled`, labeled `grafana_alert: "1"` so Grafana's alerts sidecar picks it up dynamically (see `gitops/platform/values/grafana/values.yaml`'s `sidecar.alerts`) — routes through the platform's shared Discord contact point, the app only declares the LogQL condition/threshold
+- `ConfigMap` (dashboards) — optional, gated by `dashboards.enabled`, labeled `grafana_dashboard: "1"` so Grafana's dashboards sidecar picks it up dynamically (see `gitops/platform/values/grafana/values.yaml`'s `sidecar.dashboards`) — the app ships its own dashboard JSON from its own repo, no platform file edits needed
 
 Key values a per-app `values.yaml` must set:
 
@@ -191,6 +192,25 @@ logAlerts:
       for: 5m                 # optional, defaults to 5m
       severity: warning       # optional, defaults to warning
 ```
+
+Dashboard example (app ships its own dashboard JSON):
+```yaml
+dashboards:
+  enabled: true
+  items:
+    overview: |
+      { "title": "My App Overview", "panels": [...], ... }
+```
+
+**Dashboards note** — two mechanisms exist, pick based on ownership:
+- **Platform-wide** dashboard (applies across apps, e.g. cluster health): add
+  a JSON blob under `dashboards.gitops.<key>` in
+  `gitops/platform/values/grafana/values.yaml` directly — static file
+  provisioning, `editable: false`, lives in this repo.
+- **Per-app** dashboard (belongs to one app): use the `dashboards:` block
+  above in that app's own `values.yaml` — dynamic, ConfigMap + sidecar,
+  lives in the app's own repo, lands in the shared "GitOps Dashboards"
+  folder.
 
 Annotations: `annotations` (Deployment), `podAnnotations` (pod template), `service.annotations` (Service), `ingress.annotations` (IngressRoute) — plain key/value maps, rendered as-is.
 

@@ -103,18 +103,19 @@ extraSecretMounts:
     mountPath: /etc/secrets/discord
     readOnly: true
 
-# Dynamic per-app alert rules: watches every namespace (user apps each
-# live in their own, not just `monitoring`) for ConfigMaps labeled
-# grafana_alert: "1" and loads them as extra alert-provisioning files
+# Dynamic per-app alert rules and dashboards: watches every namespace
+# (user apps each live in their own, not just `monitoring`) for ConfigMaps
+# labeled grafana_alert: "1" / grafana_dashboard: "1" and loads them
 # alongside the static ones below. Rendered by common-app-chart's
-# logAlerts values block (gitops/platform/common-app-chart/values.yaml +
-# templates/grafana-alertrules.yaml) — an app declares its own rules from
-# its own repo without touching this file. Read-only ConfigMap list/watch
-# across all namespaces (not Secrets) — standard for this chart's sidecar
-# family (same mechanism dashboards/datasources already could use), low
-# blast radius, but confirm the resulting ClusterRole after first sync
-# (`kubectl get clusterrole -l app.kubernetes.io/instance=platform-grafana`)
-# rather than assuming the chart wires it up exactly as expected.
+# logAlerts/dashboards values blocks (gitops/platform/common-app-chart/
+# values.yaml + templates/grafana-alertrules.yaml,
+# templates/grafana-dashboards.yaml) — an app declares its own rules/
+# dashboards from its own repo without touching this file. Read-only
+# ConfigMap list/watch across all namespaces (not Secrets) — standard for
+# this chart's sidecar family, low blast radius, but confirm the
+# resulting ClusterRole after first sync (`kubectl get clusterrole -l
+# app.kubernetes.io/instance=platform-grafana`) rather than assuming the
+# chart wires it up exactly as expected.
 sidecar:
   alerts:
     enabled: true
@@ -122,6 +123,15 @@ sidecar:
     labelValue: "1"
     searchNamespace: ALL
     resource: configmap
+  dashboards:
+    enabled: true
+    label: grafana_dashboard
+    labelValue: "1"
+    searchNamespace: ALL
+    resource: configmap
+    # All per-app dashboards land in one shared folder — no per-app
+    # folder structure until someone actually needs it.
+    defaultFolderName: "GitOps Dashboards"
 
 # Alerting-as-code: contact point, notification policy, and one platform-
 # wide starter rule stay static (same file-provisioning pattern as
@@ -237,10 +247,13 @@ alerting:
                         params: [0.5]
 
 # Dashboards as code: the chart's own file-provisioning (no sidecar
-# container, no extra RBAC needed) — add a JSON dashboard under the
-# `gitops` key below and it's live on the next values sync, no manual
-# import. `editable: false` keeps them locked from UI edits so this
-# stays the source of truth (see gitops/README.md's dashboards note).
+# container, no extra RBAC needed) — for a platform-wide dashboard, add a
+# JSON blob under the `gitops` key below and it's live on the next values
+# sync, no manual import. `editable: false` keeps them locked from UI
+# edits so this stays the source of truth. For a per-app dashboard, use
+# common-app-chart's `dashboards:` values block instead (renders a
+# ConfigMap picked up by `sidecar.dashboards` above) — see
+# gitops/README.md's dashboards note for which mechanism to use.
 dashboardProviders:
   dashboardproviders.yaml:
     apiVersion: 1

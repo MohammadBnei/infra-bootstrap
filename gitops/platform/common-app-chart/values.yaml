@@ -189,6 +189,20 @@ logAlerts:
   #     for: 5m                          # optional, defaults to 5m
   #     severity: warning                # optional, defaults to warning
 
+# Per-app Grafana dashboards. Renders a ConfigMap labeled
+# grafana_dashboard: "1", picked up dynamically by Grafana's dashboards
+# sidecar (sidecar.dashboards, see
+# gitops/platform/values/grafana/values.yaml) — apps ship their own
+# dashboard JSON from their own repo without touching platform files. All
+# synced dashboards land in one shared "GitOps Dashboards" folder — no
+# per-app folder structure until someone actually needs it.
+dashboards:
+  enabled: false
+  items: {}
+  # items:
+  #   overview: |
+  #     { "title": "My App Overview", "panels": [...], ... }
+
 # Irregular / one-time scripts. Rendered as suspended CronJobs (suspend:
 # true — a schedule is syntactically required but never fires on its own);
 # triggered on demand via `kubectl create job --from=cronjob/<release>-<name>
