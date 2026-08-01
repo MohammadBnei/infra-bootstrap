@@ -1,0 +1,49 @@
+# e2e-runner's image tag is a floating :latest for v1, same accepted
+# trade-off as actions-runner's myoung34/github-runner:latest — its
+# Deployment lives here in infra-bootstrap, outside agent-fleet's own CI
+# auto-bump (see docs/adr/0012 in agent-fleet).
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: e2e-provisioner
+  namespace: agent-fleet
+  labels:
+    app.kubernetes.io/part-of: agent-fleet
+spec:
+  replicas: 1
+  revisionHistoryLimit: 3
+  selector:
+    matchLabels:
+      app: e2e-provisioner
+  template:
+    metadata:
+      labels:
+        app: e2e-provisioner
+        app.kubernetes.io/part-of: agent-fleet
+    spec:
+      serviceAccountName: e2e-provisioner
+      containers:
+      - name: e2e-provisioner
+        image: mohammaddocker/agent-fleet-e2e-provisioner:latest
+        ports:
+        - containerPort: 8080
+          name: http
+        env:
+        - name: NAMESPACE
+          value: agent-fleet
+        - name: E2E_RUNNER_IMAGE
+          value: mohammaddocker/agent-fleet-e2e-runner:latest
+        - name: E2E_HOST
+          value: e2e.bnei.dev
+        - name: PORT
+          value: "8080"
+        envFrom:
+        - secretRef:
+            name: e2e-provisioner-infisical
+        resources:
+          requests:
+            cpu: 100m
+            memory: 128Mi
+          limits:
+            cpu: 500m
+            memory: 512Mi
