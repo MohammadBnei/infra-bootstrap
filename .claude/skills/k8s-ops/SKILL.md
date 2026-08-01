@@ -45,6 +45,28 @@ include both — but that's an *API server* endpoint (`:6443`, for a real
 kubeconfig/`kubectl` client), not an SSH target; this skill's pattern
 still SSHes to a specific node and runs `kubectl` there.
 
+**Control-plane/etcd/kubelet config that traces back to a kubespray
+inventory var: fix the var + rerun kubespray with narrow `--tags`, don't
+hand-patch the live static pod manifest.** A hand patch to
+`/etc/kubernetes/manifests/*.yaml` works immediately but isn't persisted
+anywhere kubespray knows about — the next node rebuild/rejoin (or a future
+`cluster.yml` run) regenerates that manifest from the inventory vars and
+silently drops the patch. Confirmed 2026-08-01: `k8s-cp-01`'s etcd static
+pod had `--listen-metrics-urls=http://0.0.0.0:2381` (someone's prior hand
+patch, never added to `inventory/ukubi/group_vars/`), while `k8s-cp-02`/
+`k8s-cp-03` — rejoined after a `.165` Proxmox-host outage — came back with
+kubeadm's own default (`127.0.0.1`-only), breaking Prometheus's etcd
+metrics scrape (`etcdMembersDown`/`etcdInsufficientMembers`/`TargetDown`
+firing) even though etcd's actual raft/quorum was healthy the whole time.
+The durable fix was adding `etcd_listen_metrics_urls: "http://0.0.0.0:2381"`
+to `inventory/ukubi/group_vars/k8s_cluster/k8s-cluster.yml` (same pattern
+already used for `kube_proxy_metrics_bind_address` from a near-identical
+2026-07-29 incident) and re-running kubespray scoped to
+`--tags control-plane` (see `ansible-ops` skill for the invocation) — not
+`sed`-ing the manifest on the two drifted nodes. Live `kubectl`/manifest
+patches in this skill are for ArgoCD/Application state and one-off
+diagnostics, not for anything kubeadm/kubespray regenerates from inventory.
+
 **A ConfigMap change doesn't apply to running pods just because `kubectl
 apply` succeeded.** DaemonSets/Deployments read their mounted ConfigMap
 via kubelet's own sync (can take a while) or a `reload`-plugin-style
