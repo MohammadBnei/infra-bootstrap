@@ -1,0 +1,43 @@
+# Standalone Application for agent-fleet's e2e-provisioner (docs/adr/0012 in
+# that repo) — plain manifests, not common-app-chart (RBAC/ServiceAccount
+# binding isn't something that chart supports). Same pattern as
+# actions-runner-application.yaml/traefik-application.yaml for things that
+# don't fit the registry/common-app-chart mold.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: platform-e2e-provisioner
+  namespace: argocd
+  labels:
+    gitops.bnei.dev/tier: platform
+  annotations:
+    argocd.argoproj.io/sync-wave: "10"
+  finalizers:
+  - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: git@github.com:MohammadBnei/infra-bootstrap.git
+    targetRevision: main
+    path: gitops/platform/e2e-provisioner
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: agent-fleet
+  ignoreDifferences:
+  - group: secrets.infisical.com
+    kind: InfisicalSecret
+    jsonPointers:
+    - /status
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+    - CreateNamespace=true
+    - ServerSideApply=true
+    retry:
+      limit: 5
+      backoff:
+        duration: 5s
+        factor: 2
+        maxDuration: 3m

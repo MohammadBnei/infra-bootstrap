@@ -1,0 +1,15 @@
+# ClusterIP only — reached by the worker pods' Agent SDK sessions at
+# http://e2e-provisioner.agent-fleet.svc.cluster.local:8080/mcp/:taskId,
+# never exposed outside the cluster.
+apiVersion: v1
+kind: Service
+metadata:
+  name: e2e-provisioner
+  namespace: agent-fleet
+spec:
+  selector:
+    app: e2e-provisioner
+  ports:
+  - name: http
+    port: 8080
+    targetPort: 8080
