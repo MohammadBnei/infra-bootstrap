@@ -129,9 +129,21 @@ sidecar:
     labelValue: "1"
     searchNamespace: ALL
     resource: configmap
-    # All per-app dashboards land in one shared folder — no per-app
-    # folder structure until someone actually needs it.
-    defaultFolderName: "GitOps Dashboards"
+    # Deliberately no `defaultFolderName`. Confirmed live (2026-08-01
+    # incident): setting one makes the chart point Grafana's file
+    # provider at a *subdirectory* of the sidecar's mounted emptyDir
+    # (folder + "/" + defaultFolderName) — that subdirectory only gets
+    # created by the sidecar when it actually writes a matching file
+    # into it. With zero apps using dashboards.enabled yet, the
+    # directory never existed, so Grafana's own provisioning walk
+    # failed at startup ("failed to walk provisioned dashboards: stat
+    # ...: no such file or directory") — a real error, not cosmetic,
+    # every reload cycle. Leaving `folder` at its chart default
+    # (`/tmp/dashboards`, the emptyDir's actual mount point) sidesteps
+    # this: that path always exists once mounted, empty or not. Synced
+    # dashboards land in Grafana's default ("General") folder for now;
+    # revisit a named folder only alongside a way to guarantee it
+    # exists first (e.g. an initContainer mkdir), not before.
 
 # Alerting-as-code: contact point, notification policy, and one platform-
 # wide starter rule stay static (same file-provisioning pattern as
