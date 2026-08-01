@@ -21,6 +21,12 @@ kube_proxy_strict_arp: true
 # 127.0.0.1-only binds on all 3 nodes, causing connection-refused scrapes).
 kube_proxy_metrics_bind_address: "0.0.0.0:10249"
 etcd_metrics_port: 2381
+# etcd_metrics_port alone doesn't change the bind address — kubeadm still
+# defaults --listen-metrics-urls to 127.0.0.1 unless this is set too. Missed
+# in the 2026-07-29 fix above; caught 2026-08-01 when a post-outage etcd
+# rejoin (cp-02/cp-03) came back loopback-only while cp-01 (hand-patched,
+# never persisted as code) stayed reachable.
+etcd_listen_metrics_urls: "http://0.0.0.0:2381"
 
 # ukubi-cluster DNS domain (kubespray default; keeps kubelet join compatibility)
 cluster_name: cluster.local
