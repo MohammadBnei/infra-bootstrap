@@ -1223,3 +1223,75 @@ own output.
 redesign + RBAC fix + this timeout fix) — that combination has never
 been through a real `.165` reboot cycle yet. Next real test is the
 actual proof.
+
+## 2026-08-01/02 — etcd metrics-bind fix (PR #78): `cluster.yml` alone doesn't reach an already-running cluster
+
+`etcd_listen_metrics_urls` was added to
+`inventory/ukubi/group_vars/k8s_cluster/k8s-cluster.yml` (mirrors the
+existing `kube_proxy_metrics_bind_address` fix) to stop `etcdMembersDown`/
+`etcdInsufficientMembers` firing — cp-02/cp-03 had rejoined post-outage with
+kubeadm's loopback-only `--listen-metrics-urls` default, unreachable from
+Prometheus. Getting the code-correct fix actually live took two rounds of
+real, on-cluster trial and error.
+
+**Round 1 — `cluster.yml --tags control-plane,download` completed clean but
+changed nothing.** Live check (`ssh` + `grep listen-metrics-urls
+/etc/kubernetes/manifests/etcd.yaml` on all 3 CP nodes, plus `kubectl get cm
+kubeadm-config -n kube-system -o jsonpath='{.data.ClusterConfiguration}'`)
+showed the var never reached the cluster at all — the live
+`etcd.local.extraArgs` had no `listen-metrics-urls` entry, cp-02/cp-03 were
+still `127.0.0.1:2381`. Root cause: kubespray's day-2 reconciliation of an
+already-running cluster's kubeadm config (`kubeadm upgrade apply`/`upgrade
+node`, then `kubeadm init phase etcd local` + `control-plane all` to rewrite
+the static pod manifests — `roles/kubernetes/control-plane/tasks/
+kubeadm-upgrade.yml`) is entirely gated behind `upgrade_cluster_setup`,
+which **defaults to `false`**
+(`roles/kubernetes/control-plane/defaults/main/main.yml:3`) and is normally
+only set `true` by the dedicated `upgrade_cluster.yml` playbook. Plain
+`cluster.yml` against an already-initialized cluster
+(`kubeadm_already_run.stat.exists == true`) skips nearly all of
+`kubeadm-setup.yml`'s init/join logic, and — without this flag — skips the
+reconciliation path too. **Any future group_vars change meant to alter an
+already-running cluster's kubeadm ClusterConfiguration (etcd/apiserver/
+controller-manager/scheduler extraArgs, etc.) needs `-e
+upgrade_cluster_setup=true` explicitly on `cluster.yml`, even with no
+`kube_version` bump** — kubespray's own upgrade docs mention this flag only
+in the context of version bumps, easy to miss for a config-only change.
+
+**Round 2 — added `-e upgrade_cluster_setup=true`, then the play died with a
+"wait for the apiserver to be running" fatal on cp-01, 60/60 retries
+exhausted.** Looked like a real outage. It wasn't: `upgrade_cluster_setup=true`
+rewrites `kube-apiserver.yaml`/`kube-controller-manager.yaml`/
+`kube-scheduler.yaml`/`etcd.yaml` on **all three** control-plane nodes in the
+same run — every static pod restarts near-simultaneously across the whole
+control plane, and ansible's fixed post-upgrade health-check retry budget
+(60 attempts) wasn't generous enough for that; cp-01 didn't come back inside
+the budget and the play aborted there.
+
+Verified live instead of trusting the ansible exit code or reflexively
+re-running/rolling back: `crictl ps -a` on cp-01 showed the new
+`kube-apiserver` container already `Running` (previous attempt `Exited`
+cleanly, no crash loop), `stat` on all 3 nodes' manifest files showed
+identical rewrite timestamps (proving the reconciliation itself had
+succeeded everywhere, not just where the wait failed), `curl -sk
+https://127.0.0.1:6443/healthz` returned `ok` on all 3 nodes, `etcdctl
+member list` showed all 3 members `started`, `kubectl get nodes` showed all
+5 nodes `Ready`. Everything had self-healed within the restart window, well
+before ansible's own timeout gave up. Confirmed end-to-end via Alertmanager:
+`etcdMembersDown`, `etcdInsufficientMembers`, `TargetDown`,
+`KubeContainerWaiting`, `KubePodNotReady` all cleared from the active alert
+list afterward.
+
+**Lesson, same shape as the CoreDNS/Pigsty "check live state, not the
+docs/exit-code" lessons above**: a kubespray play failing on a
+"wait for apiserver" step is not the same thing as the cluster being down.
+A simultaneous multi-node control-plane manifest rewrite is disruptively
+noisy for a short window *by design* — check `crictl ps -a`/`healthz`/
+`etcdctl member list`/`kubectl get nodes` directly before assuming an outage
+or reaching for a hand-patch. Because the play died mid-run, tasks after the
+manifest-rewrite step (CNI reinstall, kubelet-csr-approver helm apps,
+resolv.conf reapply) never got a chance to run in that invocation — turned
+out low-risk to skip here since live checks showed the cluster fully
+healthy and the target alerts cleared, but the safer general habit is to
+re-run the same command once cluster health is confirmed (kubespray's
+control-plane role is idempotent).
