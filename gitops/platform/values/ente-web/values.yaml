@@ -1,0 +1,39 @@
+# ente-web — Ente's Photos web app (public image, no app-specific code).
+# v1 scope is Photos only; Albums/Auth/Cast apps in the same image are
+# deferred (add NEXT_PUBLIC_ENTE_ALBUMS_ENDPOINT / a second ingress
+# hostname later if wanted). Stateless — no persistence, no Infisical
+# secrets, just needs museum's public API origin.
+
+image:
+  repository: ghcr.io/ente-io/web
+  tag: "latest"
+
+service:
+  port: 3000
+
+ingress:
+  hostname: ente.bnei.dev
+
+resources:
+  requests:
+    cpu: 100m
+    memory: 128Mi
+  limits:
+    cpu: 500m
+    memory: 256Mi
+
+env:
+  - name: NEXT_PUBLIC_ENTE_ENDPOINT
+    value: "https://ente-api.bnei.dev"
+  - name: NODE_ENV
+    value: "production"
+
+livenessProbe:
+  enabled: true
+  type: http
+  path: /
+  port: 3000
+  initialDelaySeconds: 15
+  periodSeconds: 30
+  timeoutSeconds: 5
+  failureThreshold: 3

@@ -27,6 +27,14 @@ spec:
         namespace: pgweb
         hostname: pgweb.bnei.dev
 
+      - name: ente-museum
+        namespace: ente
+        hostname: ente-api.bnei.dev
+
+      - name: ente-web
+        namespace: ente
+        hostname: ente.bnei.dev
+
   template:
     metadata:
       name: '{{.name}}'

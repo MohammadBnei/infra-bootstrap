@@ -63,6 +63,9 @@
       - name: "pg-backup" # provisional — not fixed anywhere else yet, rename freely once pigsty's pgbackrest_repo config is written
         key_name: "pgbackrest-backup-key"
         infisical_prefix: "PGBACKREST_S3"
+      - name: "ente-photos" # Ente's primary photo/video object store, reached both internally and via s3.bnei.dev (ADR-0030)
+        key_name: "ente-photos-key"
+        infisical_prefix: "ENTE_S3"
 
   handlers:
     - name: Restart garage
