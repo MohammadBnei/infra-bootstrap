@@ -37,6 +37,19 @@ spec:
           value: e2e.bnei.dev
         - name: PORT
           value: "8080"
+        # @kubernetes/client-node hands fetch() a Node-style https.Agent
+        # carrying the in-cluster CA — Bun's fetch doesn't honor a custom
+        # Agent passed that way, so it falls back to the default trust
+        # store and every K8s API call fails with "unable to verify the
+        # first certificate" (confirmed live, and matches oven-sh/bun#7332).
+        # Pointing Bun's own CA trust at the same CA file already projected
+        # into every pod fixes it without touching client-node. Both vars
+        # set together — some Bun versions only honor NODE_EXTRA_CA_CERTS
+        # when NODE_USE_SYSTEM_CA is also set.
+        - name: NODE_EXTRA_CA_CERTS
+          value: /var/run/secrets/kubernetes.io/serviceaccount/ca.crt
+        - name: NODE_USE_SYSTEM_CA
+          value: "1"
         envFrom:
         - secretRef:
             name: e2e-provisioner-infisical
