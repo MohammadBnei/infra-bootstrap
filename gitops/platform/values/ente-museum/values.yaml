@@ -156,6 +156,15 @@ extraManifests:
                 username: "{{ "{{" }} .SMTP_USERNAME.Value {{ "}}" }}"
                 password: "{{ "{{" }} .SMTP_PASSWORD.Value {{ "}}" }}"
                 email: "{{ "{{" }} .SMTP_EMAIL.Value {{ "}}" }}"
+
+              internal:
+                # account@bnei.dev — user_id confirmed from live request
+                # logs (user_id=1580559962386438 across /users/details/v2,
+                # /users/session-validity/v2, etc.). Explicit rather than
+                # relying on the "first user is admin" fallback (empty
+                # admins: []), which gets ambiguous once a second user
+                # signs up.
+                admins: [1580559962386438]
                 # Left unset deliberately — plain smtp.SendMail auto-upgrades
                 # via STARTTLS when the server advertises it, which is the
                 # right behavior for port 587. Only needed as "tls"/"ssl" if
