@@ -114,6 +114,17 @@ extraManifests:
         template:
           data:
             museum.yaml: |
+              # /dev/stdout, not a real rotated file: gets JSON formatting
+              # (setupLogger switches on log-file being non-empty, doesn't
+              # need environment != "local") straight into the same
+              # container stdout Alloy already scrapes for every pod — no
+              # sidecar, no extra volume, no Alloy-side config. Traded off
+              # against a real (if remote at this log volume) risk:
+              # lumberjack's own rotation logic (triggers past 100MB) could
+              # behave oddly trying to rename/compress a device file if
+              # log volume ever gets that high.
+              log-file: /dev/stdout
+
               db:
                 host: "{{ "{{" }} .DB_HOST.Value {{ "}}" }}"
                 port: {{ "{{" }} .DB_PORT.Value {{ "}}" }}
