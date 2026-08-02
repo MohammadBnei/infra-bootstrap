@@ -186,6 +186,18 @@ all:
           - name: entedb # REQUIRED, `name` is the only mandatory field of a database definition
             comment: ente self-hosted photo manager database # optional, comment string for this database
             owner: dbuser_ente # optional, database owner, postgres by default
+            # museum uses server-side prepared statements — transaction-mode
+            # pgbouncer (the cluster default) hands out a different backend
+            # connection per transaction, so a statement prepared on one
+            # connection doesn't exist (or belongs to a different query) on
+            # the next: "unnamed prepared statement does not exist" / "bind
+            # message supplies N parameters, but prepared statement requires
+            # M", confirmed live across every museum subsystem that runs a
+            # parameterized query. session mode gives each client connection
+            # a dedicated backend for its lifetime, same reasoning as
+            # dbuser_dba/dbuser_monitor's pool_mode: session in Pigsty's own
+            # roles/pgsql/defaults/main.yml.
+            pool_mode: session
 
         pg_hba_rules:   # https://pigsty.io/docs/pgsql/config/hba
           - { user: all ,db: all ,addr: intra ,auth: pwd ,title: 'everyone intranet access with password' ,order: 800 }
