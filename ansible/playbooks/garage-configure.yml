@@ -84,12 +84,38 @@
         # enforces CORS regardless of the presigned URL's own validity.
         # Optional per bucket — omit for buckets nothing browser-side talks
         # to directly (k8s-longhorn-backup, pg-backup).
+        # A *list* of CORS rules, one origin each — Garage's own field
+        # names directly (AllowedOrigin/AllowedMethod/...), fed to
+        # UpdateBucket's corsRules as-is, no key-renaming layer. Confirmed
+        # live: a single rule with multiple AllowedOrigin entries makes
+        # Garage join them into ONE comma-separated
+        # Access-Control-Allow-Origin value ("https://ente.bnei.dev, null")
+        # — invalid per spec (browsers require an exact single-origin
+        # match or "*"), so the browser rejects it regardless. Separate
+        # rules make Garage echo back just the one matching origin per
+        # request, which is what's actually needed.
         cors:
-          allowed_origins: ["https://ente.bnei.dev"]
-          allowed_methods: ["GET", "PUT", "POST", "HEAD"]
-          allowed_headers: ["*"]
-          expose_headers: ["ETag"]
-          max_age_seconds: 3000
+          - AllowedOrigin: ["https://ente.bnei.dev"]
+            AllowedMethod: ["GET", "PUT", "POST", "HEAD"]
+            AllowedHeader: ["*"]
+            ExposeHeader: ["ETag"]
+            MaxAgeSeconds: 3000
+          # "null" (the literal string), not a mistake: museum's
+          # /files/preview redirect crosses from ente-api.bnei.dev to
+          # s3.bnei.dev — a THIRD distinct origin from the page
+          # (ente.bnei.dev). Per the Fetch spec, a CORS-mode request
+          # redirected across origins gets its Origin header scrubbed to
+          # the literal string "null" (an anti-leak measure). Confirmed
+          # live via CDP network capture — without this rule Garage omits
+          # Access-Control-Allow-Origin for exactly that redirected
+          # request, browser reports corsError: 'MissingAllowOriginHeader',
+          # even though the underlying HTTP request/response succeeds fine
+          # (real auth is SigV4 on the presigned URL regardless of Origin).
+          - AllowedOrigin: ["null"]
+            AllowedMethod: ["GET", "PUT", "POST", "HEAD"]
+            AllowedHeader: ["*"]
+            ExposeHeader: ["ETag"]
+            MaxAgeSeconds: 3000
 
   handlers:
     - name: Restart garage
@@ -444,12 +470,7 @@
           Authorization: "Bearer {{ garage_admin_token }}"
         body_format: json
         body:
-          corsRules:
-            - AllowedOrigin: "{{ item.0.cors.allowed_origins }}"
-              AllowedMethod: "{{ item.0.cors.allowed_methods }}"
-              AllowedHeader: "{{ item.0.cors.allowed_headers | default(['*']) }}"
-              ExposeHeader: "{{ item.0.cors.expose_headers | default([]) }}"
-              MaxAgeSeconds: "{{ item.0.cors.max_age_seconds | default(3000) }}"
+          corsRules: "{{ item.0.cors }}"
         status_code: [200]
       loop: "{{ (garage_buckets | selectattr('cors', 'defined') | list) | zip(garage_cors_bucket_info.results) | list }}"
       loop_control:
