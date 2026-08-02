@@ -177,6 +177,21 @@ extraction instead of regeneration when `garage.toml` already exists,
 `rpc_secret`/keys and overwrites Infisical with them — correct, but any
 prior bucket data is gone with the old container.
 
+**Adding just a bucket** (e.g. onboarding a new app) doesn't need the full
+install-capable run — `--tags bucket_ops` (added after a real re-run for
+Ente's bucket felt like it was carrying unnecessary install-path risk)
+skips straight to buckets/keys/Infisical-write, no `GARAGE_VERSION`/
+`GARAGE_SHA256` needed, no binary download, no `garage.toml` rewrite, no
+systemd restart, no layout re-assignment. Requires Garage to already be
+installed (fails loudly rather than silently regenerating `rpc_secret` if
+not):
+
+```bash
+source ~/.hermes/cache/inf-env.sh
+ansible-playbook -i ansible/inventories/garage/hosts.yml \
+  ansible/playbooks/garage-configure.yml --tags bucket_ops
+```
+
 ## `playbooks/nfs-configure.yml`
 
 Formats and exports NFS on the bare `nfs-storage` VM `terraform/nfs.tf`

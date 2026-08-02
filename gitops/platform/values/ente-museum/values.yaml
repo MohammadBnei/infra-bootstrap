@@ -11,7 +11,10 @@
 # `template:` block, sourced from the ente-uovi project.
 
 image:
-  repository: ghcr.io/ente-io/server
+  # NOT ghcr.io/ente-io/server — that path 403s (private/nonexistent). The
+  # actual published image lives under the shorter ghcr.io/ente/* namespace,
+  # confirmed against server/quickstart.sh's generated compose.yaml.
+  repository: ghcr.io/ente/server
   tag: "latest"
 
 service:
