@@ -22,6 +22,8 @@ image:
 service:
   port: 3000
 
+# Inert for platform-common-apps releases — see ente-museum/values.yaml's
+# comment, same ApplicationSet-parameter-overrides-this-value gotcha.
 ingress:
   hostname: ente.bnei.dev
 

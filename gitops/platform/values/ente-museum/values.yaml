@@ -31,6 +31,12 @@ image:
 service:
   port: 8080
 
+# Inert for platform-common-apps releases — the ApplicationSet's own
+# helm.parameters (ingress.hostname, from each element's `hostname:` in
+# platform-common-apps.applicationset.yaml) always overrides this value.
+# Kept in sync for documentation, but the ApplicationSet entry is the
+# real source of truth — confirmed live: editing only this field left
+# the actual IngressRoute on the old hostname.
 ingress:
   hostname: api.ente.bnei.dev
 

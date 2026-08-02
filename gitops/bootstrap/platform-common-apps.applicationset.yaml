@@ -29,7 +29,7 @@ spec:
 
       - name: ente-museum
         namespace: ente
-        hostname: ente-api.bnei.dev
+        hostname: api.ente.bnei.dev
 
       - name: ente-web
         namespace: ente
