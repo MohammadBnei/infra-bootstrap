@@ -7,8 +7,11 @@
 image:
   # NOT ghcr.io/ente-io/web — see ente-museum/values.yaml's comment, same
   # ghcr.io/ente/* namespace correction.
+  #
+  # Pinned to a real commit-SHA tag, not `latest` — same reasoning as
+  # ente-museum/values.yaml (ente/web publishes no semver/dated tags either).
   repository: ghcr.io/ente/web
-  tag: "latest"
+  tag: "b4d22996c85e8080b487db1475f98487b9b10840"
 
 service:
   port: 3000

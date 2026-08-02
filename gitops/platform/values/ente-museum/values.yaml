@@ -14,8 +14,13 @@ image:
   # NOT ghcr.io/ente-io/server — that path 403s (private/nonexistent). The
   # actual published image lives under the shorter ghcr.io/ente/* namespace,
   # confirmed against server/quickstart.sh's generated compose.yaml.
+  #
+  # Pinned to a real commit-SHA tag, not `latest` — ente/server publishes no
+  # semver/dated tags, only `latest` (floating) and one tag per git commit
+  # SHA (ghcr.io/v2/ente/server/tags/list). Bump deliberately: pick a newer
+  # SHA from that list, don't switch back to `latest`.
   repository: ghcr.io/ente/server
-  tag: "latest"
+  tag: "449284a6a119a2275928d21987453f88fbde9565"
 
 service:
   port: 8080
