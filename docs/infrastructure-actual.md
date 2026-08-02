@@ -360,7 +360,7 @@ certainly no longer exists as described.)*
 
 ### DNS
 
-- **External/WAN:** Freebox (192.168.1.254) — basic, no wildcards, no internal zones. `bnei.dev` stays external via Cloudflare, unrelated to the below.
+- **External/WAN:** Freebox (192.168.1.254) — basic, no wildcards, no internal zones. `bnei.dev` stays external — manual per-host A records at Squarespace DNS, no wildcard — unrelated to the below.
 - **Local resolver, live since 2026-07-30**: Pi-hole on the Pi 4
   (`192.168.1.55`, static IP pinned via `nmcli`, `ansible/playbooks/pihole-configure.yml`),
   authoritative for `bnei.lan` (`DECISION.md` §2). Two consumers,

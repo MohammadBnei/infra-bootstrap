@@ -48,12 +48,21 @@
     garage_version: "{{ lookup('env', 'GARAGE_VERSION') }}"
     garage_sha256: "{{ lookup('env', 'GARAGE_SHA256') }}"
     garage_arch: "x86_64-unknown-linux-musl"
-    garage_bucket_longhorn: "k8s-longhorn-backup"
-    garage_bucket_pgbackrest: "pg-backup" # provisional — not fixed anywhere else yet, rename freely once pigsty's pgbackrest_repo config is written
-    garage_key_longhorn: "longhorn-backup-key"
-    garage_key_pgbackrest: "pgbackrest-backup-key"
     garage_layout_zone: "dc1"
     garage_layout_capacity: "180G"
+    # One entry per managed bucket+key. Each key gets read+write on
+    # exactly its own bucket (garage bucket allow, below) — nothing more.
+    # infisical_prefix becomes <prefix>_S3_ACCESS_KEY/_SECRET in Infisical.
+    # To add a bucket (internal or external-facing — exposure is decided
+    # at the Traefik layer, not here, see gitops/bootstrap/garage-s3.yaml),
+    # add an entry and re-run this playbook.
+    garage_buckets:
+      - name: "k8s-longhorn-backup"
+        key_name: "longhorn-backup-key"
+        infisical_prefix: "LONGHORN_S3"
+      - name: "pg-backup" # provisional — not fixed anywhere else yet, rename freely once pigsty's pgbackrest_repo config is written
+        key_name: "pgbackrest-backup-key"
+        infisical_prefix: "PGBACKREST_S3"
 
   handlers:
     - name: Restart garage
@@ -271,20 +280,19 @@
       when: "'apply --version' in garage_layout_show_current.stdout"
 
     # -------------------------------------------------------------------
-    # 6. Buckets — idempotent
+    # 6. Buckets — idempotent, one iteration per garage_buckets entry
     # -------------------------------------------------------------------
     - name: List existing buckets
       ansible.builtin.command: /usr/local/bin/garage bucket list
       register: garage_bucket_list
       changed_when: false
 
-    - name: Create Longhorn backup bucket
-      ansible.builtin.command: /usr/local/bin/garage bucket create {{ garage_bucket_longhorn }}
-      when: garage_bucket_longhorn not in garage_bucket_list.stdout
-
-    - name: Create pgBackRest backup bucket
-      ansible.builtin.command: /usr/local/bin/garage bucket create {{ garage_bucket_pgbackrest }}
-      when: garage_bucket_pgbackrest not in garage_bucket_list.stdout
+    - name: Create buckets
+      ansible.builtin.command: /usr/local/bin/garage bucket create {{ item.name }}
+      loop: "{{ garage_buckets }}"
+      loop_control:
+        label: "{{ item.name }}"
+      when: item.name not in garage_bucket_list.stdout
 
     # -------------------------------------------------------------------
     # 7. Keys — idempotent creation, unconditional (idempotent) grant
@@ -294,48 +302,29 @@
       register: garage_key_list
       changed_when: false
 
-    - name: Create Longhorn S3 key
-      ansible.builtin.command: /usr/local/bin/garage key create {{ garage_key_longhorn }}
-      when: garage_key_longhorn not in garage_key_list.stdout
+    - name: Create keys
+      ansible.builtin.command: /usr/local/bin/garage key create {{ item.key_name }}
+      loop: "{{ garage_buckets }}"
+      loop_control:
+        label: "{{ item.key_name }}"
+      when: item.key_name not in garage_key_list.stdout
 
-    - name: Create pgBackRest S3 key
-      ansible.builtin.command: /usr/local/bin/garage key create {{ garage_key_pgbackrest }}
-      when: garage_key_pgbackrest not in garage_key_list.stdout
-
-    - name: Grant Longhorn key access to its bucket
+    - name: Grant each key read+write on exactly its own bucket
       ansible.builtin.command: >
-        /usr/local/bin/garage bucket allow {{ garage_bucket_longhorn }}
-        --read --write --key {{ garage_key_longhorn }}
+        /usr/local/bin/garage bucket allow {{ item.name }}
+        --read --write --key {{ item.key_name }}
+      loop: "{{ garage_buckets }}"
+      loop_control:
+        label: "{{ item.name }} <- {{ item.key_name }}"
       changed_when: false # re-granting identical perms is a no-op in garage itself
 
-    - name: Grant pgBackRest key access to its bucket
-      ansible.builtin.command: >
-        /usr/local/bin/garage bucket allow {{ garage_bucket_pgbackrest }}
-        --read --write --key {{ garage_key_pgbackrest }}
+    - name: Read key ID/secret for each bucket's key
+      ansible.builtin.command: /usr/local/bin/garage key info {{ item.key_name }} --show-secret
+      loop: "{{ garage_buckets }}"
+      loop_control:
+        label: "{{ item.key_name }}"
+      register: garage_key_info
       changed_when: false
-
-    - name: Read Longhorn key ID/secret
-      ansible.builtin.command: /usr/local/bin/garage key info {{ garage_key_longhorn }} --show-secret
-      register: garage_key_longhorn_info
-      changed_when: false
-      no_log: true
-
-    - name: Read pgBackRest key ID/secret
-      ansible.builtin.command: /usr/local/bin/garage key info {{ garage_key_pgbackrest }} --show-secret
-      register: garage_key_pgbackrest_info
-      changed_when: false
-      no_log: true
-
-    - name: Extract key IDs/secrets
-      ansible.builtin.set_fact:
-        # regex_search with a capture group returns a list, not a scalar —
-        # same reasoning as the rpc_secret/admin_token extraction above,
-        # `| first` is required or Infisical ends up storing the Python
-        # list repr ("['GK...']") instead of the bare key.
-        garage_longhorn_key_id: "{{ (garage_key_longhorn_info.stdout | regex_search('Key ID:\\s*(\\S+)', '\\1')) | first }}"
-        garage_longhorn_key_secret: "{{ (garage_key_longhorn_info.stdout | regex_search('Secret key:\\s*(\\S+)', '\\1')) | first }}"
-        garage_pgbackrest_key_id: "{{ (garage_key_pgbackrest_info.stdout | regex_search('Key ID:\\s*(\\S+)', '\\1')) | first }}"
-        garage_pgbackrest_key_secret: "{{ (garage_key_pgbackrest_info.stdout | regex_search('Secret key:\\s*(\\S+)', '\\1')) | first }}"
       no_log: true
 
     # -------------------------------------------------------------------
@@ -356,7 +345,7 @@
           - GARAGE_ROOT_TOKEN={{ garage_rpc_secret }}
       changed_when: true
 
-    - name: Write LONGHORN_S3_ACCESS_KEY/_SECRET to Infisical
+    - name: Write per-bucket S3 access key/secret to Infisical
       delegate_to: localhost
       become: false
       no_log: true
@@ -368,24 +357,15 @@
           - --projectId={{ infisical_project_id }}
           - --env={{ infisical_env }}
           - --type=shared
-          - LONGHORN_S3_ACCESS_KEY={{ garage_longhorn_key_id }}
-          - LONGHORN_S3_SECRET={{ garage_longhorn_key_secret }}
-      changed_when: true
-
-    - name: Write PGBACKREST_S3_ACCESS_KEY/_SECRET to Infisical
-      delegate_to: localhost
-      become: false
-      no_log: true
-      ansible.builtin.command:
-        argv:
-          - infisical
-          - secrets
-          - set
-          - --projectId={{ infisical_project_id }}
-          - --env={{ infisical_env }}
-          - --type=shared
-          - PGBACKREST_S3_ACCESS_KEY={{ garage_pgbackrest_key_id }}
-          - PGBACKREST_S3_SECRET={{ garage_pgbackrest_key_secret }}
+          - >-
+            {{ item.0.infisical_prefix }}_ACCESS_KEY={{
+            (item.1.stdout | regex_search('Key ID:\s*(\S+)', '\1')) | first }}
+          - >-
+            {{ item.0.infisical_prefix }}_SECRET={{
+            (item.1.stdout | regex_search('Secret key:\s*(\S+)', '\1')) | first }}
+      loop: "{{ garage_buckets | zip(garage_key_info.results) | list }}"
+      loop_control:
+        label: "{{ item.0.infisical_prefix }}"
       changed_when: true
 
     # -------------------------------------------------------------------
@@ -394,13 +374,17 @@
     - name: Garage configured
       ansible.builtin.debug:
         msg:
-          - "Garage is up and configured. GARAGE_ROOT_TOKEN, LONGHORN_S3_ACCESS_KEY/_SECRET,"
-          - "and PGBACKREST_S3_ACCESS_KEY/_SECRET are now in Infisical."
+          - "Garage is up and configured. GARAGE_ROOT_TOKEN and one"
+          - "<PREFIX>_S3_ACCESS_KEY/_SECRET pair per garage_buckets entry"
+          - "({{ garage_buckets | map(attribute='infisical_prefix') | join(', ') }})"
+          - "are now in Infisical."
           - ""
           - "Verify:"
           - "  ssh -i ~/.ssh/id_garage root@{{ ansible_host }} garage status"
           - "  ssh -i ~/.ssh/id_garage root@{{ ansible_host }} garage bucket list"
           - "  curl -s http://{{ ansible_host }}:3900"
           - ""
-          - "S3 endpoint is LAN-only for now — the Traefik IngressRoute for"
-          - "s3.bnei.dev and the garage.bnei.lan DNS record are a separate follow-up."
+          - "S3 endpoint: LAN via http://garage.bnei.lan:3900, external via"
+          - "https://s3.bnei.dev (gitops/bootstrap/garage-s3.yaml, ADR-0030)."
+          - "To add a new bucket+key, add an entry to garage_buckets above"
+          - "and re-run this playbook — see the garage-ops skill."

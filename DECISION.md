@@ -55,8 +55,9 @@ updated.
   time, per the schema in `docs/secrets.md`. Never committed to
   this repo.
 - **DNS authority:** Pi-hole on Pi 4 (`.55`) is authoritative for
-  `bnei.lan`; `bnei.dev` is external via Cloudflare. See
-  `ARCHITECTURE.md` §3 for target records.
+  `bnei.lan`; `bnei.dev` is external — manual per-host A records at
+  Squarespace DNS, no wildcard. See `ARCHITECTURE.md` §3 for target
+  records.
 - **Postgres HA: automatic failover via Patroni + etcd is accepted
   behavior, DCS is a 3-node etcd quorum.** Reverses the earlier "no
   automatic failover" stance once a live check (2026-07-30) showed

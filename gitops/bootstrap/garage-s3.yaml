@@ -1,0 +1,68 @@
+# Bridges Traefik-in-cluster to Garage's S3 API, which runs off-cluster on
+# the garage-storage LXC (192.168.1.199:3900, LAN-only —
+# ansible/playbooks/garage-configure.yml). A headless Service with a
+# manually-managed Endpoints object is the standard way to point a k8s
+# Service at an IP that isn't a pod; Endpoints auto-mirrors to an
+# EndpointSlice, so only one object is needed.
+#
+# Auth: Garage's own S3 SigV4 signing (per-bucket, per-key via `garage
+# bucket allow`) is the only access control here — there's no
+# anonymous/public read. Garage's admin API (port 3903) is deliberately
+# NOT part of this — it stays bound to 127.0.0.1 on the LXC and is never
+# reachable through this Service. See ADR-0030.
+#
+# tls.certResolver: le (not a cert-manager Certificate) is this repo's
+# standard TLS pattern — see gitops/bootstrap/grafana-ingressroute.yaml —
+# and requests its own per-hostname cert via HTTP-01 on first request.
+#
+# s3.bnei.dev has no DNS record yet — bnei.dev is manual per-host A
+# records at Squarespace (no wildcard), so that record has to be added
+# by hand before this route is reachable from outside the LAN.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: garage
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: garage-s3
+  namespace: garage
+spec:
+  type: ClusterIP
+  ports:
+    - port: 3900
+      targetPort: 3900
+      protocol: TCP
+      name: s3
+  # No selector — Endpoints below is managed by hand, not by a pod selector.
+---
+apiVersion: v1
+kind: Endpoints
+metadata:
+  name: garage-s3
+  namespace: garage
+subsets:
+  - addresses:
+      - ip: "192.168.1.199"
+    ports:
+      - port: 3900
+        name: s3
+        protocol: TCP
+---
+apiVersion: traefik.io/v1alpha1
+kind: IngressRoute
+metadata:
+  name: garage-s3
+  namespace: garage
+spec:
+  entryPoints:
+    - websecure
+  routes:
+    - kind: Rule
+      match: Host(`s3.bnei.dev`)
+      services:
+        - name: garage-s3
+          port: 3900
+  tls:
+    certResolver: le
