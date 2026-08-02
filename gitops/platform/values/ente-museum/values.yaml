@@ -10,6 +10,17 @@
 # (gitops/platform/values/searxng/values.yaml) — an InfisicalSecret with a
 # `template:` block, sourced from the ente-uovi project.
 
+# Same mechanism as infisical.autoReload (see common-app-chart's
+# values.yaml) — set by hand since ente-museum uses a custom extraManifests
+# InfisicalSecret (needs a `template:` to render museum.yaml) instead of
+# the chart's built-in infisical: block, so the chart's own autoReload
+# wiring, which is conditional on infisical.enabled, doesn't apply here.
+# Without this, updating a secret in ente-uovi never reaches the running
+# pod — subPath mounts don't live-update either, so this is the only
+# thing that makes a secret change actually take effect.
+annotations:
+  secrets.infisical.com/auto-reload: "true"
+
 image:
   # NOT ghcr.io/ente-io/server — that path 403s (private/nonexistent). The
   # actual published image lives under the shorter ghcr.io/ente/* namespace,
