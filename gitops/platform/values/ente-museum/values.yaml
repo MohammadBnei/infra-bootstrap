@@ -125,9 +125,8 @@ extraManifests:
                 username: "{{ "{{" }} .SMTP_USERNAME.Value {{ "}}" }}"
                 password: "{{ "{{" }} .SMTP_PASSWORD.Value {{ "}}" }}"
                 email: "{{ "{{" }} .SMTP_EMAIL.Value {{ "}}" }}"
-                # Required for port 465 (implicit TLS) — museum's SendMail
-                # falls back to plaintext-first smtp.SendMail when this is
-                # unset, which hangs against an implicit-TLS-only port
-                # instead of erroring (confirmed: signup's /users/ott never
-                # returned a response at all, no error logged).
-                encryption: "tls"
+                # Left unset deliberately — plain smtp.SendMail auto-upgrades
+                # via STARTTLS when the server advertises it, which is the
+                # right behavior for port 587. Only needed as "tls"/"ssl" if
+                # switching back to an implicit-TLS-only port like 465 (see
+                # git history — that combination caused signup to hang).
