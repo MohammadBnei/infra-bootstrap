@@ -225,8 +225,8 @@ graph LR
 `ansible/playbooks/pihole-configure.yml`), authoritative for `bnei.lan`
 per `DECISION.md` §2. Triggered once there were enough real internal
 hostnames (kube-vip's endpoint, the pg/garage/nfs/k9s-dashboard VMs) that
-raw IPs stopped being convenient. `bnei.dev` stays external via
-Cloudflare, unrelated to this.
+raw IPs stopped being convenient. `bnei.dev` stays external — manual
+per-host A records at Squarespace DNS, no wildcard — unrelated to this.
 
 **Static IP:** Pi-hole's own address is pinned via `nmcli` (was
 DHCP-dynamic — a real risk once other things depend on it staying put),
@@ -267,8 +267,13 @@ A    k8s-cp-02.bnei.lan      → 192.168.1.204
 A    k8s-cp-03.bnei.lan      → 192.168.1.206
 A    k8s-worker-01.bnei.lan  → 192.168.1.202
 A    k8s-worker-02.bnei.lan  → 192.168.1.203
-A    *.bnei.dev              → public IP / router port-forward
 ```
+
+`*.bnei.dev` hostnames (`blog`, `dreamer`, `grafana`, `s3`, etc.) are each
+their own **manually-created A record at Squarespace DNS** — no wildcard
+record exists — pointing at the public IP the Freebox port-forwards
+80/443 from to Traefik's MetalLB VIP. Add each new one by hand as it's
+needed.
 
 Endpoint naming (`k8s-proxmox-gpu.bnei.lan` vs `k8s.bnei.lan`) is resolved
 in favor of `k8s.bnei.lan` — see
@@ -435,8 +440,10 @@ fate, backup target): [ADR-0019](docs/adr/0019-longhorn-rollout-specifics.md)
 ### Garage (object storage)
 
 LXC on proxmox PVE, NVMe-backed, 200GB allocated, S3-compatible API at
-`s3.bnei.dev` via Traefik. Single node initially, can scale to 2-3 nodes
-later. Replaces MinIO (archived Jan 2026).
+`s3.bnei.dev` via Traefik (live — `gitops/bootstrap/garage-s3.yaml`,
+[ADR-0030](docs/adr/0030-expose-garage-s3-externally.md); also reachable
+LAN-only at `garage.bnei.lan:3900`). Single node initially, can scale to
+2-3 nodes later. Replaces MinIO (archived Jan 2026).
 
 ### Proxmox storage
 
@@ -480,7 +487,10 @@ New service accounts per app; Infisical for app secrets.
 
 ### TLS
 
-Wildcard cert `*.bnei.dev` via Traefik ACME HTTP-01 (§4 above).
+Per-hostname certs via Traefik ACME HTTP-01 (§4 above) — **not** a
+wildcard cert: HTTP-01 can't issue one (only DNS-01 can), and DNS-01 was
+rejected (ADR-0001). Each `*.bnei.dev` host gets its own cert on first
+request, `certResolver: le` on its `IngressRoute`.
 
 > **Flag:** an earlier draft of this section proposed "internal certs
 > via internal CA (for Postgres, etcd, etc.)". That needs reconciling

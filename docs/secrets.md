@@ -48,6 +48,12 @@ everything.
 | `ALERTMANAGER_DISCORD_WEBHOOK_URL` | Discord channel webhook (Alertmanager posts via the webhook's `/slack` compatibility suffix, so its native `slack_configs` receiver works with no adapter) | user (Discord channel → Integrations → Webhooks) | `gitops/bootstrap/alertmanager-discord-secret.yaml` (InfisicalSecret) → `gitops/platform/values/prometheus/values.yaml`'s `alertmanager.config` |
 | `REDIS_MAIN_PASSWORD` | Shared Pigsty Redis (`redis-main` cluster, pg02) password — mirrors `pigsty.yml`'s `redis_password: 'Redis.Main'` | reused from the existing `pigsty.yml` value (not rotated) | `gitops/bootstrap/argocd-redis-secret.yaml` (InfisicalSecret) → ArgoCD's `externalRedis` (argocd-application.yaml) |
 
+`<PREFIX>_S3_ACCESS_KEY` / `<PREFIX>_S3_SECRET` (e.g. `LONGHORN_S3_*`,
+`PGBACKREST_S3_*` above) is the naming convention for **any** Garage-issued
+S3 key going forward — driven by `garage-configure.yml`'s `garage_buckets`
+list (`infisical_prefix` field, one entry per bucket), see the
+`garage-ops` skill and [ADR-0030](adr/0030-expose-garage-s3-externally.md).
+
 ## Per-app Infisical projects
 
 Some `platform-common-apps` (see `gitops/README.md`) get their own small,
