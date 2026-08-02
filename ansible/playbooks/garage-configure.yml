@@ -78,6 +78,18 @@
       - name: "ente-photos" # Ente's primary photo/video object store, reached both internally and via s3.bnei.dev (ADR-0030)
         key_name: "ente-photos-key"
         infisical_prefix: "ENTE_S3"
+        # Ente's web client uploads directly browser -> S3 via a presigned
+        # URL (the whole point of its S3-native design) — a real cross-origin
+        # request from ente.bnei.dev's JS to s3.bnei.dev, so the browser
+        # enforces CORS regardless of the presigned URL's own validity.
+        # Optional per bucket — omit for buckets nothing browser-side talks
+        # to directly (k8s-longhorn-backup, pg-backup).
+        cors:
+          allowed_origins: ["https://ente.bnei.dev"]
+          allowed_methods: ["GET", "PUT", "POST", "HEAD"]
+          allowed_headers: ["*"]
+          expose_headers: ["ETag"]
+          max_age_seconds: 3000
 
   handlers:
     - name: Restart garage
@@ -399,6 +411,49 @@
       loop: "{{ garage_buckets | zip(garage_key_info.results) | list }}"
       loop_control:
         label: "{{ item.0.infisical_prefix }}"
+      changed_when: true
+      tags: [bucket_ops]
+
+    # -------------------------------------------------------------------
+    # 9. CORS — declarative per-bucket, via the admin API (127.0.0.1:3903,
+    #    localhost-only — never exposed remotely, per the [admin] section's
+    #    own security note above; this task calls it from garage-storage
+    #    itself, not from outside). Full-replace + idempotent (UpdateBucket
+    #    always sets the whole CORS ruleset, safe to re-run with the same
+    #    config), needs the bucket's read+write key (ente-photos-key) can't
+    #    do this itself — CORS is an --owner-level admin operation, which
+    #    that key deliberately doesn't have (least privilege).
+    # -------------------------------------------------------------------
+    - name: Look up bucket ID for CORS-enabled buckets
+      ansible.builtin.uri:
+        url: "http://127.0.0.1:3903/v2/GetBucketInfo?globalAlias={{ item.name }}"
+        headers:
+          Authorization: "Bearer {{ garage_admin_token }}"
+        return_content: true
+      register: garage_cors_bucket_info
+      loop: "{{ garage_buckets | selectattr('cors', 'defined') | list }}"
+      loop_control:
+        label: "{{ item.name }}"
+      tags: [bucket_ops]
+
+    - name: Apply CORS rules
+      ansible.builtin.uri:
+        url: "http://127.0.0.1:3903/v2/UpdateBucket?id={{ item.1.json.id }}"
+        method: POST
+        headers:
+          Authorization: "Bearer {{ garage_admin_token }}"
+        body_format: json
+        body:
+          corsRules:
+            - AllowedOrigin: "{{ item.0.cors.allowed_origins }}"
+              AllowedMethod: "{{ item.0.cors.allowed_methods }}"
+              AllowedHeader: "{{ item.0.cors.allowed_headers | default(['*']) }}"
+              ExposeHeader: "{{ item.0.cors.expose_headers | default([]) }}"
+              MaxAgeSeconds: "{{ item.0.cors.max_age_seconds | default(3000) }}"
+        status_code: [200]
+      loop: "{{ (garage_buckets | selectattr('cors', 'defined') | list) | zip(garage_cors_bucket_info.results) | list }}"
+      loop_control:
+        label: "{{ item.0.name }}"
       changed_when: true
       tags: [bucket_ops]
 
