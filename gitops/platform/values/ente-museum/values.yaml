@@ -1,0 +1,124 @@
+# ente-museum — Ente's API backend (public image, no app-specific code,
+# same platform-common-apps category as searxng/pgweb). S3-native by
+# design: photos/videos never touch a K8s volume, so no `persistence:`
+# here — Garage (via s3.bnei.dev, ADR-0030) is the only store.
+#
+# Config is a mounted museum.yaml (not ENTE_*-prefixed env vars) — Ente's
+# own docs only document the YAML schema; the env-var override mechanism
+# exists but its exact key-mapping isn't documented, so a rendered file is
+# the reliable choice. Same idiom as searxng's settings.yml
+# (gitops/platform/values/searxng/values.yaml) — an InfisicalSecret with a
+# `template:` block, sourced from the ente-uovi project.
+
+image:
+  repository: ghcr.io/ente-io/server
+  tag: "latest"
+
+service:
+  port: 8080
+
+ingress:
+  hostname: ente-api.bnei.dev
+
+resources:
+  requests:
+    cpu: 250m
+    memory: 512Mi
+  limits:
+    cpu: "1"
+    memory: 1Gi
+
+env:
+  - name: ENTE_CREDENTIALS_FILE
+    value: /credentials.yaml
+
+livenessProbe:
+  enabled: true
+  type: http
+  path: /ping
+  port: 8080
+  initialDelaySeconds: 15
+  periodSeconds: 30
+  timeoutSeconds: 5
+  failureThreshold: 3
+
+extraVolumes:
+  - name: museum-config
+    secret:
+      secretName: ente-museum-config
+  - name: museum-data
+    emptyDir: {}
+
+extraVolumeMounts:
+  - name: museum-config
+    mountPath: /credentials.yaml
+    subPath: museum.yaml
+  - name: museum-data
+    mountPath: /data
+
+# Required secrets in the ente-uovi Infisical project (id
+# c018d40d-dfe0-4cc2-bbc8-857cac934af0): DB_HOST/DB_PORT/DB_NAME/DB_USER/
+# DB_PASSWORD (dbuser_ente/entedb on pg-proxmox, see pigsty/pigsty.yml),
+# ENTE_S3_ACCESS_KEY/ENTE_S3_SECRET (duplicated from the root Infisical
+# project after ansible/playbooks/garage-configure.yml provisions the
+# ente-photos bucket), JWT_SECRET, KEY_ENCRYPTION, KEY_HASH (random,
+# agent-generated), SMTP_HOST/SMTP_PORT/SMTP_USERNAME/SMTP_PASSWORD/
+# SMTP_EMAIL (user-supplied). universal-auth-credentials must be granted
+# access to ente-uovi in the Infisical UI first.
+extraManifests:
+  - |
+    apiVersion: secrets.infisical.com/v1alpha1
+    kind: InfisicalSecret
+    metadata:
+      name: ente-museum-config
+      namespace: {{ .Release.Namespace }}
+    spec:
+      hostAPI: http://platform-infisical-backend.infisical.svc.cluster.local:8080/api
+      resyncInterval: 60
+      authentication:
+        universalAuth:
+          secretsScope:
+            projectSlug: "ente-uovi"
+            envSlug: dev
+            secretsPath: "/"
+          credentialsRef:
+            secretName: universal-auth-credentials
+            secretNamespace: infisical
+      managedSecretReference:
+        secretName: ente-museum-config
+        secretNamespace: {{ .Release.Namespace }}
+        creationPolicy: Orphan
+        template:
+          data:
+            museum.yaml: |
+              db:
+                host: "{{ "{{" }} .DB_HOST.Value {{ "}}" }}"
+                port: {{ "{{" }} .DB_PORT.Value {{ "}}" }}
+                name: "{{ "{{" }} .DB_NAME.Value {{ "}}" }}"
+                user: "{{ "{{" }} .DB_USER.Value {{ "}}" }}"
+                password: "{{ "{{" }} .DB_PASSWORD.Value {{ "}}" }}"
+                sslmode: disable
+
+              s3:
+                are_local_buckets: false
+                use_path_style_urls: true
+                b2-eu-cen:
+                  endpoint: "https://s3.bnei.dev"
+                  region: "garage"
+                  bucket: "ente-photos"
+                  key: "{{ "{{" }} .ENTE_S3_ACCESS_KEY.Value {{ "}}" }}"
+                  secret: "{{ "{{" }} .ENTE_S3_SECRET.Value {{ "}}" }}"
+
+              jwt:
+                secret: "{{ "{{" }} .JWT_SECRET.Value {{ "}}" }}"
+
+              key:
+                encryption: "{{ "{{" }} .KEY_ENCRYPTION.Value {{ "}}" }}"
+                hash: "{{ "{{" }} .KEY_HASH.Value {{ "}}" }}"
+
+              smtp:
+                host: "{{ "{{" }} .SMTP_HOST.Value {{ "}}" }}"
+                port: {{ "{{" }} .SMTP_PORT.Value {{ "}}" }}
+                username: "{{ "{{" }} .SMTP_USERNAME.Value {{ "}}" }}"
+                password: "{{ "{{" }} .SMTP_PASSWORD.Value {{ "}}" }}"
+                email: "{{ "{{" }} .SMTP_EMAIL.Value {{ "}}" }}"
