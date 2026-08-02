@@ -1,9 +1,18 @@
 # Bridges Traefik-in-cluster to Garage's S3 API, which runs off-cluster on
 # the garage-storage LXC (192.168.1.199:3900, LAN-only —
-# ansible/playbooks/garage-configure.yml). A headless Service with a
-# manually-managed Endpoints object is the standard way to point a k8s
-# Service at an IP that isn't a pod; Endpoints auto-mirrors to an
-# EndpointSlice, so only one object is needed.
+# ansible/playbooks/garage-configure.yml).
+#
+# ExternalName, not a headless ClusterIP + hand-authored Endpoints — that
+# was tried first and silently never worked: argocd-cm excludes both
+# Endpoints and EndpointSlice cluster-wide (standard resource.exclusions
+# tuning, to cut watch/UI churn from the control-plane-managed ones), so a
+# hand-authored Endpoints object is dropped on every sync, leaving Traefik
+# with "no available server" for every request — confirmed live (zero
+# Endpoints/EndpointSlice existed despite this manifest defining one).
+# Same failure mode already documented in gitops/redirectors/proxmox.yaml,
+# which uses ExternalName for exactly this reason. Traefik's
+# kubernetesCRD provider resolves spec.externalName directly, no
+# Endpoints needed either way.
 #
 # Auth: Garage's own S3 SigV4 signing (per-bucket, per-key via `garage
 # bucket allow`) is the only access control here — there's no
@@ -14,10 +23,6 @@
 # tls.certResolver: le (not a cert-manager Certificate) is this repo's
 # standard TLS pattern — see gitops/bootstrap/grafana-ingressroute.yaml —
 # and requests its own per-hostname cert via HTTP-01 on first request.
-#
-# s3.bnei.dev has no DNS record yet — bnei.dev is manual per-host A
-# records at Squarespace (no wildcard), so that record has to be added
-# by hand before this route is reachable from outside the LAN.
 apiVersion: v1
 kind: Namespace
 metadata:
@@ -29,26 +34,12 @@ metadata:
   name: garage-s3
   namespace: garage
 spec:
-  type: ClusterIP
+  type: ExternalName
+  externalName: "192.168.1.199"
   ports:
     - port: 3900
-      targetPort: 3900
       protocol: TCP
       name: s3
-  # No selector — Endpoints below is managed by hand, not by a pod selector.
----
-apiVersion: v1
-kind: Endpoints
-metadata:
-  name: garage-s3
-  namespace: garage
-subsets:
-  - addresses:
-      - ip: "192.168.1.199"
-    ports:
-      - port: 3900
-        name: s3
-        protocol: TCP
 ---
 apiVersion: traefik.io/v1alpha1
 kind: IngressRoute
