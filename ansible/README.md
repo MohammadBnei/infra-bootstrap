@@ -192,6 +192,17 @@ ansible-playbook -i ansible/inventories/garage/hosts.yml \
   ansible/playbooks/garage-configure.yml --tags bucket_ops
 ```
 
+**CORS** (optional per bucket, `garage_buckets[].cors`) — needed for any
+bucket a browser uploads to *directly* via a presigned URL (Ente's
+`ente-photos`, for example): the browser enforces CORS on that
+cross-origin request regardless of whether the presigned URL itself is
+valid, and museum/the app server is never involved so it never sees the
+failure. Applied via Garage's admin API (`127.0.0.1:3903`, called from
+`garage-storage` itself — never exposed remotely) using `admin_token`,
+since a bucket's own read+write key deliberately can't do `--owner`-level
+operations like this. Also covered by `--tags bucket_ops`, same command as
+above.
+
 ## `playbooks/nfs-configure.yml`
 
 Formats and exports NFS on the bare `nfs-storage` VM `terraform/nfs.tf`
