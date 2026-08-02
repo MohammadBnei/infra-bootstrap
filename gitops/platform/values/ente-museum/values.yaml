@@ -46,6 +46,15 @@ env:
   - name: ENTE_CREDENTIALS_FILE
     value: /credentials.yaml
 
+# Same ente-uovi secrets as the mounted museum.yaml below, but flat as env
+# vars too (envFrom) — the chart's built-in mechanism, a second
+# InfisicalSecret alongside the hand-authored one that renders the file.
+infisical:
+  enabled: true
+  projectSlug: "ente-uovi"
+  envSlug: dev
+  secretsPath: "/"
+
 livenessProbe:
   enabled: true
   type: http

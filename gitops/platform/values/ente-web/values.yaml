@@ -1,8 +1,13 @@
 # ente-web — Ente's Photos web app (public image, no app-specific code).
 # v1 scope is Photos only; Albums/Auth/Cast apps in the same image are
 # deferred (add NEXT_PUBLIC_ENTE_ALBUMS_ENDPOINT / a second ingress
-# hostname later if wanted). Stateless — no persistence, no Infisical
-# secrets, just needs museum's public API origin.
+# hostname later if wanted). Stateless — no persistence, but does pull
+# ENTE_API_ORIGIN from the ente-uovi Infisical project (envFrom) —
+# ENTE_API_ORIGIN there is the single source of truth for museum's public
+# origin, shared with ente-museum. Note: envFrom pulls every secret in the
+# project (DB/JWT/SMTP creds included, unused here) — same project as
+# museum's since Infisical's secretsPath is flat ("/") with no per-app
+# scoping, not this app being scoped down.
 
 image:
   # NOT ghcr.io/ente-io/web — see ente-museum/values.yaml's comment, same
@@ -24,20 +29,26 @@ resources:
     cpu: 500m
     memory: 256Mi
 
+# NOT NEXT_PUBLIC_ENTE_ENDPOINT — that only matters at *build* time for
+# this image (web/Dockerfile bakes it in as the literal string
+# "ENTE_API_ORIGIN_PLACEHOLDER"). What actually matters at container
+# startup is ENTE_API_ORIGIN: an nginx docker-entrypoint.d script
+# (90-replace-ente-env.sh) sed-replaces that placeholder in every built JS
+# file with this env var's value — now sourced from Infisical (below)
+# rather than hardcoded here. Left unset, it defaults to the image's own
+# ENV ENTE_API_ORIGIN=http://localhost:8080 — confirmed live: a fresh
+# browser with no locally-stored "custom server" override got stuck
+# pointed at localhost.
 env:
-  # NOT NEXT_PUBLIC_ENTE_ENDPOINT — that only matters at *build* time for
-  # this image (web/Dockerfile bakes it in as the literal string
-  # "ENTE_API_ORIGIN_PLACEHOLDER"). What actually matters at container
-  # startup is ENTE_API_ORIGIN: an nginx docker-entrypoint.d script
-  # (90-replace-ente-env.sh) sed-replaces that placeholder in every built
-  # JS file with this env var's value. Left unset, it defaults to the
-  # image's own ENV ENTE_API_ORIGIN=http://localhost:8080 — confirmed
-  # live: a fresh browser with no locally-stored "custom server" override
-  # got stuck pointed at localhost.
-  - name: ENTE_API_ORIGIN
-    value: "https://ente-api.bnei.dev"
   - name: NODE_ENV
     value: "production"
+
+infisical:
+  enabled: true
+  projectSlug: "ente-uovi"
+  envSlug: dev
+  secretsPath: "/"
+  autoReload: true
 
 livenessProbe:
   enabled: true
