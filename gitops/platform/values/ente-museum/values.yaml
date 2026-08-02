@@ -32,7 +32,7 @@ service:
   port: 8080
 
 ingress:
-  hostname: ente-api.bnei.dev
+  hostname: api.ente.bnei.dev
 
 resources:
   requests:
@@ -165,8 +165,12 @@ extraManifests:
                 # admins: []), which gets ambiguous once a second user
                 # signs up.
                 admins: [1580559962386438]
-                # Left unset deliberately — plain smtp.SendMail auto-upgrades
-                # via STARTTLS when the server advertises it, which is the
-                # right behavior for port 587. Only needed as "tls"/"ssl" if
-                # switching back to an implicit-TLS-only port like 465 (see
-                # git history — that combination caused signup to hang).
+
+              # Base URL museum uses when constructing public share-link
+              # responses (server-side — the web client just displays
+              # whatever URL comes back from the API, no client-side env
+              # var involved). Default is Ente's own hosted
+              # https://albums.ente.com; pointed at our own album app
+              # instead so share links actually work without an account.
+              apps:
+                public-albums: https://album.ente.bnei.dev

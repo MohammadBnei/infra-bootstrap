@@ -1,13 +1,17 @@
 # ente-web — Ente's Photos web app (public image, no app-specific code).
-# v1 scope is Photos only; Albums/Auth/Cast apps in the same image are
-# deferred (add NEXT_PUBLIC_ENTE_ALBUMS_ENDPOINT / a second ingress
-# hostname later if wanted). Stateless — no persistence, but does pull
-# ENTE_API_ORIGIN from the ente-uovi Infisical project (envFrom) —
-# ENTE_API_ORIGIN there is the single source of truth for museum's public
-# origin, shared with ente-museum. Note: envFrom pulls every secret in the
-# project (DB/JWT/SMTP creds included, unused here) — same project as
-# museum's since Infisical's secretsPath is flat ("/") with no per-app
-# scoping, not this app being scoped down.
+# Auth/Cast apps in the same image are still deferred. The public Albums
+# app IS wired up (below) — needed for public album sharing/collaboration
+# without an account — reusing these same pods rather than a second
+# release: the image's nginx config already listens on a fixed port per
+# sub-app (3000 photos, 3002 albums, ...), so a second Service+IngressRoute
+# pointed at port 3002 on the same pods is all that's needed, no new
+# Deployment. Stateless — no persistence, but does pull ENTE_API_ORIGIN
+# from the ente-uovi Infisical project (envFrom) — ENTE_API_ORIGIN there
+# is the single source of truth for museum's public origin, shared with
+# ente-museum. Note: envFrom pulls every secret in the project (DB/JWT/SMTP
+# creds included, unused here) — same project as museum's since
+# Infisical's secretsPath is flat ("/") with no per-app scoping, not this
+# app being scoped down.
 
 image:
   # NOT ghcr.io/ente-io/web — see ente-museum/values.yaml's comment, same
@@ -59,3 +63,43 @@ livenessProbe:
   periodSeconds: 30
   timeoutSeconds: 5
   failureThreshold: 3
+
+# Second Service+IngressRoute for the same pods' albums sub-app (port
+# 3002) — common-app-chart's own Service only exposes one port
+# (service.port, 3000), so this is a raw second Service reusing the
+# chart's exact selector labels (app.kubernetes.io/name/instance:
+# ente-web) rather than a second release/Deployment.
+extraManifests:
+  - |
+    apiVersion: v1
+    kind: Service
+    metadata:
+      name: ente-web-albums
+      namespace: {{ .Release.Namespace }}
+    spec:
+      type: ClusterIP
+      selector:
+        app.kubernetes.io/name: {{ .Release.Name }}
+        app.kubernetes.io/instance: {{ .Release.Name }}
+      ports:
+        - port: 3002
+          targetPort: 3002
+          protocol: TCP
+          name: albums
+  - |
+    apiVersion: traefik.io/v1alpha1
+    kind: IngressRoute
+    metadata:
+      name: ente-web-albums
+      namespace: {{ .Release.Namespace }}
+    spec:
+      entryPoints:
+        - websecure
+      routes:
+        - kind: Rule
+          match: Host(`album.ente.bnei.dev`)
+          services:
+            - name: ente-web-albums
+              port: 3002
+      tls:
+        certResolver: le

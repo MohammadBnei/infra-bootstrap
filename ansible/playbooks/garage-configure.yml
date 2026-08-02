@@ -100,13 +100,23 @@
             AllowedHeader: ["*"]
             ExposeHeader: ["ETag"]
             MaxAgeSeconds: 3000
+          # Public Albums app — separate origin, same reasoning as the
+          # main ente.bnei.dev rule (direct, non-redirected fetches from
+          # that page).
+          - AllowedOrigin: ["https://album.ente.bnei.dev"]
+            AllowedMethod: ["GET", "PUT", "POST", "HEAD"]
+            AllowedHeader: ["*"]
+            ExposeHeader: ["ETag"]
+            MaxAgeSeconds: 3000
           # "null" (the literal string), not a mistake: museum's
-          # /files/preview redirect crosses from ente-api.bnei.dev to
+          # /files/preview redirect crosses from api.ente.bnei.dev to
           # s3.bnei.dev — a THIRD distinct origin from the page
-          # (ente.bnei.dev). Per the Fetch spec, a CORS-mode request
-          # redirected across origins gets its Origin header scrubbed to
-          # the literal string "null" (an anti-leak measure). Confirmed
-          # live via CDP network capture — without this rule Garage omits
+          # (ente.bnei.dev or album.ente.bnei.dev). Per the Fetch spec, a
+          # CORS-mode request redirected across origins gets its Origin
+          # header scrubbed to the literal string "null" (an anti-leak
+          # measure) — this one rule covers redirected requests from
+          # either page origin, not just one. Confirmed live via CDP
+          # network capture — without this rule Garage omits
           # Access-Control-Allow-Origin for exactly that redirected
           # request, browser reports corsError: 'MissingAllowOriginHeader',
           # even though the underlying HTTP request/response succeeds fine
