@@ -25,7 +25,16 @@ resources:
     memory: 256Mi
 
 env:
-  - name: NEXT_PUBLIC_ENTE_ENDPOINT
+  # NOT NEXT_PUBLIC_ENTE_ENDPOINT — that only matters at *build* time for
+  # this image (web/Dockerfile bakes it in as the literal string
+  # "ENTE_API_ORIGIN_PLACEHOLDER"). What actually matters at container
+  # startup is ENTE_API_ORIGIN: an nginx docker-entrypoint.d script
+  # (90-replace-ente-env.sh) sed-replaces that placeholder in every built
+  # JS file with this env var's value. Left unset, it defaults to the
+  # image's own ENV ENTE_API_ORIGIN=http://localhost:8080 — confirmed
+  # live: a fresh browser with no locally-stored "custom server" override
+  # got stuck pointed at localhost.
+  - name: ENTE_API_ORIGIN
     value: "https://ente-api.bnei.dev"
   - name: NODE_ENV
     value: "production"
