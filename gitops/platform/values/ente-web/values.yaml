@@ -5,7 +5,9 @@
 # secrets, just needs museum's public API origin.
 
 image:
-  repository: ghcr.io/ente-io/web
+  # NOT ghcr.io/ente-io/web — see ente-museum/values.yaml's comment, same
+  # ghcr.io/ente/* namespace correction.
+  repository: ghcr.io/ente/web
   tag: "latest"
 
 service:

@@ -39,6 +39,18 @@
 # a live re-run) generates a brand-new rpc_secret and brand-new S3 keys and
 # overwrites Infisical with them — correct behavior, but any prior bucket
 # data is gone with the old container.
+#
+# ADDING A BUCKET WITHOUT TOUCHING INSTALL/SERVICE STATE
+# `--tags bucket_ops` runs only the "read existing garage.toml -> buckets ->
+# keys -> write to Infisical" tail — no binary download/checksum, no
+# garage.toml rewrite, no systemd restart, no cluster-layout assignment.
+# Requires Garage to already be installed and configured (an existing
+# garage.toml) — the tag deliberately skips the "generate a fresh
+# rpc_secret" branch, so it fails loudly instead of silently reconfiguring
+# a live cluster if that assumption is ever wrong. GARAGE_VERSION/
+# GARAGE_SHA256 aren't needed for a bucket_ops-only run.
+#   ansible-playbook -i ansible/inventories/garage/hosts.yml \
+#     ansible/playbooks/garage-configure.yml --tags bucket_ops
 - name: Install and configure Garage on garage-storage
   hosts: garage-storage
   gather_facts: false
@@ -103,11 +115,13 @@
       register: infisical_check
       changed_when: false
       failed_when: false
+      tags: [bucket_ops]
 
     - name: Fail if Infisical session isn't authenticated
       ansible.builtin.assert:
         that: infisical_check.rc == 0
         fail_msg: "Infisical CLI not authenticated in this shell — run `source ~/.hermes/cache/inf-env.sh` first"
+      tags: [bucket_ops]
 
     # -------------------------------------------------------------------
     # 1. Install the Garage binary
@@ -135,6 +149,7 @@
       ansible.builtin.stat:
         path: /etc/garage.toml # Garage's own default config path — NOT /etc/garage/garage.toml
       register: garage_toml_stat
+      tags: [bucket_ops]
 
     - name: Read existing garage.toml (if already configured)
       ansible.builtin.slurp:
@@ -142,6 +157,7 @@
       register: garage_toml_existing
       when: garage_toml_stat.stat.exists
       no_log: true
+      tags: [bucket_ops]
 
     # Two mutually-exclusive `when`-gated tasks, not a single ternary
     # expression — combining regex_search with a Jinja `if/else` ternary
@@ -155,7 +171,14 @@
         garage_admin_token: "{{ (garage_toml_existing.content | b64decode | regex_search('admin_token = \"([0-9a-f]+)\"', '\\1')) | first }}"
       when: garage_toml_stat.stat.exists
       no_log: true
+      tags: [bucket_ops]
 
+    # bucket_ops assumes Garage is already installed and configured (there's
+    # always a garage.toml by then) — this branch only exists for the
+    # full/install run, deliberately left untagged so a bucket_ops-only run
+    # fails loudly (undefined garage_rpc_secret) instead of silently
+    # regenerating rpc_secret against a live cluster if that assumption ever
+    # breaks.
     - name: Generate new rpc_secret/admin_token (config doesn't exist yet)
       ansible.builtin.set_fact:
         garage_rpc_secret: "{{ lookup('pipe', 'openssl rand -hex 32') }}"
@@ -289,6 +312,7 @@
       ansible.builtin.command: /usr/local/bin/garage bucket list
       register: garage_bucket_list
       changed_when: false
+      tags: [bucket_ops]
 
     - name: Create buckets
       ansible.builtin.command: /usr/local/bin/garage bucket create {{ item.name }}
@@ -296,6 +320,7 @@
       loop_control:
         label: "{{ item.name }}"
       when: item.name not in garage_bucket_list.stdout
+      tags: [bucket_ops]
 
     # -------------------------------------------------------------------
     # 7. Keys — idempotent creation, unconditional (idempotent) grant
@@ -304,6 +329,7 @@
       ansible.builtin.command: /usr/local/bin/garage key list
       register: garage_key_list
       changed_when: false
+      tags: [bucket_ops]
 
     - name: Create keys
       ansible.builtin.command: /usr/local/bin/garage key create {{ item.key_name }}
@@ -311,6 +337,7 @@
       loop_control:
         label: "{{ item.key_name }}"
       when: item.key_name not in garage_key_list.stdout
+      tags: [bucket_ops]
 
     - name: Grant each key read+write on exactly its own bucket
       ansible.builtin.command: >
@@ -320,6 +347,7 @@
       loop_control:
         label: "{{ item.name }} <- {{ item.key_name }}"
       changed_when: false # re-granting identical perms is a no-op in garage itself
+      tags: [bucket_ops]
 
     - name: Read key ID/secret for each bucket's key
       ansible.builtin.command: /usr/local/bin/garage key info {{ item.key_name }} --show-secret
@@ -329,6 +357,7 @@
       register: garage_key_info
       changed_when: false
       no_log: true
+      tags: [bucket_ops]
 
     # -------------------------------------------------------------------
     # 8. Write everything to Infisical (upsert — safe to re-run)
@@ -347,6 +376,7 @@
           - --type=shared
           - GARAGE_ROOT_TOKEN={{ garage_rpc_secret }}
       changed_when: true
+      tags: [bucket_ops]
 
     - name: Write per-bucket S3 access key/secret to Infisical
       delegate_to: localhost
@@ -370,6 +400,7 @@
       loop_control:
         label: "{{ item.0.infisical_prefix }}"
       changed_when: true
+      tags: [bucket_ops]
 
     # -------------------------------------------------------------------
     # Done
@@ -391,3 +422,4 @@
           - "https://s3.bnei.dev (gitops/bootstrap/garage-s3.yaml, ADR-0030)."
           - "To add a new bucket+key, add an entry to garage_buckets above"
           - "and re-run this playbook — see the garage-ops skill."
+      tags: [bucket_ops]
