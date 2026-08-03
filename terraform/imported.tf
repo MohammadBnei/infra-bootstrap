@@ -94,7 +94,14 @@ resource "proxmox_virtual_environment_vm" "pg01" {
   }
 
   memory {
-    dedicated = 2048
+    # Bumped 2048 -> 4096 live 2026-08-02: 2G wasn't enough for
+    # postgres+patroni+etcd+grafana+victoria-metrics all on pg01 —
+    # confirmed via journalctl -k -b -1 repeated OOM kills of
+    # grafana-server (13:44-14:05 UTC) while postgres/etcd were the
+    # oom-killer invoker (not the victim, thanks to oom_score_adj=-1000,
+    # but still under memory pressure). Declared here so the next
+    # `terraform apply` doesn't silently shrink it back to 2048.
+    dedicated = 4096
   }
 
   disk {
