@@ -144,7 +144,7 @@ searxng · pgweb · ente-museum · ente-web
 
 Unlike the two ApplicationSets above, both the chart (`common-app-chart`) and the values file live in `infra-bootstrap` itself — a single Application source, no external repo or SSH key needed. Add one: append a list element + `gitops/platform/values/<name>/values.yaml`.
 
-**`apps.applicationset.yaml`** — user apps that need their own private repo (app-specific code/CI, own release cadence), all at wave 10. Currently: `editable-blog`, `dream-analyst`, `vos-monolith`, `vos-monolith-dev`, `agent-fleet-bot` (see `gitops/apps/registry.yaml`). n8n, openweb-ui(+pipelines), whodb, api, and ukubi-ai are still deferred until each has a real per-app repo (see `docs/bootstrap-test-notes.md`).
+**`apps.applicationset.yaml`** — user apps that need their own private repo (app-specific code/CI, own release cadence), all at wave 10. Currently: `editable-blog`, `dream-analyst`, `vos-monolith`, `vos-monolith-dev`, `agent-fleet-core` (see `gitops/apps/registry.yaml`). n8n, openweb-ui(+pipelines), whodb, api, and ukubi-ai are still deferred until each has a real per-app repo (see `docs/bootstrap-test-notes.md`).
 
 The three `agent-fleet-*` apps moved here from `platform-common-apps` 2026-07-31: their image is built from the `agent-fleet` repo, and that repo's own CI (`docker.yml`) needs to bump the pinned `image.tag` in its `k8s/*.yaml` on every release — the platform-common pattern's infra-bootstrap-only single source can't support a self-contained CI tag bump, so they need the same two-source shape as any other user app, even though they serve no HTTP (`hostname: ""`, no ingress rendered). See `agent-fleet/README.md`.
 
