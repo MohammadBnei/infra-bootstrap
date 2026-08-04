@@ -53,37 +53,27 @@ spec:
 
       # agent-fleet: moved here from platform-common-apps 2026-07-31 — see
       # gitops/apps/registry.yaml's comment for why (self-contained CI tag
-      # bump needs a real per-app repo source). Workload is fleet-core now
-      # (replaces the old agent-fleet-bot Node app — see agent-fleet's
-      # docs/adr/0013) but the Application NAME is deliberately kept as
+      # bump needs a real per-app repo source). Workload is core now
+      # (renamed from fleet-core — see agent-fleet's docs/adr/0013/0019/
+      # 0020/0021) but the Application NAME is deliberately kept as
       # agent-fleet-bot — see registry.yaml's comment on why a rename here
-      # would risk cascade-deleting agent-fleet-shared-pvc.
+      # is unnecessary churn for a values-file-only change. Per
+      # docs/adr/0019/0020/0021, this is now the ONLY agent-fleet
+      # Application here — worker pods are spawned dynamically by the
+      # standalone `platform-provisioner` Application instead of deployed
+      # as their own persistent per-repo Applications (the old
+      # dream-analyst-worker/vos-monolith-worker entries and the PVC they
+      # shared with this one are gone).
       - name: agent-fleet-bot
         namespace: agent-fleet
         syncWave: "10"
         repoURL: https://github.com/MohammadBnei/agent-fleet.git
-        valuesPath: [k8s/fleet-core.yaml]
+        valuesPath: [k8s/core.yaml]
         targetRevision: main
-        # fleet-core now also serves the agent-fleet web dashboard — see
+        # core also serves the agent-fleet web dashboard — see
         # gitops/apps/registry.yaml's matching entry for why this hostname
-        # (not k8s/fleet-core.yaml) is the source of truth.
+        # (not k8s/core.yaml) is the source of truth.
         hostname: fleet.bnei.dev
-
-      - name: dream-analyst-worker
-        namespace: agent-fleet
-        syncWave: "10"
-        repoURL: https://github.com/MohammadBnei/agent-fleet.git
-        valuesPath: [k8s/dream-analyst-worker.yaml]
-        targetRevision: main
-        hostname: ""
-
-      - name: vos-monolith-worker
-        namespace: agent-fleet
-        syncWave: "10"
-        repoURL: https://github.com/MohammadBnei/agent-fleet.git
-        valuesPath: [k8s/vos-monolith-worker.yaml]
-        targetRevision: main
-        hostname: ""
 
   template:
     metadata:

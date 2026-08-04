@@ -1,12 +1,22 @@
-# Standalone Application for agent-fleet's e2e-provisioner (docs/adr/0012 in
-# that repo) — plain manifests, not common-app-chart (RBAC/ServiceAccount
-# binding isn't something that chart supports). Same pattern as
+# Standalone Application for agent-fleet's provisioner (renamed from
+# e2e-provisioner, docs/adr/0012/0019/0020/0021 in that repo) — plain
+# manifests, not common-app-chart (RBAC/ServiceAccount binding isn't
+# something that chart supports). Same pattern as
 # actions-runner-application.yaml/traefik-application.yaml for things that
 # don't fit the registry/common-app-chart mold.
+#
+# Manifests moved OUT of this repo and into agent-fleet's own k8s/provisioner/
+# as of docs/adr/0019/0020/0021 — that project's deploy surface grew complex
+# enough (new shared PVC, worker-pod spawning, sidecar image) to warrant
+# owning it directly rather than splitting across two repos. Only
+# source.repoURL/path changed here; this Application object's shape and the
+# reasoning for keeping it a standalone plain-manifest Application (RBAC)
+# are unchanged — see agent-fleet's k8s/provisioner/README.md for what's in
+# that directory now.
 apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:
-  name: platform-e2e-provisioner
+  name: platform-provisioner
   namespace: argocd
   labels:
     gitops.bnei.dev/tier: platform
@@ -17,9 +27,9 @@ metadata:
 spec:
   project: default
   source:
-    repoURL: git@github.com:MohammadBnei/infra-bootstrap.git
+    repoURL: https://github.com/MohammadBnei/agent-fleet.git
     targetRevision: main
-    path: gitops/platform/e2e-provisioner
+    path: k8s/provisioner
   destination:
     server: https://kubernetes.default.svc
     namespace: agent-fleet
