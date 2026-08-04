@@ -42,7 +42,7 @@ spec:
         valuesPath: gitops/platform/values/infisical/values.yaml
 
       # wave 1 — Provides the InfisicalSecret CRD (secrets.infisical.com/v1alpha1)
-      # that argocd-github-apps-creds.yaml and grafana-admin-secret.yaml (both
+      # that grafana-admin-secret.yaml and alertmanager-discord-secret.yaml (both
       # in gitops/bootstrap/) already assume exists. Same wave as the Infisical
       # server above — ArgoCD doesn't strictly order same-wave siblings, but
       # each Application's own retry/selfHeal converges regardless (see

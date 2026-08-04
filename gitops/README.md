@@ -27,6 +27,11 @@ gitops/
 │   ├── longhorn-backup-secret.yaml        # InfisicalSecret → Longhorn's Garage S3 backup-target credentials
 │   ├── argocd-redis-secret.yaml            # InfisicalSecret → shared Pigsty Redis password, for argocd-application.yaml's externalRedis
 │   ├── longhorn-daily-snapshot-recurringjob.yaml  # Longhorn RecurringJob CR, daily snapshot schedule
+│   ├── node-drainer-rbac.yaml              # ServiceAccount+ClusterRole+ClusterRoleBinding for .165's self-drain automation (ansible/playbooks/self-drain-configure.yml) — least-privilege, cordon/evict/read-daemonsets only
+│   ├── grafana-ingressroute.yaml           # Traefik IngressRoute → grafana.bnei.dev
+│   ├── alertmanager-ingressroute.yaml      # Traefik IngressRoute → alertmanager.bnei.dev, gated by basic-admin-auth
+│   ├── alertmanager-discord-secret.yaml    # InfisicalSecret → Discord webhook Alertmanager posts to
+│   ├── e2e-provisioner-application.yaml    # Standalone Application: agent-fleet's e2e-provisioner (plain manifests, own RBAC) — see agent-fleet docs/adr/0012
 │   ├── platform.applicationset.yaml       # ApplicationSet for remaining platform apps (not traefik)
 │   ├── platform-common-apps.applicationset.yaml  # ApplicationSet for common-app-chart-based platform tools (public image, no app-specific code)
 │   └── apps.applicationset.yaml           # ApplicationSet for user apps with their own private repo
@@ -40,7 +45,15 @@ gitops/
 │   │       ├── ingressroute.yaml         # Traefik IngressRoute (no Gateway API, no Ingress), optional middlewares
 │   │       ├── pvc.yaml
 │   │       ├── infisicalsecret.yaml      # Optional Infisical-backed secret, auto-wired into envFrom
+│   │       ├── hooks.yaml                # ArgoCD PreSync/PostSync Jobs (ADR-0023)
+│   │       ├── oneoff-cronjobs.yaml      # Suspended CronJobs for one-time scripts (ADR-0022/0023)
+│   │       ├── grafana-alertrules.yaml   # Optional log alert ConfigMap, gated by logAlerts.enabled
+│   │       ├── grafana-dashboards.yaml   # Optional dashboard ConfigMap, gated by dashboards.enabled
+│   │       ├── limitrange.yaml
+│   │       ├── poddisruptionbudget.yaml
 │   │       └── extra-manifests.yaml      # Raw extra objects (ConfigMaps, Middlewares, ...) via values.extraManifests
+│   ├── actions-runner/                    # Standalone Application's manifests: self-hosted GitHub Actions runner (ADR-0022)
+│   ├── e2e-provisioner/                   # Standalone Application's manifests: agent-fleet's e2e-provisioner (see agent-fleet docs/adr/0012)
 │   └── values/                            # Helm values for platform apps (including platform-common-apps)
 │       ├── traefik/values.yaml
 │       ├── infisical/values.yaml
@@ -53,9 +66,12 @@ gitops/
 │       ├── metrics-server/values.yaml
 │       ├── local-path-provisioner/values.yaml
 │       ├── searxng/values.yaml            # common-app-chart values, driven by platform-common-apps.applicationset.yaml
-│       └── pgweb/values.yaml              # ditto
+│       ├── pgweb/values.yaml              # ditto
+│       ├── ente-museum/values.yaml        # ditto
+│       └── ente-web/values.yaml           # ditto
 ├── redirectors/                           # Plain manifests, no chart — TLS-terminating redirects to out-of-cluster hosts
-│   └── proxmox.yaml                       # Namespace+Service(ExternalName)+ServersTransport+IngressRoute → proxmox.bnei.dev (192.168.1.165:8006)
+│   ├── proxmox.yaml                       # Namespace+Service(ExternalName)+ServersTransport+IngressRoute → proxmox.bnei.dev (192.168.1.165:8006)
+│   └── garage-s3.yaml                     # Namespace+Service(ExternalName)+IngressRoute → s3.bnei.dev (Garage S3 API, 192.168.1.199:3900) — ADR-0030
 └── apps/
     └── registry.yaml                      # Human source of truth for user apps (apps needing their own repo)
 ```
@@ -125,7 +141,7 @@ Each platform app: public Helm chart + values from `infra-bootstrap` via the man
 
 **`platform-common-apps.applicationset.yaml`** — simple containerized tools with no app-specific code (public image, no CI/CD of their own), all at wave 10:
 
-searxng · pgweb
+searxng · pgweb · ente-museum · ente-web
 
 Unlike the two ApplicationSets above, both the chart (`common-app-chart`) and the values file live in `infra-bootstrap` itself — a single Application source, no external repo or SSH key needed. Add one: append a list element + `gitops/platform/values/<name>/values.yaml`.
 
@@ -142,6 +158,10 @@ Image updates are handled by each app's own CD pipeline — ArgoCD just syncs wh
 Deliberately `ExternalName`, not `ClusterIP` + hand-authored `Endpoints`/`EndpointSlice`: `argocd-cm`'s `resource.exclusions` excludes both `Endpoints` and `EndpointSlice` cluster-wide (standard tuning to cut watch/UI churn from the control-plane-managed ones), so ArgoCD silently drops them from any manifest it applies — Traefik ends up with a Service but zero backends ("no available server"). `ExternalName` sidesteps this entirely: no Endpoints/EndpointSlice exist for that Service type, and Traefik's `kubernetesCRD` provider resolves `spec.externalName` directly, IP literals included.
 
 This requires `providers.kubernetesCRD.allowExternalNameServices: true` in `gitops/platform/values/traefik/values.yaml` — off by default in Traefik itself (an SSRF guardrail), so without it every redirector's IngressRoute fails with `externalName services not allowed` and clients get a 404 (no router gets built at all).
+
+Currently: `proxmox.yaml` (proxmox.bnei.dev) and `garage-s3.yaml` (s3.bnei.dev, [ADR-0030](../docs/adr/0030-expose-garage-s3-externally.md)).
+
+**`e2e-provisioner-application.yaml`** (wave 10) is also standalone, same shape as `actions-runner-application.yaml`: plain manifests in `gitops/platform/e2e-provisioner/` (own scoped `Role`/`RoleBinding`, `NetworkPolicy`, provisioner `Deployment`), deploying agent-fleet's e2e task-preview provisioner into the existing `agent-fleet` namespace. See `gitops/platform/e2e-provisioner/README.md` and agent-fleet's `docs/adr/0012` for the design.
 
 ### common-app-chart
 

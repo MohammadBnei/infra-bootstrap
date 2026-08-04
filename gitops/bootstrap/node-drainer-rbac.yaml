@@ -1,0 +1,69 @@
+# Scoped credential for k8s-cp-01/k8s-worker-01's self-drain automation
+# (ansible/playbooks/self-drain-configure.yml + the shared cloud-init
+# snippet, terraform/cloud-init.tf). Both VMs are hosted on .165, which
+# dual-boots into Windows for gaming — each node drains *itself* before
+# its own graceful shutdown, so a planned .165 reboot doesn't leave
+# Longhorn volumes stuck Multi-Attach on a node Kubernetes can't confirm is
+# gone (confirmed live 2026-07-30: Grafana got stuck exactly this way
+# during an ungraceful .165 outage test — see docs/bootstrap-test-notes.md).
+#
+# Originally built as a single credential on .165 itself (the PVE host)
+# draining both nodes from outside — abandoned after two real test
+# failures: (1) ordering .165's drain unit against Proxmox's own
+# pve-guests.service turned out backwards (systemd stops in the *reverse*
+# of start order, so Before= made it run *after* the guests were already
+# gone), and (2) it's simpler and more robust to have each node drain
+# itself using Proxmox's existing ACPI-shutdown-with-timeout (`qmshutdown`,
+# confirmed 180s per VM) as the natural trigger, instead of fighting host-
+# level unit ordering neither of us fully controls.
+#
+# Deliberately NOT cluster-admin, even though k8s-cp-01 already has
+# /etc/kubernetes/admin.conf sitting there — smaller blast radius if this
+# token ever leaks, and one consistent identity across both nodes rather
+# than "CP uses full admin, worker uses scoped" (k8s-worker-01 has no
+# admin.conf at all, so it'd need a new credential regardless). Scoped to
+# only what `kubectl drain` actually needs: cordon a node, evict its pods,
+# read PDBs, and recognize DaemonSet-owned pods well enough to skip them
+# (`daemonsets: get/list` — missing in the first version, confirmed live
+# 2026-07-30: every drain attempt failed "cannot get resource daemonsets").
+# No secret material here; the actual bearer token is minted live via
+# `kubectl create token` and never committed (see the playbook).
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: node-drainer
+  namespace: kube-system
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: node-drainer
+rules:
+  - apiGroups: [""]
+    resources: ["nodes"]
+    verbs: ["get", "list", "patch", "update"]
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["get", "list"]
+  - apiGroups: [""]
+    resources: ["pods/eviction"]
+    verbs: ["create"]
+  - apiGroups: ["policy"]
+    resources: ["poddisruptionbudgets"]
+    verbs: ["get", "list"]
+  - apiGroups: ["apps"]
+    resources: ["daemonsets"]
+    verbs: ["get", "list"] # `kubectl drain --ignore-daemonsets` needs read access just to recognize and skip DaemonSet-owned pods — confirmed missing live 2026-07-30, every node failed with "cannot get resource daemonsets... forbidden"
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: node-drainer
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: node-drainer
+subjects:
+  - kind: ServiceAccount
+    name: node-drainer
+    namespace: kube-system
