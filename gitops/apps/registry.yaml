@@ -84,59 +84,42 @@
   targetRevision: dev
   hostname: dev.api.voconsteroid.com
 
-# agent-fleet: Go fleet-core (Discord ingress + planning-transcript
-# coordination + Loki queries, replaces the old agent-fleet-bot Node app —
-# see agent-fleet's docs/adr/0013) + one persistent worker pod per target
-# repo (dream-analyst, vos-monolith). Moved here from platform-common-apps
-# 2026-07-31 — unlike searxng/pgweb, this repo's own CI needs to bump the
-# pinned image tag on every release (k8s/*.yaml), so it needs a real
-# per-app repo source, not the platform pattern's infra-bootstrap-only
-# single source. Same namespace on all three so the shared fleet-wide PVC
-# (owned by this app, see its values.yaml) can be mounted by every app via
-# extraVolumes. No hostname/ingress — none of the three serve HTTP.
+# agent-fleet: Go core (Discord ingress + planning-transcript coordination +
+# Loki queries + the web dashboard's ConnectRPC API/static SPA + core's own
+# gRPC server + the task dispatch loop — see agent-fleet's docs/adr/0013,
+# 0014, 0015). Per agent-fleet's docs/adr/0019/0020/0021, this is now the
+# ONLY agent-fleet Application driven from this registry — worker pods are
+# spawned dynamically by the standalone `provisioner` Application
+# (gitops/bootstrap/provisioner-application.yaml, now sourced from
+# agent-fleet's own k8s/provisioner/ instead of a directory in this repo)
+# rather than deployed as their own persistent per-repo Applications; the
+# old dream-analyst-worker/vos-monolith-worker entries and the shared
+# agent-fleet-shared-pvc they mounted are gone, replaced by the
+# provisioner-owned agent-fleet-workspace PVC. Moved here from
+# platform-common-apps 2026-07-31 — unlike searxng/pgweb, this repo's own
+# CI needs to bump the pinned image tag on every release (k8s/*.yaml), so
+# it needs a real per-app repo source, not the platform pattern's
+# infra-bootstrap-only single source.
 #
-# Application NAME deliberately kept as `agent-fleet-bot`, not renamed to
-# `fleet-core`, even though the workload is fleet-core now — only
-# valuesPath changed. A name change makes the ApplicationSet's list
-# generator see this as delete-old/create-new instead of an in-place sync;
-# every generated Application here carries a cascade-delete finalizer
-# (resources-finalizer.argocd.argoproj.io) plus prune:true, so a rename
-# would delete agent-fleet-shared-pvc (still mounted by both worker pods —
-# same stuck-Terminating risk hit during the RWO->RWX PVC migration, plus
-# possible real data loss depending on the StorageClass reclaim policy)
-# before the "new" Application could recreate it. Repointing valuesPath
-# only, same Application identity, is a normal in-place sync — no
-# delete/recreate, the identical PVC extraManifest just no-ops.
+# Application NAME deliberately kept as `agent-fleet-bot` (not renamed to
+# `core`) even though the workload is core now — only valuesPath changed.
+# A name change makes the ApplicationSet's list generator see this as
+# delete-old/create-new instead of an in-place sync, which would cascade-
+# delete this Application's resources (resources-finalizer.argocd.argoproj.io
+# + prune:true) before a "new" one could recreate them — unnecessary churn
+# for a values-file-only change.
 - name: agent-fleet-bot
   namespace: agent-fleet
   syncWave: "10"
   repoURL: https://github.com/MohammadBnei/agent-fleet.git
-  valuesPath: [k8s/fleet-core.yaml]
+  valuesPath: [k8s/core.yaml]
   targetRevision: main
-  # fleet-core now also serves the agent-fleet web dashboard (REST/SSE +
-  # static SPA) — see agent-fleet's docs/adr/0014. This is the first
-  # hostname/ingress any of the three agent-fleet apps has ever needed;
-  # k8s/fleet-core.yaml's own ingress.middlewares (basic-admin-auth) pairs
-  # with this hostname since the ApplicationSet template's Helm
-  # `parameters` override for ingress.hostname always wins over a
-  # values-file setting of the same key.
+  # core also serves the agent-fleet web dashboard (ConnectRPC + static
+  # SPA) — see agent-fleet's docs/adr/0014/0015. k8s/core.yaml's own
+  # ingress.middlewares (basic-admin-auth) pairs with this hostname since
+  # the ApplicationSet template's Helm `parameters` override for
+  # ingress.hostname always wins over a values-file setting of the same key.
   hostname: fleet.bnei.dev
-
-- name: dream-analyst-worker
-  namespace: agent-fleet
-  syncWave: "10"
-  repoURL: https://github.com/MohammadBnei/agent-fleet.git
-  valuesPath: [k8s/dream-analyst-worker.yaml]
-  targetRevision: main
-  hostname: ""
-
-- name: vos-monolith-worker
-  namespace: agent-fleet
-  syncWave: "10"
-  repoURL: https://github.com/MohammadBnei/agent-fleet.git
-  valuesPath: [k8s/vos-monolith-worker.yaml]
-  targetRevision: main
-  hostname: ""
 
 # searxng and pgweb are NOT here: they're public-image tools with no
 # app-specific code, so they're driven as platform apps instead — see

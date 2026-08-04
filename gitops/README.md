@@ -31,7 +31,7 @@ gitops/
 │   ├── grafana-ingressroute.yaml           # Traefik IngressRoute → grafana.bnei.dev
 │   ├── alertmanager-ingressroute.yaml      # Traefik IngressRoute → alertmanager.bnei.dev, gated by basic-admin-auth
 │   ├── alertmanager-discord-secret.yaml    # InfisicalSecret → Discord webhook Alertmanager posts to
-│   ├── e2e-provisioner-application.yaml    # Standalone Application: agent-fleet's e2e-provisioner (plain manifests, own RBAC) — see agent-fleet docs/adr/0012
+│   ├── provisioner-application.yaml        # Standalone Application: agent-fleet's provisioner (plain manifests, own RBAC, sourced from agent-fleet's own k8s/provisioner/) — see agent-fleet docs/adr/0012/0019/0020/0021
 │   ├── platform.applicationset.yaml       # ApplicationSet for remaining platform apps (not traefik)
 │   ├── platform-common-apps.applicationset.yaml  # ApplicationSet for common-app-chart-based platform tools (public image, no app-specific code)
 │   └── apps.applicationset.yaml           # ApplicationSet for user apps with their own private repo
@@ -53,7 +53,6 @@ gitops/
 │   │       ├── poddisruptionbudget.yaml
 │   │       └── extra-manifests.yaml      # Raw extra objects (ConfigMaps, Middlewares, ...) via values.extraManifests
 │   ├── actions-runner/                    # Standalone Application's manifests: self-hosted GitHub Actions runner (ADR-0022)
-│   ├── e2e-provisioner/                   # Standalone Application's manifests: agent-fleet's e2e-provisioner (see agent-fleet docs/adr/0012)
 │   └── values/                            # Helm values for platform apps (including platform-common-apps)
 │       ├── traefik/values.yaml
 │       ├── infisical/values.yaml
@@ -145,7 +144,7 @@ searxng · pgweb · ente-museum · ente-web
 
 Unlike the two ApplicationSets above, both the chart (`common-app-chart`) and the values file live in `infra-bootstrap` itself — a single Application source, no external repo or SSH key needed. Add one: append a list element + `gitops/platform/values/<name>/values.yaml`.
 
-**`apps.applicationset.yaml`** — user apps that need their own private repo (app-specific code/CI, own release cadence), all at wave 10. Currently: `editable-blog`, `dream-analyst`, `vos-monolith`, `vos-monolith-dev`, `agent-fleet-bot`, `dream-analyst-worker`, `vos-monolith-worker` (see `gitops/apps/registry.yaml`). n8n, openweb-ui(+pipelines), whodb, api, and ukubi-ai are still deferred until each has a real per-app repo (see `docs/bootstrap-test-notes.md`).
+**`apps.applicationset.yaml`** — user apps that need their own private repo (app-specific code/CI, own release cadence), all at wave 10. Currently: `editable-blog`, `dream-analyst`, `vos-monolith`, `vos-monolith-dev`, `agent-fleet-bot` (see `gitops/apps/registry.yaml`). n8n, openweb-ui(+pipelines), whodb, api, and ukubi-ai are still deferred until each has a real per-app repo (see `docs/bootstrap-test-notes.md`).
 
 The three `agent-fleet-*` apps moved here from `platform-common-apps` 2026-07-31: their image is built from the `agent-fleet` repo, and that repo's own CI (`docker.yml`) needs to bump the pinned `image.tag` in its `k8s/*.yaml` on every release — the platform-common pattern's infra-bootstrap-only single source can't support a self-contained CI tag bump, so they need the same two-source shape as any other user app, even though they serve no HTTP (`hostname: ""`, no ingress rendered). See `agent-fleet/README.md`.
 
@@ -161,7 +160,7 @@ This requires `providers.kubernetesCRD.allowExternalNameServices: true` in `gito
 
 Currently: `proxmox.yaml` (proxmox.bnei.dev) and `garage-s3.yaml` (s3.bnei.dev, [ADR-0030](../docs/adr/0030-expose-garage-s3-externally.md)).
 
-**`e2e-provisioner-application.yaml`** (wave 10) is also standalone, same shape as `actions-runner-application.yaml`: plain manifests in `gitops/platform/e2e-provisioner/` (own scoped `Role`/`RoleBinding`, `NetworkPolicy`, provisioner `Deployment`), deploying agent-fleet's e2e task-preview provisioner into the existing `agent-fleet` namespace. See `gitops/platform/e2e-provisioner/README.md` and agent-fleet's `docs/adr/0012` for the design.
+**`provisioner-application.yaml`** (wave 10) is also standalone, same shape as `actions-runner-application.yaml`, but its manifests live OUT-OF-REPO as of agent-fleet's `docs/adr/0019`/`0020`/`0021`: this Application's `source` points at agent-fleet's own `k8s/provisioner/` (own scoped `Role`/`RoleBinding`, `NetworkPolicy`, `Deployment`, shared workspace PVC) instead of a directory here, deploying agent-fleet's provisioner (task-worker-pod spawning + e2e task-preview) into the existing `agent-fleet` namespace. See agent-fleet's `k8s/provisioner/README.md` and `docs/adr/0012`/`0019`/`0020`/`0021` for the design.
 
 ### common-app-chart
 
