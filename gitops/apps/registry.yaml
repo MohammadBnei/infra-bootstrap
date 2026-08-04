@@ -112,7 +112,14 @@
   repoURL: https://github.com/MohammadBnei/agent-fleet.git
   valuesPath: [k8s/fleet-core.yaml]
   targetRevision: main
-  hostname: ""
+  # fleet-core now also serves the agent-fleet web dashboard (REST/SSE +
+  # static SPA) — see agent-fleet's docs/adr/0014. This is the first
+  # hostname/ingress any of the three agent-fleet apps has ever needed;
+  # k8s/fleet-core.yaml's own ingress.middlewares (basic-admin-auth) pairs
+  # with this hostname since the ApplicationSet template's Helm
+  # `parameters` override for ingress.hostname always wins over a
+  # values-file setting of the same key.
+  hostname: fleet.bnei.dev
 
 - name: dream-analyst-worker
   namespace: agent-fleet
