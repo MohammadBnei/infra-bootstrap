@@ -55,16 +55,23 @@ spec:
       # gitops/apps/registry.yaml's comment for why (self-contained CI tag
       # bump needs a real per-app repo source). Workload is core now
       # (renamed from fleet-core — see agent-fleet's docs/adr/0013/0019/
-      # 0020/0021) but the Application NAME is deliberately kept as
-      # agent-fleet-bot — see registry.yaml's comment on why a rename here
-      # is unnecessary churn for a values-file-only change. Per
-      # docs/adr/0019/0020/0021, this is now the ONLY agent-fleet
-      # Application here — worker pods are spawned dynamically by the
-      # standalone `platform-provisioner` Application instead of deployed
-      # as their own persistent per-repo Applications (the old
-      # dream-analyst-worker/vos-monolith-worker entries and the PVC they
-      # shared with this one are gone).
-      - name: agent-fleet-bot
+      # 0020/0021). Per docs/adr/0019/0020/0021, this is now the ONLY
+      # agent-fleet Application here — worker pods are spawned dynamically
+      # by the standalone `platform-provisioner` Application instead of
+      # deployed as their own persistent per-repo Applications (the old
+      # dream-analyst-worker/vos-monolith-worker entries are gone).
+      #
+      # Application NAME renamed agent-fleet-bot -> agent-fleet-core to
+      # match the workload — previously kept as agent-fleet-bot because a
+      # rename would cascade-delete agent-fleet-shared-pvc (cascade-delete
+      # finalizer + prune:true on every generated Application) before a
+      # "new" Application could recreate it. That PVC is gone as of
+      # docs/adr/0019 (repo clones/worktrees/skills moved to the
+      # provisioner-owned agent-fleet-workspace PVC instead) — nothing
+      # stateful is attached to this Application anymore, so the rename is
+      # just a one-time resource recreate (Deployment/Service/Ingress),
+      # not a data-loss risk.
+      - name: agent-fleet-core
         namespace: agent-fleet
         syncWave: "10"
         repoURL: https://github.com/MohammadBnei/agent-fleet.git

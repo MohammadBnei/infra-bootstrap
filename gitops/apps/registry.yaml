@@ -101,14 +101,16 @@
 # it needs a real per-app repo source, not the platform pattern's
 # infra-bootstrap-only single source.
 #
-# Application NAME deliberately kept as `agent-fleet-bot` (not renamed to
-# `core`) even though the workload is core now — only valuesPath changed.
-# A name change makes the ApplicationSet's list generator see this as
-# delete-old/create-new instead of an in-place sync, which would cascade-
-# delete this Application's resources (resources-finalizer.argocd.argoproj.io
-# + prune:true) before a "new" one could recreate them — unnecessary churn
-# for a values-file-only change.
-- name: agent-fleet-bot
+# Application NAME renamed agent-fleet-bot -> agent-fleet-core to match
+# the workload. Previously kept as agent-fleet-bot specifically because a
+# rename would cascade-delete agent-fleet-shared-pvc (the ApplicationSet's
+# list generator treats a name change as delete-old/create-new, and every
+# generated Application carries a cascade-delete finalizer + prune:true)
+# before a "new" Application could recreate it. That PVC is gone as of
+# docs/adr/0019 above — nothing stateful is attached to this Application
+# anymore, so the rename is just a one-time Deployment/Service/Ingress
+# recreate, not a data-loss risk.
+- name: agent-fleet-core
   namespace: agent-fleet
   syncWave: "10"
   repoURL: https://github.com/MohammadBnei/agent-fleet.git
