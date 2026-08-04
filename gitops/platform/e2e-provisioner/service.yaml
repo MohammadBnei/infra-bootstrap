@@ -1,6 +1,8 @@
 # ClusterIP only — reached by the worker pods' Agent SDK sessions at
 # http://e2e-provisioner.agent-fleet.svc.cluster.local:8080/mcp/:taskId,
-# never exposed outside the cluster.
+# and by fleet-core's gRPC client at :9090 (KillE2eSession/
+# GetE2eSessionStatus — see docs/adr/0013 in agent-fleet); never exposed
+# outside the cluster.
 apiVersion: v1
 kind: Service
 metadata:
@@ -13,3 +15,6 @@ spec:
   - name: http
     port: 8080
     targetPort: 8080
+  - name: grpc
+    port: 9090
+    targetPort: 9090
