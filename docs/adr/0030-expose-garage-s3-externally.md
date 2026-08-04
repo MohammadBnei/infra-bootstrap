@@ -31,7 +31,7 @@ le`) is the only cert engine used here (ADR-0001).
 ## Decision
 
 1. **Expose Garage's S3 API at `https://s3.bnei.dev`** via a new
-   `gitops/bootstrap/garage-s3.yaml`: headless `Service` + `Endpoints`
+   `gitops/redirectors/garage-s3.yaml`: headless `Service` + `Endpoints`
    pointing at `192.168.1.199:3900`, plus an `IngressRoute` with
    `tls.certResolver: le` — same pattern as every other app's
    IngressRoute, no `cert-manager`.
