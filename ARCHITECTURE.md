@@ -440,7 +440,7 @@ fate, backup target): [ADR-0019](docs/adr/0019-longhorn-rollout-specifics.md)
 ### Garage (object storage)
 
 LXC on proxmox PVE, NVMe-backed, 200GB allocated, S3-compatible API at
-`s3.bnei.dev` via Traefik (live — `gitops/bootstrap/garage-s3.yaml`,
+`s3.bnei.dev` via Traefik (live — `gitops/redirectors/garage-s3.yaml`,
 [ADR-0030](docs/adr/0030-expose-garage-s3-externally.md); also reachable
 LAN-only at `garage.bnei.lan:3900`). Single node initially, can scale to
 2-3 nodes later. Replaces MinIO (archived Jan 2026).

@@ -20,7 +20,7 @@ API is reachable two ways:
 
 - **LAN, internal consumers** (Longhorn, pgBackRest): `http://garage.bnei.lan:3900`
 - **External, authenticated clients**: `https://s3.bnei.dev` (Traefik →
-  `gitops/bootstrap/garage-s3.yaml`, ADR-0030)
+  `gitops/redirectors/garage-s3.yaml`, ADR-0030)
 
 Both hit the exact same Garage instance and the exact same set of
 buckets — there's no separate "external bucket" concept. Access to any
