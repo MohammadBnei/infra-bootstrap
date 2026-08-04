@@ -83,19 +83,34 @@
   targetRevision: dev
   hostname: dev.api.voconsteroid.com
 
-# agent-fleet: Discord bot + one persistent worker pod per target repo
-# (dream-analyst, vos-monolith). Moved here from platform-common-apps 2026-07-31
-# — unlike searxng/pgweb, this repo's own CI needs to bump the pinned image
-# tag on every release (k8s/*.yaml), so it needs a real per-app repo source,
-# not the platform pattern's infra-bootstrap-only single source. Same
-# namespace on all three so the shared fleet-wide PVC (owned by
-# agent-fleet-bot, see its values.yaml) can be mounted by every app via
+# agent-fleet: Go fleet-core (Discord ingress + planning-transcript
+# coordination + Loki queries, replaces the old agent-fleet-bot Node app —
+# see agent-fleet's docs/adr/0013) + one persistent worker pod per target
+# repo (dream-analyst, vos-monolith). Moved here from platform-common-apps
+# 2026-07-31 — unlike searxng/pgweb, this repo's own CI needs to bump the
+# pinned image tag on every release (k8s/*.yaml), so it needs a real
+# per-app repo source, not the platform pattern's infra-bootstrap-only
+# single source. Same namespace on all three so the shared fleet-wide PVC
+# (owned by this app, see its values.yaml) can be mounted by every app via
 # extraVolumes. No hostname/ingress — none of the three serve HTTP.
+#
+# Application NAME deliberately kept as `agent-fleet-bot`, not renamed to
+# `fleet-core`, even though the workload is fleet-core now — only
+# valuesPath changed. A name change makes the ApplicationSet's list
+# generator see this as delete-old/create-new instead of an in-place sync;
+# every generated Application here carries a cascade-delete finalizer
+# (resources-finalizer.argocd.argoproj.io) plus prune:true, so a rename
+# would delete agent-fleet-shared-pvc (still mounted by both worker pods —
+# same stuck-Terminating risk hit during the RWO->RWX PVC migration, plus
+# possible real data loss depending on the StorageClass reclaim policy)
+# before the "new" Application could recreate it. Repointing valuesPath
+# only, same Application identity, is a normal in-place sync — no
+# delete/recreate, the identical PVC extraManifest just no-ops.
 - name: agent-fleet-bot
   namespace: agent-fleet
   syncWave: "10"
   repoURL: https://github.com/MohammadBnei/agent-fleet.git
-  valuesPath: [k8s/agent-fleet-bot.yaml]
+  valuesPath: [k8s/fleet-core.yaml]
   targetRevision: main
   hostname: ""
 

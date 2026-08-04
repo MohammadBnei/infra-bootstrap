@@ -53,12 +53,16 @@ spec:
 
       # agent-fleet: moved here from platform-common-apps 2026-07-31 — see
       # gitops/apps/registry.yaml's comment for why (self-contained CI tag
-      # bump needs a real per-app repo source).
+      # bump needs a real per-app repo source). Workload is fleet-core now
+      # (replaces the old agent-fleet-bot Node app — see agent-fleet's
+      # docs/adr/0013) but the Application NAME is deliberately kept as
+      # agent-fleet-bot — see registry.yaml's comment on why a rename here
+      # would risk cascade-deleting agent-fleet-shared-pvc.
       - name: agent-fleet-bot
         namespace: agent-fleet
         syncWave: "10"
         repoURL: https://github.com/MohammadBnei/agent-fleet.git
-        valuesPath: [k8s/agent-fleet-bot.yaml]
+        valuesPath: [k8s/fleet-core.yaml]
         targetRevision: main
         hostname: ""
 
