@@ -1,7 +1,7 @@
 # Infrastructure — Actual State
 
 > **Source of truth** for what is currently running.
-> Last updated: 2026-07-30
+> Last updated: 2026-08-04
 > Owner: hermesagent (this AI)
 >
 > **Stale-sections flag (2026-07-28, §2/§3 K8s-nodes part resolved
@@ -14,10 +14,17 @@
 > 2026-07-30 (this pass):** §3's K8s cluster is now the real 3-CP/etcd
 > HA topology, confirmed live via `kubectl get nodes` + kube-vip; §4's
 > Postgres/etcd is now a real 3-node DCS quorum, confirmed live via
-> `etcdctl`/`patronictl` (ADR-0029). **Still not re-verified:** the NFS
-> export in §5 and the HAProxy entry in §7 (both hosted on server1's
-> *old* OS, almost certainly gone too) — treat those as needing a fresh
-> state scan before relying on them.
+> `etcdctl`/`patronictl` (ADR-0029). §5's old `server1` NFS export and
+> §7's old HAProxy entry are both gone (server1's reinstall wiped the
+> host they ran on) — kept below only as a historical record, clearly
+> marked; do not rely on either.
+>
+> **2026-08-04 pass:** refreshed against `gitops/`, ADR-0026 (`nfs-storage`
+> shared template storage), ADR-0030 (Garage S3 external exposure), and
+> the ArgoCD app inventory — this pass is a doc/git-record reconciliation
+> (ADRs, `gitops/`, `docs/bootstrap-test-notes.md`), not a fresh live
+> `kubectl`/`ssh` scan; anything not re-verified live still says so
+> inline.
 
 This document describes the **current, as-is** state of the homelab infrastructure.
 For the target architecture, see [`../ARCHITECTURE.md`](../ARCHITECTURE.md).
@@ -158,7 +165,7 @@ VIP works.
 **CNI:** Cilium, chaining mode, kube-proxy retained (`ipvs`,
 `kube_proxy_strict_arp: true` — ADR-0003)
 **GitOps:** ArgoCD, Pattern C
-**Manifests repo:** github.com/MohammadBnei/k8s-cluster (submodule `k8s-cluster/` + `gitops/`)
+**Manifests repo:** `gitops/` in this repo (`github.com/MohammadBnei/infra-bootstrap`) — every ArgoCD Application/ApplicationSet source in `gitops/bootstrap/` points at `infra-bootstrap` directly. The `k8s-cluster/` submodule is a separate, older repo (still has `cert-manager`/Proxmox-LAN manifests) and is **not** what `ukubi-cluster`'s ArgoCD reads from.
 
 ### Nodes (current — confirmed live 2026-07-30 via `kubectl get nodes`)
 
@@ -186,8 +193,14 @@ deliberate minority voter, so losing it never costs quorum.
 - **Logging:** Loki + Grafana Alloy (see §10)
 - **Networking:** Cilium (chaining) + Hubble, kube-vip (control-plane VIP), CoreDNS forwarding to Pi-hole for `bnei.lan`
 - **Secrets:** Infisical
-- **Storage:** local-path-provisioner (hostPath stopgap; NFS/Longhorn is separate stage-2 work, see §5)
-- **Apps:** see `gitops/apps/registry.yaml` (live source of truth), not duplicated here — changes independently of cluster architecture
+- **Storage:** Longhorn is the default StorageClass (ADR-0002/0019), backed
+  up to Garage S3 (`backupTarget: s3://k8s-longhorn-backup@garage/`,
+  daily `RecurringJob`) — see §5/§6. `local-path-provisioner` stays
+  installed alongside as a non-default fallback, not the primary any more.
+- **Apps:** see `gitops/apps/registry.yaml` (user apps) and
+  `gitops/bootstrap/platform-common-apps.applicationset.yaml` (platform-common
+  apps: searxng, pgweb, ente-museum, ente-web) for the live source of
+  truth, not duplicated here — changes independently of cluster architecture.
 
 ### Known issues
 
@@ -195,6 +208,16 @@ deliberate minority voter, so losing it never costs quorum.
   direct PCI passthrough (no separate GPU-only VM).
 - **CI/CD:** self-hosted GitHub Actions runner in-cluster, RBAC-scoped
   to `vos`/`vos-dev` only (ADR-0022/0023).
+- **`.165` self-drain automation:** `k8s-cp-01`/`k8s-worker-01` (both
+  hosted on `.165`, which dual-boots into Windows for gaming) each run
+  `drain-self.service`/`uncordon-self.service`
+  (`ansible/playbooks/self-drain-configure.yml`) that cordon+evict/uncordon
+  themselves around their own graceful shutdown/boot, using a scoped
+  `node-drainer` ServiceAccount (`gitops/bootstrap/node-drainer-rbac.yaml`
+  — cordon/evict/read-daemonsets only, never cluster-admin). Verified live
+  2026-07-30; not yet re-proven through a full end-to-end `.165` reboot
+  with all three fixes (redesign + RBAC + Proxmox `down_delay`) in place —
+  see `docs/bootstrap-test-notes.md`.
 
 ### Access (current)
 
@@ -317,11 +340,36 @@ Standard set: pg_stat_statements, pg_trgm, pg_repack, postgres_fdw, etc. (17 tot
 
 ## 5. Storage (Current)
 
-### NFS
+### Longhorn (K8s PV storage, current)
 
-*(Not re-verified — server1's host OS was reinstalled to PVE, see
-stale-sections flag at the top of this doc; this NFS export almost
-certainly no longer exists as described.)*
+- **Default StorageClass** on `ukubi-cluster` (ADR-0002 over Ceph/NFS,
+  rollout specifics in ADR-0019) — every PVC without an explicit
+  `storageClassName` (Traefik's `acme.json`, `common-app-chart` app PVCs)
+  binds here.
+- **Backup target:** Garage S3 (`s3://k8s-longhorn-backup@garage/`, see
+  §6), credentials via `gitops/bootstrap/longhorn-backup-secret.yaml`,
+  daily snapshot via `gitops/bootstrap/longhorn-daily-snapshot-recurringjob.yaml`.
+- `local-path-provisioner` remains installed as a non-default fallback,
+  not the primary.
+
+### nfs-storage (Proxmox shared template storage, current — ADR-0026)
+
+- **VM** on server1 (`192.168.1.198`, `nfs-storage.bnei.lan`), built via
+  `terraform/nfs.tf` + `ansible/playbooks/nfs-configure.yml` — exports
+  `shared-templates`, a PVE storage backend reachable identically from
+  every PVE host, so Terraform's Proxmox provider can direct-clone the
+  golden VM template (VMID 9001) cross-host instead of falling back to a
+  clone-then-`qm migrate --with-local-disks` copy over the LAN.
+- **Not mounted by K8s at all** — purely a Proxmox-level cross-host clone
+  fix (used live to clone `k8s-worker-02` onto server1, see
+  `docs/bootstrap-test-notes.md` 2026-07-28), unrelated to the dead K8s-PV
+  NFS export below.
+
+### NFS — K8s PV export (dead, historical record only)
+
+*Confirmed gone: this ran on server1's pre-reinstall OS, wiped when
+server1 was reinstalled to PVE (ADR-0024). Superseded by Longhorn above
+for K8s PVs — do not resurrect.*
 
 - **Server:** server1 (192.168.1.200)
 - **Export:** `/home/mohammad/.local/share/k8s-nfs` → `192.168.1.200/24`
@@ -331,6 +379,8 @@ certainly no longer exists as described.)*
 ### Ceph (dead)
 
 - **OSD present** on server1 HDD (`/dev/ceph-dfb021ce.../osd-block-...`)
+  — pre-reinstall state, not re-verified since, likely gone with the rest
+  of that OS install.
 - **No active cluster** — no monitors, no mgr, no OSDs daemon running
 - **Leftover** from previous attempt
 - **Reclaimable** — HDD can be wiped and repurposed
@@ -339,20 +389,28 @@ certainly no longer exists as described.)*
 
 - `local` (directory): `/var/lib/vz`
 - `local-lvm` (LVM-thin): for VM disks on proxmox PVE
+- `shared-templates` (NFS via `nfs-storage`): cross-host template cloning
+  only, see above
 
 ---
 
 ## 6. Object Storage
 
 - **Garage v2.3.0** — LXC `garage-storage` (VMID 301, 192.168.1.199),
-  single-node layout, S3 API on port 3900 (LAN-only, no Traefik ingress
-  yet), admin API on 3903 (localhost-only)
-- Buckets: `k8s-longhorn-backup` (Longhorn snapshot target, ADR-0019),
-  `pg-backup` (pgBackRest target, provisional name — not yet wired into
-  pigsty's `pgbackrest_repo` config)
+  single-node layout, S3 API on port 3900 (LAN-only from Garage's own
+  bind), admin API on 3903 (localhost-only)
+- **Externally exposed since 2026-08-02** at `s3.bnei.dev` via a Traefik
+  redirector (`gitops/redirectors/garage-s3.yaml`, `ExternalName` Service
+  + IngressRoute, `tls.certResolver: le`) — ADR-0030. Auth is Garage's own
+  S3 SigV4 signing only, no anonymous read; the admin API (3903) is
+  deliberately not part of this exposure.
+- Buckets: `k8s-longhorn-backup` (Longhorn snapshot target, ADR-0019, see
+  §5), `pg-backup` (pgBackRest target, provisional name — not yet wired
+  into pigsty's `pgbackrest_repo` config)
 - Provisioned entirely via `terraform/garage.tf` (bare LXC) +
-  `ansible/playbooks/garage-configure.yml` (install/config/secrets) — no
-  manual CLI step, replaces the old MinIO deployment (archived Jan 2026)
+  `ansible/playbooks/garage-configure.yml` (install/config/secrets,
+  config-driven bucket/key provisioning) — no manual CLI step, replaces
+  the old MinIO deployment (archived Jan 2026)
 
 ---
 
@@ -379,9 +437,10 @@ certainly no longer exists as described.)*
 
 ### Load Balancer / Reverse Proxy
 
-*(Not re-verified — server1's host OS was reinstalled to PVE, see
-stale-sections flag at the top of this doc; this HAProxy instance almost
-certainly no longer exists as described.)*
+*(Historical record only — confirmed gone: this ran on server1's
+pre-reinstall OS, wiped by the PVE reinstall/ADR-0024. Traefik +
+IngressRoute + MetalLB is the current, only reverse-proxy/LB path — see
+`gitops/README.md`.)*
 
 - **HAProxy on server1** (port 8000, 8443)
   - Fronting the existing K8s services
@@ -396,13 +455,19 @@ certainly no longer exists as described.)*
 
 ## 8. Backup (Current)
 
-- **No structured backup strategy**
-- Postgres: not backed up externally
-- K8s manifests: in git (github.com/MohammadBnei/k8s-cluster)
-- Proxmox config: not backed up
-- /home/mohammad, K8s PVs: not backed up
+- **K8s PVs (Longhorn): backed up** — daily snapshot `RecurringJob` to
+  Garage S3 (`k8s-longhorn-backup` bucket, see §5/§6). The remaining gaps
+  below are still real.
+- **Postgres: not backed up externally** — `pg-backup` bucket exists in
+  Garage (§6) but is not yet wired into pigsty's `pgbackrest_repo` config
+  — still local-only per Pigsty's default.
+- **K8s manifests:** in git (`gitops/` in this repo — see §3's
+  manifests-repo correction; not the `k8s-cluster` submodule)
+- **Proxmox config:** not backed up
+- **`/home/mohammad`:** not backed up
 
-**Critical gap.** Identified in the discovery scan.
+**Partial gap** — K8s PV data now has a real backup path; Postgres and
+host-level config/data still don't.
 
 ---
 
@@ -431,7 +496,8 @@ certainly no longer exists as described.)*
 ### GitHub
 
 - Token in `~/.config/gh/hosts.yml`
-- Access to `MohammadBnei/k8s-cluster` repo
+- Access to `MohammadBnei/infra-bootstrap` (this repo) and
+  `MohammadBnei/k8s-cluster` (legacy)
 
 ---
 
@@ -454,6 +520,13 @@ certainly no longer exists as described.)*
   declare its own Loki-based alert rules, picked up dynamically by
   Grafana's alerts sidecar. A cluster-wide starter alert (log error-rate
   spike) routes to the same Discord contact point Alertmanager uses.
+- **Alertmanager** (part of the `kube-prometheus-stack` release) routes
+  to Discord via a Slack-formatted webhook
+  (`gitops/bootstrap/alertmanager-discord-secret.yaml`, `/slack`-suffixed
+  Discord webhook URL — same trick as the log-alert contact point above),
+  exposed at `alertmanager.bnei.dev`
+  (`gitops/bootstrap/alertmanager-ingressroute.yaml`, gated by the shared
+  `basic-admin-auth` Middleware).
 
 ---
 
@@ -461,9 +534,9 @@ certainly no longer exists as described.)*
 
 1. **ex-laptop k8s-03 LXC** — was destroyed (was a failed LXC K8s attempt, never joined cluster)
 2. ~~**Pi 4** — present in user's network but not yet inventoried~~ — **RESOLVED** (see Pi 4 section above; PG 18 already installed)
-3. **Server1 K8s VM details** — node1 (192.168.1.181) is on server1 but exact VM specs unknown
-4. **Existing apps** — many apps run on ukubi-cluster, need to enumerate before migration
-5. **Backup target** — no off-host backup location
+3. ~~**Server1 K8s VM details** — node1 (192.168.1.181) is on server1 but exact VM specs unknown~~ — **MOOT**: that pre-reinstall libvirt VM no longer exists (server1's full PVE reinstall wiped it, ADR-0024); current server1 K8s VMs are `k8s-cp-02`/`k8s-worker-02`, specs in §3.
+4. ~~**Existing apps** — many apps run on ukubi-cluster, need to enumerate before migration~~ — **RESOLVED**: app inventory now lives in `gitops/apps/registry.yaml` (user apps) + `platform-common-apps.applicationset.yaml` (platform-common apps), see §3.
+5. **Backup target** — off-host K8s-PV backup exists now (Longhorn → Garage S3, §8); Postgres and host-level config/data still have none.
 6. **Freebox features** — has admin access but limited capabilities (Revolution model)
 
 ---
