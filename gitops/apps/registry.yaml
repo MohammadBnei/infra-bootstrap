@@ -7,9 +7,10 @@
 #   name        ArgoCD Application name (lowercase, dashes only)
 #   namespace   Target namespace (created automatically)
 #   syncWave    All user apps at wave 10 (after platform is ready)
-#   repoURL     Per-app private git repo with values.yaml (HTTPS + PAT auth —
-#               see argocd-github-apps-creds.yaml; SSH deploy keys are
-#               deliberately not used here, see that file's comment)
+#   repoURL     Per-app private git repo with values.yaml (HTTPS + PAT auth via
+#               repo-creds-github-bnei, manually injected by
+#               register-repos.yml — SSH deploy keys are deliberately not
+#               used here, see gitops/README.md's credential-chain section)
 #   valuesPath  List of 1 or 2 values file paths inside repoURL, layered in
 #               order (the override wins — Helm deep-merges maps, replaces
 #               lists wholesale). The shared ApplicationSet template has a
