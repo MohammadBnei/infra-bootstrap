@@ -412,7 +412,7 @@ graph LR
         E1 <-.-> E3
     end
     P1 -- pgBackRest, local --> LocalBackup[local disk, each VM]
-    P1 -.->|pgBackRest, off-host target: open, see ADR-0024| Open[no backup target defined yet]
+    P1 -.->|pgBackRest, off-host target: open| Open["pg-backup Garage bucket exists,<br/>not yet wired into pgbackrest_repo — see §7"]
 ```
 
 **Backups:** 7 daily / 4 weekly / 3 monthly, PITR 7 days — see §10 below
@@ -462,10 +462,13 @@ LAN-only at `garage.bnei.lan:3900`). Single node initially, can scale to
 
 ### Backup target
 
-Open — the 149GB HDD on server1 that was slated to replace the dead Ceph
-OSD was physically removed before server1's reinstall
-([ADR-0024](docs/adr/0024-server1-single-disk-ext4-no-dedicated-zfs.md)).
-No backup target is defined until this is revisited.
+Still open, but a candidate now exists: `garage-configure.yml` already
+provisions a `pg-backup` bucket + S3 keys in Garage (§7 above), it's just
+not wired into pigsty's `pgbackrest_repo` config yet. The original plan
+— the 149GB HDD on server1 slated to replace the dead Ceph OSD — was
+physically removed before server1's reinstall
+([ADR-0024](docs/adr/0024-server1-single-disk-ext4-no-dedicated-zfs.md))
+and is dropped in favor of Garage.
 
 ---
 
@@ -592,8 +595,8 @@ Why this shape, in order:
 
 | Data | Method | Target | Frequency | Retention |
 | --- | --- | --- | --- | --- |
-| Postgres (full + WAL) | pgBackRest | local only; off-host target open, see §7/ADR-0024 (server1's HDD was physically removed) | daily + continuous WAL | 7d / 4w / 3m |
-| K8s manifests | Git | `github.com/MohammadBnei/k8s-cluster` | on commit | indefinite |
+| Postgres (full + WAL) | pgBackRest | local only; off-host target open — `pg-backup` Garage bucket provisioned but not yet wired into `pgbackrest_repo`, see §7 | daily + continuous WAL | 7d / 4w / 3m |
+| K8s manifests | Git | `gitops/` in `github.com/MohammadBnei/infra-bootstrap` (this repo — not the legacy `k8s-cluster` submodule) | on commit | indefinite |
 | K8s PVs | Longhorn snapshots (+ Velero if added) | Garage (S3) | daily | 7 daily |
 | Proxmox config | cron + tar | open, see §7/ADR-0024 | daily | 7 daily |
 | Pi-hole config | restic | open, see §7/ADR-0024 | daily | 7 daily |
