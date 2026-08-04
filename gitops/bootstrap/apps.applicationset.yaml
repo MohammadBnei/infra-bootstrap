@@ -64,7 +64,10 @@ spec:
         repoURL: https://github.com/MohammadBnei/agent-fleet.git
         valuesPath: [k8s/fleet-core.yaml]
         targetRevision: main
-        hostname: ""
+        # fleet-core now also serves the agent-fleet web dashboard — see
+        # gitops/apps/registry.yaml's matching entry for why this hostname
+        # (not k8s/fleet-core.yaml) is the source of truth.
+        hostname: fleet.bnei.dev
 
       - name: dream-analyst-worker
         namespace: agent-fleet
