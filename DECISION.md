@@ -128,6 +128,9 @@ Never propose these without an explicit user greenlight, even as a
   sensitive in this repo.** Use Infisical.
 - ❌ **Proxmox API tokens committed to this repo.** Fetch from Infisical
   at run time.
+- ❌ **Kubernetes-native HPA scale-to-zero (alpha, pre-1.37)** — cluster
+  is pinned to 1.35.4, the feature is Alpha in 1.36 with no
+  request-buffering for HTTP-fronted apps — [ADR-0031](docs/adr/0031-defer-hpa-scale-to-zero.md)
 
 ## 4. Known drift vs `inventory/ukubi/` (must be cleaned before next `cluster.yml` run)
 
@@ -167,6 +170,6 @@ them:
 
 ---
 
-_Last refreshed: 2026-07-30._
+_Last refreshed: 2026-08-04._
 _Source of truth: this file (`DECISION.md`) for WHY, `docs/adr/` for
 per-decision reasoning, `ARCHITECTURE.md` for WHAT._

@@ -41,3 +41,4 @@ ADR-000N` (replaced by a later decision).
 | [0028](0028-ex-laptop-no-dedicated-zfs-pool.md) | `ex-laptop` also has no dedicated ZFS pool | Accepted |
 | [0029](0029-postgres-automatic-failover-3-node-etcd-quorum.md) | Postgres automatic failover accepted; 3-node etcd DCS quorum | Accepted |
 | [0030](0030-expose-garage-s3-externally.md) | Expose Garage's S3 API externally at `s3.bnei.dev` | Accepted |
+| [0031](0031-defer-hpa-scale-to-zero.md) | Defer Kubernetes-native HPA scale-to-zero for user apps | Rejected |
