@@ -12,6 +12,12 @@ annotations: {}
 service:
   port: 80
   annotations: {}
+  # Additional Service ports beyond the primary http one above — e.g. a
+  # second listening port (gRPC, metrics) the same Deployment's container
+  # already binds. targetPort defaults to the raw port number, so no
+  # matching named containerPort is required. Each entry: {name, port,
+  # targetPort (optional), protocol (optional, default TCP)}.
+  extraPorts: []
 
 ingress:
   enabled: true
