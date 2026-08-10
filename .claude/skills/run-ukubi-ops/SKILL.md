@@ -57,7 +57,7 @@ tool result.
 # validate a pigsty playbook (run from pigsty/, its own ansible.cfg supplies the inventory)
 .claude/skills/run-ukubi-ops/driver.sh pigsty-check node.yml
 
-# build (never run) the SSH-wrapped kubectl command, classified safe vs mutating
+# build (never run) the ssh-k9s-wrapped kubectl command, classified safe vs mutating
 .claude/skills/run-ukubi-ops/driver.sh kubectl-cmd get nodes -o wide
 .claude/skills/run-ukubi-ops/driver.sh kubectl-cmd rollout restart daemonset/coredns -n kube-system
 
@@ -77,7 +77,7 @@ rm -f /tmp/pi4_key
 | `kubespray-check [-i <inv>] [args]` | Same, against `kubespray/cluster.yml`, via the pinned `kubespray-venv`, with an ansible-core version guard |
 | `pigsty-check <playbook.yml> [args]` | Same, against a vendored `pigsty/*.yml` playbook |
 | `pigsty-list` | List available `pigsty/*.yml` playbooks |
-| `kubectl-cmd <verb...>` | Print (never run) the SSH+kubeconfig-wrapped `kubectl` command, tagged `safe / read-only` or `MUTATING` |
+| `kubectl-cmd <verb...>` | Print (never run) the `ssh k9s kubectl ...` command, tagged `safe / read-only` or `MUTATING` |
 | `infisical-wrap <command...>` | Print `<command>` prefixed with the correct `infisical run --projectId=... --env=dev --` wrapper |
 | `fetch-ssh-key <SECRET_NAME> <dest-file>` | Write a secret straight to a `600` file, never to stdout |
 
@@ -105,10 +105,13 @@ result is the human's command to run themselves, same as today's
   — but `--syntax-check`/`--list-tasks` only work correctly when the CWD is
   `pigsty/`, since that's where `ansible.cfg` lives. `pigsty-check` `cd`s
   there for you.
-- **`inventory/ukubi/hosts.yaml` is the only source for the SSH key path and
-  CP node IP** — `kubectl-cmd` greps it live rather than hardcoding either
-  (both have changed before: 3 control-plane nodes as of 2026-07-30, see
-  `k8s-ops` skill).
+- **`kubectl-cmd` targets the `k9s-dashboard` LXC via the operator's local
+  `k9s` SSH alias** (`~/.ssh/config`, not tracked in this repo) — it
+  carries its own root/cluster-admin kubeconfig
+  (`ansible/playbooks/k9s-dashboard-configure.yml`), so no key path or CP
+  node IP needs to be read from `inventory/ukubi/hosts.yaml` anymore. If
+  the alias ever needs to be re-derived, the underlying host is
+  `ansible/inventories/k9s-dashboard/hosts.yml`.
 - Attempting to actually execute a live `kubectl get` over SSH from an
   unattended agent session (even read-only) was blocked by this harness's
   own permission classifier during authoring — confirming the intended
