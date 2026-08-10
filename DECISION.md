@@ -90,6 +90,13 @@ updated.
   `Job`s) and `oneOffJobs:` (suspended `CronJob`s + a git-committed ledger,
   triggered by a generic reusable workflow) — see
   [ADR-0023](docs/adr/0023-common-app-chart-hooks-and-oneoff-jobs.md).
+- **`thot` (agent-fleet's standing cluster agent) holds a cluster-wide
+  `ClusterRole`** — the broadest standing grant in the cluster after the
+  human operator's own break-glass access, deliberately excluding
+  `rbac.authorization.k8s.io`, `secrets`, and node-mutation verbs. Design
+  decision lives in agent-fleet's own ADR-0035; the concrete RBAC verb
+  table and Alertmanager fan-out routing are this repo's own call — see
+  [ADR-0032](docs/adr/0032-thot-rbac-and-alerting.md).
 - **Centralized logging: Loki (SingleBinary, filesystem storage) + Grafana
   Alloy (DaemonSet)** — over ClickHouse (too heavy for this cluster's log
   volume, no native Grafana integration) and over Promtail (Alloy's OTLP
