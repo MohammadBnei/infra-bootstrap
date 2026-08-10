@@ -4,12 +4,12 @@ description: Operate the live ukubi-cluster (kubectl/helm/ArgoCD) over SSH for t
 user-invocable: true
 allowed-tools:
   - Read
-  - Bash(ssh -i ~/.ssh/id_k8s_vms core@* sudo kubectl --kubeconfig /etc/kubernetes/admin.conf get *)
-  - Bash(ssh -i ~/.ssh/id_k8s_vms core@* sudo kubectl --kubeconfig /etc/kubernetes/admin.conf describe *)
-  - Bash(ssh -i ~/.ssh/id_k8s_vms core@* sudo kubectl --kubeconfig /etc/kubernetes/admin.conf logs *)
-  - Bash(ssh -i ~/.ssh/id_k8s_vms core@* sudo kubectl --kubeconfig /etc/kubernetes/admin.conf annotate application * argocd.argoproj.io/refresh=hard --overwrite)
-  - Bash(ssh -i ~/.ssh/id_k8s_vms core@* sudo kubectl --kubeconfig /etc/kubernetes/admin.conf rollout restart *)
-  - Bash(ssh -i ~/.ssh/id_k8s_vms core@* sudo kubectl --kubeconfig /etc/kubernetes/admin.conf rollout status *)
+  - Bash(ssh k9s kubectl get *)
+  - Bash(ssh k9s kubectl describe *)
+  - Bash(ssh k9s kubectl logs *)
+  - Bash(ssh k9s kubectl annotate application * argocd.argoproj.io/refresh=hard --overwrite)
+  - Bash(ssh k9s kubectl rollout restart *)
+  - Bash(ssh k9s kubectl rollout status *)
   - Bash(helm show values *)
   - Bash(helm pull * --untar *)
   - Bash(git status *)
@@ -30,20 +30,20 @@ incident log this skill is distilled from.
 ## Access pattern
 
 ```bash
-ssh -i ~/.ssh/id_k8s_vms core@<node-ip> "sudo kubectl --kubeconfig /etc/kubernetes/admin.conf <cmd>"
+ssh k9s kubectl <cmd>
 ```
 
-The key path comes from `inventory/ukubi/hosts.yaml`'s
-`ansible_ssh_private_key_file` — read it from there, don't guess a path or
-scan `~/.ssh` for candidates.
+`k9s` is the operator's local SSH alias (`~/.ssh/config`) for the
+`k9s-dashboard` LXC, which carries its own root-owned, cluster-admin
+kubeconfig at the default path — no `-i`/`sudo`/`--kubeconfig` needed. See
+`ansible/playbooks/k9s-dashboard-configure.yml` for how that kubeconfig
+got there and `ansible/inventories/k9s-dashboard/hosts.yml` for the
+underlying host if the alias ever needs to be re-derived.
 
-**3 control-plane nodes as of 2026-07-30** (`k8s-cp-01`/`.201`,
-`k8s-cp-02`/`.204`, `k8s-cp-03`/`.206` — ADR-0017), any of them works as
-the SSH target for the pattern above. There's also now a kube-vip VIP,
-`192.168.1.180`/`k8s.bnei.lan` (ADR-0016) — confirmed live, cert SANs
-include both — but that's an *API server* endpoint (`:6443`, for a real
-kubeconfig/`kubectl` client), not an SSH target; this skill's pattern
-still SSHes to a specific node and runs `kubectl` there.
+There's also a kube-vip VIP, `192.168.1.180`/`k8s.bnei.lan` (ADR-0016) —
+confirmed live, cert SANs include it — that's the *API server* endpoint
+(`:6443`, for a real kubeconfig/`kubectl` client) `k9s-dashboard`'s own
+kubeconfig points at; it's not itself an SSH target.
 
 **Control-plane/etcd/kubelet config that traces back to a kubespray
 inventory var: fix the var + rerun kubespray with narrow `--tags`, don't
@@ -79,12 +79,13 @@ change) — see `docs/bootstrap-test-notes.md`.
 
 **Never materialize `/etc/kubernetes/admin.conf` (or any cluster
 credential) on the local machine.** Every `kubectl`/`helm` call runs
-remotely over SSH. To apply a local manifest, pipe it in rather than
-copying the kubeconfig down:
+remotely over SSH, to `k9s-dashboard` — the one machine that kubeconfig is
+meant to live on (see `ansible/playbooks/k9s-dashboard-configure.yml`).
+To apply a local manifest, pipe it in rather than copying the kubeconfig
+down:
 
 ```bash
-cat gitops/bootstrap/some-manifest.yaml | ssh -i ~/.ssh/id_k8s_vms core@<ip> \
-  "sudo kubectl --kubeconfig /etc/kubernetes/admin.conf apply -f -"
+cat gitops/bootstrap/some-manifest.yaml | ssh k9s kubectl apply -f -
 ```
 
 To render a Secret offline (no live cluster contact) and apply it the same
@@ -215,8 +216,8 @@ Force a re-evaluation of an Application after a live manifest re-apply or a
 values push:
 
 ```bash
-ssh ... "sudo kubectl ... -n argocd annotate application <name> argocd.argoproj.io/refresh=hard --overwrite"
-ssh ... "sudo kubectl ... -n argocd patch application <name> --type merge -p '{\"operation\":{\"sync\":{\"revision\":\"HEAD\"}}}'"
+ssh k9s kubectl -n argocd annotate application <name> argocd.argoproj.io/refresh=hard --overwrite
+ssh k9s kubectl -n argocd patch application <name> --type merge -p '{"operation":{"sync":{"revision":"HEAD"}}}'
 ```
 
 If a ConfigMap change (`argocd-cm`) or an ApplicationSet template edit
@@ -224,8 +225,8 @@ doesn't seem to take effect even after refresh, the controller may be
 caching settings — restart it:
 
 ```bash
-ssh ... "sudo kubectl ... -n argocd rollout restart statefulset/argocd-application-controller"
-ssh ... "sudo kubectl ... -n argocd rollout restart deploy/argocd-applicationset-controller"
+ssh k9s kubectl -n argocd rollout restart statefulset/argocd-application-controller
+ssh k9s kubectl -n argocd rollout restart deploy/argocd-applicationset-controller
 ```
 
 ## ApplicationSet Go-template: non-string fields are typed strictly, before rendering

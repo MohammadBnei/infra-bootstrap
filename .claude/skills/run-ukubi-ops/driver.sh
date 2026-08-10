@@ -27,7 +27,7 @@ Usage: driver.sh <subcommand> [args]
       List pigsty/*.yml playbooks.
 
   kubectl-cmd     <verb...>
-      Build (never run) the SSH+kubeconfig-wrapped kubectl command per k8s-ops's pattern,
+      Build (never run) the `ssh k9s kubectl ...` command per k8s-ops's pattern,
       and classify it safe (read-only) or mutating.
 
   infisical-wrap  <command...>
@@ -107,15 +107,9 @@ cmd_kubectl_cmd() {
   for safe in $SAFE_VERBS; do
     [ "$verb" = "$safe" ] && risk="safe / read-only"
   done
-  local hosts_yaml="$REPO/inventory/ukubi/hosts.yaml"
-  local key_path host
-  key_path="$(grep -m1 'ansible_ssh_private_key_file' "$hosts_yaml" | sed -E 's/.*ansible_ssh_private_key_file:[[:space:]]*"?([^"[:space:]]+)"?.*/\1/')"
-  host="$(grep -m1 -A3 'k8s-cp-01:' "$hosts_yaml" | grep 'ansible_host' | sed -E 's/.*ansible_host:[[:space:]]*"?([^"[:space:]]+)"?.*/\1/')"
-  [ -n "$key_path" ] || key_path='<read ansible_ssh_private_key_file from inventory/ukubi/hosts.yaml>'
-  [ -n "$host" ] || host='<k8s-cp-01 ansible_host from inventory/ukubi/hosts.yaml>'
   echo "RISK: $risk"
-  printf 'ssh -i %s core@%s "sudo kubectl --kubeconfig /etc/kubernetes/admin.conf %s"\n' "$key_path" "$host" "$*"
-  echo "Never materialize admin.conf locally — this command stays SSH-wrapped, always (see k8s-ops skill)."
+  printf 'ssh k9s kubectl %s\n' "$*"
+  echo "Kubeconfig lives only on k9s-dashboard (root's own, cluster-admin) — see ansible/playbooks/k9s-dashboard-configure.yml. Nothing to materialize locally."
 }
 
 cmd_infisical_wrap() {
