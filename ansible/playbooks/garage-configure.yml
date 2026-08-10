@@ -75,6 +75,15 @@
       - name: "pg-backup" # provisional — not fixed anywhere else yet, rename freely once pigsty's pgbackrest_repo config is written
         key_name: "pgbackrest-backup-key"
         infisical_prefix: "PGBACKREST_S3"
+      - name: "agent-fleet-files" # agent-fleet's fleet-wide shared file space — core mints presigned PUT/GET URLs, the dashboard's Files page (fleet.bnei.dev) uploads/downloads directly against Garage (agent-fleet ADR-0031)
+        key_name: "agent-fleet-files-key"
+        infisical_prefix: "AGENTFLEET_FILES_S3"
+        cors:
+          - AllowedOrigin: ["https://fleet.bnei.dev"]
+            AllowedMethod: ["GET", "PUT", "DELETE", "HEAD"]
+            AllowedHeader: ["*"]
+            ExposeHeader: ["ETag"]
+            MaxAgeSeconds: 3000
       - name: "ente-photos" # Ente's primary photo/video object store, reached both internally and via s3.bnei.dev (ADR-0030)
         key_name: "ente-photos-key"
         infisical_prefix: "ENTE_S3"
