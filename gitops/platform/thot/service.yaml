@@ -1,14 +1,14 @@
-# ClusterIP only — reached directly by worker sidecars' gRPC client (Phase
-# 4) and, once wired, Alertmanager's webhook (Phase 6). Never exposed
-# outside the cluster.
+# ClusterIP only — reached by thot session pods (ordinary worker pods in
+# the agent-fleet namespace) running kubectl through the executor. Never
+# exposed outside the cluster.
 apiVersion: v1
 kind: Service
 metadata:
-  name: thot
+  name: thot-executor
   namespace: thot
 spec:
   selector:
-    app: thot
+    app: thot-executor
   ports:
   - name: grpc
     port: 9090
