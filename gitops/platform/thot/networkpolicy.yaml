@@ -1,16 +1,17 @@
-# Ingress scoped to exactly who's allowed to reach thot right now: worker
-# pods (agent-fleet namespace) dialing its gRPC port directly (Phase 4).
-# Widen for the monitoring namespace's Alertmanager webhook in a later
-# phase — not added preemptively.
+# Ingress scoped to the agent-fleet namespace, where thot session pods now
+# live as ordinary worker pods (ADR-0037). This is the boundary that
+# matters most in the fleet: anything that can reach this port runs
+# kubectl with the executor's ClusterRole, so it stays as narrow as the
+# design allows.
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
-  name: thot
+  name: thot-executor
   namespace: thot
 spec:
   podSelector:
     matchLabels:
-      app: thot
+      app: thot-executor
   policyTypes:
   - Ingress
   ingress:

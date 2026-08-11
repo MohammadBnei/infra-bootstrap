@@ -1,4 +1,17 @@
-# thot
+# thot-executor
+
+The one process in the fleet that holds cluster RBAC on behalf of agents.
+
+**As of ADR-0037 this is an *executor*, not the agent itself.** thot
+sessions are now ordinary worker pods in the `agent-fleet` namespace with
+zero Kubernetes credentials; they run kubectl by calling this service over
+gRPC. That is the ADR-0012 pattern — the thing doing the reasoning never
+also holds infra-mutation trust — and it is what let thot collapse into
+the normal task system.
+
+The RBAC here is **unchanged** from ADR-0032: same verbs, same exclusions
+(no `rbac.authorization.k8s.io`, no `secrets`, no node mutation). Only the
+holder changed.
 
 Plain manifests (no Helm chart — cluster-wide `ClusterRole`/`ServiceAccount`
 binding isn't something `common-app-chart` supports), applied as a

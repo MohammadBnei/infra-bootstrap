@@ -1,4 +1,8 @@
-# thot's cluster-wide RBAC — see ADR-0032 for the full rationale. Broader
+# The executor's cluster-wide RBAC — see ADR-0032 for the full rationale.
+# UNCHANGED by ADR-0037's refactor: the same verbs, the same exclusions,
+# still human-reviewed here in git. All that moved is which process holds
+# it — a narrow executor instead of the agent itself, so thot sessions can
+# be ordinary worker pods with zero credentials. Broader
 # than any other standing grant in this cluster except the human operator's
 # own break-glass access, because thot's actual job (diagnose "why did this
 # break" for *any* namespace) genuinely needs cluster-wide read — narrower
@@ -11,7 +15,7 @@
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
-  name: thot
+  name: thot-executor
 rules:
   # Diagnostic read, cluster-wide — the actual "inspect state, answer why
   # did this break" capability.
@@ -61,12 +65,12 @@ rules:
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
 metadata:
-  name: thot
+  name: thot-executor
 roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: ClusterRole
-  name: thot
+  name: thot-executor
 subjects:
   - kind: ServiceAccount
-    name: thot
+    name: thot-executor
     namespace: thot
