@@ -71,7 +71,12 @@ alertmanager:
           # configured, so a missing/mismatched secret fails loudly as a
           # 401/503 in Alertmanager's notification logs rather than
           # silently letting anything in-cluster spawn privileged work.
-          - url: http://core.agent-fleet.svc.cluster.local:8080/webhook/alertmanager
+          # agent-fleet-core, NOT core: common-app-chart prefixes every
+          # Service with its release name, so the bare name never resolved
+          # and every delivery died at DNS. Verified from a pod in this
+          # namespace — the bare name gives no connection at all, this one
+          # answers 200 on /healthz.
+          - url: http://agent-fleet-core.agent-fleet.svc.cluster.local:8080/webhook/alertmanager
             # Resolved alerts need no investigation; core ignores them
             # anyway, so don't spend a delivery on them.
             send_resolved: false
