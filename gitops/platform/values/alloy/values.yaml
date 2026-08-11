@@ -69,6 +69,25 @@ alloy:
           target_label  = "job"
         }
         rule {
+          // agent-fleet stamps agent-fleet.dev/task-id on every worker and
+          // e2e-preview pod it creates. Promoting it to a stream label is what
+          // makes "show me this task's logs" a selector rather than a parse:
+          // {namespace="agent-fleet", task_id="..."}.
+          //
+          // A line-content filter can't do this job. e2e-preview pods emit the
+          // target app's own output — vite, code-server, headless Chromium —
+          // which is not the fleet's JSON, so `| json | taskId=...` drops all
+          // of it. The pod label is the only handle that works for both the
+          // fleet's own services and whatever a preview happens to run.
+          //
+          // Non-agent-fleet pods have no such label, so this resolves empty
+          // and Loki stores nothing — no effect outside that namespace. It
+          // also adds no cardinality beyond the `pod` label already set above:
+          // one task maps to one worker pod.
+          source_labels = ["__meta_kubernetes_pod_label_agent_fleet_dev_task_id"]
+          target_label  = "task_id"
+        }
+        rule {
           // kubelet's fixed on-disk layout for containerd:
           // /var/log/pods/<namespace>_<pod-name>_<pod-uid>/<container>/*.log
           // — the leading "*" globs the "<namespace>_<pod-name>_" prefix so
