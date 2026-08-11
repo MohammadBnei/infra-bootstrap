@@ -1,35 +1,94 @@
-;; bnei.dev — BIND zone file for Cloudflare's "Import DNS records"
+;; bnei.dev — BIND zone file, reconciled against the live Cloudflare zone
+;; on 2026-08-11 after the migration completed (ADR-0033).
 ;;
-;; Generated 2026-08-11 from the live googledomains-hosted zone (ADR-0033).
-;; See docs/runbooks/dns-cloudflare-migration.md for the cutover procedure.
+;; This is now a RECORD OF LIVE STATE, not just an import file. It was
+;; originally written to seed Cloudflare's "Import DNS records"; the zone has
+;; since diverged (mail moved off Mailgun entirely), so it is re-derived from
+;; what is actually published. See docs/runbook-dns-cloudflare-migration.md.
 ;;
-;; SOA and apex NS are deliberately omitted — Cloudflare manages both, and
-;; including them makes the importer complain.
+;; SOA and apex NS are deliberately omitted — Cloudflare manages both.
+;; Authoritative NS are brady.ns.cloudflare.com / sasha.ns.cloudflare.com.
 ;;
-;; The 4 A records below replace 19 flat per-host records. DNS wildcards match
-;; exactly one label (RFC 4592), which is why `*.ente` and `*.e2e` are separate
-;; entries rather than being covered by `*`.
-;;
-;; TTL 300 is the cutover value — raise it once the migration is confirmed.
-;;
-;; !! After importing, set all four A records to DNS-only (grey cloud). !!
+;; !! All A records are DNS-only (grey cloud). !!
 ;; A proxied record terminates TLS at Cloudflare's edge, which breaks Traefik's
 ;; TLS-ALPN-01 renewal for that host — silently, up to 90 days later.
 
 $TTL 300
 
-bnei.dev.                  300  IN  A    82.65.231.50
-*.bnei.dev.                300  IN  A    82.65.231.50
-*.ente.bnei.dev.           300  IN  A    82.65.231.50
-*.e2e.bnei.dev.            300  IN  A    82.65.231.50
+;; ---------------------------------------------------------------------------
+;; Web — 4 records replacing the 19 flat per-host A records of the old zone.
+;;
+;; Three wildcards, not one. The naive reading is "wildcards match exactly one
+;; label", but the real rule (RFC 4592) is about the *closest encloser*: a
+;; wildcard is only skipped when some nearer node exists. `deep.sub.bnei.dev`
+;; does resolve off `*.bnei.dev`, because `sub.bnei.dev` is not a node. But
+;; `ente.bnei.dev` and `e2e.bnei.dev` DO exist as A records, and an existing
+;; node blocks the parent wildcard for everything beneath it — hence the two
+;; extra wildcards. Deleting either A record would change this behaviour.
+;; ---------------------------------------------------------------------------
+bnei.dev.                     300  IN  A      82.65.231.50
+*.bnei.dev.                   300  IN  A      82.65.231.50
+*.ente.bnei.dev.              300  IN  A      82.65.231.50
+*.e2e.bnei.dev.               300  IN  A      82.65.231.50
 
-bnei.dev.                  300  IN  MX   10 mxa.mailgun.org.
-bnei.dev.                  300  IN  MX   10 mxb.mailgun.org.
+;; ---------------------------------------------------------------------------
+;; Inbound mail — Cloudflare Email Routing, catch-all @bnei.dev -> a personal
+;; Gmail account. Replaces the previous Mailgun MX records.
+;;
+;; MX is what makes *forwarding* work at all: a redirect is still a receive,
+;; so some server has to accept the message before relaying it. With no MX,
+;; senders bounce immediately and the forward never runs.
+;;
+;; Squarespace's own email forwarding is NOT in use and cannot be: it only
+;; activates when the domain uses Squarespace nameservers, and this domain has
+;; always been on custom nameservers (googledomains, now Cloudflare).
+;; ---------------------------------------------------------------------------
+bnei.dev.                     300  IN  MX  44 route2.mx.cloudflare.net.
+bnei.dev.                     300  IN  MX  50 route1.mx.cloudflare.net.
+bnei.dev.                     300  IN  MX  70 route3.mx.cloudflare.net.
 
-bnei.dev.                  300  IN  TXT  "v=spf1 include:mailgun.org ~all"
+;; ---------------------------------------------------------------------------
+;; Outbound mail — SMTP2GO. (Mailgun is fully retired; it previously held both
+;; the MX and the SPF include.)
+;;
+;; EXACTLY ONE v=spf1 record is permitted. Two is a permerror, which makes SPF
+;; fail outright — and with p=reject below, that means rejected mail. If
+;; Cloudflare offers to add its own SPF record, edit this one instead.
+;; 2 DNS lookups against a limit of 10; both includes are bare ip4/ip6 lists.
+;; ---------------------------------------------------------------------------
+bnei.dev.                     300  IN  TXT    "v=spf1 include:spf.smtp2go.com include:_spf.mx.cloudflare.net ~all"
 
-;; DKIM. The literal space in the middle of the key is NOT a TXT chunk
-;; boundary — the payload is a single 226-byte character-string, under the
-;; 255-byte limit. RFC 6376 has verifiers ignore whitespace inside `p=`, so it
-;; is harmless, but reproduce it byte-for-byte rather than "cleaning it up".
-smtp._domainkey.bnei.dev.  300  IN  TXT  "k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDnmObaHwGAPisYQLI5IWp4OcjFxQBQ7n2wfS0BRFXhJzhd8uV3J1TPq8v/xU20VC8sVeAC70oL8JB2gV2X4fBg1PXxPH+9FmVZmTYRvEXCrHRujic7I/YMj8dTMGBA0ZTokCLxFR4lZBWvpQdvBosHBKg3 l5orSRvm+peemf1GAQIDAQAB"
+;; aspf=r, not =s, and deliberately: SMTP2GO's Return-Path is the subdomain
+;; em726320.bnei.dev, which can never satisfy STRICT SPF alignment. Under
+;; aspf=s the SPF leg was structurally dead and DMARC rode on DKIM alone.
+;;
+;; rua points at this domain, not directly at the Gmail account: an external
+;; rua destination requires the receiving domain to publish an authorization
+;; record (`bnei.dev._report._dmarc.gmail.com`, RFC 7489 §7.1), which Gmail
+;; does not do — so reports would have been silently refused. Same-domain
+;; needs no authorization, and the catch-all above delivers it to Gmail anyway.
+_dmarc.bnei.dev.              300  IN  TXT    "v=DMARC1; p=reject; sp=reject; adkim=s; aspf=r; rua=mailto:dmarc@bnei.dev"
+
+;; SMTP2GO custom return-path, link tracking, and DKIM. These MUST be explicit
+;; records: `*.bnei.dev` above would otherwise answer em726320/link with an A
+;; record, and SMTP2GO's verifier would report the domain as misconfigured
+;; rather than unconfigured. An explicit record always beats a wildcard.
+em726320.bnei.dev.            300  IN  CNAME  return.smtp2go.net.
+link.bnei.dev.                300  IN  CNAME  track.smtp2go.net.
+s726320._domainkey.bnei.dev.  300  IN  CNAME  dkim.smtp2go.net.
+
+;; ---------------------------------------------------------------------------
+;; Known divergence from live, deliberate: `smtp._domainkey.bnei.dev` is still
+;; published live with Mailgun's old 1024-bit RSA key. It is omitted here
+;; because it should be deleted — it is a valid signing key for a provider no
+;; longer in use. Harmless while it sits there, but it is one compromised
+;; Mailgun account away from being a working spoofing vector.
+;;
+;; A `*._domainkey` wildcard publishing "v=DKIM1; p=" (an explicit revocation
+;; of every unlisted selector) existed briefly and has been removed. It is a
+;; sound anti-spoofing technique ONLY if every selector actually in use is
+;; published explicitly first — while it was live it revoked SMTP2GO's key.
+;;
+;; TTLs are still the 300s cutover value. Raise to 3600+ now that the
+;; migration is confirmed; there is no longer any reason to pay for 300.
+;; ---------------------------------------------------------------------------
