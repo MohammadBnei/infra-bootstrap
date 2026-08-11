@@ -106,17 +106,31 @@ alertmanager:
   # b64encs the raw value).
   #
   # Alertmanager's data model is not Grafana's — no .Values, no .SilenceURL,
-  # so the value and silence link from the Grafana template have no equivalent
-  # here and .GeneratorURL (link back to the Prometheus rule) stands in.
+  # so the value and per-alert silence link from the Grafana template have no
+  # equivalent here.
+  #
+  # NOT .GeneratorURL, which was the first thing tried and shipped a dead link
+  # (confirmed live 2026-08-12): it resolves to the in-cluster
+  # http://platform-prometheus-kube-p-prometheus.monitoring:9090/graph?... —
+  # Prometheus has no IngressRoute (only Grafana and Alertmanager do), so it is
+  # unreachable from Discord by construction, not by misconfiguration. One
+  # .ExternalURL for the whole batch instead; it's https://alertmanager.bnei.dev
+  # via alertmanagerSpec.externalUrl above, which is where you'd go to silence.
+  #
+  # The Remove list is scrape-target metadata that kube-state-metrics and
+  # node-exporter stamp on every alert (which exporter pod observed it), NOT
+  # the subject of the alert — `pod: platform-prometheus-kube-state-metrics-...`
+  # on a longhorn job failure actively misleads. namespace/pod/container of the
+  # actual subject survive, since rules carry those as their own labels.
   templateFiles:
     discord.tmpl: |-
       {{ define "discord.title" }}{{ if eq .Status "firing" }}🔥 FIRING{{ else }}✅ RESOLVED{{ end }} · {{ .CommonLabels.alertname }}{{ end }}
 
       {{ define "discord.message" }}{{ range .Alerts }}**{{ .Annotations.summary }}**
       {{ if .Annotations.description }}{{ .Annotations.description }}
-      {{ end }}{{ range (.Labels.Remove (stringSlice "alertname")).SortedPairs }}{{ .Name }}: {{ .Value }}
-      {{ end }}{{ .GeneratorURL }}
-      {{ end }}{{ end }}
+      {{ end }}{{ range (.Labels.Remove (stringSlice "alertname" "endpoint" "instance" "job" "prometheus" "service" "condition")).SortedPairs }}{{ .Name }}: {{ .Value }}
+      {{ end }}{{ if .Annotations.runbook_url }}runbook: {{ .Annotations.runbook_url }}
+      {{ end }}{{ end }}{{ .ExternalURL }}{{ end }}
 
 # Grafana is deployed as a separate platform app
 grafana:
