@@ -37,17 +37,34 @@ spec:
         envFrom:
         - secretRef:
             name: thot-infisical
+        # Booting the standing Agent SDK session takes a while (it spawns
+        # the claude CLI and does a first model round trip). startupProbe
+        # gives that up to 5 minutes without the liveness probe running at
+        # all — the two never overlap, so a slow boot can't be mistaken for
+        # a wedged process.
+        startupProbe:
+          httpGet:
+            path: /livez
+            port: 8080
+          periodSeconds: 10
+          failureThreshold: 30
+        # Readiness gates traffic on the session actually being able to
+        # answer, so /healthz (503 until ready) is right here.
         readinessProbe:
           httpGet:
             path: /healthz
             port: 8080
           initialDelaySeconds: 5
           periodSeconds: 10
+        # Liveness must NOT use /healthz. Doing so SIGKILLed the pod while
+        # the session was still initialising, so it could never finish —
+        # exit 137, 7 restarts, confirmed live 2026-08-11. /livez answers
+        # 200 whenever the process is serving HTTP, which is what "should I
+        # restart this?" actually means.
         livenessProbe:
           httpGet:
-            path: /healthz
+            path: /livez
             port: 8080
-          initialDelaySeconds: 15
           periodSeconds: 20
         resources:
           requests:
