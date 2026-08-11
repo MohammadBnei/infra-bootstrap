@@ -39,9 +39,11 @@ concrete RBAC/Alertmanager design.
    (namespace `infisical`) access to this project — same step every other
    per-app project needed.
 3. ~~Add `CLAUDE_CODE_OAUTH_TOKEN`~~ — done (subscription OAuth, not a
-   metered API key, same rule `worker/` follows).
-4. Mint a `THOT_AUTH_TOKEN` (any long random string) and add it to BOTH
-   this project and `agent-fleet-nygh` — the sidecar and core need the
+   metered API key, same rule `worker/` follows). Note the project's **dev**
+   environment is the one this deployment reads, matching every other
+   agent-fleet component.
+4. ~~Mint a `THOT_AUTH_TOKEN`~~ — done, present in both this project (`dev`)
+   and `agent-fleet-nygh` (`dev`) — the sidecar and core need the
    same value to reach `ThotService`. Leaving it unset makes that service
    unauthenticated.
 5. Apply this Application once (or let `gitops/bootstrap/`'s self-sync
