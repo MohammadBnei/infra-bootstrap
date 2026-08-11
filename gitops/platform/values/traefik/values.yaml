@@ -79,6 +79,31 @@ persistence:
   size: 128Mi
   path: /data
 
+# Recreate, NOT the chart's default RollingUpdate — mandatory with the RWO
+# PVC above. Found live: any values change here rolled a new pod that sat in
+# ContainerCreating forever with "Multi-Attach error for volume ... Volume is
+# already used by pod(s) ...", because maxSurge:1 starts the replacement
+# before retiring the old pod and the two landed on different nodes. A
+# ReadWriteOnce volume attaches to one node only, so the rollout deadlocks
+# permanently. The old pod keeps serving throughout, so this presents as "my
+# config change silently did nothing", not as an outage — which is exactly
+# why it went unnoticed until the le-dns resolver failed to appear.
+#
+# ADR-0001's "PVC must be RWX, or replicas: 1" is necessary but NOT
+# sufficient: replicas:1 still deadlocks under RollingUpdate, because surge
+# creates a transient second pod. Switching the PVC to RWX would be worse —
+# both pods would briefly mount acme.json, giving ACME two concurrent
+# writers, the exact corruption ADR-0001's PVC rule exists to prevent.
+# Recreate trades a few seconds of ingress downtime per Traefik rollout for
+# cert-store integrity.
+#
+# rollingUpdate must be explicitly nulled: Helm merges the chart's default
+# sub-keys otherwise, and the API rejects a Deployment carrying
+# rollingUpdate alongside type: Recreate.
+updateStrategy:
+  type: Recreate
+  rollingUpdate: null
+
 # chart >=33.0.0 renamed this key from certResolvers and nested config under .acme
 #
 # Using tlsChallenge (TLS-ALPN-01, validated over port 443 only) instead of
