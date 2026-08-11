@@ -60,7 +60,7 @@ updated.
   `*.ente.bnei.dev`, `*.e2e.bnei.dev`, plus the apex. Adding an app hostname
   no longer needs a DNS change. All records stay **DNS-only (grey cloud)** —
   Cloudflare's proxy would terminate TLS at its edge and break Traefik's
-  TLS-ALPN-01 renewal. See [ADR-0032](docs/adr/0032-dns-to-cloudflare-and-dns01-wildcard.md),
+  TLS-ALPN-01 renewal. See [ADR-0033](docs/adr/0033-dns-to-cloudflare-and-dns01-wildcard.md),
   `docs/runbook-dns-cloudflare-migration.md`, and `ARCHITECTURE.md` §3.
   *Supersedes the previous "manual per-host A records at Squarespace DNS, no
   wildcard" — which was itself a correction of an older "Cloudflare" error
@@ -119,7 +119,7 @@ Never propose these without an explicit user greenlight, even as a
 - ❌ **cert-manager** as a secondary cert engine — [ADR-0001](docs/adr/0001-ingress-traefik-ingressroute-over-gateway-api.md). Unchanged and absolute.
 - ⚠️ **DNS-01 as the cert engine for `le`** (the resolver every `*.bnei.dev`
   host renews through) — [ADR-0001](docs/adr/0001-ingress-traefik-ingressroute-over-gateway-api.md).
-  **One carve-out** ([ADR-0032](docs/adr/0032-dns-to-cloudflare-and-dns01-wildcard.md)):
+  **One carve-out** ([ADR-0033](docs/adr/0033-dns-to-cloudflare-and-dns01-wildcard.md)):
   a *second* resolver `le-dns` (Traefik-native lego, Cloudflare provider, no
   plugin) issues the `*.e2e.bnei.dev` wildcard, which TLS-ALPN-01 structurally
   cannot. `le` itself stays TLS-ALPN-01, and this is still not cert-manager.

@@ -1,6 +1,6 @@
 ;; bnei.dev — BIND zone file for Cloudflare's "Import DNS records"
 ;;
-;; Generated 2026-08-11 from the live googledomains-hosted zone (ADR-0032).
+;; Generated 2026-08-11 from the live googledomains-hosted zone (ADR-0033).
 ;; See docs/runbooks/dns-cloudflare-migration.md for the cutover procedure.
 ;;
 ;; SOA and apex NS are deliberately omitted — Cloudflare manages both, and

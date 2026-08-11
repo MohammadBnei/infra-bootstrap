@@ -1,7 +1,7 @@
 # Runbook: migrate the `bnei.dev` DNS zone to Cloudflare
 
 **Status:** not yet run
-**Decision:** [ADR-0032](adr/0032-dns-to-cloudflare-and-dns01-wildcard.md)
+**Decision:** [ADR-0033](adr/0033-dns-to-cloudflare-and-dns01-wildcard.md)
 **Zone file:** [`docs/dns/bnei.dev.zone`](dns/bnei.dev.zone)
 
 Moves `bnei.dev` from its current Google Cloud DNS nameservers to Cloudflare,
@@ -163,7 +163,7 @@ curl -s -H "Authorization: Bearer $CF_ACCOUNT_TOKEN" \
 ```
 
 Prefer a token scoped to the `bnei.dev` zone alone over an account-wide one —
-ADR-0032 already records that a zone-wide token can repoint every production
+ADR-0033 already records that a zone-wide token can repoint every production
 hostname, and an account-wide token is broader still.
 
 `gitops/bootstrap/traefik-cloudflare-secret.yaml` materialises it into the

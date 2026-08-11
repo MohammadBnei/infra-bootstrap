@@ -1,4 +1,4 @@
-# ADR-0032: Move `bnei.dev` DNS to Cloudflare; DNS-01 wildcard for e2e previews
+# ADR-0033: Move `bnei.dev` DNS to Cloudflare; DNS-01 wildcard for e2e previews
 
 **Status:** Accepted
 
