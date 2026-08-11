@@ -13,6 +13,7 @@ alertmanager:
     externalUrl: https://alertmanager.bnei.dev
     secrets:
       - alertmanager-discord-webhook
+      - alertmanager-thot-token
   config:
     route:
       receiver: discord
@@ -20,6 +21,38 @@ alertmanager:
       group_wait: 30s
       group_interval: 5m
       repeat_interval: 4h
+      routes:
+        # Redeclared, NOT decoration: the chart's own Watchdog->null route
+        # only survived here because this file had no `routes:` key at all
+        # and Helm map-merged it in. Declaring routes: as a list replaces
+        # it wholesale (same trap the receivers: comment below describes),
+        # so omitting this sends the Watchdog heartbeat to Discord every
+        # repeat_interval, forever. Verified against the live generated
+        # config before this route was added. Must stay first — a
+        # non-continue match stops evaluation.
+        - receiver: "null"
+          matchers:
+            - alertname = "Watchdog"
+        # A critical alert additionally wakes thot, which investigates it
+        # as a normal fleet task (agent-fleet docs/adr/0037).
+        #
+        # Scoped to severity=critical deliberately: each match spawns a
+        # pod running an agent with cluster read access, so the blast
+        # radius of a noisy warning-level rule should be a Discord ping,
+        # not a fleet of pods. agent-fleet dedups repeat deliveries of the
+        # same alert, which bounds the other direction.
+        - receiver: thot
+          matchers:
+            - severity = "critical"
+          continue: true
+        # The catch-all that makes the route above a fan-out instead of a
+        # diversion. A matching child route does NOT fall through to the
+        # parent's receiver — without this sibling, `route.receiver:
+        # discord` above is dead for anything a child matched, and every
+        # critical alert would reach thot while silently vanishing from
+        # Discord. Confirmed with `amtool config routes test`, which
+        # returned `thot` alone before this was added.
+        - receiver: discord
     receivers:
       # Chart default route.routes silences the Watchdog heartbeat alert by
       # sending it to a receiver literally named "null" — replacing
@@ -32,6 +65,20 @@ alertmanager:
         slack_configs:
           - api_url_file: /etc/alertmanager/secrets/alertmanager-discord-webhook/webhook-url
             send_resolved: true
+      - name: thot
+        webhook_configs:
+          # core refuses this endpoint outright when it has no token
+          # configured, so a missing/mismatched secret fails loudly as a
+          # 401/503 in Alertmanager's notification logs rather than
+          # silently letting anything in-cluster spawn privileged work.
+          - url: http://core.agent-fleet.svc.cluster.local:8080/webhook/alertmanager
+            # Resolved alerts need no investigation; core ignores them
+            # anyway, so don't spend a delivery on them.
+            send_resolved: false
+            http_config:
+              authorization:
+                type: Bearer
+                credentials_file: /etc/alertmanager/secrets/alertmanager-thot-token/token
 
 # Grafana is deployed as a separate platform app
 grafana:
