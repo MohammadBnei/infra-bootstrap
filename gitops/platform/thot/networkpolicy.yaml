@@ -1,0 +1,23 @@
+# Ingress scoped to exactly who's allowed to reach thot right now: worker
+# pods (agent-fleet namespace) dialing its gRPC port directly (Phase 4).
+# Widen for the monitoring namespace's Alertmanager webhook in a later
+# phase — not added preemptively.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: thot
+  namespace: thot
+spec:
+  podSelector:
+    matchLabels:
+      app: thot
+  policyTypes:
+  - Ingress
+  ingress:
+  - from:
+    - namespaceSelector:
+        matchLabels:
+          kubernetes.io/metadata.name: agent-fleet
+    ports:
+    - protocol: TCP
+      port: 9090
