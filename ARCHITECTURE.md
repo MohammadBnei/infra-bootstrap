@@ -226,7 +226,7 @@ graph LR
 per `DECISION.md` §2. Triggered once there were enough real internal
 hostnames (kube-vip's endpoint, the pg/garage/nfs/k9s-dashboard VMs) that
 raw IPs stopped being convenient. `bnei.dev` stays external — Cloudflare,
-wildcard A records (ADR-0032) — unrelated to this.
+wildcard A records (ADR-0033) — unrelated to this.
 
 **Static IP:** Pi-hole's own address is pinned via `nmcli` (was
 DHCP-dynamic — a real risk once other things depend on it staying put),
@@ -272,7 +272,7 @@ A    k8s-worker-02.bnei.lan  → 192.168.1.203
 `bnei.dev` is hosted at **Cloudflare** (registration stays at Squarespace),
 with **wildcard A records** all pointing at the public IP the Freebox
 port-forwards 80/443 from to Traefik's MetalLB VIP — see
-[ADR-0032](docs/adr/0032-dns-to-cloudflare-and-dns01-wildcard.md) and
+[ADR-0033](docs/adr/0033-dns-to-cloudflare-and-dns01-wildcard.md) and
 `docs/runbook-dns-cloudflare-migration.md`:
 
 ```
@@ -320,7 +320,7 @@ A **second resolver `le-dns`** (ACME DNS-01 via Cloudflare, own storage at
 `/data/acme-dns.json`) issues the `*.e2e.bnei.dev` wildcard cert that
 agent-fleet's per-task preview subdomains ride on — TLS-ALPN-01 structurally
 cannot issue a wildcard. Every other host stays on `le`; no existing cert is
-re-issued. See [ADR-0032](docs/adr/0032-dns-to-cloudflare-and-dns01-wildcard.md).
+re-issued. See [ADR-0033](docs/adr/0033-dns-to-cloudflare-and-dns01-wildcard.md).
 
 Why (Gateway API reversal, cert-manager rejection): see
 [ADR-0001](docs/adr/0001-ingress-traefik-ingressroute-over-gateway-api.md).
@@ -537,7 +537,7 @@ Per-hostname certs via Traefik ACME **TLS-ALPN-01** (§4 above, resolver
 `le-dns` (ACME DNS-01 via Cloudflare) — TLS-ALPN-01 and HTTP-01 structurally
 cannot issue a wildcard, only DNS-01 can. That is why ADR-0001's DNS-01
 rejection got a narrow carve-out in
-[ADR-0032](docs/adr/0032-dns-to-cloudflare-and-dns01-wildcard.md) once
+[ADR-0033](docs/adr/0033-dns-to-cloudflare-and-dns01-wildcard.md) once
 `bnei.dev` moved to Cloudflare. The wildcard is what makes agent-fleet's
 per-task preview subdomains viable at all: LE allows 50 new certs per
 registered domain per 7 days, shared across every `bnei.dev` host, so

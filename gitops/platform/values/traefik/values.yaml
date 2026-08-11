@@ -5,7 +5,7 @@
 #   - Listeners on port 80 (web) and 443 (websecure)
 #   - ACME cert resolver (TLS-ALPN-01, port 443 only — see below),
 #     acme.json on PVC (never emptyDir)
-#   - Second resolver `le-dns` (DNS-01 via Cloudflare, ADR-0032) for the
+#   - Second resolver `le-dns` (DNS-01 via Cloudflare, ADR-0033) for the
 #     *.e2e.bnei.dev wildcard only — every other host stays on `le`
 #   - Per-app routing via Traefik IngressRoute, not Gateway API — Traefik's
 #     ACME resolver can't issue certs for Gateway API listeners without
@@ -98,7 +98,7 @@ certificatesResolvers:
       email: account@bnei.dev
       storage: /data/acme.json
       tlsChallenge: true
-  # Second resolver, DNS-01 via Cloudflare — ADR-0032. Exists solely to issue
+  # Second resolver, DNS-01 via Cloudflare — ADR-0033. Exists solely to issue
   # the *.e2e.bnei.dev wildcard that agent-fleet's per-task preview subdomains
   # ride on. TLS-ALPN-01 (and HTTP-01) physically cannot issue a wildcard; only
   # DNS-01 can, which is why ADR-0001's DNS-01 rejection got a narrow carve-out
