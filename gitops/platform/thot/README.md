@@ -30,17 +30,20 @@ concrete RBAC/Alertmanager design.
 
 ## One-time human setup (not something this repo/ArgoCD can do)
 
-1. Create a new Infisical project for `thot` (own project, not
-   `agent-fleet-nygh` — same "compromised per-app grant stays contained"
-   reasoning as every other per-app project). Add it as a new row in
-   `docs/secrets.md`'s "Per-app Infisical projects" table once created.
+1. ~~Create a new Infisical project for `thot`~~ — done, slug `thot-smmx`
+   (own project, not `agent-fleet-nygh` — same "compromised per-app grant
+   stays contained" reasoning as every other per-app project). Still worth
+   adding as a row in `docs/secrets.md`'s "Per-app Infisical projects"
+   table.
 2. Grant the shared `universal-auth-credentials` machine identity
-   (namespace `infisical`) access to this new project — same step every
-   other per-app project needed.
-3. Add `CLAUDE_CODE_OAUTH_TOKEN` (subscription OAuth, not a metered API
-   key — same rule `worker/` follows) to the project.
-4. Replace `infisicalsecret.yaml`'s `projectSlug: "thot-REPLACE-ME"` with
-   the real slug once the project exists.
+   (namespace `infisical`) access to this project — same step every other
+   per-app project needed.
+3. ~~Add `CLAUDE_CODE_OAUTH_TOKEN`~~ — done (subscription OAuth, not a
+   metered API key, same rule `worker/` follows).
+4. Mint a `THOT_AUTH_TOKEN` (any long random string) and add it to BOTH
+   this project and `agent-fleet-nygh` — the sidecar and core need the
+   same value to reach `ThotService`. Leaving it unset makes that service
+   unauthenticated.
 5. Apply this Application once (or let `gitops/bootstrap/`'s self-sync
    pick it up per ADR-0021 — no manual `kubectl apply` needed beyond the
    one-time bootstrap already documented in `gitops/README.md`).
