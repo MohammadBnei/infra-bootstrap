@@ -65,6 +65,15 @@ alertmanager:
         slack_configs:
           - api_url_file: /etc/alertmanager/secrets/alertmanager-discord-webhook/webhook-url
             send_resolved: true
+            # Same body shape as the Grafana-managed alerts (see
+            # gitops/platform/values/grafana/values.yaml `templates.yaml`) so
+            # both alert sources read the same in the shared Discord channel.
+            # Written unescaped on purpose: this chart only runs
+            # alertmanager.config through Helm `tpl` when `tplConfig: true`,
+            # and it defaults to false. Flip that and every {{ }} here has to
+            # be backtick-escaped or manifest generation breaks.
+            title: '{{ template "discord.title" . }}'
+            text: '{{ template "discord.message" . }}'
       - name: thot
         webhook_configs:
           # core refuses this endpoint outright when it has no token
@@ -84,6 +93,30 @@ alertmanager:
               authorization:
                 type: Bearer
                 credentials_file: /etc/alertmanager/secrets/alertmanager-thot-token/token
+  # Rendered into the same Secret as alertmanager.yaml and mounted at
+  # /etc/alertmanager/config/, which the chart's default
+  # `config.templates: ['/etc/alertmanager/config/*.tmpl']` already globs — that
+  # default is a list, but it survives because `config:` above never declares a
+  # `templates:` key, so Helm map-merges instead of replacing. Adding one here
+  # would be the same list-replacement trap the receivers:/routes: comments
+  # above describe, in reverse.
+  #
+  # Unescaped, unlike the Grafana side: templateFiles are never passed through
+  # Helm `tpl` (kube-prometheus-stack/templates/alertmanager/secret.yaml just
+  # b64encs the raw value).
+  #
+  # Alertmanager's data model is not Grafana's — no .Values, no .SilenceURL,
+  # so the value and silence link from the Grafana template have no equivalent
+  # here and .GeneratorURL (link back to the Prometheus rule) stands in.
+  templateFiles:
+    discord.tmpl: |-
+      {{ define "discord.title" }}{{ if eq .Status "firing" }}🔥 FIRING{{ else }}✅ RESOLVED{{ end }} · {{ .CommonLabels.alertname }}{{ end }}
+
+      {{ define "discord.message" }}{{ range .Alerts }}**{{ .Annotations.summary }}**
+      {{ if .Annotations.description }}{{ .Annotations.description }}
+      {{ end }}{{ range (.Labels.Remove (stringSlice "alertname")).SortedPairs }}{{ .Name }}: {{ .Value }}
+      {{ end }}{{ .GeneratorURL }}
+      {{ end }}{{ end }}
 
 # Grafana is deployed as a separate platform app
 grafana:

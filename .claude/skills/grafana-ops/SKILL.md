@@ -95,11 +95,25 @@ These files have bitten before — carried forward from `k8s-ops`:
   alert-annotation templating (`{{ $labels.x }}`, resolved by Grafana at
   fire time) has to be escaped as literal text (backtick trick) or Helm
   tries to resolve it as a Helm variable at chart-render time and fails
-  with "undefined variable".
+  with "undefined variable". For a multi-line body (the `templates.yaml`
+  notification templates), wrap the whole thing in ONE Helm raw string
+  literal instead of escaping each brace pair — but then no backtick may
+  appear inside it.
 - **A Threshold expression needs a single value per series.** Feeding it
   directly from a multi-point range query errors with "duplicate results
-  with labels {}" — add a `reduce` (`last`) step between the query and the
-  threshold, as `gitops-log-alerts` does.
+  with labels {}" (12.3.1 words it "looks like time series data, only
+  reduced data can be alerted on") — add a `reduce` (`last`) step between
+  the query and the threshold, as `gitops-log-alerts` does. With
+  `execErrState: Alerting` this does not fail loudly: it fires a real
+  Discord alert whose only content is the error, which reads like a
+  flapping app. common-app-chart shipped without the reduce step and did
+  exactly that until 2026-08-12.
+- **Aggregate `by (...)` if you want the notification to say anything.**
+  `sum(count_over_time(...))` yields one labelless number, so the message
+  can only say "N". `sum by (pod, msg) (...)` promotes the log's own
+  fields to alert labels, which the Discord template prints. Grafana
+  cannot put raw log lines in a notification at all — alert queries must
+  reduce to numbers, so a group-by label is the only route.
 - For any raw provisioning YAML edit (contact points, policies, rules),
   `helm template` only catches templating errors, not runtime schema
   rejections like the one above — smoke-test against a local

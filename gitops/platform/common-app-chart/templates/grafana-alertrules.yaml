@@ -42,11 +42,26 @@ data:
                   expr: {{ required "logAlerts rule: expr is required" .expr | quote }}
                   intervalMs: 60000
                   maxDataPoints: 43200
+              # Threshold needs ONE value per series; A is a range query, so it
+              # hands C a time series and Grafana rejects it at evaluation time:
+              # "invalid format of evaluation results for the alert definition
+              # C: looks like time series data, only reduced data can be alerted
+              # on". execErrState: Alerting then turns that error into a fake
+              # FIRING with "Value: [no value]" — confirmed live 2026-08-12 on
+              # agent-fleet-core. Reduce collapses each series to its last point
+              # and carries its labels through to C, which is also what makes
+              # `sum by (...)` labels show up in the notification.
+              - refId: B
+                datasourceUid: __expr__
+                model:
+                  type: reduce
+                  expression: A
+                  reducer: last
               - refId: C
                 datasourceUid: __expr__
                 model:
                   type: threshold
-                  expression: A
+                  expression: B
                   conditions:
                     - evaluator:
                         type: gt

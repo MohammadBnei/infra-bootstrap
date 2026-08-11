@@ -183,6 +183,38 @@ alerting:
             settings:
               recipient: "#alerts" # arbitrary, ignored by Discord's Slack-compat endpoint, required by the receiver's settings schema
               url: $__file{/etc/secrets/discord/webhook-url}
+              # Override the stock Slack body (raw label dump + "Value: [no
+              # value]") with the templates provisioned below.
+              title: '{{ `{{ template "discord.title" . }}` }}'
+              text: '{{ `{{ template "discord.message" . }}` }}'
+
+  # Notification templates. Same Helm `tpl` problem as the rule annotations
+  # below, but a 15-line Go template escaped brace-pair-by-brace-pair is
+  # unreadable — so the WHOLE body sits inside one Helm raw string literal
+  # ({{ `...` }}), which tpl emits verbatim. Cost of the trick: no backtick may
+  # appear anywhere inside it (it would close the literal), hence **bold**
+  # rather than Discord code fences.
+  #
+  # `.Values.B` on purpose, not `range .Values`: every rule here (this file's
+  # gitops-log-alerts and everything common-app-chart's logAlerts renders) is
+  # A -> B reduce -> C threshold, and ranging prints C's 0/1 threshold verdict
+  # next to the real number. `.GeneratorURL` (short link to the rule) rather
+  # than `.SilenceURL`, which is a 300-char matcher-encoded monster.
+  templates.yaml:
+    apiVersion: 1
+    templates:
+      - orgId: 1
+        name: discord.message
+        template: |
+          {{ `{{ define "discord.title" }}{{ if eq .Status "firing" }}🔥 FIRING{{ else }}✅ RESOLVED{{ end }} · {{ .CommonLabels.alertname }}{{ end }}
+
+          {{ define "discord.message" }}{{ range .Alerts }}**{{ .Annotations.summary }}**
+          {{ if .Annotations.description }}{{ .Annotations.description }}
+          {{ end }}{{ if .Values }}value: {{ .Values.B }}
+          {{ end }}{{ range (.Labels.Remove (stringSlice "alertname" "grafana_folder" "datasource_uid" "ref_id")).SortedPairs }}{{ .Name }}: {{ .Value }}
+          {{ end }}{{ if .Annotations.Error }}rule error: {{ .Annotations.Error }}
+          {{ end }}{{ .GeneratorURL }}
+          {{ end }}{{ end }}` }}
 
   policies.yaml:
     apiVersion: 1
