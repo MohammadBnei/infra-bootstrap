@@ -20,7 +20,7 @@ spec:
       labels:
         app: thot-executor
     spec:
-      serviceAccountName: thot
+      serviceAccountName: thot-executor
       containers:
       - name: executor
         image: mohammaddocker/agent-fleet-executor:latest
