@@ -1,0 +1,72 @@
+# thot's cluster-wide RBAC — see ADR-0032 for the full rationale. Broader
+# than any other standing grant in this cluster except the human operator's
+# own break-glass access, because thot's actual job (diagnose "why did this
+# break" for *any* namespace) genuinely needs cluster-wide read — narrower
+# scoping (per-namespace Role, actions-runner-style) would need editing
+# every time a new app namespace appears, defeating the point.
+#
+# Two logical grants in one ClusterRole, kept narrow and explicit on the
+# mutate side (agent-fleet's own ADR-0035 constraint, restated here as the
+# actual manifest boundary — this is the thing that's checkable):
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: thot
+rules:
+  # Diagnostic read, cluster-wide — the actual "inspect state, answer why
+  # did this break" capability.
+  - apiGroups: [""]
+    resources:
+      - pods
+      - services
+      - events
+      - nodes
+      - configmaps
+      - persistentvolumeclaims
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["apps"]
+    resources:
+      - deployments
+      - statefulsets
+      - daemonsets
+      - replicasets
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["batch"]
+    resources: ["jobs", "cronjobs"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["traefik.io"]
+    resources: ["ingressroutes", "middlewares"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["argoproj.io"]
+    resources: ["applications"]
+    verbs: ["get", "list", "watch"]
+  # Narrow, explicit mutate — covers exactly "restart a rollout" (there is
+  # no separate "restart" verb in the Kubernetes API; kubectl rollout
+  # restart is a template-annotation patch) and "delete a crashlooping
+  # pod". Nothing else.
+  - apiGroups: ["apps"]
+    resources: ["deployments", "statefulsets", "daemonsets"]
+    verbs: ["patch"]
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["delete"]
+  # Explicitly never granted (ADR-0035's exclusion list, made real here,
+  # not just documented intent):
+  #   - rbac.authorization.k8s.io (roles/clusterroles/rolebindings/
+  #     clusterrolebindings), any verb — no self-escalation path.
+  #   - secrets, any verb.
+  #   - nodes patch/update/delete, pods/eviction — both stay exclusively
+  #     node-drainer's territory (gitops/bootstrap/node-drainer-rbac.yaml).
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: thot
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: thot
+subjects:
+  - kind: ServiceAccount
+    name: thot
+    namespace: thot

@@ -1,0 +1,58 @@
+# Image built by agent-fleet's own CI (thot/Dockerfile) but deployed from
+# this repo's manifests — same cross-repo image-tag-drift trade-off
+# ADR-0012 already accepted for e2e-provisioner/e2e-runner (floating tag,
+# not auto-bumped by agent-fleet's docker.yml deploy job, since that job
+# only ever touches agent-fleet's own k8s/*.yaml). Bump the tag here by
+# hand until/unless that's automated.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: thot
+  namespace: thot
+spec:
+  replicas: 1
+  revisionHistoryLimit: 3
+  selector:
+    matchLabels:
+      app: thot
+  template:
+    metadata:
+      labels:
+        app: thot
+    spec:
+      serviceAccountName: thot
+      containers:
+      - name: thot
+        image: mohammaddocker/agent-fleet-thot:latest
+        ports:
+        - name: grpc
+          containerPort: 9090
+        - name: http
+          containerPort: 8080
+        env:
+        - name: GRPC_PORT
+          value: "9090"
+        - name: HTTP_PORT
+          value: "8080"
+        envFrom:
+        - secretRef:
+            name: thot-infisical
+        readinessProbe:
+          httpGet:
+            path: /healthz
+            port: 8080
+          initialDelaySeconds: 5
+          periodSeconds: 10
+        livenessProbe:
+          httpGet:
+            path: /healthz
+            port: 8080
+          initialDelaySeconds: 15
+          periodSeconds: 20
+        resources:
+          requests:
+            cpu: 200m
+            memory: 256Mi
+          limits:
+            cpu: 500m
+            memory: 512Mi
