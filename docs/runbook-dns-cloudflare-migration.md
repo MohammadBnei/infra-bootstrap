@@ -1,8 +1,44 @@
 # Runbook: migrate the `bnei.dev` DNS zone to Cloudflare
 
-**Status:** not yet run
+**Status:** **run 2026-08-11** — delegation live on
+`brady`/`sasha.ns.cloudflare.com`, all wildcards resolving, `le-dns` loaded
+in-cluster. Kept for the record and for the next zone move.
 **Decision:** [ADR-0033](adr/0033-dns-to-cloudflare-and-dns01-wildcard.md)
-**Zone file:** [`docs/dns/bnei.dev.zone`](dns/bnei.dev.zone)
+**Zone file:** [`docs/dns/bnei.dev.zone`](dns/bnei.dev.zone) — reconciled
+against live *after* the move; the mail records no longer match what step 2
+below describes (see "What actually happened").
+
+## What actually happened (2026-08-11)
+
+The DNS half went to plan. Mail did not, and every interesting failure was in
+that half:
+
+- **Mailgun turned out to be unused.** The MX/SPF/DKIM records this runbook
+  carefully preserved were for a provider already replaced by **SMTP2GO** for
+  sending. Removing the MX then broke *inbound*, because a forward is still a
+  receive — some server must accept the message before relaying it. Resolved by
+  enabling **Cloudflare Email Routing** with a catch-all.
+- **A `*._domainkey` wildcard publishing `v=DKIM1; p=`** (empty `p` = revoked)
+  was live for a while. That revokes every selector not explicitly published,
+  including SMTP2GO's. Removed.
+- **`aspf=s` was structurally unsatisfiable.** SMTP2GO's Return-Path is the
+  subdomain `em726320.bnei.dev`, and strict SPF alignment demands an exact
+  match — so DMARC was riding on DKIM alone. Now `aspf=r`.
+- **`rua=` pointed at a Gmail address**, which per RFC 7489 §7.1 requires the
+  destination domain to publish an authorization record. Gmail does not, so
+  aggregate reports would have been silently refused. Now
+  `rua=mailto:dmarc@bnei.dev`, which the catch-all forwards to the same inbox.
+- **`*.bnei.dev` shadows any hostname an ESP expects to own.** SMTP2GO's
+  `em726320`/`link` CNAMEs resolved as A records off the wildcard until created
+  explicitly, so verification reported *misconfigured* rather than *missing*.
+  Explicit records beat wildcards — just remember to add them.
+- **SPF was overwritten three times** mid-work (Mailgun → SMTP2GO → Mailgun →
+  Cloudflare-only) before landing correct. Re-check it **last**, after every
+  other mail change.
+
+**Lesson for the next zone move:** establish who actually sends and receives
+your mail *before* preserving records, rather than copying what the old zone
+had. Half the records here were for a provider nobody used.
 
 Moves `bnei.dev` from its current Google Cloud DNS nameservers to Cloudflare,
 collapsing 19 flat A records into 3 wildcards, and unlocking ACME DNS-01 so

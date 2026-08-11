@@ -356,7 +356,7 @@ To bump a chart version: update `chartRevision` in `platform.applicationset.yaml
 ## Hard constraints (from `DECISION.md` / `docs/adr/`)
 
 - **No Gateway API for app routing, no plain Ingress** — Traefik `IngressRoute` only (Gateway API can't get certs from Traefik's ACME resolver without cert-manager) — [ADR-0001](../docs/adr/0001-ingress-traefik-ingressroute-over-gateway-api.md)
-- **No cert-manager** — TLS via Traefik ACME (**TLS-ALPN-01**, resolver `le`), `acme.json` on a PVC — [ADR-0001](../docs/adr/0001-ingress-traefik-ingressroute-over-gateway-api.md). A second resolver `le-dns` (DNS-01 via Cloudflare) exists **only** to issue the `*.e2e.bnei.dev` wildcard — [ADR-0032](../docs/adr/0033-dns-to-cloudflare-and-dns01-wildcard.md)
+- **No cert-manager** — TLS via Traefik ACME (**TLS-ALPN-01**, resolver `le`), `acme.json` on a PVC — [ADR-0001](../docs/adr/0001-ingress-traefik-ingressroute-over-gateway-api.md). A second resolver `le-dns` (DNS-01 via Cloudflare) exists **only** to issue the `*.e2e.bnei.dev` wildcard — [ADR-0033](../docs/adr/0033-dns-to-cloudflare-and-dns01-wildcard.md)
 - **No secrets in git** — all secrets via Infisical; `.env.*` files are gitignored
 - **MetalLB and Cilium are not in ArgoCD** — kubespray owns them
 - **No App-of-Apps root.yaml** — the ApplicationSet list IS the registry — [ADR-0004](../docs/adr/0004-gitops-pattern-c-registry-applicationset.md)
