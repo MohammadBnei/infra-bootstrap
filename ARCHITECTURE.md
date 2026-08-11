@@ -225,8 +225,8 @@ graph LR
 `ansible/playbooks/pihole-configure.yml`), authoritative for `bnei.lan`
 per `DECISION.md` §2. Triggered once there were enough real internal
 hostnames (kube-vip's endpoint, the pg/garage/nfs/k9s-dashboard VMs) that
-raw IPs stopped being convenient. `bnei.dev` stays external — manual
-per-host A records at Squarespace DNS, no wildcard — unrelated to this.
+raw IPs stopped being convenient. `bnei.dev` stays external — Cloudflare,
+wildcard A records (ADR-0032) — unrelated to this.
 
 **Static IP:** Pi-hole's own address is pinned via `nmcli` (was
 DHCP-dynamic — a real risk once other things depend on it staying put),
@@ -269,11 +269,36 @@ A    k8s-worker-01.bnei.lan  → 192.168.1.202
 A    k8s-worker-02.bnei.lan  → 192.168.1.203
 ```
 
-`*.bnei.dev` hostnames (`blog`, `dreamer`, `grafana`, `s3`, etc.) are each
-their own **manually-created A record at Squarespace DNS** — no wildcard
-record exists — pointing at the public IP the Freebox port-forwards
-80/443 from to Traefik's MetalLB VIP. Add each new one by hand as it's
-needed.
+`bnei.dev` is hosted at **Cloudflare** (registration stays at Squarespace),
+with **wildcard A records** all pointing at the public IP the Freebox
+port-forwards 80/443 from to Traefik's MetalLB VIP — see
+[ADR-0032](docs/adr/0032-dns-to-cloudflare-and-dns01-wildcard.md) and
+`docs/runbook-dns-cloudflare-migration.md`:
+
+```
+A    bnei.dev           → 82.65.231.50   (apex)
+A    *.bnei.dev         → 82.65.231.50   argocd, grafana, infisical,
+                                         alertmanager, pgweb, s3, fleet,
+                                         proxmox, blog, dreamer, searxng,
+                                         ente, e2e
+A    *.ente.bnei.dev    → 82.65.231.50   api.ente, album.ente
+A    *.e2e.bnei.dev     → 82.65.231.50   agent-fleet per-task previews
+MX   bnei.dev           → 10 mxa/mxb.mailgun.org
+TXT  bnei.dev           → v=spf1 include:mailgun.org ~all
+TXT  smtp._domainkey    → (DKIM)
+```
+
+**Adding a new app hostname needs no DNS change** — the wildcard covers it.
+Three wildcards rather than one because DNS wildcards match exactly one label
+(RFC 4592), so `*.bnei.dev` does not cover `api.ente.bnei.dev`.
+
+All records are **DNS-only (grey cloud)**. Cloudflare's proxy would terminate
+TLS at its edge and silently break Traefik's TLS-ALPN-01 renewal for that host.
+
+*Previously: manual per-host A records, no wildcard, on Google Cloud DNS
+nameservers (`ns-cloud-d*.googledomains.com`) — described loosely in these docs
+as "Squarespace DNS", which is where the records were edited but not what
+answered queries.*
 
 Endpoint naming (`k8s-proxmox-gpu.bnei.lan` vs `k8s.bnei.lan`) is resolved
 in favor of `k8s.bnei.lan` — see
@@ -287,11 +312,25 @@ as each new host is actually provisioned, never speculatively.
 ## 4. Ingress & TLS
 
 **WHAT:** Traefik in-cluster (Helm + ArgoCD), Service `LoadBalancer` via
-MetalLB, `IngressRoute` for all app HTTPS routing, native ACME HTTP-01,
-`acme.json` on a PVC (RWX or `replicas: 1`, never `emptyDir`).
+MetalLB, `IngressRoute` for all app HTTPS routing, native ACME
+**TLS-ALPN-01** (resolver `le`), `acme.json` on a PVC (RWX or `replicas: 1`,
+never `emptyDir`).
 
-Why (Gateway API reversal, cert-manager/DNS-01 rejections): see
+A **second resolver `le-dns`** (ACME DNS-01 via Cloudflare, own storage at
+`/data/acme-dns.json`) issues the `*.e2e.bnei.dev` wildcard cert that
+agent-fleet's per-task preview subdomains ride on — TLS-ALPN-01 structurally
+cannot issue a wildcard. Every other host stays on `le`; no existing cert is
+re-issued. See [ADR-0032](docs/adr/0032-dns-to-cloudflare-and-dns01-wildcard.md).
+
+Why (Gateway API reversal, cert-manager rejection): see
 [ADR-0001](docs/adr/0001-ingress-traefik-ingressroute-over-gateway-api.md).
+cert-manager stays banned; only the DNS-01 half of that ADR is amended.
+
+> **Doc note:** ADR-0001 and parts of these docs say "HTTP-01". The live
+> config has been **TLS-ALPN-01** since the 2026-07-28 Freebox cutover —
+> LE's external HTTP-01 validation on port 80 never reached Traefik's
+> challenge handler (suspected transparent ISP proxy), while 443 was already
+> proven. See `docs/bootstrap-test-notes.md`.
 
 ```mermaid
 sequenceDiagram
@@ -305,7 +344,7 @@ sequenceDiagram
     C->>FB: HTTPS request to *.bnei.dev
     FB->>MLB: forward to VIP
     MLB->>TR: L2-announced traffic
-    TR->>TR: TLS terminate (ACME HTTP-01 cert)
+    TR->>TR: TLS terminate (ACME TLS-ALPN-01 cert)
     TR->>SVC: route by IngressRoute match
     SVC->>POD: forward to pod
     POD-->>C: response
@@ -490,10 +529,19 @@ New service accounts per app; Infisical for app secrets.
 
 ### TLS
 
-Per-hostname certs via Traefik ACME HTTP-01 (§4 above) — **not** a
-wildcard cert: HTTP-01 can't issue one (only DNS-01 can), and DNS-01 was
-rejected (ADR-0001). Each `*.bnei.dev` host gets its own cert on first
-request, `certResolver: le` on its `IngressRoute`.
+Per-hostname certs via Traefik ACME **TLS-ALPN-01** (§4 above, resolver
+`le`). Each `*.bnei.dev` host gets its own cert on first request,
+`certResolver: le` on its `IngressRoute`.
+
+**One wildcard exists:** `*.e2e.bnei.dev`, issued by the second resolver
+`le-dns` (ACME DNS-01 via Cloudflare) — TLS-ALPN-01 and HTTP-01 structurally
+cannot issue a wildcard, only DNS-01 can. That is why ADR-0001's DNS-01
+rejection got a narrow carve-out in
+[ADR-0032](docs/adr/0032-dns-to-cloudflare-and-dns01-wildcard.md) once
+`bnei.dev` moved to Cloudflare. The wildcard is what makes agent-fleet's
+per-task preview subdomains viable at all: LE allows 50 new certs per
+registered domain per 7 days, shared across every `bnei.dev` host, so
+per-session certs would have exhausted issuance domain-wide.
 
 > **Flag:** an earlier draft of this section proposed "internal certs
 > via internal CA (for Postgres, etcd, etc.)". That needs reconciling

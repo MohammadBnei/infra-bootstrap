@@ -55,9 +55,16 @@ updated.
   time, per the schema in `docs/secrets.md`. Never committed to
   this repo.
 - **DNS authority:** Pi-hole on Pi 4 (`.55`) is authoritative for
-  `bnei.lan`; `bnei.dev` is external — manual per-host A records at
-  Squarespace DNS, no wildcard. See `ARCHITECTURE.md` §3 for target
-  records.
+  `bnei.lan`; `bnei.dev` is external, hosted at **Cloudflare** (registration
+  stays at Squarespace) with **wildcard A records** — `*.bnei.dev`,
+  `*.ente.bnei.dev`, `*.e2e.bnei.dev`, plus the apex. Adding an app hostname
+  no longer needs a DNS change. All records stay **DNS-only (grey cloud)** —
+  Cloudflare's proxy would terminate TLS at its edge and break Traefik's
+  TLS-ALPN-01 renewal. See [ADR-0032](docs/adr/0032-dns-to-cloudflare-and-dns01-wildcard.md),
+  `docs/runbook-dns-cloudflare-migration.md`, and `ARCHITECTURE.md` §3.
+  *Supersedes the previous "manual per-host A records at Squarespace DNS, no
+  wildcard" — which was itself a correction of an older "Cloudflare" error
+  (ADR-0030 point 5); the domain is now genuinely moving there.*
 - **Postgres HA: automatic failover via Patroni + etcd is accepted
   behavior, DCS is a 3-node etcd quorum.** Reverses the earlier "no
   automatic failover" stance once a live check (2026-07-30) showed
@@ -109,8 +116,13 @@ updated.
 Never propose these without an explicit user greenlight, even as a
 "better alternative":
 
-- ❌ **cert-manager** as a secondary cert engine — [ADR-0001](docs/adr/0001-ingress-traefik-ingressroute-over-gateway-api.md)
-- ❌ **DNS-01 / OVH plugin** as the cert engine — [ADR-0001](docs/adr/0001-ingress-traefik-ingressroute-over-gateway-api.md)
+- ❌ **cert-manager** as a secondary cert engine — [ADR-0001](docs/adr/0001-ingress-traefik-ingressroute-over-gateway-api.md). Unchanged and absolute.
+- ⚠️ **DNS-01 as the cert engine for `le`** (the resolver every `*.bnei.dev`
+  host renews through) — [ADR-0001](docs/adr/0001-ingress-traefik-ingressroute-over-gateway-api.md).
+  **One carve-out** ([ADR-0032](docs/adr/0032-dns-to-cloudflare-and-dns01-wildcard.md)):
+  a *second* resolver `le-dns` (Traefik-native lego, Cloudflare provider, no
+  plugin) issues the `*.e2e.bnei.dev` wildcard, which TLS-ALPN-01 structurally
+  cannot. `le` itself stays TLS-ALPN-01, and this is still not cert-manager.
 - ❌ **Gateway API for app HTTPS routing** — [ADR-0001](docs/adr/0001-ingress-traefik-ingressroute-over-gateway-api.md)
 - ❌ **Plain K8s Ingress or Ingress-NGINX** — [ADR-0001](docs/adr/0001-ingress-traefik-ingressroute-over-gateway-api.md)
 - ❌ **Ceph** — [ADR-0002](docs/adr/0002-storage-longhorn-over-ceph-nfs.md)

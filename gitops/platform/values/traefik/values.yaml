@@ -5,6 +5,8 @@
 #   - Listeners on port 80 (web) and 443 (websecure)
 #   - ACME cert resolver (TLS-ALPN-01, port 443 only — see below),
 #     acme.json on PVC (never emptyDir)
+#   - Second resolver `le-dns` (DNS-01 via Cloudflare, ADR-0032) for the
+#     *.e2e.bnei.dev wildcard only — every other host stays on `le`
 #   - Per-app routing via Traefik IngressRoute, not Gateway API — Traefik's
 #     ACME resolver can't issue certs for Gateway API listeners without
 #     cert-manager as a Secret bridge (banned), so IngressRoute is the lock.
@@ -96,6 +98,44 @@ certificatesResolvers:
       email: account@bnei.dev
       storage: /data/acme.json
       tlsChallenge: true
+  # Second resolver, DNS-01 via Cloudflare — ADR-0032. Exists solely to issue
+  # the *.e2e.bnei.dev wildcard that agent-fleet's per-task preview subdomains
+  # ride on. TLS-ALPN-01 (and HTTP-01) physically cannot issue a wildcard; only
+  # DNS-01 can, which is why ADR-0001's DNS-01 rejection got a narrow carve-out
+  # once bnei.dev moved to Cloudflare. This is still Traefik's own built-in ACME
+  # (lego, Cloudflare is a native provider — there is no plugin to install or
+  # maintain, contrary to ADR-0001's premise); cert-manager remains banned.
+  #
+  # `le` above is deliberately untouched: it took three chained bugs to get
+  # working (docs/bootstrap-test-notes.md, 2026-07-28) and every existing
+  # *.bnei.dev host still renews through it. Nothing here re-issues those.
+  le-dns:
+    acme:
+      email: account@bnei.dev
+      # Separate storage file on purpose — a corrupt or lock-contended
+      # acme-dns.json can then never take down the resolver serving every
+      # other host. Same PVC, so the fsGroup/fsGroupChangePolicy handling
+      # above already covers it; Traefik creates the file itself at 0600.
+      storage: /data/acme-dns.json
+      dnsChallenge:
+        provider: cloudflare
+        # lego's propagation check must NOT go through the pod resolver:
+        # CoreDNS/nodelocaldns forwards to Pi-hole first (policy: sequential,
+        # ARCHITECTURE.md §3), which is authoritative for bnei.lan and has no
+        # business answering for bnei.dev. Ask public resolvers instead.
+        resolvers:
+        - "1.1.1.1:53"
+        - "8.8.8.8:53"
+
+# CF_DNS_API_TOKEN is what lego's cloudflare provider reads. Sourced from
+# Infisical via gitops/bootstrap/traefik-cloudflare-secret.yaml, which
+# materialises the `traefik-cloudflare-dns` Secret into this namespace.
+env:
+- name: CF_DNS_API_TOKEN
+  valueFrom:
+    secretKeyRef:
+      name: traefik-cloudflare-dns
+      key: token
 
 # Dashboard via IngressRoute is disabled — expose via IngressRoute if needed
 ingressRoute:
