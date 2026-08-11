@@ -47,8 +47,13 @@ then here. When in doubt, open those files.
 ## Locked decisions (condensed — full detail + rationale in `DECISION.md` and `docs/adr/`)
 
 - Ingress: Traefik + `IngressRoute` only (Gateway API rejected — see
-  ADR-0001). Cert engine: Traefik built-in ACME HTTP-01, `acme.json` on a
-  PVC (never `emptyDir`).
+  ADR-0001). Cert engine: Traefik built-in ACME **TLS-ALPN-01** (resolver
+  `le`), `acme.json` on a PVC (never `emptyDir`). A second resolver `le-dns`
+  (DNS-01 via Cloudflare) exists **only** for the `*.e2e.bnei.dev` wildcard —
+  ADR-0032.
+- DNS: `bnei.dev` is at Cloudflare with **wildcard A records**, all DNS-only
+  (grey cloud — proxying breaks TLS-ALPN-01 renewal). Adding an app hostname
+  needs no DNS change. ADR-0032.
 - MetalLB L2 only (Freebox blocks BGP), pool `192.168.1.233-250`, `.233`
   reserved for the Traefik VIP — `.232` is Pigsty's HA floating VIP,
   `.230`/`.231` excluded alongside it.
@@ -65,7 +70,8 @@ then here. When in doubt, open those files.
 
 ## Forbidden patterns (quick check — full list + reasons in `DECISION.md` §3 and `docs/adr/`)
 
-cert-manager · DNS-01/OVH plugin · Gateway API / Ingress-NGINX / plain
+cert-manager · DNS-01 for the `le` resolver (one carve-out: `le-dns` for the
+`*.e2e.bnei.dev` wildcard, ADR-0032) · Gateway API / Ingress-NGINX / plain
 `Ingress` · Cilium Gateway API · per-app Helm chart · per-app Applications
 spawned one-by-one bypassing the registry · Ceph · Wireguard/Tailscale ·
 Infisical as SSH/TLS CA · Vagrant for Proxmox · Flatcar · external managed

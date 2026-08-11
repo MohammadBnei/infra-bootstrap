@@ -1,0 +1,35 @@
+;; bnei.dev — BIND zone file for Cloudflare's "Import DNS records"
+;;
+;; Generated 2026-08-11 from the live googledomains-hosted zone (ADR-0032).
+;; See docs/runbooks/dns-cloudflare-migration.md for the cutover procedure.
+;;
+;; SOA and apex NS are deliberately omitted — Cloudflare manages both, and
+;; including them makes the importer complain.
+;;
+;; The 4 A records below replace 19 flat per-host records. DNS wildcards match
+;; exactly one label (RFC 4592), which is why `*.ente` and `*.e2e` are separate
+;; entries rather than being covered by `*`.
+;;
+;; TTL 300 is the cutover value — raise it once the migration is confirmed.
+;;
+;; !! After importing, set all four A records to DNS-only (grey cloud). !!
+;; A proxied record terminates TLS at Cloudflare's edge, which breaks Traefik's
+;; TLS-ALPN-01 renewal for that host — silently, up to 90 days later.
+
+$TTL 300
+
+bnei.dev.                  300  IN  A    82.65.231.50
+*.bnei.dev.                300  IN  A    82.65.231.50
+*.ente.bnei.dev.           300  IN  A    82.65.231.50
+*.e2e.bnei.dev.            300  IN  A    82.65.231.50
+
+bnei.dev.                  300  IN  MX   10 mxa.mailgun.org.
+bnei.dev.                  300  IN  MX   10 mxb.mailgun.org.
+
+bnei.dev.                  300  IN  TXT  "v=spf1 include:mailgun.org ~all"
+
+;; DKIM. The literal space in the middle of the key is NOT a TXT chunk
+;; boundary — the payload is a single 226-byte character-string, under the
+;; 255-byte limit. RFC 6376 has verifiers ignore whitespace inside `p=`, so it
+;; is harmless, but reproduce it byte-for-byte rather than "cleaning it up".
+smtp._domainkey.bnei.dev.  300  IN  TXT  "k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDnmObaHwGAPisYQLI5IWp4OcjFxQBQ7n2wfS0BRFXhJzhd8uV3J1TPq8v/xU20VC8sVeAC70oL8JB2gV2X4fBg1PXxPH+9FmVZmTYRvEXCrHRujic7I/YMj8dTMGBA0ZTokCLxFR4lZBWvpQdvBosHBKg3 l5orSRvm+peemf1GAQIDAQAB"

@@ -418,7 +418,7 @@ for K8s PVs — do not resurrect.*
 
 ### DNS
 
-- **External/WAN:** Freebox (192.168.1.254) — basic, no wildcards, no internal zones. `bnei.dev` stays external — manual per-host A records at Squarespace DNS, no wildcard — unrelated to the below.
+- **External/WAN:** Freebox (192.168.1.254) — basic, no wildcards, no internal zones. `bnei.dev` stays external — hosted at **Cloudflare** (registration at Squarespace), **wildcard A records** (`*.bnei.dev`, `*.ente.bnei.dev`, `*.e2e.bnei.dev` + apex), all DNS-only/grey-cloud — unrelated to the below. See [ADR-0032](adr/0032-dns-to-cloudflare-and-dns01-wildcard.md) and `runbook-dns-cloudflare-migration.md`. *Previously served by `ns-cloud-d*.googledomains.com` (Google Cloud DNS) with manual per-host A records — these docs called that "Squarespace DNS", which is where records were edited but not what answered queries.*
 - **Local resolver, live since 2026-07-30**: Pi-hole on the Pi 4
   (`192.168.1.55`, static IP pinned via `nmcli`, `ansible/playbooks/pihole-configure.yml`),
   authoritative for `bnei.lan` (`DECISION.md` §2). Two consumers,
