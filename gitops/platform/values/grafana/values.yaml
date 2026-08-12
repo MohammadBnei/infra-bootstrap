@@ -102,6 +102,20 @@ extraSecretMounts:
     defaultMode: 0440
     mountPath: /etc/secrets/discord
     readOnly: true
+  # The same bearer token Alertmanager presents to agent-fleet's core
+  # (gitops/bootstrap/alertmanager-thot-secret.yaml materialises it into
+  # ns monitoring, which is this pod's namespace too). Grafana-managed
+  # alerts never pass through Alertmanager, so reaching thot needs its
+  # own contact point here — see the `thot` receiver under `alerting:`.
+  #
+  # Same hard dependency as the mount above: a missing
+  # `alertmanager-thot-token` Secret leaves this pod stuck in
+  # ContainerCreating, it does not degrade gracefully.
+  - name: thot-token-secret-mount
+    secretName: alertmanager-thot-token
+    defaultMode: 0440
+    mountPath: /etc/secrets/thot
+    readOnly: true
 
 # Dynamic per-app alert rules and dashboards: watches every namespace
 # (user apps each live in their own, not just `monitoring`) for ConfigMaps
@@ -188,6 +202,45 @@ alerting:
               title: '{{ `{{ template "discord.title" . }}` }}'
               text: '{{ `{{ template "discord.message" . }}` }}'
 
+      # Grafana-managed alerts never pass through Alertmanager, so the
+      # `thot` receiver in values/prometheus/values.yaml does nothing for
+      # them — every rule in this file (and every per-app rule the
+      # sidecar loads) needs this second contact point to reach
+      # agent-fleet's core, which turns a firing alert into a thot task
+      # (agent-fleet docs/adr/0037). Same URL, same bearer token, same
+      # handler as the Alertmanager receiver.
+      #
+      # Grafana's `webhook` type sends the Alertmanager webhook body
+      # shape, including the per-alert `fingerprint` core uses as its
+      # dedup key — VERIFIED 2026-08-12 by capturing a real delivery from
+      # a local Grafana 12.3.1 (this chart's version) into a listener:
+      # keys were status/labels/annotations/fingerprint/..., exactly what
+      # core/internal/alertwebhook decodes. Without a fingerprint core
+      # skips the alert with a warning, so a future Grafana dropping it
+      # fails visibly rather than silently.
+      #
+      # authorization_credentials sits under plain `settings`, NOT
+      # `secureSettings` — same placement trap the slack `url` comment
+      # above describes, confirmed in the same capture: with it under
+      # secureSettings the provisioned contact point came back with no
+      # secure field at all and the request arrived with NO Authorization
+      # header (core would answer 401 forever). Under `settings` the
+      # $__file{} resolved and the header arrived as `Bearer <token>`;
+      # Grafana still redacts it in API responses.
+      - orgId: 1
+        name: thot
+        receivers:
+          - uid: thot-webhook
+            type: webhook
+            settings:
+              # agent-fleet-core, NOT core — common-app-chart prefixes
+              # every Service with its release name (see the identical
+              # note on the Alertmanager receiver).
+              url: http://agent-fleet-core.agent-fleet.svc.cluster.local:8080/webhook/alertmanager
+              httpMethod: POST
+              authorization_scheme: Bearer
+              authorization_credentials: $__file{/etc/secrets/thot/token}
+
   # Notification templates. Same Helm `tpl` problem as the rule annotations
   # below, but a 15-line Go template escaped brace-pair-by-brace-pair is
   # unreadable — so the WHOLE body sits inside one Helm raw string literal
@@ -216,6 +269,21 @@ alerting:
           {{ end }}{{ .GeneratorURL }}
           {{ end }}{{ end }}` }}
 
+  # Fan-out, mirroring the Alertmanager route tree in
+  # values/prometheus/values.yaml: critical/warning goes to both Discord
+  # and thot, everything else to Discord alone.
+  #
+  # The trailing `- receiver: discord` child is load-bearing, exactly as
+  # it is on the Alertmanager side: a matched child route does NOT fall
+  # through to the parent's receiver, so without that sibling every
+  # warning alert would reach thot and silently vanish from Discord.
+  # VERIFIED 2026-08-12 against a local Grafana 12.3.1 with this exact
+  # tree — one firing warning-level rule delivered to both receivers.
+  #
+  # Deliberately not `severity =~ .*`: a thot task spawns a pod running
+  # an agent with cluster read access, so info-level rules stay a Discord
+  # ping. Repeat deliveries of the same alert dedup on fingerprint in
+  # core.
   policies.yaml:
     apiVersion: 1
     policies:
@@ -225,6 +293,12 @@ alerting:
         group_wait: 30s
         group_interval: 5m
         repeat_interval: 4h
+        routes:
+          - receiver: thot
+            object_matchers:
+              - ["severity", "=~", "critical|warning"]
+            continue: true
+          - receiver: discord
 
   rules.yaml:
     apiVersion: 1
