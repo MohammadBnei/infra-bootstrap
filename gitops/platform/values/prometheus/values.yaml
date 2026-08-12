@@ -33,17 +33,25 @@ alertmanager:
         - receiver: "null"
           matchers:
             - alertname = "Watchdog"
-        # A critical alert additionally wakes thot, which investigates it
-        # as a normal fleet task (agent-fleet docs/adr/0037).
+        # A critical or warning alert additionally wakes thot, which
+        # investigates it as a normal fleet task (agent-fleet
+        # docs/adr/0037).
         #
-        # Scoped to severity=critical deliberately: each match spawns a
-        # pod running an agent with cluster read access, so the blast
-        # radius of a noisy warning-level rule should be a Discord ping,
-        # not a fleet of pods. agent-fleet dedups repeat deliveries of the
-        # same alert, which bounds the other direction.
+        # Widened from `severity = "critical"` on 2026-08-12: everything
+        # that actually fires in this cluster is warning-level
+        # (KubeJobFailed, the Loki error-rate rule), so the critical-only
+        # scope meant thot had never once been woken by an alert. This
+        # lands back on ADR-0032's original "fan out, narrow later once
+        # there's data" position — the data being that critical-only
+        # routes nothing at all.
+        #
+        # Still a matcher rather than no filter: each match spawns a pod
+        # running an agent with cluster read access, so an info-level
+        # rule stays a Discord ping. agent-fleet dedups repeat deliveries
+        # of the same alert fingerprint, which bounds the other side.
         - receiver: thot
           matchers:
-            - severity = "critical"
+            - severity =~ "critical|warning"
           continue: true
         # The catch-all that makes the route above a fan-out instead of a
         # diversion. A matching child route does NOT fall through to the
