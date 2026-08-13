@@ -61,17 +61,27 @@ Idempotent, and effectively free after the first run since `EPHEMERAL=false`
 keeps the pod alive across jobs. If that ever becomes annoying, bake an
 image — it wasn't worth a build pipeline for one `apt-get`.
 
-## One-time human setup (not something this repo or ArgoCD can do)
+## One-time human setup
 
-1. **Widen the existing PAT's repo scope to include `editable-blog`.** The
-   `ACCESS_TOKEN` in the `actions-runner` Infisical project is a
-   fine-grained PAT currently scoped to `vos-monolith` only (see
-   `../actions-runner/README.md`), with `Administration: Read and write`.
-   This runner cannot register until `editable-blog` is added to that
-   token's repository list. **Expected first failure mode** if skipped: the
-   pod starts, then crashloops on registration.
-2. Push to the registry needs a credential, not just a runner: add the
-   `ZOT_HTPASSWD` push user's username/password as GitHub Actions secrets on
-   `editable-blog` (the htpasswd *hash* goes to Infisical for zot to read;
-   the *plaintext* goes to the repo for buildah to log in with).
-3. Nothing else — `gitops/bootstrap/` self-syncs per ADR-0021.
+Exactly one step, and it genuinely cannot be automated from here:
+
+**Widen the existing PAT's repo scope to include `editable-blog`.** The
+`ACCESS_TOKEN` in the `actions-runner` Infisical project is a fine-grained
+PAT with `Administration: Read and write`, currently scoped to
+`vos-monolith` only (see `../actions-runner/README.md`). **Expected failure
+mode if skipped:** the pod starts, then crashloops on registration.
+
+Worth being explicit about, because it looks like it should already work:
+`editable-blog` being deployed in the cluster does *not* imply this. That
+deployment runs on `repo-creds-github-bnei` / `GITHUB_APPS_PAT` — a
+different, fine-grained, **read-only** token that lets ArgoCD *clone* the
+repo (ADR-0025). Registering a self-hosted runner calls GitHub's
+`actions/runners/registration-token` API, which needs `Administration:
+write` on that specific repo. Read access to clone and admin access to
+register are separate grants on separate tokens.
+
+### Already done, no action needed
+
+- `ZOT_HTPASSWD` (user `ci`, bcrypt cost 12) is in Infisical — see `docs/secrets.md`.
+- `REGISTRY_USERNAME`/`REGISTRY_PASSWORD` are set as GitHub Actions secrets on `editable-blog`. Rotate them together with `ZOT_HTPASSWD`; they are two representations of one credential.
+- `gitops/bootstrap/` self-syncs per ADR-0021, so no manual `kubectl apply`.
