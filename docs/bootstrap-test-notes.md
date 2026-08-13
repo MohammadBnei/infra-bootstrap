@@ -1447,3 +1447,55 @@ gets worse as the project grows, since every new secret adds another
 unrelated restart trigger. The real fix in both cases is a per-app Infisical
 folder (`secretsPath`), which would also stop `envFrom` handing the pod 54
 keys it has no business holding.
+
+### buildah cannot build in an unprivileged pod — the builder moved to an LXC
+
+First real run of `editable-blog`'s build pipeline failed, and the failure
+invalidated a design claim in ADR-0034 rather than a config value.
+
+Everything up to the build worked, which is worth recording because it
+proves the rest of the chain: runner registration, checkout, `buildah`
+install, version read, **registry login** (Infisical htpasswd hash → zot,
+plaintext → GitHub secret → `buildah login`), and cleanup. Then:
+
+```
+Error while applying layer: ApplyLayer exit status 1
+  stderr: remount /, flags: 0x44000: permission denied
+error creating build container: writing blob: adding layer with blob "sha256:..."
+exit code 125
+```
+
+`0x44000` is `MS_PRIVATE|MS_REC` — `mount --make-rprivate /`, which needs
+`CAP_SYS_ADMIN`.
+
+**The mistaken assumption**: ADR-0034 claimed `--isolation chroot
+--storage-driver vfs` "keeps this an ordinary unprivileged pod". Those flags
+govern buildah's *run* step. Layer extraction is a *storage* step and does
+its own mount work regardless — `chroot` isolation does not reach it.
+Known upstream: containers/buildah#4920, #5622, #2554. The rootless path
+instead wants setuid `newuidmap`/`newgidmap`, which fails under Kubernetes
+too (#4049).
+
+The claim was written confidently and never tested before being encoded in
+an ADR. The verification section of that same ADR is what caught it, on the
+first real run — which is the argument for having one.
+
+**Resolution**: the builder left the cluster. `terraform/build-runner.tf`
+(LXC 103, `nesting`+`keyctl`, 4 cores / 4GB / 40GB) plus
+`ansible/playbooks/build-runner-configure.yml`. Real root, so the problem
+class disappears rather than being negotiated around. Two side effects are
+improvements: builds no longer run on a Kubernetes node at all (stronger
+isolation than the no-ServiceAccount pod), and ADR-0035's planned Forgejo
+runner now has a box waiting for it.
+
+The rejected alternative was a privileged pod. It would have worked in
+minutes and put a container executing arbitrary app-repo `Dockerfile`s at
+node-root — strictly worse than the identity coupling ADR-0034 splits the
+runners to avoid, and it would have meant arguing against that ADR to ship
+it.
+
+**Generalisable**: "unprivileged container image builds" is a genuinely hard
+problem, not a flag. Before designing anything around buildah/kaniko/img in
+Kubernetes, build one throwaway image on the target platform first. The
+distance between "the docs list a rootless mode" and "it builds on this
+cluster" is where the whole cost is.

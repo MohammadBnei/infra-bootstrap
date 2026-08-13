@@ -18,7 +18,6 @@ gitops/
 │   ├── traefik-application.yaml           # Standalone Application (needs helm.skipCrds, can't live in the shared ApplicationSet template — see file comment)
 │   ├── traefik-crds/                      # Traefik's own CRDs (traefik.io_*/hub.traefik.io_*), vendored — see file comment in traefik-application.yaml
 │   ├── actions-runner-application.yaml    # Standalone Application: self-hosted GitHub Actions runner (plain manifests, no chart) — ADR-0022
-│   ├── build-runner-application.yaml      # Standalone Application: image-building runner, NO ServiceAccount — kept apart from actions-runner on purpose, ADR-0034
 │   ├── redirectors-application.yaml       # Standalone Application: TLS-terminating redirects to out-of-cluster hosts, plain manifests in gitops/redirectors/
 │   ├── argocd-ingressroute.yaml           # Traefik IngressRoute → argocd.bnei.dev
 │   ├── infisical-ingressroute.yaml       # Traefik IngressRoute → infisical.bnei.dev
@@ -54,7 +53,6 @@ gitops/
 │   │       ├── poddisruptionbudget.yaml
 │   │       └── extra-manifests.yaml      # Raw extra objects (ConfigMaps, Middlewares, ...) via values.extraManifests
 │   ├── actions-runner/                    # Standalone Application's manifests: self-hosted GitHub Actions runner (ADR-0022)
-│   ├── build-runner/                      # Standalone Application's manifests: image builds (buildah, chroot isolation) — no ServiceAccount, ADR-0034
 │   └── values/                            # Helm values for platform apps (including platform-common-apps)
 │       ├── traefik/values.yaml
 │       ├── infisical/values.yaml
@@ -140,7 +138,7 @@ Each platform app: public Helm chart + values from `infra-bootstrap` via the man
 
 **`actions-runner-application.yaml`** (wave 1) is also standalone: plain manifests (RBAC/ServiceAccount binding, not something `common-app-chart` renders), deploying the self-hosted GitHub Actions runner (`gitops/platform/actions-runner/`) that executes `common-app-chart`'s `hooks:`/`oneOffJobs:` CI (see ADR-0022). RBAC is scoped per-namespace — extend `rbac-<namespace>.yaml` any time another app's `oneOffJobs` gets wired up.
 
-**`build-runner-application.yaml`** (wave 1) is the same shape but exists specifically to *not* be that runner: it builds images (`buildah`, `BUILDAH_ISOLATION=chroot` + `STORAGE_DRIVER=vfs`, so an ordinary unprivileged pod suffices) and has **no ServiceAccount and no RoleBinding at all**. Keeping them apart means arbitrary `Dockerfile` execution never inherits `actions-runner`'s `create jobs` access to `vos`/`vos-dev` — the risk being identity coupling, not RBAC verb count (ADR-0034). The labels differ too (`self-hosted,ukubi-build` vs `self-hosted,ukubi`) so a workflow can't land on the wrong one.
+**Image builds do not live here at all.** They run on the `build-runner` LXC (`terraform/build-runner.tf` + `ansible/playbooks/build-runner-configure.yml`), not in the cluster. An in-cluster pod was the original design and it does not work: buildah cannot extract image layers without `CAP_SYS_ADMIN`, and the only in-cluster way to grant that is a privileged container running app-repo `Dockerfile`s — see ADR-0034 and `docs/bootstrap-test-notes.md`. Builds reach the registry over the LAN, so nothing about the latency argument changes, and they can no longer touch a Kubernetes node at all.
 
 **`platform-common-apps.applicationset.yaml`** — simple containerized tools with no app-specific code (public image, no CI/CD of their own), all at wave 10:
 

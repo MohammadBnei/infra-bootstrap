@@ -1,0 +1,300 @@
+---
+# build-runner — GitHub Actions runner that builds container images and
+# pushes them to the in-cluster registry (ADR-0034).
+#
+# Runs against the bare LXC terraform/build-runner.tf creates. Terraform's
+# job stops at "bare, SSH-reachable container"; everything below is this
+# playbook's, same split as garage-configure.yml / k9s-dashboard-configure.yml.
+#
+# Why an LXC and not a pod: buildah cannot extract image layers in an
+# unprivileged container — `mount --make-rprivate /` needs CAP_SYS_ADMIN and
+# fails with `remount /, flags: 0x44000: permission denied`
+# (containers/buildah#4920, #5622). Confirmed live. The only in-cluster
+# alternative was a privileged pod running app-repo Dockerfiles, which is a
+# node-level escape risk. See terraform/build-runner.tf's header and
+# docs/bootstrap-test-notes.md.
+#
+# Safe to re-run: package installs are idempotent, the runner is only
+# re-registered when it isn't already configured, and the systemd unit is
+# templated rather than appended to.
+- name: Configure the image build runner
+  hosts: build-runner
+  become: true
+
+  vars:
+    infisical_project_id: "{{ lookup('env', 'INFISICAL_PROJECT_ID') | default('b9043dd5-2956-43e4-9f1b-e9bf7a8e1edc', true) }}"
+    infisical_env: "{{ lookup('env', 'INFISICAL_ENV') | default('prod', true) }}"
+    # Which repo this runner serves. One runner per repo: personal GitHub
+    # accounts cannot register org-level runners, so a second build repo
+    # means a second runner, not a relabel (same constraint ADR-0022 hit).
+    runner_repo_url: "https://github.com/MohammadBnei/editable-blog"
+    # NOT `ukubi` — that label belongs to the in-cluster runner holding a
+    # ServiceAccount token with `create jobs` in vos/vos-dev. Builds must
+    # not land there and cluster jobs must not land here.
+    runner_labels: "self-hosted,ukubi-build"
+    runner_version: "2.336.0"
+    runner_user: runner
+    runner_home: /opt/actions-runner
+    registry_host: "registry.bnei.lan:5000"
+
+  tasks:
+    # -------------------------------------------------------------------
+    # Preflight
+    # -------------------------------------------------------------------
+    - name: Check Infisical CLI session is authenticated
+      delegate_to: localhost
+      become: false
+      ansible.builtin.command:
+        argv:
+          - infisical
+          - secrets
+          - get
+          - ACCESS_TOKEN
+          - --projectId={{ infisical_project_id }}
+          - --env={{ infisical_env }}
+          - --plain
+      register: infisical_check
+      changed_when: false
+      failed_when: false
+      no_log: true
+
+    - name: Fail if Infisical session isn't authenticated
+      ansible.builtin.assert:
+        that: infisical_check.rc == 0
+        fail_msg: "Infisical CLI not authenticated in this shell — run `source ~/.hermes/cache/inf-env.sh` first"
+
+    - name: Verify the runner can resolve the registry
+      # Checked here rather than discovered during the first build: Proxmox
+      # statically injects /etc/resolv.conf at the LXC level and bypasses
+      # DHCP-handed DNS, which is exactly how k9s-dashboard ended up unable
+      # to resolve bnei.lan (docs/bootstrap-test-notes.md). build-runner.tf
+      # sets the nameserver explicitly; this proves it took.
+      ansible.builtin.command: getent hosts {{ registry_host | split(':') | first }}
+      register: registry_dns
+      changed_when: false
+      failed_when: registry_dns.rc != 0
+
+    # -------------------------------------------------------------------
+    # Build tooling
+    # -------------------------------------------------------------------
+    - name: Install podman/buildah and runner dependencies
+      ansible.builtin.apt:
+        name:
+          - podman
+          - buildah
+          - skopeo
+          - curl
+          - jq
+          - git
+          # The runner's own bootstrap needs these; without them config.sh
+          # fails late with a linker error rather than a clear message.
+          - libicu76
+        state: present
+        update_cache: true
+
+    - name: Trust the in-cluster registry over plain HTTP
+      # registry.bnei.lan is a `.lan` name, so Let's Encrypt cannot issue for
+      # it and there is no ingress — it is plain HTTP on a MetalLB address
+      # (ADR-0034). This is podman/buildah's equivalent of the nodes'
+      # containerd certs.d entry.
+      ansible.builtin.copy:
+        dest: /etc/containers/registries.conf.d/010-registry-bnei-lan.conf
+        mode: "0644"
+        content: |
+          # Managed by ansible/playbooks/build-runner-configure.yml
+          [[registry]]
+          location = "{{ registry_host }}"
+          insecure = true
+
+    # -------------------------------------------------------------------
+    # Runner user + binaries
+    # -------------------------------------------------------------------
+    - name: Create the runner user
+      ansible.builtin.user:
+        name: "{{ runner_user }}"
+        home: "{{ runner_home }}"
+        shell: /bin/bash
+        create_home: true
+        system: false
+
+    - name: Check whether the runner is already configured
+      ansible.builtin.stat:
+        path: "{{ runner_home }}/.runner"
+      register: runner_configured
+
+    - name: Download the Actions runner tarball
+      ansible.builtin.get_url:
+        url: "https://github.com/actions/runner/releases/download/v{{ runner_version }}/actions-runner-linux-x64-{{ runner_version }}.tar.gz"
+        dest: "/tmp/actions-runner-{{ runner_version }}.tar.gz"
+        mode: "0644"
+      when: not runner_configured.stat.exists
+
+    - name: Unpack the runner
+      ansible.builtin.unarchive:
+        src: "/tmp/actions-runner-{{ runner_version }}.tar.gz"
+        dest: "{{ runner_home }}"
+        remote_src: true
+        owner: "{{ runner_user }}"
+        group: "{{ runner_user }}"
+      when: not runner_configured.stat.exists
+
+    # -------------------------------------------------------------------
+    # Registration
+    # -------------------------------------------------------------------
+    - name: Read the GitHub PAT from Infisical
+      delegate_to: localhost
+      become: false
+      ansible.builtin.command:
+        argv:
+          - infisical
+          - secrets
+          - get
+          - ACCESS_TOKEN
+          - --projectId={{ infisical_project_id }}
+          - --env={{ infisical_env }}
+          - --plain
+      register: gh_pat
+      changed_when: false
+      no_log: true
+      when: not runner_configured.stat.exists
+
+    - name: Mint a runner registration token
+      # Short-lived (1h) and single-use — the PAT itself never reaches the
+      # LXC. Requires `Administration: Read and write` on the repo AND the
+      # token holder to be the repo owner: personal-account repos have no
+      # admin-collaborator role, so a bot PAT cannot do this (ADR-0034).
+      delegate_to: localhost
+      become: false
+      ansible.builtin.uri:
+        url: "https://api.github.com/repos/{{ runner_repo_url | regex_replace('^https://github.com/', '') }}/actions/runners/registration-token"
+        method: POST
+        headers:
+          Authorization: "Bearer {{ gh_pat.stdout | trim }}"
+          Accept: "application/vnd.github+json"
+        status_code: [201]
+      register: gh_reg_token
+      no_log: true
+      when: not runner_configured.stat.exists
+
+    - name: Configure the runner
+      # `become` is repeated here rather than inherited from the play: with
+      # only `become_user`, ansible-lint's partial-become rule fails the
+      # build (and the pairing is clearer to read at the task).
+      become: true
+      become_user: "{{ runner_user }}"
+      ansible.builtin.command:
+        chdir: "{{ runner_home }}"
+        argv:
+          - ./config.sh
+          - --unattended
+          - --replace
+          - --url={{ runner_repo_url }}
+          - --token={{ gh_reg_token.json.token }}
+          - --name=ukubi-build
+          - --labels={{ runner_labels }}
+          - --work=_work
+      no_log: true
+      when: not runner_configured.stat.exists
+
+    # -------------------------------------------------------------------
+    # Service
+    # -------------------------------------------------------------------
+    - name: Install the runner systemd unit
+      ansible.builtin.copy:
+        dest: /etc/systemd/system/actions-runner.service
+        mode: "0644"
+        content: |
+          # Managed by ansible/playbooks/build-runner-configure.yml
+          [Unit]
+          Description=GitHub Actions runner (image builds, ADR-0034)
+          After=network-online.target
+          Wants=network-online.target
+
+          [Service]
+          Type=simple
+          User={{ runner_user }}
+          WorkingDirectory={{ runner_home }}
+          ExecStart={{ runner_home }}/run.sh
+          Restart=always
+          RestartSec=10
+          KillMode=process
+          KillSignal=SIGTERM
+          TimeoutStopSec=5min
+
+          [Install]
+          WantedBy=multi-user.target
+      notify: Restart actions-runner
+
+    - name: Enable and start the runner
+      ansible.builtin.systemd:
+        name: actions-runner
+        enabled: true
+        state: started
+        daemon_reload: true
+
+    # -------------------------------------------------------------------
+    # Housekeeping — the disk is the thing that will fill
+    # -------------------------------------------------------------------
+    - name: Install a weekly podman prune timer
+      # podman keeps every pulled base image and build layer and nothing
+      # removes them. On a 40GB disk that is a matter of weeks, and the
+      # failure mode is a build failing on ENOSPC rather than anything that
+      # names the real cause.
+      ansible.builtin.copy:
+        dest: "/etc/systemd/system/{{ item.name }}"
+        mode: "0644"
+        content: "{{ item.content }}"
+      loop:
+        - name: podman-prune.service
+          content: |
+            # Managed by ansible/playbooks/build-runner-configure.yml
+            [Unit]
+            Description=Prune unused podman/buildah images and build cache
+
+            [Service]
+            Type=oneshot
+            User={{ runner_user }}
+            ExecStart=/usr/bin/podman system prune --all --force
+        - name: podman-prune.timer
+          content: |
+            # Managed by ansible/playbooks/build-runner-configure.yml
+            [Unit]
+            Description=Weekly podman prune
+
+            [Timer]
+            OnCalendar=weekly
+            Persistent=true
+
+            [Install]
+            WantedBy=timers.target
+      loop_control:
+        label: "{{ item.name }}"
+
+    - name: Enable the prune timer
+      ansible.builtin.systemd:
+        name: podman-prune.timer
+        enabled: true
+        state: started
+        daemon_reload: true
+
+    - name: Build runner configured
+      ansible.builtin.debug:
+        msg:
+          - "build-runner is up, registered against {{ runner_repo_url }}"
+          - "with labels: {{ runner_labels }}"
+          - ""
+          - "Verify:"
+          - "  systemctl status actions-runner"
+          - "  GitHub -> repo -> Settings -> Actions -> Runners (should show 'ukubi-build' idle)"
+          - ""
+          - "Adding a second build repo means a SECOND runner, not a relabel"
+          - "— personal accounts cannot register org-level runners. Copy this"
+          - "playbook's runner_repo_url and register a second instance, and"
+          - "add that repo to the ACCESS_TOKEN PAT's repository list first."
+
+  handlers:
+    - name: Restart actions-runner
+      ansible.builtin.systemd:
+        name: actions-runner
+        state: restarted
+        daemon_reload: true

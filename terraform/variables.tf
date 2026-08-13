@@ -274,3 +274,31 @@ variable "k9s_dashboard_ssh_public_key_file" {
   type        = string
   default     = "~/.ssh/id_k9s_dashboard.pub"
 }
+
+variable "build_runner_container_storage" {
+  description = "PVE storage pool for the build-runner LXC disk — confirm exact name via `pvesm status`. Unlike k9s-dashboard this box does real I/O (image pulls, layer extraction), so prefer the NVMe-backed pool."
+  type        = string
+}
+
+variable "build_runner_ip" {
+  description = "Static IP for build-runner. 192.168.1.111 is unused (ARCHITECTURE.md §3's .100-.199 LXC range) and suggested; treat as provisional, same precedent as garage_ip/k9s_dashboard_ip. Must also be added to pihole_hosts_records if anything needs to resolve it by name."
+  type        = string
+}
+
+variable "build_runner_ct_id" {
+  description = "VMID/CTID for the build-runner container."
+  type        = number
+  default     = 103
+}
+
+variable "build_runner_ssh_public_key_file" {
+  description = "Path to the public half of build-runner's dedicated SSH key — its own keypair, separate from every other box's. Blast radius worth keeping distinct: this container executes app-repo Dockerfiles and holds a GitHub PAT with repo administration. Consumed by ansible/playbooks/build-runner-configure.yml."
+  type        = string
+  default     = "~/.ssh/id_build_runner.pub"
+}
+
+variable "pihole_ip" {
+  description = "Pi-hole's IP, injected as the LXC nameserver. Set explicitly because Proxmox statically writes /etc/resolv.conf at the LXC level and bypasses DHCP-handed DNS — k9s-dashboard was debugged into this the hard way (docs/bootstrap-test-notes.md). Anything needing to resolve *.bnei.lan needs it."
+  type        = string
+  default     = "192.168.1.55"
+}

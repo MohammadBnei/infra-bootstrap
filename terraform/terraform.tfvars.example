@@ -20,6 +20,8 @@ garage_container_storage = "" # NVMe-backed pool for garage-storage's disk — c
 garage_ip             = "" # static IP for the recreated garage-storage container — none locked in MISSION.md yet, pick one and treat as provisional
 k9s_dashboard_container_storage = "" # pool for k9s-dashboard's tiny disk — check `pvesm status`, fine to reuse garage_container_storage's pool
 k9s_dashboard_ip                 = "" # static IP for k9s-dashboard — none locked elsewhere, 192.168.1.110 is unused (ARCHITECTURE.md §3's .100-.199 range) and suggested; treat as provisional
+build_runner_container_storage   = "" # pool for build-runner's 40GB disk — prefer the NVMe-backed pool, this box does real I/O (image pulls, layer extraction), unlike k9s-dashboard
+build_runner_ip                  = "" # static IP for build-runner (ADR-0034) — 192.168.1.111 is unused and suggested; treat as provisional
 # longhorn_disk_size_gb: fallback only, defaults to 50 (ADR-0019) — k8s_nodes
 # entries in variables.tf already set their own per-node size; only override
 # here if you want a different fallback for future entries that omit it.
