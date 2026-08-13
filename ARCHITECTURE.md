@@ -90,6 +90,7 @@ Full eBPF hardware support (AMD Ryzen). ~3GB PVE overhead reserved.
 | nfs-storage | VM (Q35, OVMF) | 1 | 1GB | 120GB | Shared PVE storage for cross-host VM template cloning — [ADR-0026](docs/adr/0026-nfs-shared-pve-storage-cross-host-clone.md), never mounted by K8s |
 | k8s-worker-02 | VM (Q35, OVMF) | 6 | 16GB | 60GB | First cross-host K8s worker (Stage 2 Phase C), `192.168.1.203` — resized 4→6 vCPU/8→16GB 2026-07-30, server1 had most of its RAM idle |
 | k8s-cp-02 | VM (Q35, OVMF) | 2 | 4GB | 40GB | 2nd control-plane + etcd member, `192.168.1.204` — [ADR-0017](docs/adr/0017-second-control-plane-member.md) |
+| build-runner | LXC (VMID 103) | 4 | 4GB | 40GB | Image builds, `192.168.1.111` — `nesting=1`, buildah run as root via scoped sudo. Deliberately outside the cluster: buildah cannot extract layers without `CAP_SYS_ADMIN` ([ADR-0034](docs/adr/0034-in-cluster-oci-registry-zot-garage-backed.md)). Disk is the number to watch — `vfs` storage copies layers, and a weekly `podman system prune` timer is the only thing reclaiming them |
 
 CPU **lacks** eBPF hardware support — one reason Cilium chaining mode is
 locked cluster-wide (see [ADR-0003](docs/adr/0003-cni-cilium-chaining-over-kube-proxy-replacement.md)).
@@ -489,6 +490,34 @@ LXC on proxmox PVE, NVMe-backed, 200GB allocated, S3-compatible API at
 [ADR-0030](docs/adr/0030-expose-garage-s3-externally.md); also reachable
 LAN-only at `garage.bnei.lan:3900`). Single node initially, can scale to
 2-3 nodes later. Replaces MinIO (archived Jan 2026).
+
+### Container registry (Zot)
+
+Zot in-cluster at `registry.bnei.lan:5000` — a MetalLB `LoadBalancer` on a
+**pinned** `.234`, deliberately **no `IngressRoute`**: `.lan` is a name
+Let's Encrypt cannot issue for, so there is no certificate to route TLS
+with. Nodes trust it over plain HTTP via `containerd_registries_mirrors`
+(`inventory/ukubi/group_vars/all/settings.yml`); the pinned address, the
+Pi-hole record and that containerd entry all name the same IP and must move
+together. Anonymous pull, htpasswd-authenticated push.
+
+Blobs live in Garage's `zot-registry` bucket (40GB quota — the LXC's 200GB
+is shared with `k8s-longhorn-backup`, `pg-backup`, `agent-fleet-files` and
+`ente-photos`, and an unbounded registry starves the backup system). The
+pod itself is stateless: `dedupe: false` plus an `emptyDir` staging
+directory, so no durable state lives in the cluster.
+
+**Note the coupling this creates:** Garage is now on the critical path of
+every pod start, and its LXC sits on `.165` — the host rebooted for gaming,
+which drains pods onto cache-cold nodes at the same moment the registry
+backend disappears. Accepted and bounded rather than unnoticed; see
+[ADR-0034](docs/adr/0034-in-cluster-oci-registry-zot-garage-backed.md).
+
+Images are built on the **`build-runner` LXC** (`.111`, VMID 103), not in
+the cluster: buildah cannot extract image layers without `CAP_SYS_ADMIN`,
+and the only in-cluster way to grant that is a privileged pod executing
+app-repo `Dockerfile`s. Builds therefore cannot touch a Kubernetes node at
+all, which is stronger isolation than the pod design it replaced.
 
 ### Proxmox storage
 

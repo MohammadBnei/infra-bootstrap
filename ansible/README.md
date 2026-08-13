@@ -36,6 +36,7 @@ Custom playbooks for things kubespray and pigsty don't cover:
 - [x] `k9s-dashboard-configure.yml` drafted — see below
 - [x] `pihole-configure.yml` drafted — see below
 - [x] `self-drain-configure.yml` drafted and run (2026-07-30) — see below
+- [x] `build-runner-configure.yml` drafted and run (2026-08-13) — image build LXC, ADR-0034
 - [ ] `vm-provision.yml` drafted
 - [ ] `k8s-node-prereqs.yml` drafted (may not be needed if kubespray covers it)
 

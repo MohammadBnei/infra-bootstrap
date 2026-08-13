@@ -23,6 +23,7 @@ then here. When in doubt, open those files.
 | Ingress | Traefik + `IngressRoute` only — no cert-manager, no Gateway API, no plain Ingress |
 | GitOps | ArgoCD, Pattern C (registry + `list`-generator ApplicationSets) |
 | CI/CD | Self-hosted GitHub Actions runner, in-cluster (`gitops/platform/actions-runner/`), RBAC-scoped to `vos`/`vos-dev` only — see ADR-0022. Drives `common-app-chart`'s `hooks:`/`oneOffJobs:` (ArgoCD sync hooks + a ledger-driven reusable workflow for one-time scripts) — see ADR-0023 |
+| Registry | Zot at `registry.bnei.lan:5000` (MetalLB `.234`), blobs on Garage S3, LAN-only plain HTTP — no `IngressRoute`, since Let's Encrypt can't issue for `.lan`. Anonymous pull, htpasswd push. Images are built on the **`build-runner` LXC**, never in-cluster — see ADR-0034 |
 | Secrets | Infisical (project `infra-bootstrap-1-ge1`, id `8a3fa54f-be22-488a-bf51-55158f65c0f2`, domain `https://infisical.bnei.dev`, env `dev` — see `docs/secrets.md`) |
 | Database | Pigsty (vendored in `pigsty/`, has its **own** `pigsty/CLAUDE.md` — don't edit it, it's upstream) |
 | Observability | Prometheus + Grafana (metrics/dashboards), Loki + Grafana Alloy (logs, SingleBinary/filesystem + DaemonSet — see ADR-0027), Alertmanager (routes to Discord). Grafana alerting is native (LogQL rules against Loki), not Loki's Ruler. `common-app-chart`'s `logAlerts:` block lets a user app declare its own log alert rules from its own repo |
@@ -43,6 +44,7 @@ then here. When in doubt, open those files.
 | `gitops/` | ArgoCD source of truth — see `gitops/README.md` |
 | `k8s-cluster/` | Submodule, separate repo, the GitOps *runtime target* (not managed from here) |
 | `terraform/` | Terraform for Proxmox VM/LXC provisioning on `.165` — see `terraform/README.md` |
+| `docs/bootstrap-test-notes.md` | Real-run incident log — what actually broke and why, distilled into the `k8s-ops`/`ansible-ops` skills. Read before repeating an operation that has been done once |
 
 ## Locked decisions (condensed — full detail + rationale in `DECISION.md` and `docs/adr/`)
 
@@ -65,6 +67,13 @@ then here. When in doubt, open those files.
   self-syncing via one flat `bootstrap` Application (ADR-0021); editing
   that directory and merging to `main` is enough, no manual `kubectl
   apply` needed after the one-time setup.
+- Container images come from `registry.bnei.lan:5000` (Zot, blobs on
+  Garage). LAN-only plain HTTP, no `IngressRoute` — Let's Encrypt cannot
+  issue for `.lan`. **Builds run on the `build-runner` LXC, never
+  in-cluster** (buildah needs `CAP_SYS_ADMIN` to extract layers; the only
+  in-cluster way to grant that is a privileged pod running app-repo
+  Dockerfiles). A new build repo needs its own runner *and* adding to the
+  `ACCESS_TOKEN` PAT's repo list — ADR-0034.
 - Greenfield cluster runs use `cluster.yml`, never `scale.yml`.
 - Secrets only via Infisical, fetched at run time — never committed.
 
@@ -86,8 +95,9 @@ rejected, linked from `DECISION.md` §3.
 
 This repo is mid-bootstrap, not finished:
 
-- `ansible/playbooks/register-repos.yml`, `pve-postinstall.yml`, and
-  `garage-configure.yml` are done, committed, and have been run for real
+- `ansible/playbooks/register-repos.yml`, `pve-postinstall.yml`,
+  `garage-configure.yml`, `pihole-configure.yml` and
+  `build-runner-configure.yml` are done, committed, and have been run for real
   (server1/ex-laptop reinstalled to PVE and joined the corosync cluster,
   see ADR-0020/ADR-0024); `vm-provision.yml`/`k8s-node-prereqs.yml` and
   their runbooks are still TODO — check `ansible/README.md` /
