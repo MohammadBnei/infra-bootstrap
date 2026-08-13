@@ -1295,3 +1295,81 @@ out low-risk to skip here since live checks showed the cluster fully
 healthy and the target alerts cleared, but the safer general habit is to
 re-run the same command once cluster health is confirmed (kubespray's
 control-plane role is idempotent).
+
+## 2026-08-13 — zot registry (ADR-0034) first live bring-up: four findings, one of them a real (silent) failure
+
+First end-to-end deploy of the in-cluster OCI registry. The Garage bucket,
+the Application sync and the build runner all came up without drama; what
+follows is only the parts that did *not* behave as written, because those
+are the ones worth the words.
+
+### `/metrics` is 401 by default once htpasswd auth is on — repository policies do not cover it
+
+The scrape was silently broken on arrival. `accessControl.repositories`
+governs image paths only; enabling `http.auth.htpasswd` locks down
+`/metrics` too, and nothing in the startup log says so — zot cheerfully
+logs `metrics extension enabled` and `setting up metrics routes` while
+every scrape gets a 401. Caught by probing the endpoint directly rather
+than by trusting the log:
+
+```
+anonymous GET  /v2/                     -> 200
+anonymous GET  /v2/_catalog             -> 200
+anonymous POST /v2/test/blobs/uploads/  -> 401   # push correctly refused
+bad-cred  POST /v2/test/blobs/uploads/  -> 401
+anonymous GET  /metrics                 -> 401   # <-- not intended
+```
+
+Fix is a sibling of `repositories` under `accessControl`:
+
+```json
+"accessControl": {
+  "repositories": { "**": { "anonymousPolicy": ["read"], "defaultPolicy": [...] } },
+  "metrics": { "anonymousPolicy": ["read"] }
+}
+```
+
+**The trap inside the trap**: do not "harden" this later by adding a
+`basicAuth` stanza to the ServiceMonitor. `isAnonymousMetricsRequest`
+(`pkg/api/authn.go` v2.1.20) requires `isAuthorizationHeaderEmpty(request)`
+— *sending* credentials makes the request non-anonymous and it fails the
+very check that would have let it through. Adding auth to be safe breaks
+the scrape rather than securing it. Verified against the v2.1.20 source,
+not inferred from behaviour.
+
+### A ConfigMap mounted with `subPath` never updates — and ArgoCD reports Healthy the whole time
+
+Stricter than the CoreDNS/nodelocaldns lesson recorded above. That one is
+"eventually, unconfirmed"; this one is **never**. A `subPath` volume mount
+is resolved once at container start and receives no subsequent kubelet
+sync, ever. Meanwhile ArgoCD is entirely correct that the Application is
+`Synced` and `Healthy` — the ConfigMap *object* does match git; only the
+running process holds stale content. Green dashboard, stale config, no
+signal anywhere.
+
+Confirmed live editing zot's `distSpecVersion`: the ConfigMap updated, the
+pod kept the old value until `kubectl rollout restart deploy/zot -n zot`.
+Any change to `gitops/platform/values/zot/values.yaml`'s embedded
+`config.json` needs that restart, and the same applies to every app using
+`extraManifests` + `extraVolumeMounts` + `subPath` in `common-app-chart`.
+Added to the `k8s-ops` skill.
+
+### `.lan` names do not resolve from the MacBook — but this does not affect the pipeline
+
+`dig registry.bnei.lan @192.168.1.55` answers `192.168.1.234`; `dig
+registry.bnei.lan` (default resolver) answers nothing. `scutil --dns`
+shows `nameserver[0] 151.236.14.64` on the primary interface, with Pi-hole
+only on a lower-priority one — a VPN resolver winning.
+
+Worth writing down mostly so the *next* person does not debug the registry
+when the fault is the laptop: in-cluster consumers are unaffected, since
+pods resolve via CoreDNS which forwards to Pi-hole first
+(`dns_upstream_forward_extra_opts: {policy: sequential}`). Only manual
+testing from the Mac is affected — use `192.168.1.234:5000` directly, or
+fix the laptop's resolver order.
+
+### Smaller things
+
+- `distSpecVersion: "1.1.0"` produced `config dist-spec version differs from version actually used` on every start; zot serves 1.1.1 regardless. Cosmetic, but an expected-and-ignored warning is indistinguishable from a real one at 3am. Now `1.1.1` (PR #129).
+- `garage-configure.yml --tags bucket_ops` behaved exactly as ADR-0030 promised on a live re-run: the four existing buckets and keys skipped, only `zot-registry` created, `ZOT_S3_ACCESS_KEY`/`_SECRET` written. The new opt-in `max_size` quota applied cleanly (`changed_when: false`, so it reports `ok` not `changed` — expected, since re-setting an identical quota is a no-op in garage itself).
+- The S3 storage driver was verified from zot's own startup config dump (`"name":"s3"`, `"regionendpoint":"http://garage.bnei.lan:3900"`, `"Dedupe":false`) rather than from "the pod is Running". ADR-0034 named this the one unproven component; a filesystem fallback would also have shown `Running`.

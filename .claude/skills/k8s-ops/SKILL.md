@@ -77,6 +77,19 @@ unconfirmed" — `kubectl rollout restart <daemonset|deployment>/<name> -n
 Confirmed this the hard way 2026-07-30 (CoreDNS/nodelocaldns `dns_upstream_forward_extra_opts`
 change) — see `docs/bootstrap-test-notes.md`.
 
+**A ConfigMap mounted with `subPath` is stricter than that: it updates
+*never*, not "eventually".** The mount is resolved once at container start
+and gets no subsequent kubelet sync at all. Worse, nothing surfaces it —
+ArgoCD is entirely correct that the Application is `Synced`/`Healthy`, because
+the ConfigMap *object* does match git; only the running process holds stale
+content. Green dashboard, stale config, no signal anywhere. Confirmed live
+2026-08-13 editing zot's embedded `config.json`. Any app in
+`common-app-chart` combining `extraManifests` (a ConfigMap) with
+`extraVolumeMounts` + `subPath` — zot today — needs an explicit
+`kubectl rollout restart deploy/<name> -n <ns>` after a values change, and
+"ArgoCD says Synced" is not evidence the change is live. Verify against the
+pod's own startup log, not the Application status.
+
 **Never materialize `/etc/kubernetes/admin.conf` (or any cluster
 credential) on the local machine.** Every `kubectl`/`helm` call runs
 remotely over SSH, to `k9s-dashboard` — the one machine that kubeconfig is
