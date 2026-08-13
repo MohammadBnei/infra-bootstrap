@@ -1373,3 +1373,41 @@ fix the laptop's resolver order.
 - `distSpecVersion: "1.1.0"` produced `config dist-spec version differs from version actually used` on every start; zot serves 1.1.1 regardless. Cosmetic, but an expected-and-ignored warning is indistinguishable from a real one at 3am. Now `1.1.1` (PR #129).
 - `garage-configure.yml --tags bucket_ops` behaved exactly as ADR-0030 promised on a live re-run: the four existing buckets and keys skipped, only `zot-registry` created, `ZOT_S3_ACCESS_KEY`/`_SECRET` written. The new opt-in `max_size` quota applied cleanly (`changed_when: false`, so it reports `ok` not `changed` — expected, since re-setting an identical quota is a no-op in garage itself).
 - The S3 storage driver was verified from zot's own startup config dump (`"name":"s3"`, `"regionendpoint":"http://garage.bnei.lan:3900"`, `"Dedupe":false`) rather than from "the pod is Running". ADR-0034 named this the one unproven component; a filesystem fallback would also have shown `Running`.
+
+### containerd trust rollout: the feared collateral restart did not happen
+
+ADR-0034 warned that `--tags=containerd` re-runs the whole containerd role,
+three of whose tasks carry `notify: Restart containerd`, and that
+`cluster.yml` has no `serial:` and no drain — so the plan was `--check
+--diff` first, then `--limit` one node at a time.
+
+The `--check` run answered the question and made the ritual unnecessary.
+Both runs, dry and real, reported `changed=2` on all five nodes, and the
+only two changed tasks were:
+
+```
+container-engine/containerd : Containerd | Create registry directories
+container-engine/containerd : Containerd | Write hosts.toml file
+```
+
+Neither notifies the restart handler. The three tasks that do (*Unpack
+containerd archive*, *Generate systemd service*, *Copy containerd config
+file*) were `ok`. Real run: `RUNNING HANDLER` occurrences — **zero**.
+Afterwards all five nodes `Ready` with unchanged uptimes (18d/14d/14d/18d/
+15d), no pod churn. So it ran across all five at once, not node-by-node.
+
+Also confirmed in the same output: the `docker.io` mirror entry carried
+forward into `containerd_registries_mirrors` renders **byte-identical** to
+the role default — the loop shows one iteration `ok` (docker.io) and one
+`changed` (`registry.bnei.lan:5000`) per host. That carry-forward exists
+because Ansible replaces lists rather than merging them; the `ok` is the
+evidence it was transcribed correctly rather than approximately.
+
+**The generalisable bit** — the restart warning is about a *class of
+change*, not the tag. Adding a `certs.d` entry touches only non-notifying
+tasks. A containerd **version bump**, a `config.toml`/systemd-unit change,
+or anything else that reaches the three notifying tasks still restarts
+containerd on every targeted node simultaneously, and still deserves
+`--limit`. Run `--check --diff` and read *which tasks* report changed —
+that is the cheap question that decides whether the careful path is needed,
+and it costs a minute.
