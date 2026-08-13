@@ -86,9 +86,32 @@ infisical:
   enabled: true
   projectSlug: "infra-bootstrap-1-ge1"
   envSlug: dev
-  # Restart when the credential rotates — a registry holding a stale S3 key
-  # fails every pull, and pods failing to start is a bad way to find out.
-  autoReload: true
+  # autoReload was true, on the reasoning "restart when the S3 credential
+  # rotates". Turned off after it caused real restarts: the operator
+  # computes one ETag over the WHOLE managed secret, which here is all 54
+  # keys at this project's root — so it cannot tell ZOT_S3_* from the other
+  # 52, and any unrelated secret change bounces the registry.
+  #
+  # That is not hypothetical. garage-configure.yml's two Infisical writes
+  # are `changed_when: true` unconditionally and rewrite GARAGE_ROOT_TOKEN
+  # plus every bucket's key pair, so *every run of that playbook* restarted
+  # zot. Onboarding an unrelated bucket would too.
+  #
+  # The cost lands badly: this is on the critical path of every pod start,
+  # and MetalLB is L2 — a reschedule moves the announcing node, adding ARP
+  # convergence to the pod cycle.
+  #
+  # Trade accepted knowingly: after a real S3 credential rotation zot serves
+  # errors until someone restarts it. That is detectable (the Alertmanager
+  # rule) and rare, whereas the restarts were frequent and silent. A manual
+  # restart is already this app's operating model anyway — its config.json
+  # is mounted with subPath, which never picks up ConfigMap updates.
+  #
+  # The fuller fix, which would let this be true again AND close the
+  # envFrom exposure noted above: move the ZOT_* secrets into an Infisical
+  # folder and point secretsPath at it, so the managed secret holds only
+  # zot's own keys.
+  autoReload: false
 
 extraVolumes:
   - name: config
