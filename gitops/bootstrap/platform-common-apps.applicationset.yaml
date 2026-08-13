@@ -35,6 +35,19 @@ spec:
         namespace: ente
         hostname: ente.bnei.dev
 
+      # In-cluster OCI registry (ADR-0034). The only element here with no
+      # public hostname — it's LAN-only on a MetalLB address, because `.lan`
+      # is a name Let's Encrypt can't issue for. hostname is empty-but-
+      # present on purpose: the template below passes ingress.hostname
+      # unconditionally, and under missingkey=zero an *absent* key renders
+      # the literal "<no value>", which is truthy — that would produce an
+      # IngressRoute on Host(`<no value>`) and fire real ACME orders at a
+      # rate-limited account. values/zot/values.yaml also sets
+      # ingress.enabled: false, so this is belt and braces.
+      - name: zot
+        namespace: zot
+        hostname: ""
+
   template:
     metadata:
       name: '{{.name}}'

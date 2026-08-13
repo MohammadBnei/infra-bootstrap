@@ -1,0 +1,208 @@
+# zot — in-cluster OCI registry, blobs on Garage S3 (ADR-0034).
+#
+# Platform-common app (public image, no per-app repo), not a
+# gitops/apps/registry.yaml user app — same reasoning as searxng/pgweb.
+#
+# Reached at registry.bnei.lan:5000 over plain HTTP from a MetalLB address.
+# There is deliberately NO IngressRoute: `.lan` is a name Let's Encrypt
+# cannot issue for, so certResolver: le would fail forever. containerd is
+# told to trust it in inventory/ukubi/group_vars/all/settings.yml.
+
+image:
+  # The FULL image, not zot-minimal — extensions (the metrics endpoint
+  # below) are excluded from the minimal build, so this config would be
+  # rejected there.
+  repository: ghcr.io/project-zot/zot-linux-amd64
+  tag: "v2.1.20"
+
+service:
+  type: LoadBalancer
+  port: 5000
+  annotations:
+    # Pinned, not pool-assigned. This address is hardcoded into Pi-hole's
+    # registry.bnei.lan record AND into every node's containerd config, and
+    # selfHeal/prune make Service recreation routine — an unpinned address
+    # would silently move and break every image pull in the cluster.
+    metallb.universe.tf/loadBalancerIPs: 192.168.1.234
+
+# No IngressRoute — see header. The ApplicationSet passes ingress.hostname
+# unconditionally, so this must be explicit rather than merely absent.
+ingress:
+  enabled: false
+
+# Zot buffers multipart S3 uploads, and the chart's LimitRange would
+# otherwise default this to 512Mi — enough to OOMKill mid-push on a large
+# layer, which presents as an intermittent registry fault rather than an
+# obvious limit.
+resources:
+  requests:
+    cpu: 100m
+    memory: 256Mi
+  limits:
+    cpu: "1"
+    memory: 1Gi
+
+# TCP rather than HTTP on purpose: an HTTP probe against /v2/ would couple
+# pod health to the access-control policy below, so an ACL mistake would
+# present as a crashlooping registry instead of a 401.
+livenessProbe:
+  enabled: true
+  type: tcp
+readinessProbe:
+  enabled: true
+  type: tcp
+
+# S3 credentials. These MUST arrive named AWS_ACCESS_KEY_ID/
+# AWS_SECRET_ACCESS_KEY — zot's storage driver reads those exact names, and
+# the infisical: block below wires its managed secret in via envFrom, which
+# injects keys verbatim and cannot rename them. Hence explicit secretKeyRef
+# against the same secret. Getting this wrong yields silent 403s from
+# Garage, or a hang while the AWS SDK falls through to IMDS.
+env:
+  - name: AWS_ACCESS_KEY_ID
+    valueFrom:
+      secretKeyRef:
+        name: zot-infisical
+        key: ZOT_S3_ACCESS_KEY
+  - name: AWS_SECRET_ACCESS_KEY
+    valueFrom:
+      secretKeyRef:
+        name: zot-infisical
+        key: ZOT_S3_SECRET
+
+# ponytail: the chart appends `envFrom: secretRef` for the managed secret
+# whenever infisical.enabled is true, and there's no way to keep the
+# InfisicalSecret CR without it. Since garage-configure.yml writes to this
+# project's root path, that means EVERY secret at "/" — including
+# GARAGE_ROOT_TOKEN and the other buckets' S3 credentials — lands as an env
+# var in this pod, not just ZOT_S3_*. Accepted for now: it is how every
+# platform-common app here already works, and zot runs a pinned upstream
+# image rather than anything built from an app repo. Upgrade path if that
+# stops being comfortable: move the ZOT_* secrets into an Infisical folder
+# (`infisical secrets set --path=/zot` from garage-configure.yml) and point
+# secretsPath below at it — the explicit secretKeyRef env vars above already
+# work either way, so only this block changes.
+infisical:
+  enabled: true
+  projectSlug: "infra-bootstrap-1-ge1"
+  envSlug: dev
+  # Restart when the credential rotates — a registry holding a stale S3 key
+  # fails every pull, and pods failing to start is a bad way to find out.
+  autoReload: true
+
+extraVolumes:
+  - name: config
+    configMap:
+      name: zot-config
+  - name: htpasswd
+    secret:
+      # Same Infisical-managed secret as the env vars above, mounted as a
+      # file because zot wants an htpasswd path, not an env var. One line,
+      # "user:bcrypt-hash", written to Infisical as ZOT_HTPASSWD.
+      secretName: zot-infisical
+      items:
+        - key: ZOT_HTPASSWD
+          path: htpasswd
+  # rootDirectory. With storageDriver s3 this is a local staging area, and
+  # with dedupe disabled (see the config below) nothing in it needs to
+  # survive a restart — so emptyDir, not a PVC. Two things follow, and both
+  # were the point: the pod is genuinely stateless, keeping real state out
+  # of the cluster per the standing rule; and there's no ReadWriteOnce
+  # volume to deadlock a rollout against, which is the failure this homelab
+  # has already hit on agent-fleet workers.
+  #
+  # If verification V4 (push -> delete pod -> pull) shows zot needs durable
+  # local metadata after all, swap this for persistence: + strategy:
+  # {type: Recreate} — never a PVC on the default rolling strategy.
+  - name: registry-cache
+    emptyDir: {}
+
+extraVolumeMounts:
+  - name: config
+    mountPath: /etc/zot/config.json
+    subPath: config.json
+    readOnly: true
+  - name: htpasswd
+    mountPath: /etc/zot/htpasswd
+    subPath: htpasswd
+    readOnly: true
+  - name: registry-cache
+    mountPath: /var/lib/registry
+
+extraManifests:
+  - |
+    apiVersion: v1
+    kind: ConfigMap
+    metadata:
+      name: zot-config
+      namespace: {{ .Release.Namespace }}
+    data:
+      config.json: |
+        {
+          "distSpecVersion": "1.1.0",
+          "storage": {
+            "rootDirectory": "/var/lib/registry",
+            "dedupe": false,
+            "storageDriver": {
+              "name": "s3",
+              "bucket": "zot-registry",
+              "region": "garage",
+              "regionendpoint": "http://garage.bnei.lan:3900",
+              "secure": false,
+              "skipverify": false,
+              "forcepathstyle": true
+            }
+          },
+          "http": {
+            "address": "0.0.0.0",
+            "port": "5000",
+            "auth": {
+              "htpasswd": {
+                "path": "/etc/zot/htpasswd"
+              }
+            },
+            "accessControl": {
+              "repositories": {
+                "**": {
+                  "anonymousPolicy": ["read"],
+                  "defaultPolicy": ["read", "create", "update", "delete"]
+                }
+              }
+            }
+          },
+          "log": {
+            "level": "info"
+          },
+          "extensions": {
+            "metrics": {
+              "enable": true,
+              "prometheus": {
+                "path": "/metrics"
+              }
+            }
+          }
+        }
+  # common-app-chart has no ServiceMonitor template, and every other
+  # scraped component brings its own from an upstream chart. Prometheus'
+  # serviceMonitorSelectorNilUsesHelmValues is false, so a hand-written one
+  # is picked up.
+  #
+  # If this scrape comes back 401, it's the accessControl block above:
+  # /metrics is not a repository path, so add a dedicated metrics user to
+  # ZOT_HTPASSWD and a basicAuth stanza here rather than loosening the ACL.
+  - |
+    apiVersion: monitoring.coreos.com/v1
+    kind: ServiceMonitor
+    metadata:
+      name: zot
+      namespace: {{ .Release.Namespace }}
+      labels:
+        {{- include "common-app-chart.labels" . | nindent 8 }}
+    spec:
+      selector:
+        matchLabels:
+          {{- include "common-app-chart.selectorLabels" . | nindent 10 }}
+      endpoints:
+        - port: http
+          path: /metrics
+          interval: 30s
