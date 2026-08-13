@@ -177,6 +177,10 @@
       when: not runner_configured.stat.exists
 
     - name: Configure the runner
+      # `become` is repeated here rather than inherited from the play: with
+      # only `become_user`, ansible-lint's partial-become rule fails the
+      # build (and the pairing is clearer to read at the task).
+      become: true
       become_user: "{{ runner_user }}"
       ansible.builtin.command:
         chdir: "{{ runner_home }}"
