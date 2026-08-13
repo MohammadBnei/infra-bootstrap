@@ -135,6 +135,19 @@
             AllowedHeader: ["*"]
             ExposeHeader: ["ETag"]
             MaxAgeSeconds: 3000
+      - name: "zot-registry" # OCI image blobs for the in-cluster registry (ADR-0034)
+        key_name: "zot-registry-key"
+        infisical_prefix: "ZOT_S3"
+        # The only bucket here that grows purely as a side effect of CI —
+        # nothing prunes it, and every build adds layers. This LXC has 200GB
+        # total shared with k8s-longhorn-backup, pg-backup, agent-fleet-files
+        # and ente-photos, so an unbounded registry doesn't just fill its own
+        # space, it takes the *backups* down with it: Longhorn PV backups,
+        # pgBackRest's off-host target and image pulls would start failing
+        # together, which is a data-durability failure, not a registry
+        # failure. Retention policy is deferred (ADR-0034); this bound isn't.
+        # Garage's own size format ("40GB"/"1TB", or "none" to lift it).
+        max_size: "40GB"
 
   handlers:
     - name: Restart garage
@@ -377,6 +390,24 @@
       loop_control:
         label: "{{ item.name }}"
       when: item.name not in garage_bucket_list.stdout
+      tags: [bucket_ops]
+
+    # Optional per-bucket size cap. Opt-in (`max_size` defined) rather than
+    # applied to every bucket: the backup buckets are sized by their own
+    # retention policies, and capping those would silently drop a backup
+    # rather than fail loudly. Set it for buckets that grow as a side effect
+    # of something else and have no pruning of their own — zot-registry is
+    # the current case. Unconditional and idempotent, same rationale as the
+    # `bucket allow` grant below: re-setting an identical quota is a no-op
+    # in garage itself.
+    - name: Apply per-bucket size quotas
+      ansible.builtin.command: >
+        /usr/local/bin/garage bucket set-quotas
+        --max-size {{ item.max_size }} {{ item.name }}
+      loop: "{{ garage_buckets | selectattr('max_size', 'defined') | list }}"
+      loop_control:
+        label: "{{ item.name }} <= {{ item.max_size }}"
+      changed_when: false
       tags: [bucket_ops]
 
     # -------------------------------------------------------------------

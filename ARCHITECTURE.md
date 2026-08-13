@@ -215,6 +215,10 @@ graph LR
   `.233` (pinned via `metallb.universe.tf/loadBalancerIPs` on Traefik's
   Service). `.230-.232` excluded from the pool — `.232` is Pigsty's HA
   floating VIP (vip-manager), `.230`/`.231` kept clear alongside it.
+  **Second pinned address:** `.234` (zot OCI registry, ADR-0034) — the only
+  other Service here that isn't reached through Traefik, because `.lan` is a
+  name Let's Encrypt can't issue for. Pinned for the same reason as `.233`:
+  a DNS record and every node's containerd config both name it.
 - **Speaker:** tolerates `node-role.kubernetes.io/control-plane:NoSchedule`.
 - **Controller:** 2 replicas, pod anti-affinity keyed on
   `app=metallb,component=controller` / `topologyKey=kubernetes.io/hostname`.
@@ -259,6 +263,7 @@ A    postgres-2.bnei.lan     → 192.168.1.207  (pg02 VM — current live Leader
 A    postgres.bnei.lan       → 192.168.1.232  (Pigsty HA floating VIP — apps/tests should use this, not postgres-1/2 directly)
 A    pg-etcd-witness.bnei.lan → 192.168.1.197  (ex-laptop — 3rd etcd DCS member, live 2026-07-30, ADR-0029)
 A    garage.bnei.lan         → 192.168.1.199
+A    registry.bnei.lan       → 192.168.1.234  (zot OCI registry — a MetalLB LoadBalancer address, not a host; pinned in gitops/platform/values/zot/values.yaml and named by every node's containerd config, so both ends move together — ADR-0034)
 A    nfs-storage.bnei.lan    → 192.168.1.198
 A    k9s-dashboard.bnei.lan  → 192.168.1.110
 A    k8s.bnei.lan            → 192.168.1.180  (kube-vip control-plane VIP, confirmed live — see ADR-0016)

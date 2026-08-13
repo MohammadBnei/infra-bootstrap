@@ -1,6 +1,12 @@
 # ADR-0022: Self-hosted GitHub Actions runner in-cluster
 
 **Status:** Accepted
+**Amended by:** [ADR-0034](0034-in-cluster-oci-registry-zot-garage-backed.md)
+— image builds do **not** run in this pod. They get a separate
+`build-runner` Deployment with no ServiceAccount binding, precisely so this
+runner's identity (a projected SA token with `create jobs` in `vos`/
+`vos-dev`) is never inherited by arbitrary `Dockerfile` execution. The
+scope described below is unchanged.
 
 ## Context
 
