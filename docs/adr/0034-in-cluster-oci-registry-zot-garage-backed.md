@@ -176,8 +176,20 @@ Two further practical constraints made this unavoidable anyway:
   tasks `notify: Restart containerd`, while the two that actually write
   `certs.d/*/hosts.toml` notify nothing (containerd re-reads per request).
   Every restart it causes is therefore collateral, and `cluster.yml` has no
-  `serial:` and no drain — so it is run `--check --diff` first and then
-  `--limit` one node at a time, by hand, per `CLAUDE.md`.
+  `serial:` and no drain — so it is run `--check --diff` first, by hand, per
+  `CLAUDE.md`.
+
+  **Resolved live 2026-08-13:** for *this* change the collateral restart did
+  not occur at all. Both the check and real runs reported `changed=2` on all
+  five nodes, only the two non-notifying `certs.d` tasks; zero handlers ran;
+  all nodes stayed `Ready` with unchanged uptimes. So it was applied to all
+  five at once rather than `--limit` one at a time. The warning above still
+  stands for a *different class of change* — a containerd version bump, or a
+  `config.toml`/systemd-unit edit, reaches the notifying tasks and restarts
+  every targeted node simultaneously. The durable rule is therefore not
+  "always `--limit`" but "`--check --diff` first and read *which tasks*
+  report changed" — a minute that decides whether the careful path is
+  needed. See `docs/bootstrap-test-notes.md`.
 - VISION credits an in-cluster registry with removing the Docker Hub rate
   limit. Nothing in this decision delivers that — a pull-through cache
   (`extensions.sync`) changes image resolution for *every* workload in the
