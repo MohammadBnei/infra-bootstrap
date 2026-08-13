@@ -23,3 +23,32 @@ upstream_dns_servers:
 # roles/kubernetes-apps/ansible/defaults/main.yml).
 dns_upstream_forward_extra_opts:
   policy: sequential
+
+# In-cluster OCI registry (ADR-0034). registry.bnei.lan is a `.lan` name, so
+# Let's Encrypt can't issue for it and there's no IngressRoute to route
+# through — it's a MetalLB LoadBalancer speaking plain HTTP, and containerd
+# has to be told that's acceptable.
+#
+# The docker.io entry below is NOT redundant: this replaces the role default
+# (roles/container-engine/containerd/defaults/main.yml) wholesale, because
+# Ansible replaces lists rather than merging them. Drop it and the existing
+# /etc/containerd/certs.d/docker.io/hosts.toml is left orphaned on every
+# node — still on disk, no longer reconciled by anything.
+#
+# `server:` is set explicitly for the same class of reason: hosts.toml.j2
+# defaults it to "https://" + prefix, which would point the plain-HTTP
+# registry at an HTTPS URL and fail every pull. `push` is deliberately not
+# in capabilities — containerd only ever pulls; CI pushes over the S3 API
+# path, not through this config.
+containerd_registries_mirrors:
+  - prefix: docker.io # carried forward verbatim from the role default
+    mirrors:
+      - host: https://registry-1.docker.io
+        capabilities: ["pull", "resolve"]
+        skip_verify: false
+  - prefix: registry.bnei.lan:5000
+    server: http://registry.bnei.lan:5000
+    mirrors:
+      - host: http://registry.bnei.lan:5000
+        capabilities: ["pull", "resolve"]
+        skip_verify: true
