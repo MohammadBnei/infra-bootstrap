@@ -61,21 +61,21 @@ Idempotent, and effectively free after the first run since `EPHEMERAL=false`
 keeps the pod alive across jobs. If that ever becomes annoying, bake an
 image — it wasn't worth a build pipeline for one `apt-get`.
 
-## One-time human setup
+## Credential prerequisite — satisfied 2026-08-13
 
-Exactly one step, and it genuinely cannot be done from here:
+`ACCESS_TOKEN` must list **every repo a runner registers against**, with
+`Administration: Read and write`. It now covers `vos-monolith` +
+`editable-blog`. **Adding a third build repo means editing that PAT's
+repository list too** — the pod otherwise starts and then crashloops on
+registration, which reads as a broken image rather than a missing grant.
 
-**Add `editable-blog` to the `ACCESS_TOKEN` PAT's repository list** (GitHub
-→ Settings → Developer settings → fine-grained tokens). It currently covers
-`vos-monolith` only, with `Administration: Read and write` — that permission
-is already correct, only the repo list needs extending.
-
-**Expected failure mode if skipped:** the pod starts, then crashloops on
-registration. Verify with:
+Verify without deploying anything (the endpoint mints a short-lived token
+and changes no state):
 
 ```
-POST /repos/MohammadBnei/editable-blog/actions/runners/registration-token
-  → 201 means the runner will come up
+POST /repos/<owner>/<repo>/actions/runners/registration-token
+  201 → the runner will come up
+  403 → the PAT doesn't cover that repo, or lacks Administration
 ```
 
 ### Why not the `argocd-ukubi-bot` account
