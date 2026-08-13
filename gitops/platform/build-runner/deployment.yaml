@@ -63,12 +63,20 @@ spec:
           value: chroot
         - name: STORAGE_DRIVER
           value: vfs
-        envFrom:
-        # Reuses actions-runner's Infisical project: the registration token
-        # is derived from a user-scoped PAT, so the same one registers a
-        # runner on any repo this account owns. One PAT, two runners.
-        - secretRef:
-            name: build-runner-infisical
+        # Explicit secretKeyRef, NOT envFrom, for two reasons that both
+        # matter here:
+        #   - myoung34/github-runner reads ACCESS_TOKEN; the Infisical key is
+        #     UKUBI_BOT_GH_PAT, and envFrom injects keys verbatim with no way
+        #     to rename. Same trap as zot's AWS_ACCESS_KEY_ID.
+        #   - envFrom is all-or-nothing. This pod executes an app repo's
+        #     Dockerfile and everything it pulls in, so it gets exactly the
+        #     one credential it needs and nothing else that happens to live
+        #     in the same Infisical project.
+        - name: ACCESS_TOKEN
+          valueFrom:
+            secretKeyRef:
+              name: build-runner-infisical
+              key: UKUBI_BOT_GH_PAT
         # Builds are the reason this exists, so it gets real headroom —
         # actions-runner's 500m/512Mi would OOMKill a monolith build. The
         # ephemeral-storage limit is the load-bearing one: vfs copies image

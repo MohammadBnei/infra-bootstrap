@@ -63,25 +63,50 @@ image — it wasn't worth a build pipeline for one `apt-get`.
 
 ## One-time human setup
 
-Exactly one step, and it genuinely cannot be automated from here:
+Exactly one step, and it genuinely cannot be done from here:
 
-**Widen the existing PAT's repo scope to include `editable-blog`.** The
-`ACCESS_TOKEN` in the `actions-runner` Infisical project is a fine-grained
-PAT with `Administration: Read and write`, currently scoped to
-`vos-monolith` only (see `../actions-runner/README.md`). **Expected failure
-mode if skipped:** the pod starts, then crashloops on registration.
+**Give `argocd-ukubi-bot` the Admin role on `editable-blog`** (Settings →
+Collaborators). It is currently a **Write** collaborator, and that is not
+enough — GitHub gates repo-level runner registration on `admin`, and even
+`maintain` is refused. Verified empirically rather than assumed:
+
+```
+login: argocd-ukubi-bot
+editable-blog permissions: admin:false  maintain:false  push:true
+POST /repos/MohammadBnei/editable-blog/actions/runners/registration-token → 403
+```
+
+**Expected failure mode if skipped:** the pod starts, then crashloops on
+registration. Re-run that same `POST` after the change — `201` means the
+runner will come up.
 
 Worth being explicit about, because it looks like it should already work:
 `editable-blog` being deployed in the cluster does *not* imply this. That
-deployment runs on `repo-creds-github-bnei` / `GITHUB_APPS_PAT` — a
-different, fine-grained, **read-only** token that lets ArgoCD *clone* the
-repo (ADR-0025). Registering a self-hosted runner calls GitHub's
-`actions/runners/registration-token` API, which needs `Administration:
-write` on that specific repo. Read access to clone and admin access to
-register are separate grants on separate tokens.
+runs on `repo-creds-github-bnei` / `GITHUB_APPS_PAT` — a different,
+fine-grained, **read-only** token that lets ArgoCD *clone* the repo
+(ADR-0025). Read-to-clone and admin-to-register are separate grants on
+separate tokens, so no amount of deployment implies the second.
+
+### Accepted trade-off, recorded rather than glossed
+
+Repo Admin includes deleting the repo and reading/writing its Actions
+secrets, and `UKUBI_BOT_GH_PAT` is a *wide* PAT — so its blast radius is
+every repo `argocd-ukubi-bot` collaborates on, not just this one. That token
+is mounted into the pod that executes an app repo's `Dockerfile`.
+
+This was chosen knowingly over a fine-grained `Administration`-only PAT (see
+ADR-0034's consequences). Two things narrow it as far as the choice allows,
+and both are load-bearing rather than decorative:
+
+- The token arrives via an explicit `secretKeyRef`, not `envFrom`, so this pod gets that one key and nothing else that shares its Infisical project.
+- The PAT is duplicated into the small `actions-runner` project instead of the main one, so the Secret in this namespace never contains `PVE_API_TOKEN`, `K8S_BREAK_GLASS_TOKEN` or `GARAGE_ROOT_TOKEN`.
+
+If this ever stops feeling proportionate, the swap is one line here plus one
+new fine-grained token — nothing else in the design depends on it.
 
 ### Already done, no action needed
 
+- `UKUBI_BOT_GH_PAT` copied into the `actions-runner` Infisical project. **Rotate the two copies together** — the other lives in `infra-bootstrap-1-ge1`.
 - `ZOT_HTPASSWD` (user `ci`, bcrypt cost 12) is in Infisical — see `docs/secrets.md`.
-- `REGISTRY_USERNAME`/`REGISTRY_PASSWORD` are set as GitHub Actions secrets on `editable-blog`. Rotate them together with `ZOT_HTPASSWD`; they are two representations of one credential.
+- `REGISTRY_USERNAME`/`REGISTRY_PASSWORD` set as Actions secrets on `editable-blog`. Rotate with `ZOT_HTPASSWD`; two representations of one credential.
 - `gitops/bootstrap/` self-syncs per ADR-0021, so no manual `kubectl apply`.

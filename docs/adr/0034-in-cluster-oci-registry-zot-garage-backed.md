@@ -183,5 +183,21 @@ Two further practical constraints made this unavoidable anyway:
   (`extensions.sync`) changes image resolution for *every* workload in the
   cluster, a far larger blast radius than the registry itself. It is
   deliberately a separate, later change.
+- **The build runner registers with a wide bot PAT, knowingly.** GitHub
+  gates repo-level runner registration on the `admin` role (`maintain` is
+  refused, confirmed by a 403 against `editable-blog` while the bot held
+  Write). Rather than mint a fine-grained `Administration`-only token, the
+  existing `argocd-ukubi-bot` account is promoted to Admin on that repo and
+  its `UKUBI_BOT_GH_PAT` is used — one identity, consistent with the bot
+  pattern agent-fleet already established. The cost is stated plainly: repo
+  Admin includes deletion and Actions-secret access, the PAT is wide, and it
+  lives in the pod that runs an app repo's `Dockerfile`. That is the same
+  identity-coupling this ADR splits the runners to avoid, re-entering
+  through a different door, and it is accepted rather than unnoticed. Two
+  mitigations bound it — the token arrives by explicit `secretKeyRef` rather
+  than `envFrom`, and it is duplicated into the small `actions-runner`
+  Infisical project so the namespace's Secret never holds `PVE_API_TOKEN`,
+  `K8S_BREAK_GLASS_TOKEN` or `GARAGE_ROOT_TOKEN`. The alternative remains a
+  one-line swap if the posture stops feeling proportionate.
 - Deferred and named so they are not mistaken for oversights: vulnerability
   scanning, image signing, GC/retention policy, public exposure.
