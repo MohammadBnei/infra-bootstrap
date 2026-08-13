@@ -28,17 +28,19 @@
 # provisioner (see garage.tf's header for why).
 #
 # node_name hardcoded to "server1" for the same reason k9s-dashboard is:
-# single fixed-purpose resource, and "local" storage's vztmpl content is
-# per-node in Proxmox, so it needs its own download rather than reusing
-# another host's template.
-resource "proxmox_download_file" "build_runner_lxc_template" {
-  content_type = "vztmpl"
-  datastore_id = "local"
-  node_name    = "server1"
-  url          = "http://download.proxmox.com/images/system/debian-13-standard_13.6-1_amd64.tar.zst"
-  file_name    = "debian-13-standard_13.6-1_amd64.tar.zst"
-  overwrite    = false
-}
+# single fixed-purpose resource, explicit placement.
+#
+# It reuses k9s-dashboard's vztmpl download rather than declaring its own.
+# That is the opposite of what k9s-dashboard.tf does relative to garage.tf,
+# and the difference is the node: "local" storage's vztmpl content is
+# *per-node* in Proxmox, so garage's template on .165 genuinely isn't
+# visible to server1 — but k9s-dashboard is on server1 too, and it is the
+# same Debian 13 image. Declaring a second download of the same file to the
+# same datastore fails, confirmed on first apply:
+#   "refusing to override existing file
+#    '/var/lib/vz/template/cache/debian-13-standard_13.6-1_amd64.tar.zst'"
+# Copying k9s-dashboard's "needs its own download" comment without checking
+# whether its per-node reasoning applied here is what caused that.
 
 resource "proxmox_virtual_environment_container" "build_runner" {
   node_name    = "server1"
@@ -66,13 +68,26 @@ resource "proxmox_virtual_environment_container" "build_runner" {
   }
 
   # nesting is required, not optional: podman/buildah inside an unprivileged
-  # LXC needs it to create the mount and user namespaces that the
-  # in-cluster attempt could not. keyctl is needed for the same reason
-  # podman documents it for LXC — the kernel keyring is namespaced and
-  # container runtimes touch it during image handling.
+  # LXC needs it to create the mount and user namespaces the in-cluster
+  # attempt could not.
+  #
+  # keyctl is deliberately NOT set, despite the usual Proxmox advice pairing
+  # the two. Terraform cannot set it: the API token gets
+  #   "changing feature flags (except nesting) is only allowed for root@pam"
+  # (a bpg-documented hard restriction, see terraform/README.md — nesting is
+  # the single exception). The kernel keyring mostly matters for a nested
+  # *daemon* (dockerd) or systemd-in-container; buildah building an image
+  # with chroot isolation does not obviously need it. Rather than escalate
+  # to root@pam password auth for a feature that may be unnecessary, this
+  # starts without it.
+  #
+  # If a build ever fails on a keyring error, the fix is one manual command
+  # on server1 as root@pam, not a Terraform change:
+  #   pct set 103 --features nesting=1,keyctl=1
+  # Record it in docs/bootstrap-test-notes.md if that day comes, since it
+  # would then be drift Terraform cannot express.
   features {
     nesting = true
-    keyctl  = true
   }
 
   network_interface {
@@ -109,6 +124,6 @@ resource "proxmox_virtual_environment_container" "build_runner" {
 
   operating_system {
     type             = "debian"
-    template_file_id = proxmox_download_file.build_runner_lxc_template.id
+    template_file_id = proxmox_download_file.k9s_dashboard_lxc_template.id
   }
 }

@@ -1499,3 +1499,109 @@ problem, not a flag. Before designing anything around buildah/kaniko/img in
 Kubernetes, build one throwaway image on the target platform first. The
 distance between "the docs list a rootless mode" and "it builds on this
 cluster" is where the whole cost is.
+
+### build-runner LXC bring-up: five failures, each one a wrong assumption
+
+The LXC itself was easy; getting a build through it took five iterations, and
+every one was an assumption written into code without being exercised. Listed
+because the *pattern* is the lesson, not the individual fixes.
+
+**1. Duplicate vztmpl download.** `build-runner.tf` declared its own
+`proxmox_download_file` for the Debian 13 template, copying
+`k9s-dashboard.tf`'s "needs its own download" comment. That comment's
+reasoning is *per-node* — garage's template on `.165` isn't visible to
+`server1` — and build-runner is on `server1`, the same node as
+k9s-dashboard. Apply failed:
+
+```
+refusing to override existing file
+'/var/lib/vz/template/cache/debian-13-standard_13.6-1_amd64.tar.zst'
+```
+
+Now references `proxmox_download_file.k9s_dashboard_lxc_template.id`.
+Copying a comment is not the same as copying its reasoning.
+
+**2. `keyctl` needs `root@pam`.** The `features` block set
+`nesting=1,keyctl=1`; the API token can only set `nesting`:
+
+```
+Permission check failed (changing feature flags (except nesting)
+is only allowed for root@pam)
+```
+
+Already documented in `terraform/README.md` as a bpg hard restriction.
+Dropped `keyctl` rather than escalating for a feature that may be
+unnecessary — if a build ever fails on a keyring error the fix is
+`pct set 103 --features nesting=1,keyctl=1` on server1 as root@pam, which
+would then be drift Terraform cannot express.
+
+**3–4. `become_user` on a minimal Debian LXC.** Two missing packages, both
+surfacing as the same useless error:
+
+```
+Module result deserialization failed: No start of json char found
+```
+
+`sudo` (ansible's default `become_method`; the LXC ships without it) and
+`acl` (to hand module temp files from root to an unprivileged become user).
+The play-level `become: true` masks both, because becoming root when already
+root never exercises either. Adding `acl` alone did not fix it — `sudo` was
+the load-bearing one.
+
+**5. `config.sh` rejects `--flag=value`.** The runner's configurator wants
+space-separated arguments. Given `--url=https://...` it reports
+`Unrecognized command-line input arguments` and then
+`Invalid configuration provided for url`, which points at the *value* rather
+than the syntax that actually broke. `no_log: true` on that task hid all of
+it; the diagnosis came from running `config.sh` by hand over SSH.
+
+### And then rootless buildah failed on the LXC too — but recoverably
+
+The first successful-looking run still died:
+
+```
+insufficient UIDs or GIDs available in user namespace
+(requested 0:42 for /etc/shadow) ... lchown /etc/shadow: invalid argument
+```
+
+preceded by `newgidmap: write to gid_map failed: Operation not permitted`
+and `Falling back to single mapping`. An unprivileged LXC gives the runner
+user exactly one UID, and `node:22-alpine` chowns `/etc/shadow` to gid 42.
+
+**This is the same root cause that killed the in-cluster attempt** — no
+usable user namespace — but here it is recoverable, because the box has real
+root. That is precisely the property the LXC was chosen for. The runner
+*process* still cannot be root (GitHub's `config.sh` refuses to register that
+way), so the runner user gets `NOPASSWD` sudo for `/usr/bin/buildah` alone
+and every buildah call goes through it.
+
+All four calls had to move together, not just the build: `buildah login`
+writes its auth file under `/run/containers/<uid>/`, so a rootless login is
+invisible to a rootful push.
+
+**Also caught here**: `node -p` read the version out of `package.json`, but a
+build box has no Node runtime. The step did not fail — command substitution
+returned empty — and it surfaced three steps later as
+`tag registry.bnei.lan:5000/editable-blog:: invalid reference format`.
+Switched to `jq` with `set -euo pipefail` and an emptiness check.
+
+### V10 — the number ADR-0034 asked for
+
+First green run, `editable-blog` at `0.37.9`, verified in the registry
+(`/v2/_catalog` → `["editable-blog"]`, tags `0.37.9` + `latest`, blobs in
+Garage):
+
+| pipeline | wall clock |
+|---|---|
+| `local-registry.yml` — LAN build → LAN push | **67s** |
+| `docker.yml` — GitHub runner → Docker Hub | **113s** |
+
+**Read this honestly: it is not apples-to-apples.** `docker.yml` also runs a
+Trivy scan, uses buildx with a registry-backed cache, and triggers a deploy
+job; the LAN pipeline does none of those. So the fair claim is "meaningfully
+faster, and certainly not slower," not "1.7× faster." A like-for-like number
+needs the scan added to the LAN pipeline, or removed from the comparison.
+
+What is unambiguous: the WAN is off the hot path in both directions, and
+nodes now pull over gigabit instead of a residential downlink — which was
+the actual argument, and which the wall clock above does not even measure.

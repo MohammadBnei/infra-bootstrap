@@ -86,6 +86,19 @@
           - curl
           - jq
           - git
+          # Both are required for `become_user: runner`, not optional
+          # tooling. A minimal Debian LXC ships neither, and both failures
+          # surface as the same unhelpful "Module result deserialization
+          # failed: No start of json char found" — the play-level
+          # `become: true` hides it, because becoming root when already
+          # root is a no-op that never exercises either.
+          #   sudo — ansible's default become_method; without it the
+          #          become invocation itself fails.
+          #   acl  — needed to hand module temp files from root to an
+          #          unprivileged become user.
+          # Confirmed live, in that order: adding acl alone did not fix it.
+          - sudo
+          - acl
           # The runner's own bootstrap needs these; without them config.sh
           # fails late with a linker error rather than a clear message.
           - libicu76
@@ -116,6 +129,30 @@
         shell: /bin/bash
         create_home: true
         system: false
+
+    - name: Allow the runner to invoke buildah as root
+      # The runner process must be non-root — GitHub's config.sh refuses to
+      # register as root — but buildah must be rootful. Rootless buildah in
+      # an unprivileged LXC gets "newuidmap: write to gid_map failed:
+      # Operation not permitted", falls back to a single UID mapping, and
+      # then dies on any image that chowns to a second one:
+      #   "insufficient UIDs or GIDs available in user namespace
+      #    (requested 0:42 for /etc/shadow)"
+      # Real root is exactly why the builder moved to an LXC (ADR-0034), so
+      # use it rather than rebuilding the user-namespace machinery that
+      # failed in-cluster.
+      #
+      # Scoped to buildah alone rather than blanket NOPASSWD:ALL. The
+      # honest boundary here is the LXC itself — this box exists to run
+      # untrusted build content and holds nothing else — but a narrow rule
+      # still keeps "what the build can do as root" legible.
+      ansible.builtin.copy:
+        dest: /etc/sudoers.d/runner-buildah
+        mode: "0440"
+        validate: /usr/sbin/visudo -csf %s
+        content: |
+          # Managed by ansible/playbooks/build-runner-configure.yml
+          {{ runner_user }} ALL=(root) NOPASSWD: /usr/bin/buildah
 
     - name: Check whether the runner is already configured
       ansible.builtin.stat:
@@ -184,15 +221,25 @@
       become_user: "{{ runner_user }}"
       ansible.builtin.command:
         chdir: "{{ runner_home }}"
+        # Space-separated, NOT --flag=value. The runner's config.sh rejects
+        # the `=` form outright — "Unrecognized command-line input arguments
+        # for command configure" — and then fails with "Invalid
+        # configuration provided for url", which points at the value rather
+        # than at the syntax that actually broke it. Confirmed live.
         argv:
           - ./config.sh
           - --unattended
           - --replace
-          - --url={{ runner_repo_url }}
-          - --token={{ gh_reg_token.json.token }}
-          - --name=ukubi-build
-          - --labels={{ runner_labels }}
-          - --work=_work
+          - --url
+          - "{{ runner_repo_url }}"
+          - --token
+          - "{{ gh_reg_token.json.token }}"
+          - --name
+          - ukubi-build
+          - --labels
+          - "{{ runner_labels }}"
+          - --work
+          - _work
       no_log: true
       when: not runner_configured.stat.exists
 
