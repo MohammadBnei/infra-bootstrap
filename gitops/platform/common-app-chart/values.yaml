@@ -11,6 +11,16 @@ annotations: {}
 
 service:
   port: 80
+  # ClusterIP for anything reached through Traefik — i.e. everything with an
+  # IngressRoute, which is almost every app here. LoadBalancer is for the
+  # rare service consumed from *outside* the cluster by something that can't
+  # go through Traefik: a name Let's Encrypt can't issue for (`.lan`), or a
+  # non-HTTP protocol. Pin the address with a
+  # `metallb.universe.tf/loadBalancerIPs` annotation below whenever you set
+  # this — MetalLB otherwise reassigns from the pool on Service recreation,
+  # which selfHeal/prune make routine, and anything holding the old address
+  # (a DNS record, a containerd mirror) silently breaks.
+  type: ClusterIP
   annotations: {}
   # Additional Service ports beyond the primary http one above — e.g. a
   # second listening port (gRPC, metrics) the same Deployment's container
