@@ -190,7 +190,9 @@ logAlerts:
   # rules:
   #   - uid: high-5xx-rate               # unique within this app
   #     title: High 5xx rate
-  #     expr: 'sum(rate({namespace="myapp"} |~ "(?i) 5\\d\\d " [5m]))'
+  #     # LogQL aggregations (sum/count/rate) work with instant queryType.
+  #     # Use `by (label)` to group and include labels in notifications.
+  #     expr: 'sum by (pod) (rate({namespace="myapp"} |~ "(?i) 5\\d\\d " [5m]))'
   #     threshold: 0.2
   #     for: 5m                          # optional, defaults to 5m
   #     severity: warning                # optional, defaults to warning
