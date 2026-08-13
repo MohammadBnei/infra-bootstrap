@@ -1411,3 +1411,39 @@ containerd on every targeted node simultaneously, and still deserves
 `--limit`. Run `--check --diff` and read *which tasks* report changed —
 that is the cheap question that decides whether the careful path is needed,
 and it costs a minute.
+
+### `infisical.autoReload: true` restarts an app on *any* secret in the project, not just its own
+
+Zot bounced repeatedly on its first afternoon — four Deployment revisions in
+~40 minutes, only two of which were deliberate `rollout restart`s.
+
+Cause: the infisical-operator computes a single ETag over the **whole
+managed secret** and stamps it on the pod template
+(`secrets.infisical.com/managed-secret.<name>`). `common-app-chart`'s
+`infisical:` block syncs a project *path*, and `infra-bootstrap-1-ge1`'s
+root holds **54 keys** — so the annotation changes when *any* of those 54
+change, and the Deployment rolls. There is no per-key granularity.
+
+The recurring trigger is one this repo runs often:
+`garage-configure.yml`'s two Infisical write tasks are `changed_when: true`
+unconditionally, rewriting `GARAGE_ROOT_TOKEN` plus every bucket's key pair
+on every run. So onboarding an unrelated bucket restarts the registry.
+
+Two things made the cost worse than a normal rolling update:
+
+- The registry is on the critical path of every pod start, so its blips are everyone's blips.
+- MetalLB is **L2**. A reschedule moves the announcing node (`nodeAssigned … announcing from node "k8s-cp-01"` in the Service's events), so ARP convergence stacks on top of the pod cycle. Surge-then-kill keeps the *pod* transition clean; it does nothing for the L2 announcement.
+
+Set `autoReload: false`. The trade is explicit: after a genuine S3 credential
+rotation zot serves errors until restarted — rare and alertable — versus
+restarts that were frequent and silent. A deliberate restart is already this
+app's operating model, since its `config.json` is mounted with `subPath` and
+never picks up ConfigMap updates either (see above).
+
+**Generalisable**: `autoReload: true` is only safe when the app's Infisical
+path contains *only that app's* secrets. For anything reading a shared
+project root, it is an availability risk disguised as convenience — and it
+gets worse as the project grows, since every new secret adds another
+unrelated restart trigger. The real fix in both cases is a per-app Infisical
+folder (`secretsPath`), which would also stop `envFrom` handing the pod 54
+keys it has no business holding.
