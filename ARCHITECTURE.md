@@ -266,6 +266,7 @@ A    garage.bnei.lan         → 192.168.1.199
 A    registry.bnei.lan       → 192.168.1.234  (zot OCI registry — a MetalLB LoadBalancer address, not a host; pinned in gitops/platform/values/zot/values.yaml and named by every node's containerd config, so both ends move together — ADR-0034)
 A    nfs-storage.bnei.lan    → 192.168.1.198
 A    k9s-dashboard.bnei.lan  → 192.168.1.110
+A    build-runner.bnei.lan   → 192.168.1.111  (image build runner LXC — ADR-0034)
 A    k8s.bnei.lan            → 192.168.1.180  (kube-vip control-plane VIP, confirmed live — see ADR-0016)
 A    k8s-cp-01.bnei.lan      → 192.168.1.201
 A    k8s-cp-02.bnei.lan      → 192.168.1.204

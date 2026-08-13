@@ -89,6 +89,42 @@ into scope.
    Longhorn PV backups, pgBackRest's target and image pulls fail together.
    Retention *policy* is deferred; the *bound* is not.
 
+### The builder is an LXC, not a pod — corrected after a live failure
+
+This clause originally put the build runner in-cluster as a pod, using
+`buildah` with `--isolation chroot --storage-driver vfs`, on the stated
+reasoning that this "keeps this an ordinary unprivileged pod — no
+`/dev/fuse`, no user namespaces, no seccomp relaxation."
+
+**That was wrong, and it was asserted without being tested.** Those flags
+govern buildah's *run* step. Its *storage* step is separate: extracting an
+image layer calls `mount --make-rprivate /`, which needs `CAP_SYS_ADMIN`.
+In an unprivileged pod it fails with `remount /, flags: 0x44000: permission
+denied` (containers/buildah#4920, #5622), which is precisely what the first
+real build produced. The genuinely-rootless alternative needs setuid
+`newuidmap`/`newgidmap`, which fails under Kubernetes as well (#4049).
+
+That left only a **privileged** container executing an app repo's
+`Dockerfile` — a node-level escape risk, and strictly worse than the
+identity coupling this ADR splits the runners to avoid. So the builder
+moves out of the cluster entirely: `terraform/build-runner.tf` (LXC, VMID
+103, `nesting`+`keyctl`) plus
+`ansible/playbooks/build-runner-configure.yml`.
+
+Three things fall out, and two of them are improvements rather than
+consolations:
+
+- An LXC has real root, so the whole problem class disappears instead of being negotiated around.
+- Builds leave the cluster completely — **stronger** isolation than the no-ServiceAccount pod it replaces, since untrusted build content can no longer reach a Kubernetes node at all.
+- It is still on the LAN, so nothing about the latency argument changes.
+
+ADR-0035 already commits to an LXC runner for Forgejo, so Phase 2 inherits
+this box rather than provisioning a second one.
+
+The reasoning below about *identity* separation is unchanged and is why
+this remains a separate runner from ADR-0022's, rather than that one
+growing a build capability.
+
 ### Why a second runner rather than extending ADR-0022's
 
 ADR-0022's runner holds a projected ServiceAccount token with `create jobs`
@@ -98,9 +134,11 @@ production-namespace job creation. The relevant erosion is **identity
 coupling, not RBAC verb count**: "building needs no new verbs" is a true
 answer to a question nobody asked.
 
-So builds get their own Deployment (`gitops/platform/build-runner/`) with
-**no ServiceAccount binding at all**, and ADR-0022's runner is left exactly
-as that ADR describes it.
+So builds get their own runner — now the `build-runner` LXC, per the section
+above — with **no Kubernetes identity at all**, and ADR-0022's runner is left
+exactly as that ADR describes it. The move out of the cluster strengthened
+this rather than weakening it: the original design's "no ServiceAccount
+binding" became "no access to the cluster whatsoever."
 
 Two further practical constraints made this unavoidable anyway:
 
@@ -108,12 +146,14 @@ Two further practical constraints made this unavoidable anyway:
   cannot pick up jobs for `editable-blog`, the intended pilot. Personal
   GitHub accounts cannot register org-level runners, so a second Deployment
   was required regardless.
-- Builds use **rootless buildah with the `vfs` driver**, not kaniko —
-  `GoogleContainerTools/kaniko` was archived upstream in June 2025. Rootless
-  buildah needs `/etc/subuid`/`/etc/subgid` and likely a
-  `seccompProfile`/`procMount` relaxation; `common-app-chart` emits no
-  `securityContext` today. That pod-security delta is the real cost of this
-  clause and is recorded here rather than discovered later.
+- Builds use **buildah**, not kaniko — `GoogleContainerTools/kaniko` was
+  archived upstream in June 2025. On the LXC it runs as real root, so none
+  of the `subuid`/`seccomp`/`procMount` machinery an in-cluster attempt
+  would have needed applies. (This bullet previously described that
+  machinery as "the real cost of this clause, recorded here rather than
+  discovered later." It was discovered later anyway — the cost was not a
+  relaxation to configure but a capability that cannot be granted without
+  making the pod privileged.)
 
 ## Alternatives considered
 

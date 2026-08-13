@@ -16,12 +16,14 @@ Custom playbooks for things kubespray and pigsty don't cover:
 | `playbooks/garage-configure.yml` | Install/configure Garage on the bare LXC terraform/garage.tf creates — drafted, see below |
 | `playbooks/nfs-configure.yml` | Format + export NFS on the bare VM terraform/nfs.tf creates — drafted, see below |
 | `playbooks/k9s-dashboard-configure.yml` | Install kubectl/k9s + write a cluster-admin kubeconfig on the bare k9s-dashboard LXC terraform/k9s-dashboard.tf creates — drafted, see below |
+| `playbooks/build-runner-configure.yml` | Install podman/buildah + register the GitHub Actions build runner on the bare LXC terraform/build-runner.tf creates (ADR-0034) — an LXC rather than a pod because buildah cannot extract image layers unprivileged |
 | `playbooks/pihole-configure.yml` | Install/configure Pi-hole on the Pi 4, authoritative for `bnei.lan` — drafted, see below |
 | `playbooks/self-drain-configure.yml` | Configure k8s-cp-01/k8s-worker-01 to drain + uncordon themselves around their own graceful reboot — drafted and run, see below |
 | `inventories/proxmox/hosts.yml` | Proxmox host inventory for `pve-postinstall.yml` (`.200`/`.161` — `.165` is a delegation target only) |
 | `inventories/garage/hosts.yml` | Single-host inventory for `garage-configure.yml` (`garage-storage` LXC) |
 | `inventories/nfs/hosts.yml` | Single-host inventory for `nfs-configure.yml` (`nfs-storage` VM) |
 | `inventories/k9s-dashboard/hosts.yml` | Single-host inventory for `k9s-dashboard-configure.yml` (`k9s-dashboard` LXC) |
+| `inventories/build-runner/hosts.yml` | Single-host inventory for `build-runner-configure.yml` (`build-runner` LXC) |
 | `inventories/pihole/hosts.yml` | Single-host inventory for `pihole-configure.yml` (Pi 4, physical hardware) |
 | `requirements.yml` | Ansible collections needed by these playbooks (`ansible-galaxy collection install -r ansible/requirements.yml`) |
 
