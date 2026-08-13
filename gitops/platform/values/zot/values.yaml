@@ -167,6 +167,9 @@ extraManifests:
                   "anonymousPolicy": ["read"],
                   "defaultPolicy": ["read", "create", "update", "delete"]
                 }
+              },
+              "metrics": {
+                "anonymousPolicy": ["read"]
               }
             }
           },
@@ -187,9 +190,16 @@ extraManifests:
   # serviceMonitorSelectorNilUsesHelmValues is false, so a hand-written one
   # is picked up.
   #
-  # If this scrape comes back 401, it's the accessControl block above:
-  # /metrics is not a repository path, so add a dedicated metrics user to
-  # ZOT_HTPASSWD and a basicAuth stanza here rather than loosening the ACL.
+  # Confirmed live: /metrics returned 401 until `accessControl.metrics`
+  # above was added — repository policies do not cover it, and enabling
+  # htpasswd locks it down by default.
+  #
+  # Do NOT "fix" a future 401 here by adding a basicAuth stanza to this
+  # ServiceMonitor. zot's isAnonymousMetricsRequest (pkg/api/authn.go)
+  # requires the Authorization header to be **absent** — sending
+  # credentials makes the request non-anonymous and it fails the check that
+  # would otherwise let it through. Adding auth to be safe would break the
+  # scrape rather than harden it.
   - |
     apiVersion: monitoring.coreos.com/v1
     kind: ServiceMonitor
