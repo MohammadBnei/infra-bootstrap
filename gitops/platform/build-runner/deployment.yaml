@@ -1,0 +1,86 @@
+# Image-building runner, registered against editable-blog. Deliberately a
+# SEPARATE Deployment from gitops/platform/actions-runner, not an extension
+# of it — see ADR-0034's "Why a second runner".
+#
+# The short version: that runner carries a projected ServiceAccount token
+# with `create jobs` in vos/vos-dev. Building an image means executing an
+# app repo's Dockerfile and everything it pulls in, and doing that in the
+# same pod would hand that identity to arbitrary build dependencies. The
+# risk is identity coupling, not RBAC verb count — so this pod has no
+# serviceAccountName and no RoleBinding anywhere.
+#
+# Also repo-scoped, for the same reason actions-runner is: personal GitHub
+# accounts can't register org-level runners, so one Deployment per repo.
+# Adding a second build repo means copying this file, not relabeling.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: build-runner
+  namespace: build-runner
+spec:
+  replicas: 1
+  revisionHistoryLimit: 3
+  selector:
+    matchLabels:
+      app: build-runner
+  template:
+    metadata:
+      labels:
+        app: build-runner
+    spec:
+      containers:
+      - name: runner
+        image: myoung34/github-runner:latest
+        env:
+        - name: REPO_URL
+          value: https://github.com/MohammadBnei/editable-blog
+        - name: RUNNER_NAME_PREFIX
+          value: ukubi-build
+        - name: RUNNER_SCOPE
+          value: repo
+        # Distinct from actions-runner's `self-hosted,ukubi` on purpose: a
+        # workflow asking for a builder must not land on the pod that can
+        # talk to the Kubernetes API, and vice versa. Workflows opt in with
+        # `runs-on: [self-hosted, ukubi-build]`.
+        - name: LABELS
+          value: self-hosted,ukubi-build
+        - name: RUNNER_WORKDIR
+          value: /home/runner/work
+        - name: EPHEMERAL
+          value: "false"
+        # Rootless buildah in an unprivileged pod, without needing
+        # /dev/fuse, user namespaces, or a seccomp relaxation:
+        #   - chroot isolation skips the user-namespace machinery buildah
+        #     would otherwise need (the usual reason "rootless buildah in
+        #     Kubernetes" turns into a securityContext project).
+        #   - vfs storage skips fuse-overlayfs, which is what wants
+        #     /dev/fuse. Slower and more disk-hungry than overlay; that is
+        #     the trade being made for not loosening pod security.
+        # ponytail: vfs is the cost here — it copies rather than layers, so
+        # a large multi-stage build will feel it. Move to fuse-overlayfs
+        # (needs /dev/fuse) only if build times actually become the problem.
+        - name: BUILDAH_ISOLATION
+          value: chroot
+        - name: STORAGE_DRIVER
+          value: vfs
+        envFrom:
+        # Reuses actions-runner's Infisical project: the registration token
+        # is derived from a user-scoped PAT, so the same one registers a
+        # runner on any repo this account owns. One PAT, two runners.
+        - secretRef:
+            name: build-runner-infisical
+        # Builds are the reason this exists, so it gets real headroom —
+        # actions-runner's 500m/512Mi would OOMKill a monolith build. The
+        # ephemeral-storage limit is the load-bearing one: vfs copies image
+        # layers rather than stacking them, and an unbounded build cache on
+        # node ephemeral storage triggers disk-pressure eviction of
+        # unrelated pods on the same node.
+        resources:
+          requests:
+            cpu: 500m
+            memory: 1Gi
+            ephemeral-storage: 5Gi
+          limits:
+            cpu: "2"
+            memory: 4Gi
+            ephemeral-storage: 20Gi

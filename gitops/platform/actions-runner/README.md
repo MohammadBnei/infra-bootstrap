@@ -7,6 +7,13 @@ Application (see `gitops/bootstrap/actions-runner-application.yaml`), same
 pattern as `traefik-application.yaml` for things that don't fit the
 registry/`common-app-chart` mold. See ADR-0022 for why this exists.
 
+> **This runner does not build images.** Image builds live in
+> `../build-runner/`, a separate Deployment with no ServiceAccount, so that
+> arbitrary `Dockerfile` execution never inherits this pod's `create jobs`
+> access to `vos`/`vos-dev`. See ADR-0034. The scope described below is
+> unchanged by that — but note both runners read the *same* PAT, so
+> widening its repo list for `build-runner` also widens it here.
+
 ## Contents
 
 - `namespace.yaml` — `actions-runner` namespace, where the runner pod lives.

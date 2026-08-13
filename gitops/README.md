@@ -18,6 +18,7 @@ gitops/
 │   ├── traefik-application.yaml           # Standalone Application (needs helm.skipCrds, can't live in the shared ApplicationSet template — see file comment)
 │   ├── traefik-crds/                      # Traefik's own CRDs (traefik.io_*/hub.traefik.io_*), vendored — see file comment in traefik-application.yaml
 │   ├── actions-runner-application.yaml    # Standalone Application: self-hosted GitHub Actions runner (plain manifests, no chart) — ADR-0022
+│   ├── build-runner-application.yaml      # Standalone Application: image-building runner, NO ServiceAccount — kept apart from actions-runner on purpose, ADR-0034
 │   ├── redirectors-application.yaml       # Standalone Application: TLS-terminating redirects to out-of-cluster hosts, plain manifests in gitops/redirectors/
 │   ├── argocd-ingressroute.yaml           # Traefik IngressRoute → argocd.bnei.dev
 │   ├── infisical-ingressroute.yaml       # Traefik IngressRoute → infisical.bnei.dev
@@ -53,6 +54,7 @@ gitops/
 │   │       ├── poddisruptionbudget.yaml
 │   │       └── extra-manifests.yaml      # Raw extra objects (ConfigMaps, Middlewares, ...) via values.extraManifests
 │   ├── actions-runner/                    # Standalone Application's manifests: self-hosted GitHub Actions runner (ADR-0022)
+│   ├── build-runner/                      # Standalone Application's manifests: image builds (buildah, chroot isolation) — no ServiceAccount, ADR-0034
 │   └── values/                            # Helm values for platform apps (including platform-common-apps)
 │       ├── traefik/values.yaml
 │       ├── infisical/values.yaml
@@ -137,6 +139,8 @@ Each platform app: public Helm chart + values from `infra-bootstrap` via the man
 **`traefik-application.yaml`** (wave 2) is deliberately a standalone `Application`, not part of the ApplicationSet above: it needs `helm.skipCrds: true` (the chart bundles an outdated Gateway API CRD set that a cluster `ValidatingAdmissionPolicy` rejects), and `skipCrds` is a `bool` field the ApplicationSet CRD validates strictly — it can't be produced by a per-element Go-template conditional in the shared list template. See the comment in the file for the full story.
 
 **`actions-runner-application.yaml`** (wave 1) is also standalone: plain manifests (RBAC/ServiceAccount binding, not something `common-app-chart` renders), deploying the self-hosted GitHub Actions runner (`gitops/platform/actions-runner/`) that executes `common-app-chart`'s `hooks:`/`oneOffJobs:` CI (see ADR-0022). RBAC is scoped per-namespace — extend `rbac-<namespace>.yaml` any time another app's `oneOffJobs` gets wired up.
+
+**`build-runner-application.yaml`** (wave 1) is the same shape but exists specifically to *not* be that runner: it builds images (`buildah`, `BUILDAH_ISOLATION=chroot` + `STORAGE_DRIVER=vfs`, so an ordinary unprivileged pod suffices) and has **no ServiceAccount and no RoleBinding at all**. Keeping them apart means arbitrary `Dockerfile` execution never inherits `actions-runner`'s `create jobs` access to `vos`/`vos-dev` — the risk being identity coupling, not RBAC verb count (ADR-0034). The labels differ too (`self-hosted,ukubi-build` vs `self-hosted,ukubi`) so a workflow can't land on the wrong one.
 
 **`platform-common-apps.applicationset.yaml`** — simple containerized tools with no app-specific code (public image, no CI/CD of their own), all at wave 10:
 
