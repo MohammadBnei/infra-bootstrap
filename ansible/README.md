@@ -222,8 +222,12 @@ playbook loops over an `nfs_exports` list of **two** independent exports on
 
 | Export | Disk | Clients | Purpose |
 |---|---|---|---|
-| `/export/templates` | `/dev/sdb` | the 3 PVE hosts, by IP | Shared PVE storage, ADR-0026. Untouched by ADR-0036 |
-| `/export/k8s` | `/dev/sdc` | the 5 K8s nodes, by `*.bnei.lan` name | Backs the unreplicated `nfs` StorageClass, ADR-0036. **Not** a PVE pool |
+| `/export/templates` | `scsi1` (by-id) | the 3 PVE hosts, by IP | Shared PVE storage, ADR-0026. Untouched by ADR-0036 |
+| `/export/k8s` | `scsi2` (by-id) | the 5 K8s nodes, by `*.bnei.lan` name | Backs the unreplicated `nfs` StorageClass, ADR-0036. **Not** a PVE pool |
+
+Disks are addressed as `/dev/disk/by-id/scsi-0QEMU_QEMU_HARDDISK_drive-scsiN`,
+never `/dev/sdX` — verified live 2026-08-14 that the newer `scsi2` enumerated
+as `/dev/sdb` while the older `scsi1` was `/dev/sdc`.
 
 The hostname clients mean this VM must resolve `bnei.lan` via Pi-hole —
 `terraform/nfs.tf` declares that, but on an already-running VM it needs a

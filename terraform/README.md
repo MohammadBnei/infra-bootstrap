@@ -229,7 +229,11 @@ Adds `scsi2` (`var.nfs_k8s_disk_size_gb`, default 200GB) plus Pi-hole as
 the VM's resolver, on the *already-running* `nfs-storage` VM. Order matters:
 
 1. `pvesm status` on `server1` — confirm `local-lvm` has room before
-   raising `nfs_k8s_disk_size_gb` in `terraform.tfvars`.
+   raising `nfs_k8s_disk_size_gb` in `terraform.tfvars`. Measured
+   2026-08-14: 104.2G avail of 374.5G, hence the 50GB default. It's
+   LVM-thin, so an over-sized disk provisions *successfully* and only bites
+   later, when the pool fills and every VM on it locks up — this check is
+   not a formality.
 2. `terraform plan -target=proxmox_virtual_environment_vm.nfs_storage` —
    **assert the plan says `~ update in-place`, not `-/+ must be
    replaced`.** ADR-0026's Consequences document two separate ForceNew
@@ -239,10 +243,12 @@ the VM's resolver, on the *already-running* `nfs-storage` VM. Order matters:
    regenerates the cloud-init drive — a running VM keeps its old resolver
    until it boots again, and `nfs-configure.yml` will fail its resolution
    assert if you skip this.
-5. `lsblk` on the VM — confirm the new disk really is `/dev/sdc` before
-   re-running `nfs-configure.yml` (the playbook hardcodes that name).
-6. Re-run `nfs-configure.yml` (same command as step 2 above; idempotent,
-   the `/export/templates` half is a no-op).
+5. Re-run `nfs-configure.yml` (same command as step 2 above; idempotent,
+   the `/export/templates` half is a no-op). No `lsblk` check needed — the
+   playbook addresses disks by `/dev/disk/by-id/...drive-scsiN`, matching
+   the `interface` names here. Confirmed necessary on 2026-08-14: the
+   hot-plugged `scsi2` came up as `/dev/sdb` while the older `scsi1` was
+   `/dev/sdc`, so kernel order is *not* interface order.
 
 ## Out of scope here
 

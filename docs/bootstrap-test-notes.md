@@ -1605,3 +1605,78 @@ needs the scan added to the LAN pipeline, or removed from the comparison.
 What is unambiguous: the WAN is off the hot path in both directions, and
 nodes now pull over gigabit instead of a residential downlink — which was
 the actual argument, and which the wall clock above does not even measure.
+
+---
+
+## 2026-08-14 — `nfs` StorageClass (ADR-0036) bring-up: two bugs caught before the destructive step
+
+Adding the second export to `nfs-storage` (`.198`) for the unreplicated
+`nfs` StorageClass. Terraform's part went clean on the first try —
+`~ update in-place`, `0 to add, 1 to change, 0 to destroy`, no ForceNew
+trap despite `nfs.tf`'s history of them. The interesting part is what the
+pre-flight checks caught.
+
+### 1. The 200GB default did not fit, and LVM-thin would have hidden that
+
+`terraform.tfvars` was written with `nfs_k8s_disk_size_gb = 200` as a
+working assumption, with a "confirm with `pvesm status` first" note. The
+confirm found server1's `local-lvm` at **104.2G avail of 374.5G**.
+
+The trap is that this would have *worked*. `local-lvm` is LVM-thin, so a
+200GB volume provisions successfully against 104GB of real space and only
+bites later — when the export fills, the pool hits 100%, and every VM
+sharing it (`k8s-worker-02`, `k8s-cp-02`, `pg01`) locks up simultaneously.
+A thin pool converts "I over-committed storage" into "three VMs are down",
+with a long delay in between.
+
+Dropped to 50GB — about half the real free space. `variables.tf`'s default
+now carries the measured figure and the reason, so the next person doesn't
+re-derive it from a guess.
+
+### 2. Kernel device order is not SCSI interface order
+
+The playbook addressed disks as `/dev/sdb` (templates) and `/dev/sdc`
+(k8s), assuming `sdX` follows `scsiN`. It does not. After the hot-plug,
+`lsblk` showed:
+
+```
+sdb   50G                                 <- the NEW disk (scsi2)
+sdc  100G ext4 nfsexport /export/templates <- the OLD disk (scsi1)
+```
+
+Reversed. Confirmed via `/dev/disk/by-id/`:
+`...drive-scsi1 -> ../../sdc`, `...drive-scsi2 -> ../../sdb`.
+
+Running the playbook as written would have `mkfs.ext4 -L nfsexport` on the
+*new* empty disk, then left two disks claiming `LABEL=nfsexport` with the
+mounts done by label. **The template disk itself was never at risk** — the
+`blkid ... | grep -q TYPE=` guard sees the existing ext4 signature and
+skips the mkfs, which is precisely the failure this idiom exists to
+prevent. Worth noting as evidence that guard earns its keep.
+
+Fixed by addressing disks as
+`/dev/disk/by-id/scsi-0QEMU_QEMU_HARDDISK_drive-scsiN`, which matches
+`terraform/nfs.tf`'s `interface` value exactly and is stable across
+reboots and hotplug ordering. **Generalizable: any future playbook that
+formats a Proxmox VM disk should use by-id, not `/dev/sdX`.**
+
+### 3. Two non-bugs worth recording
+
+- **Host key mismatch on `.198`.** SSH refused with
+  `REMOTE HOST IDENTIFICATION HAS CHANGED`. Not the terraform run — the
+  stale `known_hosts` entry was an **ECDSA** key while the host serves
+  **ED25519**, i.e. a leftover from a previous occupant of that IP.
+  Verified out-of-band before clearing it, by asking the qemu guest agent
+  through the PVE API to print the host key
+  (`/nodes/server1/qemu/302/agent/exec` → `ssh-keygen -lf`) and comparing
+  fingerprints. They matched, so `ssh-keygen -R` was safe. Cheap trick,
+  worth reusing: the PVE API is an independent channel to the guest, so a
+  host key can always be confirmed without trusting the SSH connection
+  being questioned.
+- **The DNS reboot turned out to be unnecessary.** `terraform/nfs.tf` now
+  sets `initialization.dns.servers`, and both the runbook and the ADR
+  warned that on an already-running VM this only regenerates the
+  cloud-init drive, needing a reboot to land. In practice `.198` already
+  resolved `k8s-cp-01.bnei.lan` via `192.168.1.55` with no reboot. The
+  warning stays in the docs — it costs nothing and is right in the general
+  case — but the reboot was skipped here.

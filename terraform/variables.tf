@@ -106,9 +106,9 @@ variable "nfs_vm_id" {
 }
 
 variable "nfs_k8s_disk_size_gb" {
-  description = "GB size for nfs-storage's scsi2 disk — the K8s PV export (/export/k8s), backing the unreplicated `nfs` StorageClass (ADR-0036). Kept separate from scsi1's template storage on purpose. Confirm server1's local-lvm free space with `pvesm status` before raising this; unlike Longhorn there is no replication overhead, so 1GB here is 1GB of usable PV."
+  description = "GB size for nfs-storage's scsi2 disk — the K8s PV export (/export/k8s), backing the unreplicated `nfs` StorageClass (ADR-0036). Kept separate from scsi1's template storage on purpose. Unlike Longhorn there is no replication overhead, so 1GB here is 1GB of usable PV. Sized against a live measurement, not a guess: server1's local-lvm had 104.2G avail of 374.5G on 2026-08-14, and it is LVM-thin — over-provisioning would silently succeed and then risk a pool-full that hard-locks the other VMs sharing it (k8s-worker-02, k8s-cp-02, pg01). Re-check `pvesm status` on server1 before raising this."
   type        = number
-  default     = 200
+  default     = 50
 }
 
 variable "nfs_ssh_public_key_file" {
