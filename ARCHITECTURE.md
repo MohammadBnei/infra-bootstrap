@@ -87,7 +87,7 @@ Full eBPF hardware support (AMD Ryzen). ~3GB PVE overhead reserved.
 | VM/LXC | Type | vCPU | RAM | Disk | Notes |
 | --- | --- | --- | --- | --- | --- |
 | pg01 | VM (Q35, OVMF) | 2 | 4GB | 40GB | Pigsty PG **replica**, `192.168.1.205` — migrated off `.165` 2026-07-30 via live migration ([ADR-0029](docs/adr/0029-postgres-automatic-failover-3-node-etcd-quorum.md)); hit a kernel panic on first boot here, recovered cleanly with a reboot, confirmed streaming/lag-0 afterward |
-| nfs-storage | VM (Q35, OVMF) | 1 | 1GB | 120GB | Shared PVE storage for cross-host VM template cloning — [ADR-0026](docs/adr/0026-nfs-shared-pve-storage-cross-host-clone.md), never mounted by K8s |
+| nfs-storage | VM (Q35, OVMF) | 1 | 1GB | 320GB (20 root + 100 `scsi1` + 200 `scsi2`) | Two independent exports on two disks: `scsi1` → `/export/templates`, shared PVE storage for cross-host VM template cloning ([ADR-0026](docs/adr/0026-nfs-shared-pve-storage-cross-host-clone.md), never mounted by K8s); `scsi2` → `/export/k8s`, backing the unreplicated `nfs` StorageClass ([ADR-0036](docs/adr/0036-nfs-storage-class-for-k8s.md)). Separate disks so a runaway PVC can't starve PVE's template storage |
 | k8s-worker-02 | VM (Q35, OVMF) | 6 | 16GB | 60GB | First cross-host K8s worker (Stage 2 Phase C), `192.168.1.203` — resized 4→6 vCPU/8→16GB 2026-07-30, server1 had most of its RAM idle |
 | k8s-cp-02 | VM (Q35, OVMF) | 2 | 4GB | 40GB | 2nd control-plane + etcd member, `192.168.1.204` — [ADR-0017](docs/adr/0017-second-control-plane-member.md) |
 | k9s-dashboard | LXC (VMID 102) | 1 | 1GB | 8GB | Ops convenience box, `192.168.1.110` — a human SSHes in and drives `kubectl`/`k9s` against the live cluster. Carries a **cluster-admin kubeconfig on disk**, which is why it holds its own dedicated SSH keypair and why cluster credentials are never materialised on the workstation instead ([`k8s-ops`](.claude/skills/k8s-ops/SKILL.md)) |
@@ -484,6 +484,24 @@ specifics (sizing, replica count on `k8s-cp-01`, `local-path-provisioner`
 fate, backup target): [ADR-0019](docs/adr/0019-longhorn-rollout-specifics.md)
 (Accepted).
 
+### `nfs` StorageClass (unreplicated, RWX)
+
+Second, **non-default** StorageClass — `csi-driver-nfs` provisioning
+subdirectories under `nfs-storage.bnei.lan:/export/k8s` (the `scsi2` disk
+on the `nfs-storage` VM, separate from ADR-0026's PVE template export).
+Exists for two things Longhorn does badly here: real ReadWriteMany without
+a `share-manager` pod in the path, and bulk regenerable data that isn't
+worth 3× replication on the 40GB control-plane disks.
+
+**Unreplicated and unbacked-up.** It lives and dies with `server1`, and
+mounts are `hard` — if that host is down, `nfs` PVCs block rather than
+return truncated reads. Only put data there that can be lost and
+regenerated; everything else stays on Longhorn. A PVC with no
+`storageClassName` still gets Longhorn — opting in is always explicit.
+[ADR-0036](docs/adr/0036-nfs-storage-class-for-k8s.md).
+
+`local-path` remains a third, node-pinned RWO fallback (ADR-0019).
+
 ### Garage (object storage)
 
 LXC on proxmox PVE, NVMe-backed, 200GB allocated, S3-compatible API at
@@ -681,7 +699,8 @@ Why this shape, in order:
 | --- | --- | --- | --- | --- |
 | Postgres (full + WAL) | pgBackRest | local only; off-host target open — `pg-backup` Garage bucket provisioned but not yet wired into `pgbackrest_repo`, see §7 | daily + continuous WAL | 7d / 4w / 3m |
 | K8s manifests | Git | `gitops/` in `github.com/MohammadBnei/infra-bootstrap` (this repo — not the legacy `k8s-cluster` submodule) | on commit | indefinite |
-| K8s PVs | Longhorn snapshots (+ Velero if added) | Garage (S3) | daily | 7 daily |
+| K8s PVs (`longhorn` class) | Longhorn snapshots (+ Velero if added) | Garage (S3) | daily | 7 daily |
+| K8s PVs (`nfs` class) | **none — gap, not "by design"** | nothing. `/export/k8s` on the `nfs-storage` VM has no backup job at all; the class is scoped to regenerable data so that's survivable, but a restic-to-Garage job is the named follow-up ([ADR-0036](docs/adr/0036-nfs-storage-class-for-k8s.md)) | — | — |
 | Container images | *none, by design* | rebuildable from git + `build-runner` — losing the `zot-registry` bucket costs a rebuild, not data ([ADR-0034](docs/adr/0034-in-cluster-oci-registry-zot-garage-backed.md)) | — | — |
 | `build-runner` LXC | *none, by design* | rebuildable from `terraform/build-runner.tf` + `ansible/playbooks/build-runner-configure.yml`; holds no state worth keeping | — | — |
 | Proxmox config | cron + tar | open, see §7/ADR-0024 | daily | 7 daily |

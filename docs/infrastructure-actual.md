@@ -358,6 +358,18 @@ Standard set: pg_stat_statements, pg_trgm, pg_repack, postgres_fdw, etc. (17 tot
 - `local-path-provisioner` remains installed as a non-default fallback,
   not the primary.
 
+### `nfs` StorageClass (ADR-0036 — **declared, not yet live**)
+
+- Second non-default class via `csi-driver-nfs`, backed by a *new second
+  export* on the `nfs-storage` VM (`/export/k8s`, its own `scsi2` disk).
+  Unreplicated, no backup, RWX-capable — for regenerable data only.
+- Committed to git (`gitops/bootstrap/platform.applicationset.yaml`,
+  `terraform/nfs.tf`, `ansible/playbooks/nfs-configure.yml`) but **not yet
+  applied**: needs the targeted `terraform apply`, a reboot of
+  `nfs-storage` (for the cloud-init DNS change), and the `nfs-configure.yml`
+  re-run. Move this section up next to Longhorn once `kubectl get sc` shows
+  it.
+
 ### nfs-storage (Proxmox shared template storage, current — ADR-0026)
 
 - **VM** on server1 (`192.168.1.198`, `nfs-storage.bnei.lan`), built via
@@ -366,16 +378,23 @@ Standard set: pg_stat_statements, pg_trgm, pg_repack, postgres_fdw, etc. (17 tot
   every PVE host, so Terraform's Proxmox provider can direct-clone the
   golden VM template (VMID 9001) cross-host instead of falling back to a
   clone-then-`qm migrate --with-local-disks` copy over the LAN.
-- **Not mounted by K8s at all** — purely a Proxmox-level cross-host clone
-  fix (used live to clone `k8s-worker-02` onto server1, see
-  `docs/bootstrap-test-notes.md` 2026-07-28), unrelated to the dead K8s-PV
-  NFS export below.
+- **The `/export/templates` share is not mounted by K8s at all** — purely
+  a Proxmox-level cross-host clone fix (used live to clone `k8s-worker-02`
+  onto server1, see `docs/bootstrap-test-notes.md` 2026-07-28), unrelated
+  to the dead K8s-PV NFS export below. That stays true under ADR-0036: the
+  `nfs` StorageClass uses a *separate* disk and a *separate* export
+  (`/export/k8s`) on the same VM, with its own client list.
 
 ### NFS — K8s PV export (dead, historical record only)
 
 *Confirmed gone: this ran on server1's pre-reinstall OS, wiped when
 server1 was reinstalled to PVE (ADR-0024). Superseded by Longhorn above
 for K8s PVs — do not resurrect.*
+
+*"Do not resurrect" means this box, this export, and
+`nfs-subdir-external-provisioner` as the **default** class. It is not a ban
+on NFS-backed PVs generally — ADR-0036 deliberately adds one as a
+non-default class on the purpose-built `nfs-storage` VM.*
 
 - **Server:** server1 (192.168.1.200)
 - **Export:** `/home/mohammad/.local/share/k8s-nfs` → `192.168.1.200/24`
@@ -396,7 +415,9 @@ for K8s PVs — do not resurrect.*
 - `local` (directory): `/var/lib/vz`
 - `local-lvm` (LVM-thin): for VM disks on proxmox PVE
 - `shared-templates` (NFS via `nfs-storage`): cross-host template cloning
-  only, see above
+  only, see above. `nfs-storage`'s *other* export (`/export/k8s`, ADR-0036)
+  is deliberately **not** a PVE storage pool — K8s reaches it directly via
+  `csi-driver-nfs`.
 
 ---
 

@@ -36,7 +36,7 @@ build against — expect it to change:
 | `pg01` | VM | 205 | **real, production — imported, `prevent_destroy`** |
 | `pg02` | VM | 207 | **real, production — imported, `prevent_destroy`** |
 | `hermesagent` | LXC | 101 | **real, production — imported, `prevent_destroy`** |
-| `nfs-storage` | VM | 302 | new-create on `server1`, built directly from cloud image (not cloned) — shared PVE storage, ADR-0026 |
+| `nfs-storage` | VM | 302 | new-create on `server1`, built directly from cloud image (not cloned) — shared PVE storage (ADR-0026, `scsi1`) **and** the `nfs` StorageClass's backing export (ADR-0036, `scsi2`) |
 | `k8s-worker-02` | VM | 203 | new-create on `server1`, cloned cross-host from the golden template via `shared-templates` |
 | `k9s-dashboard` | LXC | 102 | new-create on `server1`, ops-only convenience box (k9s + kubectl against ukubi-cluster), no application workload, no import needed |
 | `k8s-cp-02` | VM | 204 | new-create on `server1`, cloned cross-host — 2nd control-plane/etcd member, ADR-0017 |
@@ -210,7 +210,7 @@ Needed once before the first `k8s_nodes` entry targeting `server1`/
    installing it isn't there at first boot (confirmed by testing).
 2. `ansible-playbook -i ansible/inventories/nfs/hosts.yml
    -i ansible/inventories/proxmox/hosts.yml
-   ansible/playbooks/nfs-configure.yml` — formats the export disk,
+   ansible/playbooks/nfs-configure.yml` — formats the export disks,
    installs and configures `nfs-kernel-server`, **and** registers
    `shared-templates` as a PVE storage pool (idempotent — the second play
    only runs `pvesm add` if it isn't already registered). `storage.cfg` is
@@ -222,6 +222,27 @@ Needed once before the first `k8s_nodes` entry targeting `server1`/
 4. From here, any new `k8s_nodes` entry with `node_name` set to
    `server1`/`ex-laptop` clones directly via `shared-templates` instead
    of the automatic clone-then-migrate fallback.
+
+## Second export for the `nfs` StorageClass (ADR-0036)
+
+Adds `scsi2` (`var.nfs_k8s_disk_size_gb`, default 200GB) plus Pi-hole as
+the VM's resolver, on the *already-running* `nfs-storage` VM. Order matters:
+
+1. `pvesm status` on `server1` — confirm `local-lvm` has room before
+   raising `nfs_k8s_disk_size_gb` in `terraform.tfvars`.
+2. `terraform plan -target=proxmox_virtual_environment_vm.nfs_storage` —
+   **assert the plan says `~ update in-place`, not `-/+ must be
+   replaced`.** ADR-0026's Consequences document two separate ForceNew
+   traps on this file; do not skim this step.
+3. `terraform apply` the same target.
+4. **Reboot the VM.** The `initialization.dns.servers` change only
+   regenerates the cloud-init drive — a running VM keeps its old resolver
+   until it boots again, and `nfs-configure.yml` will fail its resolution
+   assert if you skip this.
+5. `lsblk` on the VM — confirm the new disk really is `/dev/sdc` before
+   re-running `nfs-configure.yml` (the playbook hardcodes that name).
+6. Re-run `nfs-configure.yml` (same command as step 2 above; idempotent,
+   the `/export/templates` half is a no-op).
 
 ## Out of scope here
 

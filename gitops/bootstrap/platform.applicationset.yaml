@@ -32,6 +32,20 @@ spec:
         chartName: local-path-provisioner
         valuesPath: gitops/platform/values/local-path-provisioner/values.yaml
 
+      # Third StorageClass, `nfs` — non-default, unreplicated, RWX-capable,
+      # backed by the nfs-storage VM's /export/k8s (ADR-0036,
+      # docs/adr/0036-nfs-storage-class-for-k8s.md). Longhorn stays the
+      # default; opting into `nfs` is always explicit. Needs the export to
+      # exist first (ansible/playbooks/nfs-configure.yml) — the driver
+      # installs fine either way, but PVCs stay Pending until it does.
+      - name: csi-driver-nfs
+        namespace: kube-system
+        syncWave: "0"
+        chartRepoURL: https://raw.githubusercontent.com/kubernetes-csi/csi-driver-nfs/master/charts
+        chartRevision: "4.13.4" # confirmed against `helm search repo csi-driver-nfs/csi-driver-nfs` 2026-08-14
+        chartName: csi-driver-nfs
+        valuesPath: gitops/platform/values/csi-driver-nfs/values.yaml
+
       # wave 1 — Secrets engine (must be first; serves SSH keys to ArgoCD for all other apps)
       - name: infisical
         namespace: infisical

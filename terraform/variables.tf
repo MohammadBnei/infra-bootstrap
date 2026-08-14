@@ -105,6 +105,12 @@ variable "nfs_vm_id" {
   default     = 302
 }
 
+variable "nfs_k8s_disk_size_gb" {
+  description = "GB size for nfs-storage's scsi2 disk — the K8s PV export (/export/k8s), backing the unreplicated `nfs` StorageClass (ADR-0036). Kept separate from scsi1's template storage on purpose. Confirm server1's local-lvm free space with `pvesm status` before raising this; unlike Longhorn there is no replication overhead, so 1GB here is 1GB of usable PV."
+  type        = number
+  default     = 200
+}
+
 variable "nfs_ssh_public_key_file" {
   description = "Path to the public half of nfs-storage's dedicated SSH key — new, separate keypair from PVE-host/k8s-VM/garage credentials (own blast radius: one storage VM). Consumed by ansible/playbooks/nfs-configure.yml."
   type        = string

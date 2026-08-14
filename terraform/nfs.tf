@@ -77,6 +77,10 @@ resource "proxmox_virtual_environment_vm" "nfs_storage" {
     cores = 1
   }
 
+  # Still 1GB with ADR-0036's second export: nfsd is kernel threads, and the
+  # only thing more RAM buys is page cache, which barely helps a class scoped
+  # to streamed bulk data on `sync` exports. Bump it if `free`/`nfsstat` ever
+  # says so, not on principle.
   memory {
     dedicated = 1024
   }
@@ -102,11 +106,33 @@ resource "proxmox_virtual_environment_vm" "nfs_storage" {
     size         = 100
   }
 
+  # ADR-0036 — K8s PV storage, deliberately a SEPARATE disk from scsi1 above
+  # and not a subdirectory of it. scsi1 is sized for a transient template
+  # clone; a PVC that runs away on a shared disk would starve the PVE storage
+  # ADR-0026 exists to provide, i.e. break cross-host VM cloning. Different
+  # lifetimes, different blast radius, different disk.
+  # Also raw — ansible/playbooks/nfs-configure.yml formats and exports it at
+  # /export/k8s, same split as scsi1.
+  disk {
+    datastore_id = var.nfs_storage_id
+    interface    = "scsi2"
+    size         = var.nfs_k8s_disk_size_gb
+  }
+
   initialization {
     datastore_id = var.nfs_storage_id
 
+    # servers: ADR-0036 exports /export/k8s to `k8s-*.bnei.lan` hostnames
+    # rather than literal IPs, so `exportfs` on this box has to resolve
+    # bnei.lan — Pi-hole is authoritative for it (DECISION.md §2). Same fix
+    # build-runner.tf carries, and the same failure k9s-dashboard was
+    # debugged into (docs/bootstrap-test-notes.md).
+    # NOTE for the already-running VM: this regenerates the cloud-init
+    # drive, which only takes effect on reboot. nfs-configure.yml asserts
+    # resolution works rather than assuming it landed.
     dns {
-      domain = "localdomain" # see k8s-vms.tf's identical workaround for why
+      domain  = "localdomain" # see k8s-vms.tf's identical workaround for why
+      servers = [var.pihole_ip]
     }
 
     user_account {

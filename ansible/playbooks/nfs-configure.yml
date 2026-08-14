@@ -5,11 +5,14 @@
 # just re-reads current state).
 #
 # WHY THIS PLAYBOOK EXISTS
-# terraform/nfs.tf only creates a bare VM with a raw second disk — same
+# terraform/nfs.tf only creates a bare VM with raw extra disks — same
 # "Terraform stops at bare, SSH-reachable" split as garage.tf/
-# garage-configure.yml. This playbook formats that disk, exports it over
-# NFS, and registers it as shared PVE storage so terraform/k8s-vms.tf's
-# cross-node clone (docs/adr/0026) has somewhere shared to clone from/to.
+# garage-configure.yml. This playbook formats those disks, exports them over
+# NFS, and registers the first one as shared PVE storage so
+# terraform/k8s-vms.tf's cross-node clone (docs/adr/0026) has somewhere
+# shared to clone from/to. The second export (/export/k8s, docs/adr/0036)
+# backs the cluster's unreplicated `nfs` StorageClass and is deliberately
+# NOT a PVE storage pool.
 #
 # PREREQUISITES
 # - nfs-storage VM already created (terraform apply -target=... per
@@ -17,6 +20,15 @@
 #   ansible/inventories/nfs/hosts.yml (fill in ansible_host first).
 # - SSH access via the dedicated nfs keypair (~/.ssh/id_nfs, see
 #   variables.tf's nfs_ssh_public_key_file) already seeded via cloud-init.
+# - The VM resolves bnei.lan via Pi-hole. terraform/nfs.tf declares this
+#   (initialization.dns.servers), but on an ALREADY-RUNNING VM that only
+#   regenerates the cloud-init drive — reboot it after the terraform apply.
+#   The "Assert every export client resolves" task below is what catches it
+#   if that didn't take; fix by hand with `resolvectl dns <iface> 192.168.1.55`
+#   if needed.
+# - Device names (/dev/sdb, /dev/sdc) are assumed to follow scsi1/scsi2
+#   order — confirm with `lsblk` on the VM before the first run after
+#   adding a disk.
 # - Run with BOTH inventories so the second play below (PVE storage
 #   registration) can resolve the `proxmox` host alias:
 #     ansible-playbook -i ansible/inventories/nfs/hosts.yml \
@@ -31,15 +43,37 @@
   hosts: nfs-storage
   gather_facts: false
   vars:
-    nfs_export_path: /export/templates
-    nfs_export_device: /dev/sdb
-    nfs_export_label: nfsexport
-    # PVE hosts allowed to mount this export — docs/adr/0020's corosync
-    # cluster members, never opened wider than that.
-    nfs_allowed_clients:
-      - 192.168.1.165
-      - 192.168.1.200
-      - 192.168.1.161
+    # Two independent exports on two separate disks. Keep them separate:
+    # /export/templates is PVE's (docs/adr/0026) and is sized for a transient
+    # VM clone; /export/k8s is the `nfs` StorageClass's (docs/adr/0036) and
+    # grows with real PV usage. Sharing one disk would let a runaway PVC
+    # break cross-host VM cloning.
+    nfs_exports:
+      # PVE hosts allowed to mount this — docs/adr/0020's corosync cluster
+      # members, never opened wider than that. Left as literal IPs on
+      # purpose: this export is live and working, and ADR-0036's move to
+      # hostnames deliberately doesn't touch it.
+      - path: /export/templates
+        device: /dev/sdb
+        label: nfsexport
+        clients:
+          - 192.168.1.165
+          - 192.168.1.200
+          - 192.168.1.161
+      # K8s nodes only, by `bnei.lan` name rather than IP (ADR-0036) — same
+      # reasoning as registry.bnei.lan in every node's containerd config
+      # (ADR-0034): the name is the contract, the address can move. Requires
+      # this VM to resolve bnei.lan via Pi-hole (terraform/nfs.tf's
+      # initialization.dns.servers) — asserted below, not assumed.
+      - path: /export/k8s
+        device: /dev/sdc
+        label: nfsk8s
+        clients:
+          - k8s-cp-01.bnei.lan
+          - k8s-cp-02.bnei.lan
+          - k8s-cp-03.bnei.lan
+          - k8s-worker-01.bnei.lan
+          - k8s-worker-02.bnei.lan
 
   handlers:
     - name: Reload exports
@@ -54,24 +88,33 @@
     # (blkid-guarded mkfs) rather than pulling in community.general's
     # filesystem module for one call — ansible.posix (already a required
     # collection, ansible/requirements.yml) has no mkfs module of its own.
-    - name: Format export disk if not already formatted
+    - name: Format export disks if not already formatted
       ansible.builtin.shell: |
-        blkid {{ nfs_export_device }} | grep -q TYPE= || mkfs.ext4 -L {{ nfs_export_label }} {{ nfs_export_device }}
+        blkid {{ item.device }} | grep -q TYPE= || mkfs.ext4 -L {{ item.label }} {{ item.device }}
       register: nfs_mkfs
       changed_when: "'TYPE=' not in nfs_mkfs.stdout"
+      loop: "{{ nfs_exports }}"
+      loop_control:
+        label: "{{ item.device }}"
 
-    - name: Create export directory
+    - name: Create export directories
       ansible.builtin.file:
-        path: "{{ nfs_export_path }}"
+        path: "{{ item.path }}"
         state: directory
         mode: "0755"
+      loop: "{{ nfs_exports }}"
+      loop_control:
+        label: "{{ item.path }}"
 
-    - name: Mount export disk
+    - name: Mount export disks
       ansible.posix.mount:
-        path: "{{ nfs_export_path }}"
-        src: "LABEL={{ nfs_export_label }}"
+        path: "{{ item.path }}"
+        src: "LABEL={{ item.label }}"
         fstype: ext4
         state: mounted
+      loop: "{{ nfs_exports }}"
+      loop_control:
+        label: "{{ item.path }}"
 
     # qemu-guest-agent is installed via terraform/nfs.tf's dedicated
     # nfs_vm_vendor_data cloud-init snippet at first boot, not here —
@@ -87,12 +130,24 @@
         state: present
         update_cache: true
 
+    # Hostname clients are resolved by exportfs when it loads /etc/exports,
+    # so a DNS failure here silently denies every K8s node instead of
+    # erroring loudly. Check before writing rather than debugging a
+    # "permission denied" mount two layers up in a CSI driver.
+    - name: Assert every export client resolves
+      ansible.builtin.command: getent hosts {{ item }}
+      changed_when: false
+      loop: "{{ nfs_exports | map(attribute='clients') | flatten }}"
+
     - name: Write /etc/exports
       ansible.builtin.copy:
         dest: /etc/exports
         mode: "0644"
         content: |
-          {{ nfs_export_path }} {% for client in nfs_allowed_clients %}{{ client }}(rw,no_root_squash,sync,no_subtree_check) {% endfor %}
+          {% for export in nfs_exports %}
+          {{ export.path }} {% for client in export.clients %}{{ client }}(rw,no_root_squash,sync,no_subtree_check) {% endfor %}
+
+          {% endfor %}
       notify: Reload exports
 
     - name: Enable and start nfs-kernel-server
@@ -107,9 +162,11 @@
     # -------------------------------------------------------------------
     # Done
     # -------------------------------------------------------------------
-    - name: NFS export configured
+    - name: NFS exports configured
       ansible.builtin.debug:
-        msg: "{{ nfs_export_path }} is exported to {{ nfs_allowed_clients | join(', ') }}. Verify: ssh -i ~/.ssh/id_nfs core@{{ ansible_host }} sudo exportfs -v"
+        msg: >-
+          {% for export in nfs_exports %}{{ export.path }} → {{ export.clients | join(', ') }}. {% endfor %}
+          Verify: ssh -i ~/.ssh/id_nfs core@{{ ansible_host }} sudo exportfs -v
 
 # -------------------------------------------------------------------
 # Register the export as PVE storage — cluster-wide via storage.cfg
