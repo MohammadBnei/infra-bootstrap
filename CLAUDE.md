@@ -77,8 +77,9 @@ then here. When in doubt, open those files.
 - Storage: `longhorn` is the **default** StorageClass and the only one with
   replication + backups (ADR-0002/0019). `nfs`
   (`nfs-storage.bnei.lan:/export/k8s` via `csi-driver-nfs`, ADR-0036) is a
-  non-default class that is **unreplicated and unbacked-up** — use it for
-  RWX and regenerable bulk data only, never for anything whose loss matters.
+  non-default class that is **unreplicated and never backed up** (a settled
+  decision, not a pending gap) — use it for RWX and regenerable bulk data
+  only, never for anything whose loss matters. There is no restore path.
   `local-path` is a node-pinned RWO fallback. Opting out of `longhorn` is
   always an explicit `storageClassName`.
 - Greenfield cluster runs use `cluster.yml`, never `scale.yml`.

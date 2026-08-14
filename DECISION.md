@@ -115,9 +115,11 @@ updated.
   loss would be an incident goes on `longhorn` (3 replicas, daily snapshots
   to Garage) — that is unchanged, [ADR-0002](docs/adr/0002-storage-longhorn-over-ceph-nfs.md).
   `nfs` (`nfs-storage.bnei.lan:/export/k8s`, `csi-driver-nfs`) is a second,
-  **unreplicated and unbacked-up** class for ReadWriteMany and for bulk data
-  that can be regenerated; it dies with `server1`, so nothing important goes
-  on it — [ADR-0036](docs/adr/0036-nfs-storage-class-for-k8s.md).
+  **unreplicated class that is never backed up** (decided 2026-08-14 — not
+  a pending gap), for ReadWriteMany and for bulk data that can be
+  regenerated; it dies with `server1`, so nothing important goes on it, and
+  there is no restore path if something does —
+  [ADR-0036](docs/adr/0036-nfs-storage-class-for-k8s.md).
   `local-path` remains a node-pinned RWO fallback, [ADR-0019](docs/adr/0019-longhorn-rollout-specifics.md).
   A PVC that sets no `storageClassName` gets `longhorn`; opting into `nfs`
   is always explicit.

@@ -363,7 +363,7 @@ Standard set: pg_stat_statements, pg_trgm, pg_repack, postgres_fdw, etc. (17 tot
 - Second non-default class via `csi-driver-nfs` (chart 4.13.4, `kube-system`,
   ArgoCD wave 0), backed by a second export on the `nfs-storage` VM:
   `nfs-storage.bnei.lan:/export/k8s`, its own 50GB `scsi2` disk, `ext4`,
-  label `nfsk8s`. Unreplicated, **no backup**, RWX-capable — regenerable
+  label `nfsk8s`. Unreplicated, **no backup and none planned**, RWX-capable — regenerable
   data only.
 - `csi-nfs-controller` (4/4, snapshotter deliberately disabled) + a
   `csi-nfs-node` DaemonSet pod on all 5 nodes.

@@ -97,9 +97,17 @@ Add a **second, non-default StorageClass named `nfs`**, backed by a
    server hiccup into silent truncated reads, whereas `hard` blocks until the
    server returns.
 
-6. **Scope: expendable data only.** `nfs` is for volumes whose loss is an
-   inconvenience, not an incident — RWX scratch space and bulk regenerable
-   data. Anything whose loss matters stays on `longhorn`.
+6. **Scope: expendable data only, and this is load-bearing.** `nfs` is for
+   volumes whose loss is an inconvenience, not an incident — RWX scratch
+   space and bulk regenerable data. Anything whose loss matters stays on
+   `longhorn`.
+
+   This is not a soft guideline pending a backup job. There is deliberately
+   **no backup for this class and none planned** (see Consequences), so this
+   restriction is the only thing standing between a `server1` disk failure
+   and permanent data loss. Treat "could I regenerate this from scratch
+   tomorrow?" as the admission test for every PVC that sets
+   `storageClassName: nfs`.
 
 ## Alternatives considered
 
@@ -134,10 +142,17 @@ Named explicitly so they are not later mistaken for oversights:
   goes down, every `nfs` PVC blocks (`hard` mounts, by choice) until it comes
   back. Longhorn survives a single node loss; this class does not. This is the
   price of the class and the reason it is not the default.
-- **No backup.** `longhorn` PVs get daily snapshots into Garage; `/export/k8s`
-  gets nothing. A restic/rsync job to the Garage S3 endpoint is the obvious
-  follow-up and is deliberately **not** part of this change — until it exists,
-  Decision 5's scope restriction is the whole safety story.
+- **No backup, permanently — decided 2026-08-14, not deferred.** `longhorn`
+  PVs get daily snapshots into Garage; `/export/k8s` gets nothing, and no
+  restic/rsync job to Garage is planned. Backing up data that is by
+  definition regenerable would buy a restore path nobody would use, at the
+  cost of Garage capacity and another job to maintain.
+
+  The consequence is that **Decision 6's scope restriction is not a stopgap
+  — it is the entire safety story, forever.** Every other class in the
+  cluster forgives a mistake; this one does not. If a workload's data would
+  be missed after a `server1` disk failure, it does not belong on `nfs`, and
+  there is no second line of defence to fall back on.
 - `server1`'s local-lvm loses the size of the new disk. Confirm free space with
   `pvesm status` before choosing it.
 - **Pi-hole becomes a dependency of the NFS authorization path.** Hostnames
