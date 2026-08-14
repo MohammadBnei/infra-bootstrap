@@ -493,11 +493,13 @@ Exists for two things Longhorn does badly here: real ReadWriteMany without
 a `share-manager` pod in the path, and bulk regenerable data that isn't
 worth 3× replication on the 40GB control-plane disks.
 
-**Unreplicated and unbacked-up.** It lives and dies with `server1`, and
-mounts are `hard` — if that host is down, `nfs` PVCs block rather than
-return truncated reads. Only put data there that can be lost and
-regenerated; everything else stays on Longhorn. A PVC with no
-`storageClassName` still gets Longhorn — opting in is always explicit.
+**Unreplicated, and never backed up.** It lives and dies with `server1`,
+and mounts are `hard` — if that host is down, `nfs` PVCs block rather than
+return truncated reads. There is no backup for this class and none planned
+(decided 2026-08-14, §10), so "only put data there that can be lost and
+regenerated" is not advice pending a safety net — it *is* the safety net.
+Everything else stays on Longhorn. A PVC with no `storageClassName` still
+gets Longhorn — opting in is always explicit.
 [ADR-0036](docs/adr/0036-nfs-storage-class-for-k8s.md).
 
 `local-path` remains a third, node-pinned RWO fallback (ADR-0019).
@@ -700,7 +702,7 @@ Why this shape, in order:
 | Postgres (full + WAL) | pgBackRest | local only; off-host target open — `pg-backup` Garage bucket provisioned but not yet wired into `pgbackrest_repo`, see §7 | daily + continuous WAL | 7d / 4w / 3m |
 | K8s manifests | Git | `gitops/` in `github.com/MohammadBnei/infra-bootstrap` (this repo — not the legacy `k8s-cluster` submodule) | on commit | indefinite |
 | K8s PVs (`longhorn` class) | Longhorn snapshots (+ Velero if added) | Garage (S3) | daily | 7 daily |
-| K8s PVs (`nfs` class) | **none — gap, not "by design"** | nothing. `/export/k8s` on the `nfs-storage` VM has no backup job at all; the class is scoped to regenerable data so that's survivable, but a restic-to-Garage job is the named follow-up ([ADR-0036](docs/adr/0036-nfs-storage-class-for-k8s.md)) | — | — |
+| K8s PVs (`nfs` class) | *none, by design* | nothing, and none planned — decided 2026-08-14. The class only ever holds regenerable data, so a restore path would go unused; that scope restriction is the entire safety story, with no second line of defence ([ADR-0036](docs/adr/0036-nfs-storage-class-for-k8s.md)) | — | — |
 | Container images | *none, by design* | rebuildable from git + `build-runner` — losing the `zot-registry` bucket costs a rebuild, not data ([ADR-0034](docs/adr/0034-in-cluster-oci-registry-zot-garage-backed.md)) | — | — |
 | `build-runner` LXC | *none, by design* | rebuildable from `terraform/build-runner.tf` + `ansible/playbooks/build-runner-configure.yml`; holds no state worth keeping | — | — |
 | Proxmox config | cron + tar | open, see §7/ADR-0024 | daily | 7 daily |
