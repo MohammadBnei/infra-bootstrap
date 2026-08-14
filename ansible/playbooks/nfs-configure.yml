@@ -96,19 +96,30 @@
     # filesystem module for one call — ansible.posix (already a required
     # collection, ansible/requirements.yml) has no mkfs module of its own.
     - name: Format export disks if not already formatted
+      # The mkfs echoes a marker rather than the old `'TYPE=' not in stdout`
+      # test: `grep -q` writes nothing to stdout, so that condition was true
+      # on every run and the task reported "changed" even when it correctly
+      # skipped a formatted disk. Harmless in itself, but it made a re-run
+      # look like it had just reformatted a live export — exactly the alarm
+      # you don't want to teach people to ignore (confirmed 2026-08-14).
       ansible.builtin.shell: |
-        blkid {{ item.device }} | grep -q TYPE= || mkfs.ext4 -L {{ item.label }} {{ item.device }}
+        blkid {{ item.device }} | grep -q TYPE= || { mkfs.ext4 -L {{ item.label }} {{ item.device }} && echo FORMATTED; }
       register: nfs_mkfs
-      changed_when: "'TYPE=' not in nfs_mkfs.stdout"
+      changed_when: "'FORMATTED' in nfs_mkfs.stdout"
       loop: "{{ nfs_exports }}"
       loop_control:
         label: "{{ item.device }}"
 
+    # No `mode:` on purpose. These paths are mountpoints — once the disk is
+    # mounted, the mode you see belongs to the filesystem's own root inode,
+    # not to anything this playbook created. csi-driver-nfs chmods
+    # /export/k8s to 0777 to match its `mountPermissions`, so pinning 0755
+    # here just means the two fight and every re-run reports a spurious
+    # `changed` (confirmed 2026-08-14). Creation-time default is 0755 anyway.
     - name: Create export directories
       ansible.builtin.file:
         path: "{{ item.path }}"
         state: directory
-        mode: "0755"
       loop: "{{ nfs_exports }}"
       loop_control:
         label: "{{ item.path }}"

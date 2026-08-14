@@ -358,17 +358,22 @@ Standard set: pg_stat_statements, pg_trgm, pg_repack, postgres_fdw, etc. (17 tot
 - `local-path-provisioner` remains installed as a non-default fallback,
   not the primary.
 
-### `nfs` StorageClass (ADR-0036 — **declared, not yet live**)
+### `nfs` StorageClass (ADR-0036 — **live 2026-08-14**)
 
-- Second non-default class via `csi-driver-nfs`, backed by a *new second
-  export* on the `nfs-storage` VM (`/export/k8s`, its own `scsi2` disk).
-  Unreplicated, no backup, RWX-capable — for regenerable data only.
-- Committed to git (`gitops/bootstrap/platform.applicationset.yaml`,
-  `terraform/nfs.tf`, `ansible/playbooks/nfs-configure.yml`) but **not yet
-  applied**: needs the targeted `terraform apply`, a reboot of
-  `nfs-storage` (for the cloud-init DNS change), and the `nfs-configure.yml`
-  re-run. Move this section up next to Longhorn once `kubectl get sc` shows
-  it.
+- Second non-default class via `csi-driver-nfs` (chart 4.13.4, `kube-system`,
+  ArgoCD wave 0), backed by a second export on the `nfs-storage` VM:
+  `nfs-storage.bnei.lan:/export/k8s`, its own 50GB `scsi2` disk, `ext4`,
+  label `nfsk8s`. Unreplicated, **no backup**, RWX-capable — regenerable
+  data only.
+- `csi-nfs-controller` (4/4, snapshotter deliberately disabled) + a
+  `csi-nfs-node` DaemonSet pod on all 5 nodes.
+- Verified end-to-end on bring-up: a 1Gi RWX PVC bound, two pods on
+  *different* nodes (`k8s-worker-01`/`k8s-worker-02`) each read the other's
+  writes, the data landed at `/export/k8s/pvc-<uid>/` on `.198`, and
+  deleting the PVC removed that subdirectory (`reclaimPolicy: Delete`
+  confirmed, 0 PVs leaked).
+- `longhorn` remains the default class — confirmed via `kubectl get sc`
+  after the rollout.
 
 ### nfs-storage (Proxmox shared template storage, current — ADR-0026)
 
