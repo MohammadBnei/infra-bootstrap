@@ -62,8 +62,12 @@ For the target architecture, see [`../ARCHITECTURE.md`](../ARCHITECTURE.md).
   - VMID 101 `hermesagent` (2 vCPU / 4GB / 19GB) — this AI
   - VMID 301 `garage-storage` (2 vCPU / 2GB / 200GB, Debian 13, IP
     192.168.1.199) — running, configured (Garage v2.3.0, single-node
-    layout applied, `k8s-longhorn-backup`/`pg-backup` buckets + S3 keys
-    created — see `ansible/playbooks/garage-configure.yml`)
+    layout applied). Five buckets + per-bucket S3 keys, all driven from
+    `garage-configure.yml`'s `garage_buckets` list:
+    `k8s-longhorn-backup`, `pg-backup`, `agent-fleet-files`,
+    `ente-photos`, and `zot-registry` (40GB quota — the registry is the
+    only one that grows purely as a CI side effect, and this LXC's 200GB
+    is shared with the backup buckets, ADR-0034)
 - Running VMs (Postgres):
   - VMID 207 `pg02` (2 vCPU / 4GB / 40GB) — IP: 192.168.1.207 — Pigsty PG 18
     **Leader/primary** (current live role — see ADR-0029, roles flipped
@@ -151,6 +155,8 @@ is deliberately not vGPU-style sharing across multiple VMs.
 | Postgres | QEMU VMs split across 2 hosts | pg02 VMID 207 (.207, on `.165`) — **Leader**; pg01 VMID 205 (.205, migrated to server1 2026-07-30) — Replica. See §4 |
 | Postgres DCS (etcd) | 3-node quorum, **live 2026-07-30** | `etcd-1`/.207 (`.165`), `etcd-2`/.205 (server1), `etcd-3`/pg-etcd-witness `.197` (ex-laptop, VMID 303, etcd-only, no PG data) — ADR-0029 |
 | Garage | LXC on proxmox PVE (.165) | VMID 301, running, configured (v2.3.0, 192.168.1.199) |
+| Container registry | Zot, in-cluster (ns `zot`) | **Live 2026-08-13.** `registry.bnei.lan:5000`, MetalLB `.234` (pinned), blobs in Garage's `zot-registry` bucket (40GB quota). Plain HTTP, no IngressRoute — LE cannot issue for `.lan`; nodes trust it via `containerd_registries_mirrors`. Anonymous pull, htpasswd push. `editable-blog:0.37.9` pulled from it and serving — ADR-0034 |
+| Image builds | `build-runner` LXC on server1 | **Live 2026-08-13.** VMID 103, `192.168.1.111`, `nesting=1`. GitHub Actions runner labelled `self-hosted,ukubi-build`, buildah run as root via scoped sudo. Outside the cluster because buildah cannot extract layers without `CAP_SYS_ADMIN` — ADR-0034 |
 
 ---
 

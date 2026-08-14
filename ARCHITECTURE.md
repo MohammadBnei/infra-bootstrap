@@ -90,6 +90,7 @@ Full eBPF hardware support (AMD Ryzen). ~3GB PVE overhead reserved.
 | nfs-storage | VM (Q35, OVMF) | 1 | 1GB | 120GB | Shared PVE storage for cross-host VM template cloning — [ADR-0026](docs/adr/0026-nfs-shared-pve-storage-cross-host-clone.md), never mounted by K8s |
 | k8s-worker-02 | VM (Q35, OVMF) | 6 | 16GB | 60GB | First cross-host K8s worker (Stage 2 Phase C), `192.168.1.203` — resized 4→6 vCPU/8→16GB 2026-07-30, server1 had most of its RAM idle |
 | k8s-cp-02 | VM (Q35, OVMF) | 2 | 4GB | 40GB | 2nd control-plane + etcd member, `192.168.1.204` — [ADR-0017](docs/adr/0017-second-control-plane-member.md) |
+| k9s-dashboard | LXC (VMID 102) | 1 | 1GB | 8GB | Ops convenience box, `192.168.1.110` — a human SSHes in and drives `kubectl`/`k9s` against the live cluster. Carries a **cluster-admin kubeconfig on disk**, which is why it holds its own dedicated SSH keypair and why cluster credentials are never materialised on the workstation instead ([`k8s-ops`](.claude/skills/k8s-ops/SKILL.md)) |
 | build-runner | LXC (VMID 103) | 4 | 4GB | 40GB | Image builds, `192.168.1.111` — `nesting=1`, buildah run as root via scoped sudo. Deliberately outside the cluster: buildah cannot extract layers without `CAP_SYS_ADMIN` ([ADR-0034](docs/adr/0034-in-cluster-oci-registry-zot-garage-backed.md)). Disk is the number to watch — `vfs` storage copies layers, and a weekly `podman system prune` timer is the only thing reclaiming them |
 
 CPU **lacks** eBPF hardware support — one reason Cilium chaining mode is
@@ -681,13 +682,43 @@ Why this shape, in order:
 | Postgres (full + WAL) | pgBackRest | local only; off-host target open — `pg-backup` Garage bucket provisioned but not yet wired into `pgbackrest_repo`, see §7 | daily + continuous WAL | 7d / 4w / 3m |
 | K8s manifests | Git | `gitops/` in `github.com/MohammadBnei/infra-bootstrap` (this repo — not the legacy `k8s-cluster` submodule) | on commit | indefinite |
 | K8s PVs | Longhorn snapshots (+ Velero if added) | Garage (S3) | daily | 7 daily |
+| Container images | *none, by design* | rebuildable from git + `build-runner` — losing the `zot-registry` bucket costs a rebuild, not data ([ADR-0034](docs/adr/0034-in-cluster-oci-registry-zot-garage-backed.md)) | — | — |
+| `build-runner` LXC | *none, by design* | rebuildable from `terraform/build-runner.tf` + `ansible/playbooks/build-runner-configure.yml`; holds no state worth keeping | — | — |
 | Proxmox config | cron + tar | open, see §7/ADR-0024 | daily | 7 daily |
 | Pi-hole config | restic | open, see §7/ADR-0024 | daily | 7 daily |
 | `/home/mohammad` | restic | open, see §7/ADR-0024 | daily | 7 daily |
+| Forgejo (`/var/lib/forgejo`) | **not yet — prerequisite, see below** | git repos are filesystem-only; PRs/issues/CI history exist nowhere else and do **not** push-mirror ([ADR-0035](docs/adr/0035-self-hosted-forgejo-authoritative-github-mirror.md)) | — | — |
 
 Backup verification: monthly restore test to a sandbox VM.
 
----
+### The gap: every path terminates inside the same failure domain
+
+**This is the largest known divergence from `VISION.md`, and it is stated
+here rather than discovered during a restore.**
+
+Read the table by destination rather than by row and the shape is plain:
+Longhorn PVs land in Garage; Garage is an LXC on `.165`; Postgres is local
+only; Proxmox, Pi-hole and `/home` are open. **Nothing leaves the house.** A
+fire, a theft, or a `.165` disk failure takes the primary and its backup
+together — which is not a backup story, it is a copy.
+
+`VISION.md` principle 8 states the requirement directly: *"the restore path
+must survive the system failing entirely — so it cannot live only inside the
+cluster."* Its implications section names this as the **prerequisite before
+autonomy**, and it sits between the registry (done) and self-hosted git (not
+started) in that ordering — deliberately, because moving git into the house
+before a restore path exists would concentrate more into one failure domain,
+not less.
+
+Two things made this sharper rather than softer since it was written:
+
+- **Garage now carries a double load.** It is both the backup *target* and, since [ADR-0034](docs/adr/0034-in-cluster-oci-registry-zot-garage-backed.md), on the critical path of every pod start. Losing it is simultaneously an outage and the loss of the thing that would recover from an outage.
+- **GitHub is currently the only copy that leaves the failure domain** — for `gitops/` and app repos. That is an accident of not having migrated yet, not a designed restore path, and [ADR-0035](docs/adr/0035-self-hosted-forgejo-authoritative-github-mirror.md) would convert it into a deliberate one (mirror as restore path). Which is exactly why that ADR is gated on this row being filled first.
+
+**Target:** at least one off-site (or at minimum off-`.165`, off-premises)
+destination for Postgres, Longhorn PV backups, and `/home`, with a rehearsed
+restore — not merely a configured one. Until that exists, `docs/adr/0035`
+stays `Proposed` and unsupervised operation stays bounded.
 
 ## 11. Migration Path
 
@@ -709,6 +740,23 @@ graph TD
 
     P0 --> P1 --> P2 --> P3 --> P4 --> P5 --> P6 --> P7 --> P8
 ```
+
+### Where this is now
+
+Phases 0-8 above describe the *migration onto* this hardware, and that arc
+is substantially done. What follows is no longer migration but convergence,
+and its ordering comes from `VISION.md`'s implications section rather than
+from this diagram:
+
+| Step | State |
+| --- | --- |
+| **Registry in-cluster, before git** | **Done** — Zot + `build-runner`, [ADR-0034](docs/adr/0034-in-cluster-oci-registry-zot-garage-backed.md). `editable-blog` cut over and pulling from it |
+| **A restore path that leaves the failure domain** | **Not started — the current blocker.** See §10's gap. Gates everything below it |
+| **Then git, mirrored** | Designed, `Proposed` — [ADR-0035](docs/adr/0035-self-hosted-forgejo-authoritative-github-mirror.md). Deliberately *not* started: moving git in-house before a restore path exists concentrates more into one failure domain |
+| **Give drift detection somewhere to write** | Not started — `mission-drift` produces prose, not proposed tasks |
+
+The ordering is not arbitrary and should not be reordered for convenience:
+each step is what makes the next one safe to take.
 
 ---
 
