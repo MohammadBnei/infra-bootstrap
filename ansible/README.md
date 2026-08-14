@@ -14,7 +14,7 @@ Custom playbooks for things kubespray and pigsty don't cover:
 | `playbooks/vm-provision.yml` | Create QEMU VMs and LXC containers from a host_vars-driven spec |
 | `playbooks/k8s-node-prereqs.yml` | Standalone K8s-node prereq setup (kernel modules, cgroup, containerd) |
 | `playbooks/garage-configure.yml` | Install/configure Garage on the bare LXC terraform/garage.tf creates — drafted, see below |
-| `playbooks/nfs-configure.yml` | Format + export NFS on the bare VM terraform/nfs.tf creates — drafted, see below |
+| `playbooks/nfs-configure.yml` | Format + export NFS on the bare VM terraform/nfs.tf creates — two exports since ADR-0036, see below |
 | `playbooks/k9s-dashboard-configure.yml` | Install kubectl/k9s + write a cluster-admin kubeconfig on the bare k9s-dashboard LXC terraform/k9s-dashboard.tf creates — drafted, see below |
 | `playbooks/build-runner-configure.yml` | Install podman/buildah + register the GitHub Actions build runner on the bare LXC terraform/build-runner.tf creates (ADR-0034) — an LXC rather than a pod because buildah cannot extract image layers unprivileged |
 | `playbooks/pihole-configure.yml` | Install/configure Pi-hole on the Pi 4, authoritative for `bnei.lan` — drafted, see below |
@@ -213,9 +213,24 @@ creates — shared PVE storage so cross-host VM template cloning takes a
 direct-clone path instead of an automatic clone-then-migrate (see
 [ADR-0026](../docs/adr/0026-nfs-shared-pve-storage-cross-host-clone.md)).
 Much smaller scope than `garage-configure.yml`: no Infisical writes, no
-application state — just format the raw second disk, install
-`nfs-kernel-server`, write `/etc/exports` restricted to the 3 PVE cluster
-members with `no_root_squash`, and start the service. A second play then
+application state — just format the raw extra disks, install
+`nfs-kernel-server`, write `/etc/exports`, and start the service.
+
+Since [ADR-0036](../docs/adr/0036-nfs-storage-class-for-k8s.md) the
+playbook loops over an `nfs_exports` list of **two** independent exports on
+**two** disks, both `no_root_squash`:
+
+| Export | Disk | Clients | Purpose |
+|---|---|---|---|
+| `/export/templates` | `/dev/sdb` | the 3 PVE hosts, by IP | Shared PVE storage, ADR-0026. Untouched by ADR-0036 |
+| `/export/k8s` | `/dev/sdc` | the 5 K8s nodes, by `*.bnei.lan` name | Backs the unreplicated `nfs` StorageClass, ADR-0036. **Not** a PVE pool |
+
+The hostname clients mean this VM must resolve `bnei.lan` via Pi-hole —
+`terraform/nfs.tf` declares that, but on an already-running VM it needs a
+reboot to land, so the playbook asserts resolution before writing
+`/etc/exports` rather than letting `exportfs` silently deny every node.
+
+A second play then
 registers the export as a PVE storage pool (`pvesm add nfs ...`) against
 the `proxmox` host alias — idempotent (only runs if not already present),
 and only needed once since `storage.cfg` is cluster-shared (ADR-0020).

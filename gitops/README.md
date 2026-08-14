@@ -64,6 +64,7 @@ gitops/
 │       ├── alloy/values.yaml
 │       ├── metrics-server/values.yaml
 │       ├── local-path-provisioner/values.yaml
+│       ├── csi-driver-nfs/values.yaml     # `nfs` StorageClass — non-default, unreplicated, RWX (ADR-0036)
 │       ├── searxng/values.yaml            # common-app-chart values, driven by platform-common-apps.applicationset.yaml
 │       ├── pgweb/values.yaml              # ditto
 │       ├── ente-museum/values.yaml        # ditto
@@ -85,7 +86,7 @@ Everything is sequenced so each layer is ready before the next depends on it:
 
 | Wave | App(s) | Why first |
 |------|--------|-----------|
-| 0 | **Longhorn**, **local-path-provisioner** | Longhorn is the default StorageClass (ADR-0002); local-path-provisioner stays installed as a non-default fallback. Every PVC in the cluster (Traefik's acme.json, common-app-chart PVCs) needs a default StorageClass to bind at all |
+| 0 | **Longhorn**, **local-path-provisioner**, **csi-driver-nfs** | Longhorn is the default StorageClass (ADR-0002); local-path-provisioner stays installed as a non-default fallback; csi-driver-nfs adds the non-default `nfs` class — unreplicated, unbacked-up, RWX-capable, for regenerable data only (ADR-0036). Every PVC in the cluster (Traefik's acme.json, common-app-chart PVCs) needs a default StorageClass to bind at all |
 | 1 | **Infisical**, **infisical-operator** | Serves secrets to ArgoCD/apps via `InfisicalSecret` CRDs (the operator provides the CRD itself) — must be ready before any app that needs a private values repo or Infisical-backed secret |
 | 2 | **Traefik** (standalone `traefik-application.yaml`, not in the ApplicationSet) | Ingress — must be up before IngressRoutes resolve |
 | 5 | Prometheus, Grafana, Loki, Alloy, metrics-server | Observability, no hard ordering constraint |
@@ -124,6 +125,7 @@ Everything else flows from Infisical once it's running.
 |------|-----|-------|
 | 0 | longhorn | longhorn.io/longhorn |
 | 0 | local-path-provisioner | containeroo/local-path-provisioner |
+| 0 | csi-driver-nfs | kubernetes-csi/csi-driver-nfs |
 | 1 | infisical | infisical/infisical |
 | 1 | infisical-operator | infisical/secrets-operator |
 | 5 | prometheus | prometheus-community/kube-prometheus-stack |

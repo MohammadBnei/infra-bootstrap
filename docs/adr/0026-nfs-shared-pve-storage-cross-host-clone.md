@@ -1,6 +1,9 @@
 # ADR-0026: NFS-backed shared PVE storage for cross-host VM template cloning
 
-**Status:** Accepted
+**Status:** Accepted (scope note below amended by
+[ADR-0036](0036-nfs-storage-class-for-k8s.md) — the `nfs-storage` VM now also
+carries a *separate* disk and export backing a K8s StorageClass; the
+`/export/templates` share this ADR is about is still never mounted by K8s)
 **Date:** 2026-07-28
 
 ## Context

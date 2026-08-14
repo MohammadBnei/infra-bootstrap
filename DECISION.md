@@ -111,6 +111,17 @@ updated.
   alerting is Grafana-native, not Loki's Ruler and not routed through
   Alertmanager. See [ADR-0027](docs/adr/0027-logging-loki-alloy-over-clickhouse-promtail.md).
 
+- **Three StorageClasses, and `longhorn` is the default.** Anything whose
+  loss would be an incident goes on `longhorn` (3 replicas, daily snapshots
+  to Garage) — that is unchanged, [ADR-0002](docs/adr/0002-storage-longhorn-over-ceph-nfs.md).
+  `nfs` (`nfs-storage.bnei.lan:/export/k8s`, `csi-driver-nfs`) is a second,
+  **unreplicated and unbacked-up** class for ReadWriteMany and for bulk data
+  that can be regenerated; it dies with `server1`, so nothing important goes
+  on it — [ADR-0036](docs/adr/0036-nfs-storage-class-for-k8s.md).
+  `local-path` remains a node-pinned RWO fallback, [ADR-0019](docs/adr/0019-longhorn-rollout-specifics.md).
+  A PVC that sets no `storageClassName` gets `longhorn`; opting into `nfs`
+  is always explicit.
+
 - **Container images come from the in-cluster registry: Zot at
   `registry.bnei.lan:5000`, blobs on Garage S3.** LAN-only and plain HTTP
   — `.lan` is a name Let's Encrypt cannot issue for, so there is no

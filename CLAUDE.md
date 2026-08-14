@@ -74,6 +74,13 @@ then here. When in doubt, open those files.
   in-cluster way to grant that is a privileged pod running app-repo
   Dockerfiles). A new build repo needs its own runner *and* adding to the
   `ACCESS_TOKEN` PAT's repo list — ADR-0034.
+- Storage: `longhorn` is the **default** StorageClass and the only one with
+  replication + backups (ADR-0002/0019). `nfs`
+  (`nfs-storage.bnei.lan:/export/k8s` via `csi-driver-nfs`, ADR-0036) is a
+  non-default class that is **unreplicated and unbacked-up** — use it for
+  RWX and regenerable bulk data only, never for anything whose loss matters.
+  `local-path` is a node-pinned RWO fallback. Opting out of `longhorn` is
+  always an explicit `storageClassName`.
 - Greenfield cluster runs use `cluster.yml`, never `scale.yml`.
 - Secrets only via Infisical, fetched at run time — never committed.
 

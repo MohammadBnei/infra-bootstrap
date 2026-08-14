@@ -1,0 +1,46 @@
+# csi-driver-nfs — dynamic provisioner for the `nfs` StorageClass
+# (docs/adr/0036-nfs-storage-class-for-k8s.md).
+#
+# Backed by the nfs-storage VM's SECOND export (/export/k8s, scsi2), not the
+# PVE template export ADR-0026 built. Unreplicated and unbacked-up by design:
+# this class is for ReadWriteMany scratch and bulk regenerable data. Anything
+# whose loss is an incident stays on `longhorn`, which remains the default
+# StorageClass (ADR-0002).
+
+# The csi-snapshotter sidecar is on by default and needs VolumeSnapshot CRDs
+# to do anything. We take no snapshots of this class (that's Longhorn's job,
+# ADR-0019), so turn it off rather than leave a sidecar erroring in a loop.
+controller:
+  enableSnapshotter: false
+
+# Already the chart default; pinned explicitly so a chart-version bump can't
+# quietly start installing snapshot CRDs into a cluster where kubespray owns
+# that territory.
+externalSnapshotter:
+  enabled: false
+
+storageClass:
+  create: true
+  name: nfs
+  # Deliberately NO storageclass.kubernetes.io/is-default-class annotation —
+  # longhorn keeps the default, opting into `nfs` is always explicit.
+  parameters:
+    # By DNS name, not IP (ADR-0036): Pi-hole is authoritative for bnei.lan,
+    # same contract as registry.bnei.lan in every node's containerd config.
+    server: nfs-storage.bnei.lan
+    share: /export/k8s
+    # The driver creates one subdirectory per volume under `share`. 0777
+    # because app containers run as assorted non-root UIDs and there is no
+    # fsGroup story over NFS.
+    mountPermissions: "0777"
+  reclaimPolicy: Delete
+  volumeBindingMode: Immediate
+  mountOptions:
+    - nfsvers=4.1
+    # hard, not soft: a soft mount turns an nfs-storage hiccup into silently
+    # truncated reads. hard blocks until the server is back, which is the
+    # honest failure mode for a single-host store.
+    - hard
+    - timeo=600
+    - retrans=2
+    - noatime
