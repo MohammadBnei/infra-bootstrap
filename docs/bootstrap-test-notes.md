@@ -1680,3 +1680,64 @@ formats a Proxmox VM disk should use by-id, not `/dev/sdX`.**
   resolved `k8s-cp-01.bnei.lan` via `192.168.1.55` with no reboot. The
   warning stays in the docs — it costs nothing and is right in the general
   case — but the reboot was skipped here.
+
+### Outcome — clean bring-up, one cosmetic bug found
+
+With both fixes in, the run went through in one pass. `terraform apply`:
+`0 added, 1 changed, 0 destroyed`. Playbook: `ok=9 changed=5 failed=0`.
+ArgoCD had already synced `platform-csi-driver-nfs` off the merge
+(`Synced`/`Healthy`, no manual apply — ADR-0021 working as designed), and
+`kubectl get sc` showed `nfs` alongside `longhorn (default)`.
+
+Acceptance test (1Gi RWX PVC, two pods pinned to different nodes via
+`requiredDuringScheduling` anti-affinity):
+
+- PVC bound `RWX` on class `nfs`
+- pods landed on `k8s-worker-01` / `k8s-worker-02`; each read the other's
+  file, so this is genuine cross-node RWX, not a same-node false pass
+- directory mode `drwxrwxrwx` — `mountPermissions: "0777"` applied
+- data present at `/export/k8s/pvc-<uid>/` on `.198`
+- deleting the namespace removed the subdirectory and left 0 `nfs` PVs —
+  `reclaimPolicy: Delete` confirmed end to end
+
+### The cosmetic bug: a `changed_when` that cried wolf
+
+The format task reported `changed` for **both** disks — including `scsi1`,
+the live 1.8GB template export. Genuinely alarming for a second.
+
+It had not been reformatted. Proof: `tune2fs -l` showed `scsi1`'s
+filesystem created `Jul 28 21:09` (original) versus `scsi2`'s `Aug 14
+15:18` (today), with `images/` and `snippets/` and their July mtimes
+intact.
+
+The cause was the `changed_when`, not the shell logic:
+
+```yaml
+shell: blkid {{ item.device }} | grep -q TYPE= || mkfs.ext4 ...
+changed_when: "'TYPE=' not in nfs_mkfs.stdout"
+```
+
+`grep -q` writes **nothing** to stdout by definition, so `'TYPE=' not in
+stdout` is true on every run, formatted or not. The task always claimed
+`changed`. This was inherited from the original single-disk playbook where
+it was invisible (one item, first run, actually changed); adding a second
+disk made it look like a live export was being reformatted on every run.
+
+Fixed by having the mkfs branch echo a marker and testing for that
+instead. Worth generalizing: **a `changed_when` that reads stdout from a
+`grep -q` guard is always wrong** — the quiet flag is the whole point of
+`-q`. Check the exit code, or emit an explicit marker.
+
+Two guards did their job here and are worth keeping: the `blkid` check
+(prevented an actual reformat of live data despite the misleading report)
+and the by-id device addressing from the previous section (without it the
+same run would have targeted the wrong disks entirely).
+
+A second, smaller idempotency bug surfaced from the same re-run: `Create
+export directories` pinned `mode: "0755"`, but `csi-driver-nfs` chmods the
+share root to `0777` to match its `mountPermissions`. The two fought, so
+every re-run reported `changed` on a directory nobody had touched. These
+paths are *mountpoints* — after the mount, the visible mode belongs to the
+filesystem's own root inode, not to anything the playbook created — so the
+`mode:` was dropped rather than argued with. With both fixes the playbook
+re-runs at `ok=8 changed=0`.
