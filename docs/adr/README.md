@@ -32,7 +32,7 @@ ADR-000N` (replaced by a later decision).
 | [0019](0019-longhorn-rollout-specifics.md) | Longhorn rollout specifics | Accepted |
 | [0020](0020-pve-corosync-cluster.md) | PVE corosync cluster (not 3 independent standalone hosts) | Accepted |
 | [0021](0021-self-syncing-bootstrap-directory.md) | Self-syncing `gitops/bootstrap/` directory (scoped App-of-Apps) | Accepted |
-| [0022](0022-self-hosted-actions-runner.md) | Self-hosted GitHub Actions runner in-cluster | Accepted (amended by 0034 — a *separate* build runner is added; this runner's scope is unchanged) |
+| [0022](0022-self-hosted-actions-runner.md) | Self-hosted GitHub Actions runner in-cluster | Accepted (amended by 0034 — image builds run on a separate LXC, outside the cluster; this runner's scope is unchanged) |
 | [0023](0023-common-app-chart-hooks-and-oneoff-jobs.md) | `hooks:`/`oneOffJobs:` in common-app-chart, layered values for multi-env | Accepted |
 | [0024](0024-server1-single-disk-ext4-no-dedicated-zfs.md) | `server1` reinstalled single-disk, ext4 root, no dedicated ZFS pool | Accepted |
 | [0025](0025-repo-credential-shared-pat-not-ssh-deploy-key.md) | Repo credentials via shared HTTPS+PAT, not per-repo SSH deploy key | Accepted |
@@ -44,5 +44,5 @@ ADR-000N` (replaced by a later decision).
 | [0031](0031-defer-hpa-scale-to-zero.md) | Defer Kubernetes-native HPA scale-to-zero for user apps | Rejected |
 | [0032](0032-thot-rbac-and-alerting.md) | `thot`'s cluster-wide RBAC scope and Alertmanager routing | Accepted |
 | [0033](0033-dns-to-cloudflare-and-dns01-wildcard.md) | `bnei.dev` DNS to Cloudflare; DNS-01 wildcard for e2e previews | Accepted |
-| [0034](0034-in-cluster-oci-registry-zot-garage-backed.md) | In-cluster OCI registry (Zot, Garage-backed), builds moved in-house | Proposed |
+| [0034](0034-in-cluster-oci-registry-zot-garage-backed.md) | In-cluster OCI registry (Zot, Garage-backed), builds moved in-house | Accepted (builder is an LXC, not a pod — corrected in-ADR after a live failure) |
 | [0035](0035-self-hosted-forgejo-authoritative-github-mirror.md) | Self-hosted Forgejo authoritative, GitHub demoted to push-mirror | Proposed |

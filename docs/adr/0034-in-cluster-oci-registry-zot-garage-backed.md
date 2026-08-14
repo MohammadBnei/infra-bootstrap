@@ -1,6 +1,6 @@
 # ADR-0034: In-cluster OCI registry (Zot, Garage-backed), with builds moved in-house
 
-**Status:** Proposed
+**Status:** Accepted
 **Amends:** [ADR-0022](0022-self-hosted-actions-runner.md) (adds a *second*,
 separate build runner — ADR-0022's cluster-touching runner and its RBAC
 scope are deliberately left untouched; see "Why a second runner")

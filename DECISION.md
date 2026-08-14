@@ -111,6 +111,21 @@ updated.
   alerting is Grafana-native, not Loki's Ruler and not routed through
   Alertmanager. See [ADR-0027](docs/adr/0027-logging-loki-alloy-over-clickhouse-promtail.md).
 
+- **Container images come from the in-cluster registry: Zot at
+  `registry.bnei.lan:5000`, blobs on Garage S3.** LAN-only and plain HTTP
+  — `.lan` is a name Let's Encrypt cannot issue for, so there is no
+  `IngressRoute`; containerd trusts it via
+  `containerd_registries_mirrors` in `inventory/ukubi/group_vars/all/`.
+  Anonymous pull, authenticated push (htpasswd). Stateless by
+  construction: `dedupe: false` and an `emptyDir` staging dir, so nothing
+  durable lives in the cluster.
+  **Images are built on the `build-runner` LXC, never in the cluster** —
+  buildah cannot extract layers without `CAP_SYS_ADMIN`, and the only
+  in-cluster way to grant that is a privileged pod running app-repo
+  `Dockerfile`s. Adding a build repo means a *second* runner, not a
+  relabel, and adding it to the `ACCESS_TOKEN` PAT's repo list first.
+  See [ADR-0034](docs/adr/0034-in-cluster-oci-registry-zot-garage-backed.md).
+
 ## 3. Do not propose (quick reference — see linked ADR for full reasoning)
 
 Never propose these without an explicit user greenlight, even as a
