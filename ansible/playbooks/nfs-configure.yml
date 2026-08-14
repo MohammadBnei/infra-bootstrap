@@ -26,9 +26,9 @@
 #   The "Assert every export client resolves" task below is what catches it
 #   if that didn't take; fix by hand with `resolvectl dns <iface> 192.168.1.55`
 #   if needed.
-# - Device names (/dev/sdb, /dev/sdc) are assumed to follow scsi1/scsi2
-#   order — confirm with `lsblk` on the VM before the first run after
-#   adding a disk.
+# - No device-name assumptions to check: disks are addressed by
+#   /dev/disk/by-id/...drive-scsiN, which matches terraform/nfs.tf's
+#   `interface` regardless of how the kernel ordered /dev/sdX.
 # - Run with BOTH inventories so the second play below (PVE storage
 #   registration) can resolve the `proxmox` host alias:
 #     ansible-playbook -i ansible/inventories/nfs/hosts.yml \
@@ -43,6 +43,13 @@
   hosts: nfs-storage
   gather_facts: false
   vars:
+    # Devices are addressed by /dev/disk/by-id/...drive-scsiN, NOT /dev/sdX.
+    # Kernel enumeration order is not the SCSI interface order: confirmed
+    # live 2026-08-14 that scsi1 (the older template disk) was /dev/sdc while
+    # the freshly hot-plugged scsi2 came up as /dev/sdb. Hardcoding sdb/sdc
+    # would have mkfs'd the wrong disk's label. The by-id name matches
+    # terraform/nfs.tf's `interface` exactly, and survives reboots/hotplug.
+    #
     # Two independent exports on two separate disks. Keep them separate:
     # /export/templates is PVE's (docs/adr/0026) and is sized for a transient
     # VM clone; /export/k8s is the `nfs` StorageClass's (docs/adr/0036) and
@@ -54,7 +61,7 @@
       # purpose: this export is live and working, and ADR-0036's move to
       # hostnames deliberately doesn't touch it.
       - path: /export/templates
-        device: /dev/sdb
+        device: /dev/disk/by-id/scsi-0QEMU_QEMU_HARDDISK_drive-scsi1
         label: nfsexport
         clients:
           - 192.168.1.165
@@ -66,7 +73,7 @@
       # this VM to resolve bnei.lan via Pi-hole (terraform/nfs.tf's
       # initialization.dns.servers) — asserted below, not assumed.
       - path: /export/k8s
-        device: /dev/sdc
+        device: /dev/disk/by-id/scsi-0QEMU_QEMU_HARDDISK_drive-scsi2
         label: nfsk8s
         clients:
           - k8s-cp-01.bnei.lan
