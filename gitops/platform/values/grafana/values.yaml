@@ -335,7 +335,7 @@ alerting:
                   to: 0
                 model:
                   queryType: range
-                  expr: 'sum by (namespace, pod) (rate({namespace=~".+"} |~ "(?i)error" [5m]))'
+                  expr: 'sum by (namespace, pod) (rate({namespace=~".+"} | json | level=~"(?i)(error|fatal|panic)" [5m]))'
                   intervalMs: 60000
                   maxDataPoints: 43200
               # A Threshold expression fed directly by a range query (A has
