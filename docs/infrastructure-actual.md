@@ -64,13 +64,17 @@ loss on the host carrying the PG leader, etcd, `k8s-worker-01`, and Garage.
   `ip addr add 192.168.0.50/24 dev <iface>`, default `admin`/`admin`).
   Supports VLANs / LACP / port mirroring, none configured. **Not** the
   bottleneck — its other ports show the `1000M` LED lit.
-- **Room switch:** a second, **unidentified** switch sits between `.165`
-  and the wall, shared with the Pi 4 (`192.168.1.55`). Identify it.
-- **Open**, but narrowed: Ethernet negotiates per segment, so `nic0`'s
-  100Mb/s describes *only* the `.165` ↔ room-switch link — the wall run,
-  patch panel and `TL-SG108E` cannot cause it. Leading hypothesis is that
-  the room switch is a 10/100 model; the Pi's link speed discriminates
-  switch-wide vs. `.165`-specific. See `ARCHITECTURE.md` §3 and
+- **Room switch:** a second switch sits between `.165` and the wall, shared
+  with the Pi 4 (`192.168.1.55`). **It is 10/100 only — this is the root
+  cause**, confirmed 2026-08-15. Ethernet negotiates per segment, so
+  `nic0`'s 100Mb/s describes exactly this hop; nothing downstream (wall
+  run, patch panel, `TL-SG108E`) could have caused it.
+- **Fix pending:** replace with any gigabit switch. Unmanaged is fine —
+  VLAN capability already exists at the rack.
+- **Then re-measure end-to-end** with `iperf3` to `.200`. The room
+  switch's uplink will renegotiate against the in-wall run, which has
+  never been measured; a 2-pair punch-down there would move the 100Mb
+  ceiling one hop out rather than remove it. See `ARCHITECTURE.md` §3 and
   `docs/bootstrap-test-notes.md`.
 
 Measure with `ethtool nic0`, **never** `ethtool vmbr0` — the bridge reports

@@ -231,29 +231,34 @@ Being an Easy Smart model it also supports **802.1Q VLANs, LACP, and port
 mirroring** — available today, unused so far, and the only way to segment
 this LAN given the Freebox has no VLANs.
 
-`.165` does not reach the `TL-SG108E` directly. There is a **second,
-unidentified switch in the room** (shared with the Pi 4, `192.168.1.55`),
-and beyond it **in-wall structured cabling terminated on a `C5e` patch
-panel** (ports labeled per room: `Router salon`, `M. Amine`, `Bur Linda`,
-`CH 5 DTE`, `CH 5 Ghe`, `ALI`, `LINDA`):
+`.165` does not reach the `TL-SG108E` directly. There is a **second switch
+in the room** (shared with the Pi 4, `192.168.1.55`), and beyond it
+**in-wall structured cabling terminated on a `C5e` patch panel** (ports
+labeled per room: `Router salon`, `M. Amine`, `Bur Linda`, `CH 5 DTE`,
+`CH 5 Ghe`, `ALI`, `LINDA`):
 
 ```
-.165 NIC → patch cable → ROOM SWITCH (unidentified, shared with the Pi)
+.165 NIC → patch cable → ROOM SWITCH  ← ⚠ 10/100 ONLY — ROOT CAUSE
          → patch cable → wall socket → in-wall run
          → C5e patch panel → patch cable → TL-SG108E → Freebox
 ```
 
-**Ethernet negotiates per segment**, so `ethtool nic0` on `.165` reports
-*only* the `.165` ↔ room-switch link. The wall run, the patch panel and
-the `TL-SG108E` are downstream and invisible to that number — none of them
-can explain the 100Mb/s. The fault is confined to that first segment:
-the room switch being a 10/100 model (most likely), its port, `.165`'s
-patch cable, or `nic0` autoneg. The Pi shares that switch, so its link
-speed discriminates switch-wide vs. `.165`-specific.
+**Root cause confirmed 2026-08-15: the room switch is a 10/100
+fast-ethernet unit.** It physically cannot do gigabit, so `.165` is hard
+capped at ~12 MB/s regardless of cabling. Fix is to replace it with any
+gigabit switch; unmanaged is fine here, since VLAN capability already
+exists at the rack on the `TL-SG108E`.
 
-Corollary: per-segment link speed is **not** end-to-end throughput. Every
-hop above must be gigabit for `.165` to actually reach ~940 Mbit/s to
-`.200`; verify with `iperf3`, not `ethtool`.
+Why the diagnosis took four attempts: **Ethernet negotiates per segment**,
+so `ethtool nic0` reports *only* the `.165` ↔ room-switch link. The wall
+run, the patch panel and the `TL-SG108E` are all downstream of that
+measurement and could never have explained the reading.
+
+Corollary, still unverified: per-segment link speed is **not** end-to-end
+throughput. Once the room switch is gigabit, its *uplink* renegotiates
+against the in-wall run — and if that punch-down carries only 2 pairs it
+will come up at 100Mb and simply move the ceiling one hop out. Confirm
+the real number with `iperf3` to `.200`, not `ethtool`.
 
 This matters more than a flat-LAN diagram suggests: `.165` carries `pg02`
 (the Postgres **leader**, streaming to `pg01` on `.200`), `etcd-1`,

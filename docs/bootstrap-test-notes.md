@@ -1824,21 +1824,29 @@ uniform cabling, "the switch" for a five-segment path, and then the wrong
 switch entirely. Link-layer debugging has to be done against the topology
 that physically exists — which here meant going and looking at it twice.
 
-Next, cheapest first:
+**Root cause: the room switch is a 10/100 fast-ethernet unit.** Confirmed
+by inspecting it. It cannot do gigabit at all, so `.165` was hard-capped
+at ~12 MB/s no matter what any cable did. Fix: replace with any gigabit
+switch — unmanaged is fine, VLAN capability already exists at the rack on
+the `TL-SG108E`.
 
-1. **Read the Pi's link speed** — it shares the room switch and a Pi 4 is
-   genuinely gigabit. Pi also at 100Mb → the room switch is 10/100, which
-   is the answer and the one thing here worth actually replacing. Pi at
-   1000Mb → the fault is `.165`'s cable or port.
-2. **Identify the room switch** by label/LED count — one LED per port
-   means 10/100; a `TL-SF` prefix confirms it.
-3. Swap `.165`'s patch cable, then its port. Check `ethtool nic0` for
-   `Auto-negotiation: off`.
-4. **Then measure end-to-end, not per-link.** Every hop in the chain must
-   be gigabit to actually get ~940 Mbit/s — including the `Router salon`
-   uplink port on the `TL-SG108E`. `iperf3 -c 192.168.1.200` from `.165`
-   is the only number that reflects reality; `ethtool` describes one
-   segment at a time.
+The user's opening instinct — "buy a cheap TP-Link gigabit switch" — was
+correct from the start. It was aimed at the wrong switch, and the
+investigation spent four rounds establishing *which* one. Both of the
+early recommendations to buy hardware were wrong: the first because the
+target device was already gigabit, the second because the whole purchase
+was called off. The winning move was cheap and physical each time — read
+the label, look at the LEDs, count the hops.
+
+Still unverified: **per-segment link speed is not end-to-end throughput.**
+Once the room switch is gigabit its *uplink* renegotiates against the
+in-wall run, which has never been measured. If that punch-down carries
+only 2 pairs it comes up at 100Mb and the ceiling simply moves one hop
+out — the trap-3 hypothesis would return, correctly this time, as the
+*next* bottleneck rather than this one. Confirm with
+`iperf3 -c 192.168.1.200` from `.165` (expect ~940 Mbit/s), and check the
+`Router salon` uplink LED on the `TL-SG108E` while at it. `ethtool`
+describes one segment at a time and will never answer this.
 
 Worth knowing for later: the `TL-SG108E` is the *Easy Smart* model, so it
 has a web UI (`192.168.0.100`, off-subnet — reach it via a temporary
