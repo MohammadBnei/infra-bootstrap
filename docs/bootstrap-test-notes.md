@@ -2016,4 +2016,11 @@ cd pigsty && ansible 192.168.1.207 -b --private-key="$SP/oldpg_key" \
 `--force` is mandatory, not cosmetic — without it `patronictl` prompts and
 Ansible has no TTY. Disk was not a blocker: 51G total, 25G used, 27G free.
 
-**Outcome: see the follow-up entry below.**
+**Status at time of writing: not yet run.** The agent session attempted it
+with explicit user authorization and was blocked by the harness's own
+permission classifier — the same behaviour the `run-ukubi-ops` skill
+documents for live SSH execution. Read-only checks against these nodes
+(`patronictl list`, `journalctl`, `df`, config greps, the `:8008` REST API)
+all went through; only the mutating `reinit` was refused. That boundary is
+worth knowing before planning any hands-on Pigsty work from an agent
+session: **diagnosis is automatable here, remediation is not.**
