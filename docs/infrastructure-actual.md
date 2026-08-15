@@ -48,6 +48,38 @@ For the target architecture, see [`../ARCHITECTURE.md`](../ARCHITECTURE.md).
 - All hosts on single flat LAN — no VLANs
 - IP range partially occupied by existing devices (no clean reservation possible)
 
+#### Link speeds — `server1` and `ex-laptop` are at 100 Mbps
+
+**Confirmed 2026-08-15.** Both are on **USB-to-Ethernet adapters running at
+100 Mbps**, and neither has a usable onboard NIC. `.165` is not affected.
+
+This was undocumented until now, and it is not a detail — it is the ceiling on
+every piece of network storage in the cluster. `agent-fleet`'s ADR-0048 §4
+benchmarked Longhorn RWX and the `nfs` StorageClass on 2026-08-14 and got an
+identical **10 MB/s ≈ 80 Mbps** from both, against **1069 MB/s** on node-local
+disk. Two unrelated backends landing on the same number is 100BASE-TX after
+overhead, not a coincidence about the backends.
+
+It reaches further than the fleet, because of where the VMs sit:
+`k8s-worker-02`, `k8s-cp-02` and `pg01` are on `server1`, `k8s-cp-03` on
+`ex-laptop`. So
+
+- **two of three etcd voters** sit behind a 100 Mbps USB adapter;
+- **Longhorn replica rebuilds** run at 10 MB/s — a 100 GB replica is ~2.8 h;
+- with `defaultReplicaCount: 3`, **every synchronous write is gated by the
+  slowest replica link**, wherever the pod itself happens to run.
+
+What this does *not* mean: it is not an argument for different storage. The
+same disks measured 1069 MB/s on the same day. The `nfs` StorageClass
+(ADR-0036) is still worth having for RWX-without-a-share-manager and for
+capacity relief on the scarcest disks, but it is **not** a performance lever
+and should not be proposed as one.
+
+The fix is gigabit USB 3.0 adapters (Realtek RTL8153 — e.g. TP-Link UE300),
+~€15 each, in a USB 3.0 port. **Not yet ordered.** Run `ethtool <iface>` on
+both hosts before and after, and record the numbers here — no link speed has
+ever been measured for any host in this estate.
+
 ### Proxmox host details
 
 - Hostname: `bnei`

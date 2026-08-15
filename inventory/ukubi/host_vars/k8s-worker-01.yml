@@ -1,0 +1,19 @@
+# Session pods for the agent-fleet run only on the two worker nodes.
+#
+# Why a label and not a hand-run `kubectl label`: the label was applied live on
+# 2026-08-15 to get the fleet moving, and a `kubectl label` does not survive a
+# node rebuild. If it is lost, sessions do not fail loudly — they sit Pending
+# with no error anyone sees, because a nodeSelector matching nothing is not an
+# error condition. This file is what makes the label a property of the node.
+#
+# Why only the workers: agent-fleet's per-session working volumes are on the
+# `local-path` StorageClass (agent-fleet/k8s/provisioner/deployment.yaml,
+# SESSION_STORAGE_CLASS), which is a hostPath on the node's OS disk. The
+# control-plane nodes have ~33 GiB allocatable; filling one is a cluster
+# incident rather than a session failure. The workers have ~85 (this node) and
+# ~50 GiB.
+#
+# hosts.yaml itself is terraform-generated and must not be hand-edited, which
+# is why this lives in host_vars — see its header.
+node_labels:
+  agent-fleet.dev/session-node: "true"

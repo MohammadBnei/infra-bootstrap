@@ -1,0 +1,5 @@
+# See k8s-worker-01.yml for the full reasoning. This node has ~50 GiB
+# allocatable — the smaller of the two, and the one that carries every session
+# alone whenever `.165` is booted into Windows (k8s-worker-01 lives there).
+node_labels:
+  agent-fleet.dev/session-node: "true"
