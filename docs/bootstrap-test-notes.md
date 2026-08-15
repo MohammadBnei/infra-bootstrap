@@ -1741,3 +1741,363 @@ paths are *mountpoints* — after the mount, the visible mode belongs to the
 filesystem's own root inode, not to anything the playbook created — so the
 `mode:` was dropped rather than argued with. With both fixes the playbook
 re-runs at `ok=8 changed=0`.
+
+## 2026-08-15 — `.165` is on a 100Mb link; two measurement traps found first
+
+Chasing a suspected "10Gbit limit" between `.165` and the Freebox. The
+limit is real but was the opposite of the framing: **`.165`'s physical NIC
+negotiates 100Mb/s**, ~12 MB/s. The host carries `pg02` (PG **leader**,
+streaming to `pg01` on `.200`), `etcd-1`, `k8s-cp-01`, `k8s-worker-01`, and
+the Garage LXC backing Longhorn backups + Zot's registry blobs. All of it
+crosses that link. **Open** — not yet isolated to switch vs. cable.
+
+**Trap 1 — `vmbr0` reports a fake `10000Mb/s`.** A sweep built on
+`ethtool $(ip -o route get 1.1.1.1 | awk '{print $5}')` returned
+`10000Mb/s` for all three PVE hosts. The default-route interface on a PVE
+host is the **bridge**, and a Linux bridge has no PHY, so the driver
+reports a synthetic 10G. This is almost certainly where the original
+"10Gbit" figure came from. Enumerate real devices instead — bridges,
+`veth`, and `tap` have no `device` symlink in sysfs:
+
+```bash
+for d in /sys/class/net/*/device; do
+  n=$(basename $(dirname $d)); echo -n "$n: "; ethtool $n | grep -E "^\s+Speed"
+done
+```
+
+**Trap 2 — the flat LAN is not physically uniform.** The corrected sweep
+gave `.165` 100Mb, `.200` and `.161` 1000Mb. The inference drawn — "the
+switch is fine, so it's `.165`'s cable" — was **wrong**, because it assumed
+all three shared the switch. They don't: **only `.165` goes through the
+TP-Link; `.200` and `.161` are cabled straight to the Freebox.** Their
+1000Mb proves the *Freebox ports* are gigabit and says nothing about the
+switch. Two hosts on a different path are not a control group.
+
+`ARCHITECTURE.md` §3 described the LAN as flat and said nothing about
+physical uplinks, which is what made the bad assumption easy. Both it and
+`docs/infrastructure-actual.md` §3 now carry the per-host path table.
+
+Generalizable: **a logically flat LAN says nothing about physical paths.**
+Before comparing link speeds across hosts, confirm they traverse the same
+cabling — otherwise the comparison silently changes two variables at once.
+
+**Trap 3 — "the switch" was never one hop.** Photos of the rack settled
+two things at once. The switch is a **`TL-SG108E`** — 8-port *Gigabit*
+Easy Smart — and its other ports light the `1000M` LED, so the switch is
+exonerated outright. But `.165` never reaches it directly: the path runs
+through **in-wall structured cabling terminated on a `C5e` patch panel**
+(ports labeled per room). Real chain:
+
+```
+.165 NIC → patch cable → wall socket → in-wall run
+         → C5e patch panel → patch cable → TL-SG108E → Freebox
+```
+
+Five segments and four terminations, where the whole investigation had
+been reasoning about "the cable" as a single object.
+
+**Trap 4 — there is a second switch, and it makes the panel irrelevant.**
+`.165` shares an **unidentified switch in the room** with the Pi 4
+(`192.168.1.55`), *before* the wall. Full chain:
+
+```
+.165 NIC → patch cable → ROOM SWITCH (unidentified, shared with the Pi)
+         → patch cable → wall socket → in-wall run
+         → C5e patch panel → patch cable → TL-SG108E → Freebox
+```
+
+This retroactively killed the hypothesis recorded above. **Ethernet
+negotiates per segment**: `ethtool nic0` reports only the link between
+`.165`'s NIC and whatever it is *directly* plugged into — the room switch.
+The wall run, the patch panel and the `TL-SG108E` are downstream and
+cannot influence that number at all, so no punch-down or split run
+explains the 100Mb/s. Kept here rather than deleted, because a
+confidently-argued theory about hardware two hops beyond the measurement
+is exactly the failure worth remembering.
+
+Narrowed to one segment, four suspects: the room switch is a 10/100 model
+(most likely), its port, `.165`'s patch cable, or `nic0` autoneg forced.
+
+Four traps, one shape: **each wrong turn came from treating an
+abstraction as the physical thing.** `vmbr0` for a NIC, "flat LAN" for
+uniform cabling, "the switch" for a five-segment path, and then the wrong
+switch entirely. Link-layer debugging has to be done against the topology
+that physically exists — which here meant going and looking at it twice.
+
+**Root cause: the room switch is a 10/100 fast-ethernet unit.** Confirmed
+by inspecting it. It cannot do gigabit at all, so `.165` was hard-capped
+at ~12 MB/s no matter what any cable did. Fix: replace with any gigabit
+switch — unmanaged is fine, VLAN capability already exists at the rack on
+the `TL-SG108E`.
+
+The user's opening instinct — "buy a cheap TP-Link gigabit switch" — was
+correct from the start. It was aimed at the wrong switch, and the
+investigation spent four rounds establishing *which* one. Both of the
+early recommendations to buy hardware were wrong: the first because the
+target device was already gigabit, the second because the whole purchase
+was called off. The winning move was cheap and physical each time — read
+the label, look at the LEDs, count the hops.
+
+**Resolved the same day.** Gigabit switch installed in the room:
+`nic0` came up at **1000Mb/s**, and `iperf3` `.165` → `.200` measured
+**942 Mbit/s sender / 940 receiver** — line rate for 1000BASE-T (~941
+after framing overhead), with 104 retransmits over 10s, which is ordinary
+buffer behaviour on a saturated link. **~95 → 940 Mbit/s, a true 10×.**
+
+The `iperf3` number also retired the last open question: the in-wall run
+and the `C5e` punch-down carry all four pairs correctly, so the trap-3
+hypothesis was wrong on the merits and not merely mis-aimed. Nothing
+anywhere on the path is capped.
+
+### Swapping the switch took the room offline — worth knowing the shape
+
+After the swap, `.165` and `.55` were both unreachable while every switch
+LED was lit. A ping sweep localised it instantly: `.200`/`.161`/`.254` up,
+everything on `.165` down (`.207` pg02, `.201`/`.202` k8s nodes, `.199`
+Garage, `.233`/`.234` VIPs). Two facts that made this readable:
+
+- **A lit port LED does not mean the host is up.** Most NICs keep the PHY
+  powered for Wake-on-LAN, so a switch port stays lit on a machine that is
+  powered off, and a switch with hosts plugged in lights those ports
+  whether or not it reaches anything else.
+- **`Connection refused` ≠ timeout.** Refused is a TCP RST — the host is
+  alive and nothing is listening. Timeout is a link/routing problem. The
+  `iperf3` failure earlier in this session was refused (server not
+  started); the post-swap failures were timeouts (room isolated).
+
+Also confirmed during the outage: **Patroni failed over correctly.** With
+`.165` gone, `.232` (Pigsty's floating VIP) re-pointed to `pg01`'s MAC on
+`.205` — visible from a plain `arp -a`, no cluster access needed. ADR-0029's
+3-node etcd quorum behaving exactly as designed under a real host loss.
+
+Note for the next swap: gigabit switches have **no uplink port and no
+cable order** — 1000BASE-T mandates auto-negotiation and auto-MDI/MDI-X,
+so any port takes the uplink and crossover cables are irrelevant. The
+dedicated uplink port died with fast ethernet.
+
+### Trap 5 — do not `ping` a MetalLB VIP
+
+During the same recovery, `.233` (Traefik) and `.234` (zot) kept failing
+`ping` long after every other address returned. Since the two share no
+storage and no app code, the common factor looked like MetalLB, and a
+speaker/announcement fault was diagnosed on that basis.
+
+There was no fault. **MetalLB L2 VIPs do not reliably answer ICMP.** The
+speaker answers *ARP* for the address and forwards *TCP* to the service;
+no interface genuinely holds the IP, and with `kube-proxy` in IPVS +
+strict-ARP mode (this cluster's config) nothing is obliged to reply to a
+ping. A dead ping on a LoadBalancer IP is not evidence of anything.
+
+Test with TCP instead. Both were perfectly healthy the entire time:
+
+```bash
+curl -sk -m 8 -o /dev/null -w "%{http_code}\n" https://192.168.1.233/  # 404 = Traefik up
+curl -s  -m 8 -o /dev/null -w "%{http_code}\n" http://192.168.1.234:5000/v2/  # 200 = zot up
+curl -sk -m 8 -o /dev/null -w "%{http_code}\n" https://argocd.bnei.dev/       # 200 = ingress up
+```
+
+`404` on Traefik's bare VIP is the **correct** healthy response — no
+`IngressRoute` matches a raw IP, so there is nothing to route to. Only a
+connection failure or timeout would indicate a real problem.
+
+The in-cluster view said so too, and would have caught this before the
+ping did: `kubectl get svc -A | grep LoadBalancer` showed both
+EXTERNAL-IPs assigned, and `kubectl get endpoints -A` showed ready
+endpoints for both. **When an external probe disagrees with healthy
+cluster state, suspect the probe.**
+
+Post-outage health after `.165` returned, for the record: all 5 nodes
+`Ready`, all MetalLB speakers `Running` (the two on `.165` had restarted,
+8× and 13×), all 5 Longhorn volumes `healthy` with no RWO attach
+deadlock, and every ArgoCD Application `Synced`/`Healthy`.
+
+Same shape as traps 1-4, one layer up: **`vmbr0` was the wrong interface
+to measure, `ping` was the wrong protocol to measure with.** Both produced
+a confident, entirely wrong conclusion from a real reading.
+
+Worth knowing for later: the `TL-SG108E` is the *Easy Smart* model, so it
+has a web UI (`192.168.0.100`, off-subnet — reach it via a temporary
+`ip addr add 192.168.0.50/24 dev <iface>`) exposing per-port stats and
+error counters, plus **802.1Q VLANs, LACP and port mirroring**. Already
+owned, never configured — and the only route to segmenting this LAN,
+since the Freebox has no VLANs.
+
+## 2026-08-15 — the failover left a diverged replica that never self-heals
+
+The switch replacement's automatic Patroni failover (previous entry) was
+only half a success. `.205` promoted correctly, but **`.207` never rejoined
+as a working replica** — and it lies about it convincingly.
+
+```
+| Member       | Host          | Role    | State   | TL | Receive LSN |   Lag |
+| pg-proxmox-1 | 192.168.1.205 | Leader  | running | 30 |             |       |
+| pg-proxmox-2 | 192.168.1.207 | Replica | running | 27 | 18/C7000000 | 62720 |
+```
+
+`Replica` / `running` reads healthy at a glance. It is not: the timeline is
+**27 against the leader's 30**, lag is **62720 MB (~61 GiB)**, and the
+leader reports **zero connected standbys** (`/patroni` → no `replication`
+array). The cluster was effectively **single-node** — no current standby
+to promote if `.205` had died.
+
+**Root cause, and it is by design.** `/etc/patroni/patroni.yml` on `.207`:
+
+```yaml
+use_pg_rewind: true
+remove_data_directory_on_rewind_failure: true
+remove_data_directory_on_diverged_timelines: false   # <-- this
+```
+
+`wal_log_hints` and `data_checksums` are both `on`, so `pg_rewind`'s
+prerequisites are met. But when a replica's timeline has genuinely
+*diverged* rather than merely fallen behind, Patroni's only recovery is to
+wipe `PGDATA` and re-clone — and this Pigsty default forbids that. So it
+loops forever, every 5 seconds, doing nothing:
+
+```
+INFO: Local timeline=27 lsn=18/C70000A0
+INFO: primary_timeline=30
+INFO: no action. I am (pg-proxmox-2), a secondary, and following a leader (pg-proxmox-1)
+```
+
+"following a leader" is Patroni's *intent*, not an observed fact. Believe
+the timeline and the leader's `replication` array, not the role string.
+
+**This will recur after every ungraceful failover with timeline
+divergence.** It is a safe default — never auto-destroy data — but it
+means a human must run `reinit` each time. Setting
+`remove_data_directory_on_diverged_timelines: true` would automate it, at
+the cost of letting Patroni wipe a replica unattended; not changed here,
+and it would have to go through `pigsty/pigsty.yml`, not a hand-edit.
+
+### Getting `patronictl` to run at all
+
+The documented path `/etc/patroni/patroni.yml` is **correct** — it is a
+symlink to `/pg/conf/pg-proxmox-2.yml`, mode `0640`, owned by the `postgres`
+dbsu, and Pigsty's own tasks use it (`roles/pgsql/tasks/patroni.yml`). It
+fails for an ordinary user because of the permissions, not the path.
+
+Running it from `pigsty/` fails for a *different* reason:
+`pigsty/ansible.cfg` is vendored upstream and still carries Vagrant
+defaults — `remote_user = vagrant` (correct here, by luck) and
+`private_key_file = /home/mohammad/.ssh/id_pigsty_rsa` (does not exist).
+The real key is `SSH_OLDPG_KEY` in Infisical. `pigsty/` must not be edited,
+so override per invocation:
+
+```bash
+.claude/skills/run-ukubi-ops/driver.sh fetch-ssh-key SSH_OLDPG_KEY "$SP/oldpg_key"
+cd pigsty && ansible pg-proxmox -b --private-key="$SP/oldpg_key" \
+  -m shell -a 'patronictl -c /etc/patroni/patroni.yml list pg-proxmox'
+rm -f "$SP/oldpg_key"
+```
+
+**Easier for read-only checks: skip SSH entirely.** Patroni's REST API on
+`:8008` needs no key, no sudo and no config file, and answers everything:
+
+```bash
+curl -s http://192.168.1.205:8008/cluster | python3 -m json.tool   # roles, TLs, lag
+curl -s http://192.168.1.205:8008/patroni                          # leader's connected standbys
+```
+
+That is how this was diagnosed, before the SSH path was solved at all.
+
+### Fix
+
+`patronictl reinit` — not the Pigsty playbooks. `pgsql-rm.yml` runs the
+`pg_remove` role, whose defaults are `pg_rm_data: true`, **`pg_rm_backup:
+true`** and `pg_safeguard: false`; it would take the backups with it.
+`reinit` wipes only the target's `PGDATA` and re-clones from the leader:
+
+```bash
+cd pigsty && ansible 192.168.1.207 -b --private-key="$SP/oldpg_key" \
+  -m shell -a 'patronictl -c /etc/patroni/patroni.yml reinit pg-proxmox pg-proxmox-2 --force'
+```
+
+`--force` is mandatory, not cosmetic — without it `patronictl` prompts and
+Ansible has no TTY. Disk was not a blocker: 51G total, 25G used, 27G free.
+
+The agent session attempted it with explicit user authorization and was
+blocked by the harness's own permission classifier — the same behaviour the
+`run-ukubi-ops` skill documents for live SSH execution. Read-only checks
+against these nodes (`patronictl list`, `journalctl`, `df`, `psql` selects,
+config greps, the `:8008` REST API) all went through; only the mutating
+statements were refused. Worth knowing before planning hands-on Pigsty work
+from an agent session: **diagnosis is automatable here, remediation is
+not.** The user ran the `reinit` themselves.
+
+### The reinit fixed the data and left replication broken
+
+Run by the user; clone completed in **≤195s** for ~20 GB (the timer started
+mid-clone, so that is an upper bound on the tail, not total elapsed — at the
+old 100Mb ceiling this would have been ~28 min). Afterwards:
+
+```
+| pg-proxmox-1 | 192.168.1.205 | Leader  | running | 30 |
+| pg-proxmox-2 | 192.168.1.207 | Replica | running | 30 |  lag=4312 bytes
+```
+
+Timeline 27→**30**, lag 61.2 GiB→**4 KB**. Looks finished. **It was not.**
+
+| Probe | Result |
+|---|---|
+| `pg_stat_wal_receiver` on `.207` | **empty** — no receiver process |
+| `pg_stat_replication` on `.205` | **empty** — no walsender |
+| `pg_replication_slots` on `.205` | `pg_proxmox_2` — `active=f`, **`wal_status=lost`** |
+| `pg_is_in_recovery()` | `t` |
+| receive/replay LSN | both frozen at `28/1A000000` |
+
+The replica was a **static snapshot**, not a streaming standby. The lag
+looked stable at ~4 KB only because the database happened to be idle — under
+write load it would diverge without bound. `/pg/log/postgres/*.csv`, every
+5 seconds:
+
+```
+FATAL: could not start WAL streaming: ERROR: can no longer access replication slot "pg_proxmox_2"
+DETAIL: This replication slot has been invalidated due to "wal_removed".
+LOG:   waiting for WAL to become available at 28/1A000018
+```
+
+**`reinit` re-clones `PGDATA` but reuses the existing slot.** That slot had
+been invalidated back when `.207` fell 61 GiB behind and the leader recycled
+the WAL it was holding. A fresh clone cannot stream through a dead slot, and
+nothing in the reinit path notices. Patroni does not notice either — it
+reports `no action ... following a leader` throughout, because from its
+perspective the timelines finally match.
+
+Fix — drop the slot; Patroni recreates it (`use_slots: true`), and the
+replica needs only the *current* WAL segment since it is ~4 KB behind:
+
+```bash
+echo "select pg_drop_replication_slot('pg_proxmox_2');" | \
+  ssh -i "$SP/oldpg_key" vagrant@192.168.1.205 'sudo -u postgres psql'
+```
+
+**Resolved.** After the user dropped the slot, Patroni recreated it and
+streaming established immediately:
+
+| Probe | Before | After |
+|---|---|---|
+| slot `pg_proxmox_2` | `active=f`, `wal_status=lost` | `active=t`, **`wal_status=reserved`** |
+| `pg_stat_replication` on `.205` | empty | `192.168.1.207 \| streaming \| async` |
+| `pg-proxmox-2` state | `running` (static snapshot) | **`streaming`** |
+| timeline | 27 vs 30 | 30 = 30 |
+| lag | 61.2 GiB | **0** |
+
+`wal_status=reserved` is the load-bearing detail: the slot is holding WAL
+for the replica again, so a brief disconnect cannot silently repeat the
+invalidation. `pg-proxmox` is a genuine primary/replica pair again, and
+ADR-0029's HA claim is true rather than merely reported.
+
+**Three lessons, all the same shape as this session's earlier traps:**
+
+1. **`patronictl list` showing `Replica / running` at matching timeline and
+   near-zero lag is not proof of replication.** Verify the walsender
+   (`pg_stat_replication` on the leader) or the receiver
+   (`pg_stat_wal_receiver` on the standby). Both empty means no streaming,
+   whatever the role column says.
+2. **Low lag on an idle database is meaningless.** Lag is an LSN delta; if
+   nobody writes, a completely disconnected standby reports a small, stable
+   number that reads as healthy.
+3. **Check `wal_status` on slots after any long divergence.** `lost` is
+   terminal — the slot must be dropped and recreated, and no amount of
+   re-cloning fixes it.
