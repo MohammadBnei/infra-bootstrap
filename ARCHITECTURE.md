@@ -214,14 +214,14 @@ graph LR
 
 | Host | Path to Freebox | `nic0` link speed |
 |---|---|---|
-| **proxmox** (`.165`) | **structured cabling → TL-SG108E switch** | **100Mb/s** ⚠ |
+| **proxmox** (`.165`) | room switch → structured cabling → TL-SG108E | 1000Mb/s |
 | server1 (`.200`) | direct to Freebox | 1000Mb/s |
 | ex-laptop (`.161`) | direct to Freebox | 1000Mb/s |
 
-`.165` is the **only** host behind the switch. The other two are plugged
-straight into the Freebox, so their 1000Mb/s confirms the Freebox's LAN
-ports are gigabit but says nothing about the switch — the two are
-different paths and a measurement on one does not generalize to the other.
+`.165` is the **only** host behind the switch; the other two are plugged
+straight into the Freebox. Their speeds therefore say nothing about
+`.165`'s path — different cabling, so a measurement on one never
+generalizes to the other.
 
 **The switch is a TP-Link `TL-SG108E`** (8-port **Gigabit** Easy Smart,
 management UI at `192.168.0.100`, off-subnet). It is *not* the bottleneck:
@@ -238,35 +238,35 @@ labeled per room: `Router salon`, `M. Amine`, `Bur Linda`, `CH 5 DTE`,
 `CH 5 Ghe`, `ALI`, `LINDA`):
 
 ```
-.165 NIC → patch cable → ROOM SWITCH  ← ⚠ 10/100 ONLY — ROOT CAUSE
+.165 NIC → patch cable → ROOM SWITCH (gigabit, replaced 2026-08-15)
          → patch cable → wall socket → in-wall run
          → C5e patch panel → patch cable → TL-SG108E → Freebox
 ```
 
-**Root cause confirmed 2026-08-15: the room switch is a 10/100
-fast-ethernet unit.** It physically cannot do gigabit, so `.165` is hard
-capped at ~12 MB/s regardless of cabling. Fix is to replace it with any
-gigabit switch; unmanaged is fine here, since VLAN capability already
-exists at the rack on the `TL-SG108E`.
+**Resolved 2026-08-15.** `.165` sat at **100Mb/s** because the room switch
+was a **10/100 fast-ethernet unit** — it physically could not do gigabit,
+so no cabling change would ever have helped. Replaced with a gigabit
+switch; unmanaged is fine there, since VLAN capability already exists at
+the rack on the `TL-SG108E`. Verified `nic0` at 1000Mb/s **and** `iperf3`
+to `.200` at **942 Mbit/s** — line rate, ~10× the previous ceiling.
 
-Why the diagnosis took four attempts: **Ethernet negotiates per segment**,
-so `ethtool nic0` reports *only* the `.165` ↔ room-switch link. The wall
-run, the patch panel and the `TL-SG108E` are all downstream of that
-measurement and could never have explained the reading.
+The `iperf3` result also clears the rest of the chain: the in-wall run and
+the `C5e` punch-down carry all four pairs correctly. Nothing else on the
+path is capped.
 
-Corollary, still unverified: per-segment link speed is **not** end-to-end
-throughput. Once the room switch is gigabit, its *uplink* renegotiates
-against the in-wall run — and if that punch-down carries only 2 pairs it
-will come up at 100Mb and simply move the ceiling one hop out. Confirm
-the real number with `iperf3` to `.200`, not `ethtool`.
+Two things worth keeping from how long this took to find:
 
-This matters more than a flat-LAN diagram suggests: `.165` carries `pg02`
-(the Postgres **leader**, streaming to `pg01` on `.200`), `etcd-1`,
-`k8s-cp-01`, `k8s-worker-01`, and the Garage LXC that backs both Longhorn
-backups and the Zot registry's blobs. All of that crosses the LAN at
-~12 MB/s. Measured 2026-08-15; cause narrowed to the `.165` path
-(fast-ethernet switch, or a cable segment in it) but not yet isolated —
-see `docs/bootstrap-test-notes.md`.
+- **Ethernet negotiates per segment.** `ethtool nic0` reports *only* the
+  link to whatever the host is directly plugged into. Everything past the
+  first hop is invisible to it — which is why the wall run and the patch
+  panel were suspected at length despite being downstream of the reading.
+- **Never read link speed off `vmbr0`.** See the box below.
+
+Why this was worth chasing: `.165` carries `pg02` (the Postgres
+**leader**, streaming to `pg01` on `.200`), `etcd-1`, `k8s-cp-01`,
+`k8s-worker-01`, and the Garage LXC that backs both Longhorn backups and
+the Zot registry's blobs. All of that had been crossing the LAN at
+~12 MB/s. Full diagnostic trail in `docs/bootstrap-test-notes.md`.
 
 > **Never read link speed off `vmbr0`.** A Linux bridge has no PHY and
 > reports a synthetic `10000Mb/s`. Query the physical NIC (`nic0`), or

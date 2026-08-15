@@ -1838,15 +1838,42 @@ target device was already gigabit, the second because the whole purchase
 was called off. The winning move was cheap and physical each time — read
 the label, look at the LEDs, count the hops.
 
-Still unverified: **per-segment link speed is not end-to-end throughput.**
-Once the room switch is gigabit its *uplink* renegotiates against the
-in-wall run, which has never been measured. If that punch-down carries
-only 2 pairs it comes up at 100Mb and the ceiling simply moves one hop
-out — the trap-3 hypothesis would return, correctly this time, as the
-*next* bottleneck rather than this one. Confirm with
-`iperf3 -c 192.168.1.200` from `.165` (expect ~940 Mbit/s), and check the
-`Router salon` uplink LED on the `TL-SG108E` while at it. `ethtool`
-describes one segment at a time and will never answer this.
+**Resolved the same day.** Gigabit switch installed in the room:
+`nic0` came up at **1000Mb/s**, and `iperf3` `.165` → `.200` measured
+**942 Mbit/s sender / 940 receiver** — line rate for 1000BASE-T (~941
+after framing overhead), with 104 retransmits over 10s, which is ordinary
+buffer behaviour on a saturated link. **~95 → 940 Mbit/s, a true 10×.**
+
+The `iperf3` number also retired the last open question: the in-wall run
+and the `C5e` punch-down carry all four pairs correctly, so the trap-3
+hypothesis was wrong on the merits and not merely mis-aimed. Nothing
+anywhere on the path is capped.
+
+### Swapping the switch took the room offline — worth knowing the shape
+
+After the swap, `.165` and `.55` were both unreachable while every switch
+LED was lit. A ping sweep localised it instantly: `.200`/`.161`/`.254` up,
+everything on `.165` down (`.207` pg02, `.201`/`.202` k8s nodes, `.199`
+Garage, `.233`/`.234` VIPs). Two facts that made this readable:
+
+- **A lit port LED does not mean the host is up.** Most NICs keep the PHY
+  powered for Wake-on-LAN, so a switch port stays lit on a machine that is
+  powered off, and a switch with hosts plugged in lights those ports
+  whether or not it reaches anything else.
+- **`Connection refused` ≠ timeout.** Refused is a TCP RST — the host is
+  alive and nothing is listening. Timeout is a link/routing problem. The
+  `iperf3` failure earlier in this session was refused (server not
+  started); the post-swap failures were timeouts (room isolated).
+
+Also confirmed during the outage: **Patroni failed over correctly.** With
+`.165` gone, `.232` (Pigsty's floating VIP) re-pointed to `pg01`'s MAC on
+`.205` — visible from a plain `arp -a`, no cluster access needed. ADR-0029's
+3-node etcd quorum behaving exactly as designed under a real host loss.
+
+Note for the next swap: gigabit switches have **no uplink port and no
+cable order** — 1000BASE-T mandates auto-negotiation and auto-MDI/MDI-X,
+so any port takes the uplink and crossover cables are irrelevant. The
+dedicated uplink port died with fast ethernet.
 
 Worth knowing for later: the `TL-SG108E` is the *Easy Smart* model, so it
 has a web UI (`192.168.0.100`, off-subnet — reach it via a temporary

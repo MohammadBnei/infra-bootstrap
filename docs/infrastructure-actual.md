@@ -52,30 +52,27 @@ For the target architecture, see [`../ARCHITECTURE.md`](../ARCHITECTURE.md).
 
 | Host | Path | `nic0` speed (2026-08-15) |
 |---|---|---|
-| proxmox `.165` | **room switch → wall → C5e panel → TL-SG108E** | **100Mb/s** ⚠ |
+| proxmox `.165` | room switch → wall → C5e panel → TL-SG108E | 1000Mb/s |
 | server1 `.200` | direct to Freebox | 1000Mb/s |
 | ex-laptop `.161` | direct to Freebox | 1000Mb/s |
 
-Only `.165` sits behind the switch. Its 100Mb/s is a live ~10× throughput
-loss on the host carrying the PG leader, etcd, `k8s-worker-01`, and Garage.
+Only `.165` sits behind switches; the other two are direct to the Freebox.
 
-- **Switch:** TP-Link **`TL-SG108E`**, 8-port Gigabit Easy Smart. Web UI at
-  `192.168.0.100` (off-subnet — reach it with a temporary
+- **Rack switch:** TP-Link **`TL-SG108E`**, 8-port Gigabit Easy Smart. Web
+  UI at `192.168.0.100` (off-subnet — reach it with a temporary
   `ip addr add 192.168.0.50/24 dev <iface>`, default `admin`/`admin`).
-  Supports VLANs / LACP / port mirroring, none configured. **Not** the
-  bottleneck — its other ports show the `1000M` LED lit.
-- **Room switch:** a second switch sits between `.165` and the wall, shared
-  with the Pi 4 (`192.168.1.55`). **It is 10/100 only — this is the root
-  cause**, confirmed 2026-08-15. Ethernet negotiates per segment, so
-  `nic0`'s 100Mb/s describes exactly this hop; nothing downstream (wall
-  run, patch panel, `TL-SG108E`) could have caused it.
-- **Fix pending:** replace with any gigabit switch. Unmanaged is fine —
-  VLAN capability already exists at the rack.
-- **Then re-measure end-to-end** with `iperf3` to `.200`. The room
-  switch's uplink will renegotiate against the in-wall run, which has
-  never been measured; a 2-pair punch-down there would move the 100Mb
-  ceiling one hop out rather than remove it. See `ARCHITECTURE.md` §3 and
-  `docs/bootstrap-test-notes.md`.
+  Supports VLANs / LACP / port mirroring, **none configured**. Never was
+  the bottleneck.
+- **Room switch:** sits between `.165` and the wall, shared with the Pi 4
+  (`192.168.1.55`). **Was a 10/100 unit — the root cause of `.165` running
+  at 100Mb/s.** Replaced with a gigabit switch 2026-08-15.
+- **Verified:** `nic0` at 1000Mb/s and `iperf3` `.165` → `.200` at
+  **942 Mbit/s** — line rate, ~10× the old ceiling. This also proves the
+  in-wall run and the `C5e` punch-down carry all four pairs, so nothing
+  further along the path is capped.
+- `iperf3` was installed on `.165` and `.200` for this measurement.
+
+See `ARCHITECTURE.md` §3 and `docs/bootstrap-test-notes.md` for the trail.
 
 Measure with `ethtool nic0`, **never** `ethtool vmbr0` — the bridge reports
 a fake `10000Mb/s`.
