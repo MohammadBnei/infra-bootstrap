@@ -2072,6 +2072,22 @@ echo "select pg_drop_replication_slot('pg_proxmox_2');" | \
   ssh -i "$SP/oldpg_key" vagrant@192.168.1.205 'sudo -u postgres psql'
 ```
 
+**Resolved.** After the user dropped the slot, Patroni recreated it and
+streaming established immediately:
+
+| Probe | Before | After |
+|---|---|---|
+| slot `pg_proxmox_2` | `active=f`, `wal_status=lost` | `active=t`, **`wal_status=reserved`** |
+| `pg_stat_replication` on `.205` | empty | `192.168.1.207 \| streaming \| async` |
+| `pg-proxmox-2` state | `running` (static snapshot) | **`streaming`** |
+| timeline | 27 vs 30 | 30 = 30 |
+| lag | 61.2 GiB | **0** |
+
+`wal_status=reserved` is the load-bearing detail: the slot is holding WAL
+for the replica again, so a brief disconnect cannot silently repeat the
+invalidation. `pg-proxmox` is a genuine primary/replica pair again, and
+ADR-0029's HA claim is true rather than merely reported.
+
 **Three lessons, all the same shape as this session's earlier traps:**
 
 1. **`patronictl list` showing `Replica / running` at matching timeline and

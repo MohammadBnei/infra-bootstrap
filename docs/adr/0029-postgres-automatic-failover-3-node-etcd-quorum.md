@@ -191,11 +191,23 @@ not a graceful degrade.
   ungraceful host loss rather than a controlled `systemctl stop`, which
   makes it stronger evidence than the planned test would have been.
 
-  **One gap remains**: whether `.207` rejoined cleanly as a replica after
-  `.165` returned — it was Leader on a host that died ungracefully, so it
-  had to rewind onto the new timeline. Not verified at time of writing;
-  confirm with `patronictl -c /etc/patroni/patroni.yml list` (want
-  `Replica` / `streaming` / lag 0).
+  **The rejoin was not automatic** and took two manual steps the same day.
+  `.207` came back on timeline 27 against the leader's 30 and sat there:
+  `remove_data_directory_on_diverged_timelines: false` (a Pigsty default)
+  forbids the only recovery Patroni has for a diverged timeline, so it
+  logged `no action ... following a leader` indefinitely while the cluster
+  ran with **no working standby**. `patronictl reinit` restored the data,
+  but replication stayed dead — reinit reuses the existing slot, and
+  `pg_proxmox_2` was already `wal_status=lost` from the 61 GiB divergence.
+  Dropping the slot let Patroni recreate it; now `streaming`,
+  `wal_status=reserved`, lag 0, verified.
+
+  **Operational consequence for this ADR's HA claim:** automatic failover
+  works, but automatic *recovery of the demoted node* does not. Every
+  ungraceful failover with timeline divergence needs a human to reinit and
+  to check the slot afterwards. Until that is done the cluster is
+  single-node, and `patronictl list` will not say so — it reported
+  `Replica / running` at lag 4 KB the entire time it was disconnected.
 
   No failback was performed, and none is planned: Patroni is symmetric,
   and `.165` is the host that gets rebooted for gaming (§2), making it

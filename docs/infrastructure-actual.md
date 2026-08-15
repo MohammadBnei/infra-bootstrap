@@ -102,8 +102,8 @@ a fake `10000Mb/s`.
     **Replica** as of 2026-08-15 (was Leader; `.205` was promoted
     automatically when this host went down during the room switch
     replacement — see ADR-0029. The `pg01`/`pg02` names have never
-    tracked roles) + etcd DCS member (`etcd-1` of 3). ⚠ Its rejoin and
-    lag are **unverified** — run `patronictl list`. `pg01` (VMID 205) is
+    tracked roles) + etcd DCS member (`etcd-1` of 3). Rejoined via
+    `reinit` + slot drop; **streaming, lag 0, verified**. `pg01` (VMID 205) is
     **no longer on this host** — migrated to server1 2026-07-30, see
     §2/§4.
 - Template: VMID 9001 `ubuntu-24.04-ci-template` (Golden cloud-init
@@ -273,7 +273,7 @@ deliberate minority voter, so losing it never costs quorum.
 
 | Node | VMID | IP | Host | Role |
 | --- | --- | --- | --- | --- |
-| pg02 | 207 | 192.168.1.207 | proxmox `.165` | Pigsty **Replica** as of 2026-08-15 — was Leader until `.165` went down during the room switch replacement. ⚠ Its rejoin (timeline rewind, lag) is **unverified**; run `patronictl list`. + etcd DCS member (`etcd-1` of 3) |
+| pg02 | 207 | 192.168.1.207 | proxmox `.165` | Pigsty **Replica** as of 2026-08-15 — was Leader until `.165` went down during the room switch replacement. Rejoined via `patronictl reinit` + a replication-slot drop; **streaming, lag 0, verified**. + etcd DCS member (`etcd-1` of 3) |
 | pg01 | 205 | 192.168.1.205 | server1 `.200` | Pigsty **Leader/primary** as of 2026-08-15, promoted automatically — migrated off `.165` 2026-07-30; etcd DCS member (`etcd-2` of 3) + Redis (relocated here 2026-07-30, see below) |
 | pg-etcd-witness | 303 | 192.168.1.197 | ex-laptop `.161` | etcd DCS member only (`etcd-3` of 3), no PG data — provisioned + joined 2026-07-30 |
 
@@ -288,7 +288,7 @@ incident/fix history (including two real quorum-loss incidents during
 
 ### HA status
 
-- **Replication:** Leader `.205` → Replica `.207` as of 2026-08-15 (roles flipped by automatic failover). ⚠ `.207`'s rejoin and lag are **unverified** — confirm with `patronictl list`. Note the `pg01`/`pg02` names have never tracked roles; always check rather than infer
+- **Replication:** Leader `.205` → Replica `.207` as of 2026-08-15 (roles flipped by automatic failover). **Streaming, `wal_status=reserved`, lag 0 — verified 2026-08-15** after a `reinit` plus a slot drop (see `docs/bootstrap-test-notes.md`). Note the `pg01`/`pg02` names have never tracked roles, and a `Replica/running` row is not proof of streaming — check `pg_stat_replication` on the leader
 - **Topology:** primary/replica + **real 3-node etcd DCS quorum** (ADR-0029)
 - **Failover:** automatic via Patroni + etcd (accepted behavior — reverses the earlier "no automatic failover" stance, see `DECISION.md` §2)
 - **Proven for real 2026-08-15** (unplanned): `.165` went down during the room switch replacement, taking the then-Leader `.207` and `etcd-1`. `.205` promoted automatically, the `.232` VIP followed (its new MAC visible from a plain `arp -a`), and DCS quorum held on `etcd-2`/`etcd-3`. Exactly the test ADR-0029 was written to enable, executed involuntarily and passed

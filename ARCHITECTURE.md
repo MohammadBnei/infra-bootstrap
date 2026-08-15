@@ -75,7 +75,7 @@ graph TD
 
 | VM/LXC | Type | vCPU | RAM | Disk | Notes |
 | --- | --- | --- | --- | --- | --- |
-| pg02 | VM (Q35, OVMF) | 2 | 4GB | 40GB | Pigsty PG **replica** as of 2026-08-15 — was Leader until `.165` went down during the switch replacement and Patroni promoted `.205`. `192.168.1.207` + etcd DCS member (`etcd-1` of 3), stays on `.165`. ⚠ Its rejoin (rewind onto the new timeline, lag) has **not** been verified — run `patronictl list`. [ADR-0029](docs/adr/0029-postgres-automatic-failover-3-node-etcd-quorum.md) |
+| pg02 | VM (Q35, OVMF) | 2 | 4GB | 40GB | Pigsty PG **replica** as of 2026-08-15 — was Leader until `.165` went down during the switch replacement and Patroni promoted `.205`. `192.168.1.207` + etcd DCS member (`etcd-1` of 3), stays on `.165`. Rejoined via `patronictl reinit` + a replication-slot drop; **streaming, lag 0, verified**. [ADR-0029](docs/adr/0029-postgres-automatic-failover-3-node-etcd-quorum.md) |
 | k8s-cp-01 | VM (Q35, OVMF) | 2 | 4GB | 40GB | Control plane + etcd + worker, Ubuntu 24.04 |
 | k8s-worker-01 | VM (Q35, OVMF) | 6 | 15GB | 100GB | Ubuntu 24.04, RTX 2070 SUPER PCIe passthrough |
 | garage-storage | LXC | 2 | 2GB | 200GB | S3-compatible, NVMe-backed |
@@ -517,11 +517,13 @@ VIP's new MAC was visible from a plain `arp -a` on the LAN, and DCS
 quorum survived on `etcd-2`/`etcd-3`. That is exactly the end-to-end test
 this ADR was written to enable, executed involuntarily and passed.
 
-⚠ **Not yet verified**: that `pg02`/`.207` rejoined cleanly as a replica
-after `.165` returned — it was the leader on a host that died
-ungracefully, so it had to rewind onto the new timeline. Confirm with
-`patronictl -c /etc/patroni/patroni.yml list` (want: `Replica`,
-`streaming`, lag 0).
+**Replica rejoin took two manual steps**, 2026-08-15: `.207` came back on
+timeline 27 and never self-healed (`remove_data_directory_on_diverged_timelines:
+false`), so it needed `patronictl reinit`; that restored the data but left
+replication dead, because reinit reuses the old slot and this one was
+`wal_status=lost`. Dropping the slot let Patroni recreate it. Now
+`streaming`, `wal_status=reserved`, **lag 0** — verified. See
+`docs/bootstrap-test-notes.md`.
 
 ```mermaid
 graph LR
