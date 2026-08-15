@@ -99,11 +99,13 @@ a fake `10000Mb/s`.
     is shared with the backup buckets, ADR-0034)
 - Running VMs (Postgres):
   - VMID 207 `pg02` (2 vCPU / 4GB / 40GB) — IP: 192.168.1.207 — Pigsty PG 18
-    **Leader/primary** (current live role — see ADR-0029, roles flipped
-    from the original static pg01/pg02 naming at some point via
-    unattended Patroni failover) + Redis + etcd DCS member (`etcd-1` of
-    3). `pg01` (VMID 205) is **no longer on this host** — migrated to
-    server1 2026-07-30, see §2/§4.
+    **Replica** as of 2026-08-15 (was Leader; `.205` was promoted
+    automatically when this host went down during the room switch
+    replacement — see ADR-0029. The `pg01`/`pg02` names have never
+    tracked roles) + etcd DCS member (`etcd-1` of 3). ⚠ Its rejoin and
+    lag are **unverified** — run `patronictl list`. `pg01` (VMID 205) is
+    **no longer on this host** — migrated to server1 2026-07-30, see
+    §2/§4.
 - Template: VMID 9001 `ubuntu-24.04-ci-template` (Golden cloud-init
   template, rebuilt 2026-07-12 with qemu-guest-agent fix — see
   docs/bootstrap-test-notes.md). VMID 9000 is the original hand-created
@@ -181,7 +183,7 @@ is deliberately not vGPU-style sharing across multiple VMs.
 | --- | --- | --- |
 | PVE nodes | 3 (proxmox .165, server1 .200, ex-laptop .161) | All reinstalled/joined the corosync cluster — see ADR-0020, ADR-0024 |
 | K8s nodes | 5 QEMU VMs, **joined and confirmed live 2026-07-30 via `kubectl get nodes`** | 3 control-plane+etcd (`k8s-cp-01` `.165`/minority voter, `k8s-cp-02` server1, `k8s-cp-03` ex-laptop) + 2 workers (`k8s-worker-01` `.165`+GPU, `k8s-worker-02` server1) — real 3-CP/etcd HA per ADR-0017, fronted by kube-vip VIP `192.168.1.180`/`k8s.bnei.lan` (ADR-0016) |
-| Postgres | QEMU VMs split across 2 hosts | pg02 VMID 207 (.207, on `.165`) — **Leader**; pg01 VMID 205 (.205, migrated to server1 2026-07-30) — Replica. See §4 |
+| Postgres | QEMU VMs split across 2 hosts | pg01 VMID 205 (.205, on server1) — **Leader** since 2026-08-15; pg02 VMID 207 (.207, on `.165`) — Replica. Roles flipped by an automatic Patroni failover; see §4 |
 | Postgres DCS (etcd) | 3-node quorum, **live 2026-07-30** | `etcd-1`/.207 (`.165`), `etcd-2`/.205 (server1), `etcd-3`/pg-etcd-witness `.197` (ex-laptop, VMID 303, etcd-only, no PG data) — ADR-0029 |
 | Garage | LXC on proxmox PVE (.165) | VMID 301, running, configured (v2.3.0, 192.168.1.199) |
 | Container registry | Zot, in-cluster (ns `zot`) | **Live 2026-08-13.** `registry.bnei.lan:5000`, MetalLB `.234` (pinned), blobs in Garage's `zot-registry` bucket (40GB quota). Plain HTTP, no IngressRoute — LE cannot issue for `.lan`; nodes trust it via `containerd_registries_mirrors`. Anonymous pull, htpasswd push. `editable-blog:0.37.9` pulled from it and serving — ADR-0034 |
@@ -271,8 +273,8 @@ deliberate minority voter, so losing it never costs quorum.
 
 | Node | VMID | IP | Host | Role |
 | --- | --- | --- | --- | --- |
-| pg02 | 207 | 192.168.1.207 | proxmox `.165` | Pigsty **Leader/primary** (current live role, ADR-0029 — roles flipped from the original static pg01/pg02 naming via an unattended Patroni failover at some point) + etcd DCS member (`etcd-1` of 3) |
-| pg01 | 205 | 192.168.1.205 | server1 `.200` | Replica, streaming, lag 0 — migrated off `.165` 2026-07-30; etcd DCS member (`etcd-2` of 3) + Redis (relocated here 2026-07-30, see below) |
+| pg02 | 207 | 192.168.1.207 | proxmox `.165` | Pigsty **Replica** as of 2026-08-15 — was Leader until `.165` went down during the room switch replacement. ⚠ Its rejoin (timeline rewind, lag) is **unverified**; run `patronictl list`. + etcd DCS member (`etcd-1` of 3) |
+| pg01 | 205 | 192.168.1.205 | server1 `.200` | Pigsty **Leader/primary** as of 2026-08-15, promoted automatically — migrated off `.165` 2026-07-30; etcd DCS member (`etcd-2` of 3) + Redis (relocated here 2026-07-30, see below) |
 | pg-etcd-witness | 303 | 192.168.1.197 | ex-laptop `.161` | etcd DCS member only (`etcd-3` of 3), no PG data — provisioned + joined 2026-07-30 |
 
 **Resolved 2026-07-30**: the DB tier's single-point-of-failure on `.165`
@@ -286,10 +288,10 @@ incident/fix history (including two real quorum-loss incidents during
 
 ### HA status
 
-- **Replication:** streaming replication active (Leader `.207` → Replica `.205`), lag 0
+- **Replication:** Leader `.205` → Replica `.207` as of 2026-08-15 (roles flipped by automatic failover). ⚠ `.207`'s rejoin and lag are **unverified** — confirm with `patronictl list`. Note the `pg01`/`pg02` names have never tracked roles; always check rather than infer
 - **Topology:** primary/replica + **real 3-node etcd DCS quorum** (ADR-0029)
 - **Failover:** automatic via Patroni + etcd (accepted behavior — reverses the earlier "no automatic failover" stance, see `DECISION.md` §2)
-- **Not yet done**: the actual end-to-end proof (stop `.207`, confirm `.205` promotes + the VIP follows + DCS survives on 2 of 3) hasn't been performed
+- **Proven for real 2026-08-15** (unplanned): `.165` went down during the room switch replacement, taking the then-Leader `.207` and `etcd-1`. `.205` promoted automatically, the `.232` VIP followed (its new MAC visible from a plain `arp -a`), and DCS quorum held on `etcd-2`/`etcd-3`. Exactly the test ADR-0029 was written to enable, executed involuntarily and passed
 
 ### Monitoring: VictoriaMetrics, not Prometheus
 

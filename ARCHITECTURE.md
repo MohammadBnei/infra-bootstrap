@@ -41,8 +41,8 @@ graph TD
     end
 
     subgraph Pigsty["Pigsty"]
-        PG1[pg01 primary]
-        PG2[pg02 replica]
+        PG1[pg01 .205 primary]
+        PG2[pg02 .207 replica]
         PG1 -- streaming replication --> PG2
     end
 
@@ -75,7 +75,7 @@ graph TD
 
 | VM/LXC | Type | vCPU | RAM | Disk | Notes |
 | --- | --- | --- | --- | --- | --- |
-| pg02 | VM (Q35, OVMF) | 2 | 4GB | 40GB | Pigsty PG **leader/primary** (current live role), `192.168.1.207` + etcd DCS member (`etcd-1` of 3) — stays on `.165`, [ADR-0029](docs/adr/0029-postgres-automatic-failover-3-node-etcd-quorum.md) |
+| pg02 | VM (Q35, OVMF) | 2 | 4GB | 40GB | Pigsty PG **replica** as of 2026-08-15 — was Leader until `.165` went down during the switch replacement and Patroni promoted `.205`. `192.168.1.207` + etcd DCS member (`etcd-1` of 3), stays on `.165`. ⚠ Its rejoin (rewind onto the new timeline, lag) has **not** been verified — run `patronictl list`. [ADR-0029](docs/adr/0029-postgres-automatic-failover-3-node-etcd-quorum.md) |
 | k8s-cp-01 | VM (Q35, OVMF) | 2 | 4GB | 40GB | Control plane + etcd + worker, Ubuntu 24.04 |
 | k8s-worker-01 | VM (Q35, OVMF) | 6 | 15GB | 100GB | Ubuntu 24.04, RTX 2070 SUPER PCIe passthrough |
 | garage-storage | LXC | 2 | 2GB | 200GB | S3-compatible, NVMe-backed |
@@ -86,7 +86,7 @@ Full eBPF hardware support (AMD Ryzen). ~3GB PVE overhead reserved.
 
 | VM/LXC | Type | vCPU | RAM | Disk | Notes |
 | --- | --- | --- | --- | --- | --- |
-| pg01 | VM (Q35, OVMF) | 2 | 4GB | 40GB | Pigsty PG **replica**, `192.168.1.205` — migrated off `.165` 2026-07-30 via live migration ([ADR-0029](docs/adr/0029-postgres-automatic-failover-3-node-etcd-quorum.md)); hit a kernel panic on first boot here, recovered cleanly with a reboot, confirmed streaming/lag-0 afterward |
+| pg01 | VM (Q35, OVMF) | 2 | 4GB | 40GB | Pigsty PG **leader/primary** as of 2026-08-15 (promoted automatically when `.165` went down — see §HA), `192.168.1.205` — migrated off `.165` 2026-07-30 via live migration ([ADR-0029](docs/adr/0029-postgres-automatic-failover-3-node-etcd-quorum.md)); hit a kernel panic on first boot here, recovered cleanly with a reboot |
 | nfs-storage | VM (Q35, OVMF) | 1 | 1GB | 320GB (20 root + 100 `scsi1` + 200 `scsi2`) | Two independent exports on two disks: `scsi1` → `/export/templates`, shared PVE storage for cross-host VM template cloning ([ADR-0026](docs/adr/0026-nfs-shared-pve-storage-cross-host-clone.md), never mounted by K8s); `scsi2` → `/export/k8s`, backing the unreplicated `nfs` StorageClass ([ADR-0036](docs/adr/0036-nfs-storage-class-for-k8s.md)). Separate disks so a runaway PVC can't starve PVE's template storage |
 | k8s-worker-02 | VM (Q35, OVMF) | 6 | 16GB | 60GB | First cross-host K8s worker (Stage 2 Phase C), `192.168.1.203` — resized 4→6 vCPU/8→16GB 2026-07-30, server1 had most of its RAM idle |
 | k8s-cp-02 | VM (Q35, OVMF) | 2 | 4GB | 40GB | 2nd control-plane + etcd member, `192.168.1.204` — [ADR-0017](docs/adr/0017-second-control-plane-member.md) |
@@ -330,8 +330,8 @@ A    proxmox.bnei.lan        → 192.168.1.165
 A    server1.bnei.lan        → 192.168.1.200
 A    ex-laptop.bnei.lan      → 192.168.1.161
 A    pi4.bnei.lan            → 192.168.1.55
-A    postgres-1.bnei.lan     → 192.168.1.205  (pg01 VM — current live role is Replica, not Primary; now on server1, migrated 2026-07-30, ADR-0029/patronictl)
-A    postgres-2.bnei.lan     → 192.168.1.207  (pg02 VM — current live Leader, stays on .165, ADR-0029)
+A    postgres-1.bnei.lan     → 192.168.1.205  (pg01 VM — current live Leader/Primary as of 2026-08-15; on server1, migrated 2026-07-30, ADR-0029/patronictl)
+A    postgres-2.bnei.lan     → 192.168.1.207  (pg02 VM — current live Replica, on .165, ADR-0029. Names never tracked roles; always confirm with patronictl)
 A    postgres.bnei.lan       → 192.168.1.232  (Pigsty HA floating VIP — apps/tests should use this, not postgres-1/2 directly)
 A    pg-etcd-witness.bnei.lan → 192.168.1.197  (ex-laptop — 3rd etcd DCS member, live 2026-07-30, ADR-0029)
 A    garage.bnei.lan         → 192.168.1.199
@@ -475,7 +475,7 @@ scripts — ADR-0022 / ADR-0023).
 
 | Node | Host | Role (live, confirmed 2026-07-30) |
 | --- | --- | --- |
-| pg02 (`192.168.1.207`) | proxmox PVE (`.165`) | **Leader/primary**, etcd DCS member (`etcd-1`) |
+| pg02 (`192.168.1.207`) | proxmox PVE (`.165`) | **Replica** as of 2026-08-15 (was Leader), etcd DCS member (`etcd-1`) |
 | pg01 (`192.168.1.205`) | server1 (`.200`) | Replica, streaming, lag 0 — migrated off `.165` via live migration; etcd DCS member (`etcd-2`) |
 | pg-etcd-witness (`192.168.1.197`) | ex-laptop | etcd DCS member only (`etcd-3`), no PG data |
 
@@ -510,15 +510,23 @@ healthy the entire time. See `docs/bootstrap-test-notes.md`'s 2026-07-30
 entries. The 3-node quorum above closes this gap — a single host going
 down (any of the 3) no longer takes DCS with it.
 
-**Still open**: the end-to-end proof this ADR exists to enable — stop
-`.207` (current Leader) and confirm `.205` promotes automatically with
-the VIP following, while DCS quorum survives on the remaining 2 of 3
-members — hasn't been performed yet.
+**Proven for real 2026-08-15**, unplanned: `.165` went down during the
+room switch replacement, taking the then-Leader `.207` and `etcd-1` with
+it. **`.205` promoted automatically and the `.232` VIP followed** — the
+VIP's new MAC was visible from a plain `arp -a` on the LAN, and DCS
+quorum survived on `etcd-2`/`etcd-3`. That is exactly the end-to-end test
+this ADR was written to enable, executed involuntarily and passed.
+
+⚠ **Not yet verified**: that `pg02`/`.207` rejoined cleanly as a replica
+after `.165` returned — it was the leader on a host that died
+ungracefully, so it had to rewind onto the new timeline. Confirm with
+`patronictl -c /etc/patroni/patroni.yml list` (want: `Replica`,
+`streaming`, lag 0).
 
 ```mermaid
 graph LR
     subgraph Pigsty
-        P1[pg02 .207 — leader] -- streaming replication --> P2[pg01 .205 — replica, on server1]
+        P1[pg01 .205 — leader, on server1] -- streaming replication --> P2[pg02 .207 — replica, on .165]
         P1 --> Bouncer[PgBouncer]
         P1 --> Exporter[pg_exporter → Grafana]
         P1 -.->|etcd DCS| E1[.207 etcd-1]

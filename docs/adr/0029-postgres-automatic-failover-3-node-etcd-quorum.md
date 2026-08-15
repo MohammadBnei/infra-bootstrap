@@ -175,8 +175,29 @@ not a graceful degrade.
      registration delegates to the `infra` group host). Fixed by running
      an `ssh-agent` with both keys loaded (`ssh-add`) instead, letting
      ansible/ssh pick whichever identity the target host accepts.
-- **Still open**: the real end-to-end test this ADR exists to enable —
-  stop `.207` (current Leader) and confirm `.205` promotes automatically
-  *and* the VIP follows, with DCS quorum (2 of 3) surviving the loss —
-  has not been performed yet. Next session's priority, and the actual
-  proof this rollout worked.
+- **Proven 2026-08-15 — unplanned, and it passed.** The end-to-end test
+  this ADR exists to enable never had to be scheduled: `.165` went down
+  while its room network switch was being replaced, taking the
+  then-Leader `.207` and `etcd-1` with it. Outcome:
+  - **`.205` promoted automatically** to Leader. Confirmed by the user
+    via `patronictl` after recovery.
+  - **The `.232` VIP followed** — `arp -a` from a LAN workstation showed
+    `.232` resolving to `pg01`/`.205`'s MAC (`bc:24:11:e8:da:d9`), with
+    no cluster access needed to see it.
+  - **DCS quorum survived** on `etcd-2` (`.205`) / `etcd-3` (`.197`) —
+    `floor(3/2)+1` = 2, exactly as designed.
+
+  This is the real proof the rollout worked, obtained from a genuine
+  ungraceful host loss rather than a controlled `systemctl stop`, which
+  makes it stronger evidence than the planned test would have been.
+
+  **One gap remains**: whether `.207` rejoined cleanly as a replica after
+  `.165` returned — it was Leader on a host that died ungracefully, so it
+  had to rewind onto the new timeline. Not verified at time of writing;
+  confirm with `patronictl -c /etc/patroni/patroni.yml list` (want
+  `Replica` / `streaming` / lag 0).
+
+  No failback was performed, and none is planned: Patroni is symmetric,
+  and `.165` is the host that gets rebooted for gaming (§2), making it
+  the *worse* home for the Leader. See `docs/bootstrap-test-notes.md`'s
+  2026-08-15 entry for the switch-replacement incident itself.
