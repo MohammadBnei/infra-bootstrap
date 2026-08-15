@@ -52,13 +52,21 @@ For the target architecture, see [`../ARCHITECTURE.md`](../ARCHITECTURE.md).
 
 | Host | Path | `nic0` speed (2026-08-15) |
 |---|---|---|
-| proxmox `.165` | **through a TP-Link switch** | **100Mb/s** ⚠ |
+| proxmox `.165` | **wall socket → C5e patch panel → TL-SG108E** | **100Mb/s** ⚠ |
 | server1 `.200` | direct to Freebox | 1000Mb/s |
 | ex-laptop `.161` | direct to Freebox | 1000Mb/s |
 
 Only `.165` sits behind the switch. Its 100Mb/s is a live ~10× throughput
 loss on the host carrying the PG leader, etcd, `k8s-worker-01`, and Garage.
-Open — cause not yet isolated to switch vs. cable.
+
+- **Switch:** TP-Link **`TL-SG108E`**, 8-port Gigabit Easy Smart. Web UI at
+  `192.168.0.100` (off-subnet — reach it with a temporary
+  `ip addr add 192.168.0.50/24 dev <iface>`, default `admin`/`admin`).
+  Supports VLANs / LACP / port mirroring, none configured. **Not** the
+  bottleneck — its other ports show the `1000M` LED lit.
+- **Open**, cause not isolated. Leading hypothesis is the in-wall run or a
+  patch-panel punch-down carrying only 2 of the 4 pairs gigabit requires.
+  See `ARCHITECTURE.md` §3 and `docs/bootstrap-test-notes.md`.
 
 Measure with `ethtool nic0`, **never** `ethtool vmbr0` — the bridge reports
 a fake `10000Mb/s`.

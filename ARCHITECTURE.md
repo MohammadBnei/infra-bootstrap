@@ -214,7 +214,7 @@ graph LR
 
 | Host | Path to Freebox | `nic0` link speed |
 |---|---|---|
-| **proxmox** (`.165`) | **via a TP-Link switch** | **100Mb/s** ⚠ |
+| **proxmox** (`.165`) | **structured cabling → TL-SG108E switch** | **100Mb/s** ⚠ |
 | server1 (`.200`) | direct to Freebox | 1000Mb/s |
 | ex-laptop (`.161`) | direct to Freebox | 1000Mb/s |
 
@@ -222,6 +222,31 @@ graph LR
 straight into the Freebox, so their 1000Mb/s confirms the Freebox's LAN
 ports are gigabit but says nothing about the switch — the two are
 different paths and a measurement on one does not generalize to the other.
+
+**The switch is a TP-Link `TL-SG108E`** (8-port **Gigabit** Easy Smart,
+management UI at `192.168.0.100`, off-subnet). It is *not* the bottleneck:
+its other ports light the `1000M` LED, and the per-port `1000M` /
+`10M/100M` LED pair is the fastest way to read link speed without SSH.
+Being an Easy Smart model it also supports **802.1Q VLANs, LACP, and port
+mirroring** — available today, unused so far, and the only way to segment
+this LAN given the Freebox has no VLANs.
+
+`.165` does not reach the switch directly. It runs through **in-wall
+structured cabling terminated on a `C5e` patch panel** (ports labeled per
+room: `Router salon`, `M. Amine`, `Bur Linda`, `CH 5 DTE`, `CH 5 Ghe`,
+`ALI`, `LINDA`):
+
+```
+.165 NIC → patch cable → wall socket → in-wall run
+         → C5e patch panel → patch cable → TL-SG108E → Freebox
+```
+
+Five segments, four terminations. Gigabit needs **all 4 pairs**; 100Mb
+needs 2 — so a punch-down that terminated only pairs 1-2/3-6, or a single
+run split into two links, caps at exactly 100Mb permanently and looks
+healthy to every test that isn't a link-speed check. That is the leading
+hypothesis. Note `CH 5 DTE` and `CH 5 Ghe` appear to be two panel ports
+for one room, which is what a split run looks like.
 
 This matters more than a flat-LAN diagram suggests: `.165` carries `pg02`
 (the Postgres **leader**, streaming to `pg01` on `.200`), `etcd-1`,

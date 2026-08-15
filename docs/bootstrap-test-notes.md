@@ -1781,7 +1781,46 @@ Generalizable: **a logically flat LAN says nothing about physical paths.**
 Before comparing link speeds across hosts, confirm they traverse the same
 cabling — otherwise the comparison silently changes two variables at once.
 
-Next: `ethtool nic0` on `.165` to rule out forced-100/autoneg-off (free
-software fix), then identify the switch by its label — a **TL-SF** model is
-fast-ethernet by design and no cable will help, a **TL-SG** is gigabit and
-points back at cabling.
+**Trap 3 — "the switch" was never one hop.** Photos of the rack settled
+two things at once. The switch is a **`TL-SG108E`** — 8-port *Gigabit*
+Easy Smart — and its other ports light the `1000M` LED, so the switch is
+exonerated outright. But `.165` never reaches it directly: the path runs
+through **in-wall structured cabling terminated on a `C5e` patch panel**
+(ports labeled per room). Real chain:
+
+```
+.165 NIC → patch cable → wall socket → in-wall run
+         → C5e patch panel → patch cable → TL-SG108E → Freebox
+```
+
+Five segments and four terminations, where the whole investigation had
+been reasoning about "the cable" as a single object. **Gigabit needs all 4
+pairs, 100Mb needs 2** — so a punch-down that landed only pairs 1-2/3-6,
+or one run split into two links via an "economiser", caps at exactly
+100Mb permanently and passes every test that isn't a link-speed check.
+The panel showing both `CH 5 DTE` and `CH 5 Ghe` — two ports, apparently
+one room — is what a split run looks like.
+
+Three traps, one shape: **each wrong turn came from treating an
+abstraction as the physical thing.** `vmbr0` for a NIC, "flat LAN" for
+uniform cabling, "the switch" for a five-segment path. Link-layer
+debugging has to be done against the topology that physically exists,
+which in this repo meant going and looking at it.
+
+Next, cheapest first:
+
+1. **Bypass the wall entirely** — long known-good cable, `.165` straight
+   into a free `TL-SG108E` port. Jumps to 1000Mb → the run/punch-down is
+   the fault. Still 100Mb → it is `nic0` or its own patch cable, so check
+   `ethtool nic0` for `Auto-negotiation: off`.
+2. **Read the `Router salon` uplink port's LED.** If the uplink itself is
+   at 100M, nothing fixed on `.165`'s run helps.
+3. Re-punch both ends on all 4 pairs (same T568A/B at each end), or chase
+   the split-run hypothesis.
+
+Worth knowing for later: the `TL-SG108E` is the *Easy Smart* model, so it
+has a web UI (`192.168.0.100`, off-subnet — reach it via a temporary
+`ip addr add 192.168.0.50/24 dev <iface>`) exposing per-port stats and
+error counters, plus **802.1Q VLANs, LACP and port mirroring**. Already
+owned, never configured — and the only route to segmenting this LAN,
+since the Freebox has no VLANs.
