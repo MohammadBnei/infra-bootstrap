@@ -2016,11 +2016,72 @@ cd pigsty && ansible 192.168.1.207 -b --private-key="$SP/oldpg_key" \
 `--force` is mandatory, not cosmetic — without it `patronictl` prompts and
 Ansible has no TTY. Disk was not a blocker: 51G total, 25G used, 27G free.
 
-**Status at time of writing: not yet run.** The agent session attempted it
-with explicit user authorization and was blocked by the harness's own
-permission classifier — the same behaviour the `run-ukubi-ops` skill
-documents for live SSH execution. Read-only checks against these nodes
-(`patronictl list`, `journalctl`, `df`, config greps, the `:8008` REST API)
-all went through; only the mutating `reinit` was refused. That boundary is
-worth knowing before planning any hands-on Pigsty work from an agent
-session: **diagnosis is automatable here, remediation is not.**
+The agent session attempted it with explicit user authorization and was
+blocked by the harness's own permission classifier — the same behaviour the
+`run-ukubi-ops` skill documents for live SSH execution. Read-only checks
+against these nodes (`patronictl list`, `journalctl`, `df`, `psql` selects,
+config greps, the `:8008` REST API) all went through; only the mutating
+statements were refused. Worth knowing before planning hands-on Pigsty work
+from an agent session: **diagnosis is automatable here, remediation is
+not.** The user ran the `reinit` themselves.
+
+### The reinit fixed the data and left replication broken
+
+Run by the user; clone completed in **≤195s** for ~20 GB (the timer started
+mid-clone, so that is an upper bound on the tail, not total elapsed — at the
+old 100Mb ceiling this would have been ~28 min). Afterwards:
+
+```
+| pg-proxmox-1 | 192.168.1.205 | Leader  | running | 30 |
+| pg-proxmox-2 | 192.168.1.207 | Replica | running | 30 |  lag=4312 bytes
+```
+
+Timeline 27→**30**, lag 61.2 GiB→**4 KB**. Looks finished. **It was not.**
+
+| Probe | Result |
+|---|---|
+| `pg_stat_wal_receiver` on `.207` | **empty** — no receiver process |
+| `pg_stat_replication` on `.205` | **empty** — no walsender |
+| `pg_replication_slots` on `.205` | `pg_proxmox_2` — `active=f`, **`wal_status=lost`** |
+| `pg_is_in_recovery()` | `t` |
+| receive/replay LSN | both frozen at `28/1A000000` |
+
+The replica was a **static snapshot**, not a streaming standby. The lag
+looked stable at ~4 KB only because the database happened to be idle — under
+write load it would diverge without bound. `/pg/log/postgres/*.csv`, every
+5 seconds:
+
+```
+FATAL: could not start WAL streaming: ERROR: can no longer access replication slot "pg_proxmox_2"
+DETAIL: This replication slot has been invalidated due to "wal_removed".
+LOG:   waiting for WAL to become available at 28/1A000018
+```
+
+**`reinit` re-clones `PGDATA` but reuses the existing slot.** That slot had
+been invalidated back when `.207` fell 61 GiB behind and the leader recycled
+the WAL it was holding. A fresh clone cannot stream through a dead slot, and
+nothing in the reinit path notices. Patroni does not notice either — it
+reports `no action ... following a leader` throughout, because from its
+perspective the timelines finally match.
+
+Fix — drop the slot; Patroni recreates it (`use_slots: true`), and the
+replica needs only the *current* WAL segment since it is ~4 KB behind:
+
+```bash
+echo "select pg_drop_replication_slot('pg_proxmox_2');" | \
+  ssh -i "$SP/oldpg_key" vagrant@192.168.1.205 'sudo -u postgres psql'
+```
+
+**Three lessons, all the same shape as this session's earlier traps:**
+
+1. **`patronictl list` showing `Replica / running` at matching timeline and
+   near-zero lag is not proof of replication.** Verify the walsender
+   (`pg_stat_replication` on the leader) or the receiver
+   (`pg_stat_wal_receiver` on the standby). Both empty means no streaming,
+   whatever the role column says.
+2. **Low lag on an idle database is meaningless.** Lag is an LSN delta; if
+   nobody writes, a completely disconnected standby reports a small, stable
+   number that reads as healthy.
+3. **Check `wal_status` on slots after any long divergence.** `lost` is
+   terminal — the slot must be dropped and recreated, and no amount of
+   re-cloning fixes it.
