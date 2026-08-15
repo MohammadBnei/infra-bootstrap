@@ -1921,3 +1921,99 @@ has a web UI (`192.168.0.100`, off-subnet — reach it via a temporary
 error counters, plus **802.1Q VLANs, LACP and port mirroring**. Already
 owned, never configured — and the only route to segmenting this LAN,
 since the Freebox has no VLANs.
+
+## 2026-08-15 — the failover left a diverged replica that never self-heals
+
+The switch replacement's automatic Patroni failover (previous entry) was
+only half a success. `.205` promoted correctly, but **`.207` never rejoined
+as a working replica** — and it lies about it convincingly.
+
+```
+| Member       | Host          | Role    | State   | TL | Receive LSN |   Lag |
+| pg-proxmox-1 | 192.168.1.205 | Leader  | running | 30 |             |       |
+| pg-proxmox-2 | 192.168.1.207 | Replica | running | 27 | 18/C7000000 | 62720 |
+```
+
+`Replica` / `running` reads healthy at a glance. It is not: the timeline is
+**27 against the leader's 30**, lag is **62720 MB (~61 GiB)**, and the
+leader reports **zero connected standbys** (`/patroni` → no `replication`
+array). The cluster was effectively **single-node** — no current standby
+to promote if `.205` had died.
+
+**Root cause, and it is by design.** `/etc/patroni/patroni.yml` on `.207`:
+
+```yaml
+use_pg_rewind: true
+remove_data_directory_on_rewind_failure: true
+remove_data_directory_on_diverged_timelines: false   # <-- this
+```
+
+`wal_log_hints` and `data_checksums` are both `on`, so `pg_rewind`'s
+prerequisites are met. But when a replica's timeline has genuinely
+*diverged* rather than merely fallen behind, Patroni's only recovery is to
+wipe `PGDATA` and re-clone — and this Pigsty default forbids that. So it
+loops forever, every 5 seconds, doing nothing:
+
+```
+INFO: Local timeline=27 lsn=18/C70000A0
+INFO: primary_timeline=30
+INFO: no action. I am (pg-proxmox-2), a secondary, and following a leader (pg-proxmox-1)
+```
+
+"following a leader" is Patroni's *intent*, not an observed fact. Believe
+the timeline and the leader's `replication` array, not the role string.
+
+**This will recur after every ungraceful failover with timeline
+divergence.** It is a safe default — never auto-destroy data — but it
+means a human must run `reinit` each time. Setting
+`remove_data_directory_on_diverged_timelines: true` would automate it, at
+the cost of letting Patroni wipe a replica unattended; not changed here,
+and it would have to go through `pigsty/pigsty.yml`, not a hand-edit.
+
+### Getting `patronictl` to run at all
+
+The documented path `/etc/patroni/patroni.yml` is **correct** — it is a
+symlink to `/pg/conf/pg-proxmox-2.yml`, mode `0640`, owned by the `postgres`
+dbsu, and Pigsty's own tasks use it (`roles/pgsql/tasks/patroni.yml`). It
+fails for an ordinary user because of the permissions, not the path.
+
+Running it from `pigsty/` fails for a *different* reason:
+`pigsty/ansible.cfg` is vendored upstream and still carries Vagrant
+defaults — `remote_user = vagrant` (correct here, by luck) and
+`private_key_file = /home/mohammad/.ssh/id_pigsty_rsa` (does not exist).
+The real key is `SSH_OLDPG_KEY` in Infisical. `pigsty/` must not be edited,
+so override per invocation:
+
+```bash
+.claude/skills/run-ukubi-ops/driver.sh fetch-ssh-key SSH_OLDPG_KEY "$SP/oldpg_key"
+cd pigsty && ansible pg-proxmox -b --private-key="$SP/oldpg_key" \
+  -m shell -a 'patronictl -c /etc/patroni/patroni.yml list pg-proxmox'
+rm -f "$SP/oldpg_key"
+```
+
+**Easier for read-only checks: skip SSH entirely.** Patroni's REST API on
+`:8008` needs no key, no sudo and no config file, and answers everything:
+
+```bash
+curl -s http://192.168.1.205:8008/cluster | python3 -m json.tool   # roles, TLs, lag
+curl -s http://192.168.1.205:8008/patroni                          # leader's connected standbys
+```
+
+That is how this was diagnosed, before the SSH path was solved at all.
+
+### Fix
+
+`patronictl reinit` — not the Pigsty playbooks. `pgsql-rm.yml` runs the
+`pg_remove` role, whose defaults are `pg_rm_data: true`, **`pg_rm_backup:
+true`** and `pg_safeguard: false`; it would take the backups with it.
+`reinit` wipes only the target's `PGDATA` and re-clones from the leader:
+
+```bash
+cd pigsty && ansible 192.168.1.207 -b --private-key="$SP/oldpg_key" \
+  -m shell -a 'patronictl -c /etc/patroni/patroni.yml reinit pg-proxmox pg-proxmox-2 --force'
+```
+
+`--force` is mandatory, not cosmetic — without it `patronictl` prompts and
+Ansible has no TTY. Disk was not a blocker: 51G total, 25G used, 27G free.
+
+**Outcome: see the follow-up entry below.**
