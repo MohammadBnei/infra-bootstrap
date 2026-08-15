@@ -48,37 +48,65 @@ For the target architecture, see [`../ARCHITECTURE.md`](../ARCHITECTURE.md).
 - All hosts on single flat LAN — no VLANs
 - IP range partially occupied by existing devices (no clean reservation possible)
 
-#### Link speeds — `server1` and `ex-laptop` are at 100 Mbps
+#### Link speeds — `.165` is at 100 Mbps, and it is the estate's bottleneck
 
-**Confirmed 2026-08-15.** Both are on **USB-to-Ethernet adapters running at
-100 Mbps**, and neither has a usable onboard NIC. `.165` is not affected.
+**Measured 2026-08-15** (`ethtool`). No link speed had ever been recorded for
+any host here before this.
 
-This was undocumented until now, and it is not a detail — it is the ceiling on
-every piece of network storage in the cluster. `agent-fleet`'s ADR-0048 §4
-benchmarked Longhorn RWX and the `nfs` StorageClass on 2026-08-14 and got an
-identical **10 MB/s ≈ 80 Mbps** from both, against **1069 MB/s** on node-local
-disk. Two unrelated backends landing on the same number is 100BASE-TX after
-overhead, not a coincidence about the backends.
+| Host | Link | NIC |
+| --- | --- | --- |
+| **proxmox `.165` (bnei)** | **100 Mb/s** | onboard Realtek RTL8168H (`r8169`) |
+| server1 | 1000 Mb/s | RTL8153 USB 3 adapter, negotiated 5 Gb/s on the USB side; onboard NIC (`nic1`) has no carrier |
+| ex-laptop | not yet measured | |
 
-It reaches further than the fleet, because of where the VMs sit:
-`k8s-worker-02`, `k8s-cp-02` and `pg01` are on `server1`, `k8s-cp-03` on
-`ex-laptop`. So
+**`.165`'s NIC is gigabit hardware running at 100.** `ethtool` reports
+`1000baseT/Full` in both *Supported* and *Advertised* link modes, and the error
+counters are clean — `tx_errors 0`, `rx_errors 0`, `align_errors 0`,
+`tx_underrun 0`.
 
-- **two of three etcd voters** sit behind a 100 Mbps USB adapter;
-- **Longhorn replica rebuilds** run at 10 MB/s — a 100 GB replica is ~2.8 h;
-- with `defaultReplicaCount: 3`, **every synchronous write is gated by the
-  slowest replica link**, wherever the pod itself happens to run.
+That pairing is diagnostic. 100BASE-TX uses 2 pairs; 1000BASE-T needs all 4. A
+cable with only two pairs wired makes autonegotiation settle at 100 with a
+*perfectly healthy* link — which is why there are no errors. A damaged or
+marginal cable would instead show CRC/align errors. So the leading suspect is
+the **cable** (2-pair, or a broken pair in a longer run), then the **switch
+port**. Confirm which with:
+
+```sh
+ethtool nic0 | grep -A4 "Link partner advertised link modes"
+```
+
+If the link partner advertises `1000baseT/Full` and the link still comes up at
+100, it is the cable. If the partner tops out at `100baseT`, it is the port.
+
+**Why this one link matters more than any other.** `.165` hosts `k8s-cp-01`,
+**`k8s-worker-01`**, `pg02` (the current Patroni **leader**) and the
+`garage-storage` LXC (S3 for registry blobs and backups). Everything measured
+so far crosses it:
+
+- `agent-fleet`'s ADR-0048 §4 benchmarked Longhorn RWX and the `nfs`
+  StorageClass at an identical **10 MB/s ≈ 80 Mbps** — 100BASE-TX after TCP
+  overhead — against **1069 MB/s** node-local. The benchmark pod ran on
+  `k8s-worker-01`, a `.165` guest.
+- A PVE **VM migration** between hosts hits the same ~10 MB/s ceiling, and
+  shares no code with Longhorn or NFS — no replicas, no fsync, no `sync`
+  export. Three unrelated workloads, one shared link.
+- One of three **etcd voters** (`k8s-cp-01`) sits behind it, and etcd is
+  latency-sensitive.
+- **Longhorn replica rebuilds** run at 10 MB/s — a 100 GB replica is ~2.8 h.
 
 What this does *not* mean: it is not an argument for different storage. The
-same disks measured 1069 MB/s on the same day. The `nfs` StorageClass
-(ADR-0036) is still worth having for RWX-without-a-share-manager and for
-capacity relief on the scarcest disks, but it is **not** a performance lever
-and should not be proposed as one.
+same disks measured 1069 MB/s the same day, so `nfs` (ADR-0036) remains worth
+having for RWX-without-a-share-manager and capacity relief, but it is **not**
+a performance lever and should not be proposed as one.
 
-The fix is gigabit USB 3.0 adapters (Realtek RTL8153 — e.g. TP-Link UE300),
-~€15 each, in a USB 3.0 port. **Not yet ordered.** Run `ethtool <iface>` on
-both hosts before and after, and record the numbers here — no link speed has
-ever been measured for any host in this estate.
+**Correction, recorded deliberately.** The first version of this section said
+server1 and ex-laptop were the 100 Mbps hosts, on USB adapters with no usable
+onboard NIC — from recollection, before anyone ran `ethtool`. `lsusb` then
+showed server1's adapter is a *gigabit* RTL8153 on a 5 Gb/s port, and `ethtool`
+put it at 1000 Mb/s. The real 100 Mbps host was the one assumed to be fine.
+ADR-0048 §4 had named `ethtool` on the PVE hosts as the check that would settle
+this and it went unrun for a day; the wrong answer was committed in the
+meantime.
 
 ### Proxmox host details
 
