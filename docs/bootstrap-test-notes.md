@@ -1794,29 +1794,51 @@ through **in-wall structured cabling terminated on a `C5e` patch panel**
 ```
 
 Five segments and four terminations, where the whole investigation had
-been reasoning about "the cable" as a single object. **Gigabit needs all 4
-pairs, 100Mb needs 2** — so a punch-down that landed only pairs 1-2/3-6,
-or one run split into two links via an "economiser", caps at exactly
-100Mb permanently and passes every test that isn't a link-speed check.
-The panel showing both `CH 5 DTE` and `CH 5 Ghe` — two ports, apparently
-one room — is what a split run looks like.
+been reasoning about "the cable" as a single object.
 
-Three traps, one shape: **each wrong turn came from treating an
+**Trap 4 — there is a second switch, and it makes the panel irrelevant.**
+`.165` shares an **unidentified switch in the room** with the Pi 4
+(`192.168.1.55`), *before* the wall. Full chain:
+
+```
+.165 NIC → patch cable → ROOM SWITCH (unidentified, shared with the Pi)
+         → patch cable → wall socket → in-wall run
+         → C5e patch panel → patch cable → TL-SG108E → Freebox
+```
+
+This retroactively killed the hypothesis recorded above. **Ethernet
+negotiates per segment**: `ethtool nic0` reports only the link between
+`.165`'s NIC and whatever it is *directly* plugged into — the room switch.
+The wall run, the patch panel and the `TL-SG108E` are downstream and
+cannot influence that number at all, so no punch-down or split run
+explains the 100Mb/s. Kept here rather than deleted, because a
+confidently-argued theory about hardware two hops beyond the measurement
+is exactly the failure worth remembering.
+
+Narrowed to one segment, four suspects: the room switch is a 10/100 model
+(most likely), its port, `.165`'s patch cable, or `nic0` autoneg forced.
+
+Four traps, one shape: **each wrong turn came from treating an
 abstraction as the physical thing.** `vmbr0` for a NIC, "flat LAN" for
-uniform cabling, "the switch" for a five-segment path. Link-layer
-debugging has to be done against the topology that physically exists,
-which in this repo meant going and looking at it.
+uniform cabling, "the switch" for a five-segment path, and then the wrong
+switch entirely. Link-layer debugging has to be done against the topology
+that physically exists — which here meant going and looking at it twice.
 
 Next, cheapest first:
 
-1. **Bypass the wall entirely** — long known-good cable, `.165` straight
-   into a free `TL-SG108E` port. Jumps to 1000Mb → the run/punch-down is
-   the fault. Still 100Mb → it is `nic0` or its own patch cable, so check
-   `ethtool nic0` for `Auto-negotiation: off`.
-2. **Read the `Router salon` uplink port's LED.** If the uplink itself is
-   at 100M, nothing fixed on `.165`'s run helps.
-3. Re-punch both ends on all 4 pairs (same T568A/B at each end), or chase
-   the split-run hypothesis.
+1. **Read the Pi's link speed** — it shares the room switch and a Pi 4 is
+   genuinely gigabit. Pi also at 100Mb → the room switch is 10/100, which
+   is the answer and the one thing here worth actually replacing. Pi at
+   1000Mb → the fault is `.165`'s cable or port.
+2. **Identify the room switch** by label/LED count — one LED per port
+   means 10/100; a `TL-SF` prefix confirms it.
+3. Swap `.165`'s patch cable, then its port. Check `ethtool nic0` for
+   `Auto-negotiation: off`.
+4. **Then measure end-to-end, not per-link.** Every hop in the chain must
+   be gigabit to actually get ~940 Mbit/s — including the `Router salon`
+   uplink port on the `TL-SG108E`. `iperf3 -c 192.168.1.200` from `.165`
+   is the only number that reflects reality; `ethtool` describes one
+   segment at a time.
 
 Worth knowing for later: the `TL-SG108E` is the *Easy Smart* model, so it
 has a web UI (`192.168.0.100`, off-subnet — reach it via a temporary

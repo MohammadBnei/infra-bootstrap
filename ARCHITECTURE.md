@@ -231,22 +231,29 @@ Being an Easy Smart model it also supports **802.1Q VLANs, LACP, and port
 mirroring** — available today, unused so far, and the only way to segment
 this LAN given the Freebox has no VLANs.
 
-`.165` does not reach the switch directly. It runs through **in-wall
-structured cabling terminated on a `C5e` patch panel** (ports labeled per
-room: `Router salon`, `M. Amine`, `Bur Linda`, `CH 5 DTE`, `CH 5 Ghe`,
-`ALI`, `LINDA`):
+`.165` does not reach the `TL-SG108E` directly. There is a **second,
+unidentified switch in the room** (shared with the Pi 4, `192.168.1.55`),
+and beyond it **in-wall structured cabling terminated on a `C5e` patch
+panel** (ports labeled per room: `Router salon`, `M. Amine`, `Bur Linda`,
+`CH 5 DTE`, `CH 5 Ghe`, `ALI`, `LINDA`):
 
 ```
-.165 NIC → patch cable → wall socket → in-wall run
+.165 NIC → patch cable → ROOM SWITCH (unidentified, shared with the Pi)
+         → patch cable → wall socket → in-wall run
          → C5e patch panel → patch cable → TL-SG108E → Freebox
 ```
 
-Five segments, four terminations. Gigabit needs **all 4 pairs**; 100Mb
-needs 2 — so a punch-down that terminated only pairs 1-2/3-6, or a single
-run split into two links, caps at exactly 100Mb permanently and looks
-healthy to every test that isn't a link-speed check. That is the leading
-hypothesis. Note `CH 5 DTE` and `CH 5 Ghe` appear to be two panel ports
-for one room, which is what a split run looks like.
+**Ethernet negotiates per segment**, so `ethtool nic0` on `.165` reports
+*only* the `.165` ↔ room-switch link. The wall run, the patch panel and
+the `TL-SG108E` are downstream and invisible to that number — none of them
+can explain the 100Mb/s. The fault is confined to that first segment:
+the room switch being a 10/100 model (most likely), its port, `.165`'s
+patch cable, or `nic0` autoneg. The Pi shares that switch, so its link
+speed discriminates switch-wide vs. `.165`-specific.
+
+Corollary: per-segment link speed is **not** end-to-end throughput. Every
+hop above must be gigabit for `.165` to actually reach ~940 Mbit/s to
+`.200`; verify with `iperf3`, not `ethtool`.
 
 This matters more than a flat-LAN diagram suggests: `.165` carries `pg02`
 (the Postgres **leader**, streaming to `pg01` on `.200`), `etcd-1`,

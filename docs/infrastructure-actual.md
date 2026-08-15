@@ -52,7 +52,7 @@ For the target architecture, see [`../ARCHITECTURE.md`](../ARCHITECTURE.md).
 
 | Host | Path | `nic0` speed (2026-08-15) |
 |---|---|---|
-| proxmox `.165` | **wall socket → C5e patch panel → TL-SG108E** | **100Mb/s** ⚠ |
+| proxmox `.165` | **room switch → wall → C5e panel → TL-SG108E** | **100Mb/s** ⚠ |
 | server1 `.200` | direct to Freebox | 1000Mb/s |
 | ex-laptop `.161` | direct to Freebox | 1000Mb/s |
 
@@ -64,9 +64,14 @@ loss on the host carrying the PG leader, etcd, `k8s-worker-01`, and Garage.
   `ip addr add 192.168.0.50/24 dev <iface>`, default `admin`/`admin`).
   Supports VLANs / LACP / port mirroring, none configured. **Not** the
   bottleneck — its other ports show the `1000M` LED lit.
-- **Open**, cause not isolated. Leading hypothesis is the in-wall run or a
-  patch-panel punch-down carrying only 2 of the 4 pairs gigabit requires.
-  See `ARCHITECTURE.md` §3 and `docs/bootstrap-test-notes.md`.
+- **Room switch:** a second, **unidentified** switch sits between `.165`
+  and the wall, shared with the Pi 4 (`192.168.1.55`). Identify it.
+- **Open**, but narrowed: Ethernet negotiates per segment, so `nic0`'s
+  100Mb/s describes *only* the `.165` ↔ room-switch link — the wall run,
+  patch panel and `TL-SG108E` cannot cause it. Leading hypothesis is that
+  the room switch is a 10/100 model; the Pi's link speed discriminates
+  switch-wide vs. `.165`-specific. See `ARCHITECTURE.md` §3 and
+  `docs/bootstrap-test-notes.md`.
 
 Measure with `ethtool nic0`, **never** `ethtool vmbr0` — the bridge reports
 a fake `10000Mb/s`.
