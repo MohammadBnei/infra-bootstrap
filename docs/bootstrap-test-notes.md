@@ -1741,3 +1741,47 @@ paths are *mountpoints* — after the mount, the visible mode belongs to the
 filesystem's own root inode, not to anything the playbook created — so the
 `mode:` was dropped rather than argued with. With both fixes the playbook
 re-runs at `ok=8 changed=0`.
+
+## 2026-08-15 — `.165` is on a 100Mb link; two measurement traps found first
+
+Chasing a suspected "10Gbit limit" between `.165` and the Freebox. The
+limit is real but was the opposite of the framing: **`.165`'s physical NIC
+negotiates 100Mb/s**, ~12 MB/s. The host carries `pg02` (PG **leader**,
+streaming to `pg01` on `.200`), `etcd-1`, `k8s-cp-01`, `k8s-worker-01`, and
+the Garage LXC backing Longhorn backups + Zot's registry blobs. All of it
+crosses that link. **Open** — not yet isolated to switch vs. cable.
+
+**Trap 1 — `vmbr0` reports a fake `10000Mb/s`.** A sweep built on
+`ethtool $(ip -o route get 1.1.1.1 | awk '{print $5}')` returned
+`10000Mb/s` for all three PVE hosts. The default-route interface on a PVE
+host is the **bridge**, and a Linux bridge has no PHY, so the driver
+reports a synthetic 10G. This is almost certainly where the original
+"10Gbit" figure came from. Enumerate real devices instead — bridges,
+`veth`, and `tap` have no `device` symlink in sysfs:
+
+```bash
+for d in /sys/class/net/*/device; do
+  n=$(basename $(dirname $d)); echo -n "$n: "; ethtool $n | grep -E "^\s+Speed"
+done
+```
+
+**Trap 2 — the flat LAN is not physically uniform.** The corrected sweep
+gave `.165` 100Mb, `.200` and `.161` 1000Mb. The inference drawn — "the
+switch is fine, so it's `.165`'s cable" — was **wrong**, because it assumed
+all three shared the switch. They don't: **only `.165` goes through the
+TP-Link; `.200` and `.161` are cabled straight to the Freebox.** Their
+1000Mb proves the *Freebox ports* are gigabit and says nothing about the
+switch. Two hosts on a different path are not a control group.
+
+`ARCHITECTURE.md` §3 described the LAN as flat and said nothing about
+physical uplinks, which is what made the bad assumption easy. Both it and
+`docs/infrastructure-actual.md` §3 now carry the per-host path table.
+
+Generalizable: **a logically flat LAN says nothing about physical paths.**
+Before comparing link speeds across hosts, confirm they traverse the same
+cabling — otherwise the comparison silently changes two variables at once.
+
+Next: `ethtool nic0` on `.165` to rule out forced-100/autoneg-off (free
+software fix), then identify the switch by its label — a **TL-SF** model is
+fast-ethernet by design and no cable will help, a **TL-SG** is gigabit and
+points back at cabling.

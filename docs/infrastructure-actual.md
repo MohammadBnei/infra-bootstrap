@@ -48,6 +48,21 @@ For the target architecture, see [`../ARCHITECTURE.md`](../ARCHITECTURE.md).
 - All hosts on single flat LAN — no VLANs
 - IP range partially occupied by existing devices (no clean reservation possible)
 
+**Physical cabling (not uniform — see `ARCHITECTURE.md` §3):**
+
+| Host | Path | `nic0` speed (2026-08-15) |
+|---|---|---|
+| proxmox `.165` | **through a TP-Link switch** | **100Mb/s** ⚠ |
+| server1 `.200` | direct to Freebox | 1000Mb/s |
+| ex-laptop `.161` | direct to Freebox | 1000Mb/s |
+
+Only `.165` sits behind the switch. Its 100Mb/s is a live ~10× throughput
+loss on the host carrying the PG leader, etcd, `k8s-worker-01`, and Garage.
+Open — cause not yet isolated to switch vs. cable.
+
+Measure with `ethtool nic0`, **never** `ethtool vmbr0` — the bridge reports
+a fake `10000Mb/s`.
+
 ### Proxmox host details
 
 - Hostname: `bnei`

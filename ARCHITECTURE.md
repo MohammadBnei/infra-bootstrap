@@ -210,6 +210,32 @@ graph LR
   `.50-.99` static infra · `.100-.199` VMs/LXCs · `.200-.254` Freebox DHCP.
 - Bridge: `vmbr0` on each PVE host, no NAT, no internal libvirt network.
 
+**Physical links — the LAN is flat logically, but *not* uniform physically:**
+
+| Host | Path to Freebox | `nic0` link speed |
+|---|---|---|
+| **proxmox** (`.165`) | **via a TP-Link switch** | **100Mb/s** ⚠ |
+| server1 (`.200`) | direct to Freebox | 1000Mb/s |
+| ex-laptop (`.161`) | direct to Freebox | 1000Mb/s |
+
+`.165` is the **only** host behind the switch. The other two are plugged
+straight into the Freebox, so their 1000Mb/s confirms the Freebox's LAN
+ports are gigabit but says nothing about the switch — the two are
+different paths and a measurement on one does not generalize to the other.
+
+This matters more than a flat-LAN diagram suggests: `.165` carries `pg02`
+(the Postgres **leader**, streaming to `pg01` on `.200`), `etcd-1`,
+`k8s-cp-01`, `k8s-worker-01`, and the Garage LXC that backs both Longhorn
+backups and the Zot registry's blobs. All of that crosses the LAN at
+~12 MB/s. Measured 2026-08-15; cause narrowed to the `.165` path
+(fast-ethernet switch, or a cable segment in it) but not yet isolated —
+see `docs/bootstrap-test-notes.md`.
+
+> **Never read link speed off `vmbr0`.** A Linux bridge has no PHY and
+> reports a synthetic `10000Mb/s`. Query the physical NIC (`nic0`), or
+> enumerate real devices via `/sys/class/net/*/device` — bridges, `veth`,
+> and `tap` have no `device` symlink.
+
 ### MetalLB
 
 - **Mode:** L2 only (Freebox blocks BGP — see `DECISION.md` §2).
