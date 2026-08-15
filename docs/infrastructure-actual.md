@@ -48,82 +48,34 @@ For the target architecture, see [`../ARCHITECTURE.md`](../ARCHITECTURE.md).
 - All hosts on single flat LAN — no VLANs
 - IP range partially occupied by existing devices (no clean reservation possible)
 
-#### Link speeds — `.165` is at 100 Mbps, and it is the estate's bottleneck
+**Physical cabling (not uniform — see `ARCHITECTURE.md` §3):**
 
-**Measured 2026-08-15** (`ethtool`). No link speed had ever been recorded for
-any host here before this.
+| Host | Path | `nic0` speed (2026-08-15) |
+|---|---|---|
+| proxmox `.165` | room switch → wall → C5e panel → TL-SG108E | 1000Mb/s |
+| server1 `.200` | direct to Freebox | 1000Mb/s |
+| ex-laptop `.161` | direct to Freebox | 1000Mb/s |
 
-| Host | Link | NIC |
-| --- | --- | --- |
-| **proxmox `.165` (bnei)** | **100 Mb/s** | onboard Realtek RTL8168H (`r8169`) |
-| server1 | 1000 Mb/s | RTL8153 USB 3 adapter, negotiated 5 Gb/s on the USB side; onboard NIC (`nic1`) has no carrier |
-| ex-laptop | not yet measured | |
+Only `.165` sits behind switches; the other two are direct to the Freebox.
 
-**`.165`'s NIC is gigabit hardware running at 100.** `ethtool` reports
-`1000baseT/Full` in both *Supported* and *Advertised* link modes, and the error
-counters are clean — `tx_errors 0`, `rx_errors 0`, `align_errors 0`,
-`tx_underrun 0`.
+- **Rack switch:** TP-Link **`TL-SG108E`**, 8-port Gigabit Easy Smart. Web
+  UI at `192.168.0.100` (off-subnet — reach it with a temporary
+  `ip addr add 192.168.0.50/24 dev <iface>`, default `admin`/`admin`).
+  Supports VLANs / LACP / port mirroring, **none configured**. Never was
+  the bottleneck.
+- **Room switch:** sits between `.165` and the wall, shared with the Pi 4
+  (`192.168.1.55`). **Was a 10/100 unit — the root cause of `.165` running
+  at 100Mb/s.** Replaced with a gigabit switch 2026-08-15.
+- **Verified:** `nic0` at 1000Mb/s and `iperf3` `.165` → `.200` at
+  **942 Mbit/s** — line rate, ~10× the old ceiling. This also proves the
+  in-wall run and the `C5e` punch-down carry all four pairs, so nothing
+  further along the path is capped.
+- `iperf3` was installed on `.165` and `.200` for this measurement.
 
-**Cause, confirmed.** `.165` does not reach the Freebox directly. Its path is
-`.165` → patch cable → wall socket → in-wall run → patch cable → **a TP-Link
-device (`.100`)** → Freebox. `server1` and `ex-laptop` have no such hop, which
-is exactly why they are at gigabit.
+See `ARCHITECTURE.md` §3 and `docs/bootstrap-test-notes.md` for the trail.
 
-`ethtool nic0 | grep -A6 "Link partner"` names the culprit:
-
-```
-Link partner advertised link modes:  10baseT/Half 10baseT/Full
-                                     100baseT/Half 100baseT/Full
-```
-
-**No `1000baseT/Full`.** The device terminating `.165`'s copper is 100 Mb/s
-hardware. That also exonerates the wiring: a 2-pair run would still show the
-partner advertising gigabit — autonegotiation rides a single pair — and merely
-fail to reach it. This partner cannot do gigabit at all.
-
-`.100` does not answer ARP from `.165` (`ip neigh` → `INCOMPLETE`), so it has no
-reachable management address on this subnet. Irrelevant to the fault: a switch
-or powerline adapter is transparent at layer 2 and imposes its port speed
-whether or not it is manageable.
-
-**Fix: replace it with an unmanaged gigabit switch** — TP-Link TL-SG105 (~€15)
-or TL-SG108 (~€20), fanless, no configuration. Anything else hanging off that
-device is capped at 100 Mb/s today and gains from the swap too.
-
-Then re-check `ethtool nic0 | grep Speed`. If it is **still** 100 afterwards,
-the in-wall run is 2-pair — it has never been tested above 100 Mb/s, because
-nothing in the path has ever offered gigabit. Re-terminate if all four pairs are
-physically present, otherwise pull a new Cat6.
-
-**Why this one link matters more than any other.** `.165` hosts `k8s-cp-01`,
-**`k8s-worker-01`**, `pg02` (the current Patroni **leader**) and the
-`garage-storage` LXC (S3 for registry blobs and backups). Everything measured
-so far crosses it:
-
-- `agent-fleet`'s ADR-0048 §4 benchmarked Longhorn RWX and the `nfs`
-  StorageClass at an identical **10 MB/s ≈ 80 Mbps** — 100BASE-TX after TCP
-  overhead — against **1069 MB/s** node-local. The benchmark pod ran on
-  `k8s-worker-01`, a `.165` guest.
-- A PVE **VM migration** between hosts hits the same ~10 MB/s ceiling, and
-  shares no code with Longhorn or NFS — no replicas, no fsync, no `sync`
-  export. Three unrelated workloads, one shared link.
-- One of three **etcd voters** (`k8s-cp-01`) sits behind it, and etcd is
-  latency-sensitive.
-- **Longhorn replica rebuilds** run at 10 MB/s — a 100 GB replica is ~2.8 h.
-
-What this does *not* mean: it is not an argument for different storage. The
-same disks measured 1069 MB/s the same day, so `nfs` (ADR-0036) remains worth
-having for RWX-without-a-share-manager and capacity relief, but it is **not**
-a performance lever and should not be proposed as one.
-
-**Correction, recorded deliberately.** The first version of this section said
-server1 and ex-laptop were the 100 Mbps hosts, on USB adapters with no usable
-onboard NIC — from recollection, before anyone ran `ethtool`. `lsusb` then
-showed server1's adapter is a *gigabit* RTL8153 on a 5 Gb/s port, and `ethtool`
-put it at 1000 Mb/s. The real 100 Mbps host was the one assumed to be fine.
-ADR-0048 §4 had named `ethtool` on the PVE hosts as the check that would settle
-this and it went unrun for a day; the wrong answer was committed in the
-meantime.
+Measure with `ethtool nic0`, **never** `ethtool vmbr0` — the bridge reports
+a fake `10000Mb/s`.
 
 ### Proxmox host details
 
@@ -147,11 +99,13 @@ meantime.
     is shared with the backup buckets, ADR-0034)
 - Running VMs (Postgres):
   - VMID 207 `pg02` (2 vCPU / 4GB / 40GB) — IP: 192.168.1.207 — Pigsty PG 18
-    **Leader/primary** (current live role — see ADR-0029, roles flipped
-    from the original static pg01/pg02 naming at some point via
-    unattended Patroni failover) + Redis + etcd DCS member (`etcd-1` of
-    3). `pg01` (VMID 205) is **no longer on this host** — migrated to
-    server1 2026-07-30, see §2/§4.
+    **Replica** as of 2026-08-15 (was Leader; `.205` was promoted
+    automatically when this host went down during the room switch
+    replacement — see ADR-0029. The `pg01`/`pg02` names have never
+    tracked roles) + etcd DCS member (`etcd-1` of 3). Rejoined via
+    `reinit` + slot drop; **streaming, lag 0, verified**. `pg01` (VMID 205) is
+    **no longer on this host** — migrated to server1 2026-07-30, see
+    §2/§4.
 - Template: VMID 9001 `ubuntu-24.04-ci-template` (Golden cloud-init
   template, rebuilt 2026-07-12 with qemu-guest-agent fix — see
   docs/bootstrap-test-notes.md). VMID 9000 is the original hand-created
@@ -229,7 +183,7 @@ is deliberately not vGPU-style sharing across multiple VMs.
 | --- | --- | --- |
 | PVE nodes | 3 (proxmox .165, server1 .200, ex-laptop .161) | All reinstalled/joined the corosync cluster — see ADR-0020, ADR-0024 |
 | K8s nodes | 5 QEMU VMs, **joined and confirmed live 2026-07-30 via `kubectl get nodes`** | 3 control-plane+etcd (`k8s-cp-01` `.165`/minority voter, `k8s-cp-02` server1, `k8s-cp-03` ex-laptop) + 2 workers (`k8s-worker-01` `.165`+GPU, `k8s-worker-02` server1) — real 3-CP/etcd HA per ADR-0017, fronted by kube-vip VIP `192.168.1.180`/`k8s.bnei.lan` (ADR-0016) |
-| Postgres | QEMU VMs split across 2 hosts | pg02 VMID 207 (.207, on `.165`) — **Leader**; pg01 VMID 205 (.205, migrated to server1 2026-07-30) — Replica. See §4 |
+| Postgres | QEMU VMs split across 2 hosts | pg01 VMID 205 (.205, on server1) — **Leader** since 2026-08-15; pg02 VMID 207 (.207, on `.165`) — Replica. Roles flipped by an automatic Patroni failover; see §4 |
 | Postgres DCS (etcd) | 3-node quorum, **live 2026-07-30** | `etcd-1`/.207 (`.165`), `etcd-2`/.205 (server1), `etcd-3`/pg-etcd-witness `.197` (ex-laptop, VMID 303, etcd-only, no PG data) — ADR-0029 |
 | Garage | LXC on proxmox PVE (.165) | VMID 301, running, configured (v2.3.0, 192.168.1.199) |
 | Container registry | Zot, in-cluster (ns `zot`) | **Live 2026-08-13.** `registry.bnei.lan:5000`, MetalLB `.234` (pinned), blobs in Garage's `zot-registry` bucket (40GB quota). Plain HTTP, no IngressRoute — LE cannot issue for `.lan`; nodes trust it via `containerd_registries_mirrors`. Anonymous pull, htpasswd push. `editable-blog:0.37.9` pulled from it and serving — ADR-0034 |
@@ -319,8 +273,8 @@ deliberate minority voter, so losing it never costs quorum.
 
 | Node | VMID | IP | Host | Role |
 | --- | --- | --- | --- | --- |
-| pg02 | 207 | 192.168.1.207 | proxmox `.165` | Pigsty **Leader/primary** (current live role, ADR-0029 — roles flipped from the original static pg01/pg02 naming via an unattended Patroni failover at some point) + etcd DCS member (`etcd-1` of 3) |
-| pg01 | 205 | 192.168.1.205 | server1 `.200` | Replica, streaming, lag 0 — migrated off `.165` 2026-07-30; etcd DCS member (`etcd-2` of 3) + Redis (relocated here 2026-07-30, see below) |
+| pg02 | 207 | 192.168.1.207 | proxmox `.165` | Pigsty **Replica** as of 2026-08-15 — was Leader until `.165` went down during the room switch replacement. Rejoined via `patronictl reinit` + a replication-slot drop; **streaming, lag 0, verified**. + etcd DCS member (`etcd-1` of 3) |
+| pg01 | 205 | 192.168.1.205 | server1 `.200` | Pigsty **Leader/primary** as of 2026-08-15, promoted automatically — migrated off `.165` 2026-07-30; etcd DCS member (`etcd-2` of 3) + Redis (relocated here 2026-07-30, see below) |
 | pg-etcd-witness | 303 | 192.168.1.197 | ex-laptop `.161` | etcd DCS member only (`etcd-3` of 3), no PG data — provisioned + joined 2026-07-30 |
 
 **Resolved 2026-07-30**: the DB tier's single-point-of-failure on `.165`
@@ -334,10 +288,10 @@ incident/fix history (including two real quorum-loss incidents during
 
 ### HA status
 
-- **Replication:** streaming replication active (Leader `.207` → Replica `.205`), lag 0
+- **Replication:** Leader `.205` → Replica `.207` as of 2026-08-15 (roles flipped by automatic failover). **Streaming, `wal_status=reserved`, lag 0 — verified 2026-08-15** after a `reinit` plus a slot drop (see `docs/bootstrap-test-notes.md`). Note the `pg01`/`pg02` names have never tracked roles, and a `Replica/running` row is not proof of streaming — check `pg_stat_replication` on the leader
 - **Topology:** primary/replica + **real 3-node etcd DCS quorum** (ADR-0029)
 - **Failover:** automatic via Patroni + etcd (accepted behavior — reverses the earlier "no automatic failover" stance, see `DECISION.md` §2)
-- **Not yet done**: the actual end-to-end proof (stop `.207`, confirm `.205` promotes + the VIP follows + DCS survives on 2 of 3) hasn't been performed
+- **Proven for real 2026-08-15** (unplanned): `.165` went down during the room switch replacement, taking the then-Leader `.207` and `etcd-1`. `.205` promoted automatically, the `.232` VIP followed (its new MAC visible from a plain `arp -a`), and DCS quorum held on `etcd-2`/`etcd-3`. Exactly the test ADR-0029 was written to enable, executed involuntarily and passed
 
 ### Monitoring: VictoriaMetrics, not Prometheus
 

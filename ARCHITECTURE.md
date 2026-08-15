@@ -41,8 +41,8 @@ graph TD
     end
 
     subgraph Pigsty["Pigsty"]
-        PG1[pg01 primary]
-        PG2[pg02 replica]
+        PG1[pg01 .205 primary]
+        PG2[pg02 .207 replica]
         PG1 -- streaming replication --> PG2
     end
 
@@ -75,7 +75,7 @@ graph TD
 
 | VM/LXC | Type | vCPU | RAM | Disk | Notes |
 | --- | --- | --- | --- | --- | --- |
-| pg02 | VM (Q35, OVMF) | 2 | 4GB | 40GB | Pigsty PG **leader/primary** (current live role), `192.168.1.207` + etcd DCS member (`etcd-1` of 3) — stays on `.165`, [ADR-0029](docs/adr/0029-postgres-automatic-failover-3-node-etcd-quorum.md) |
+| pg02 | VM (Q35, OVMF) | 2 | 4GB | 40GB | Pigsty PG **replica** as of 2026-08-15 — was Leader until `.165` went down during the switch replacement and Patroni promoted `.205`. `192.168.1.207` + etcd DCS member (`etcd-1` of 3), stays on `.165`. Rejoined via `patronictl reinit` + a replication-slot drop; **streaming, lag 0, verified**. [ADR-0029](docs/adr/0029-postgres-automatic-failover-3-node-etcd-quorum.md) |
 | k8s-cp-01 | VM (Q35, OVMF) | 2 | 4GB | 40GB | Control plane + etcd + worker, Ubuntu 24.04 |
 | k8s-worker-01 | VM (Q35, OVMF) | 6 | 15GB | 100GB | Ubuntu 24.04, RTX 2070 SUPER PCIe passthrough |
 | garage-storage | LXC | 2 | 2GB | 200GB | S3-compatible, NVMe-backed |
@@ -86,7 +86,7 @@ Full eBPF hardware support (AMD Ryzen). ~3GB PVE overhead reserved.
 
 | VM/LXC | Type | vCPU | RAM | Disk | Notes |
 | --- | --- | --- | --- | --- | --- |
-| pg01 | VM (Q35, OVMF) | 2 | 4GB | 40GB | Pigsty PG **replica**, `192.168.1.205` — migrated off `.165` 2026-07-30 via live migration ([ADR-0029](docs/adr/0029-postgres-automatic-failover-3-node-etcd-quorum.md)); hit a kernel panic on first boot here, recovered cleanly with a reboot, confirmed streaming/lag-0 afterward |
+| pg01 | VM (Q35, OVMF) | 2 | 4GB | 40GB | Pigsty PG **leader/primary** as of 2026-08-15 (promoted automatically when `.165` went down — see §HA), `192.168.1.205` — migrated off `.165` 2026-07-30 via live migration ([ADR-0029](docs/adr/0029-postgres-automatic-failover-3-node-etcd-quorum.md)); hit a kernel panic on first boot here, recovered cleanly with a reboot |
 | nfs-storage | VM (Q35, OVMF) | 1 | 1GB | 320GB (20 root + 100 `scsi1` + 200 `scsi2`) | Two independent exports on two disks: `scsi1` → `/export/templates`, shared PVE storage for cross-host VM template cloning ([ADR-0026](docs/adr/0026-nfs-shared-pve-storage-cross-host-clone.md), never mounted by K8s); `scsi2` → `/export/k8s`, backing the unreplicated `nfs` StorageClass ([ADR-0036](docs/adr/0036-nfs-storage-class-for-k8s.md)). Separate disks so a runaway PVC can't starve PVE's template storage |
 | k8s-worker-02 | VM (Q35, OVMF) | 6 | 16GB | 60GB | First cross-host K8s worker (Stage 2 Phase C), `192.168.1.203` — resized 4→6 vCPU/8→16GB 2026-07-30, server1 had most of its RAM idle |
 | k8s-cp-02 | VM (Q35, OVMF) | 2 | 4GB | 40GB | 2nd control-plane + etcd member, `192.168.1.204` — [ADR-0017](docs/adr/0017-second-control-plane-member.md) |
@@ -210,6 +210,69 @@ graph LR
   `.50-.99` static infra · `.100-.199` VMs/LXCs · `.200-.254` Freebox DHCP.
 - Bridge: `vmbr0` on each PVE host, no NAT, no internal libvirt network.
 
+**Physical links — the LAN is flat logically, but *not* uniform physically:**
+
+| Host | Path to Freebox | `nic0` link speed |
+|---|---|---|
+| **proxmox** (`.165`) | room switch → structured cabling → TL-SG108E | 1000Mb/s |
+| server1 (`.200`) | direct to Freebox | 1000Mb/s |
+| ex-laptop (`.161`) | direct to Freebox | 1000Mb/s |
+
+`.165` is the **only** host behind the switch; the other two are plugged
+straight into the Freebox. Their speeds therefore say nothing about
+`.165`'s path — different cabling, so a measurement on one never
+generalizes to the other.
+
+**The switch is a TP-Link `TL-SG108E`** (8-port **Gigabit** Easy Smart,
+management UI at `192.168.0.100`, off-subnet). It is *not* the bottleneck:
+its other ports light the `1000M` LED, and the per-port `1000M` /
+`10M/100M` LED pair is the fastest way to read link speed without SSH.
+Being an Easy Smart model it also supports **802.1Q VLANs, LACP, and port
+mirroring** — available today, unused so far, and the only way to segment
+this LAN given the Freebox has no VLANs.
+
+`.165` does not reach the `TL-SG108E` directly. There is a **second switch
+in the room** (shared with the Pi 4, `192.168.1.55`), and beyond it
+**in-wall structured cabling terminated on a `C5e` patch panel** (ports
+labeled per room: `Router salon`, `M. Amine`, `Bur Linda`, `CH 5 DTE`,
+`CH 5 Ghe`, `ALI`, `LINDA`):
+
+```
+.165 NIC → patch cable → ROOM SWITCH (gigabit, replaced 2026-08-15)
+         → patch cable → wall socket → in-wall run
+         → C5e patch panel → patch cable → TL-SG108E → Freebox
+```
+
+**Resolved 2026-08-15.** `.165` sat at **100Mb/s** because the room switch
+was a **10/100 fast-ethernet unit** — it physically could not do gigabit,
+so no cabling change would ever have helped. Replaced with a gigabit
+switch; unmanaged is fine there, since VLAN capability already exists at
+the rack on the `TL-SG108E`. Verified `nic0` at 1000Mb/s **and** `iperf3`
+to `.200` at **942 Mbit/s** — line rate, ~10× the previous ceiling.
+
+The `iperf3` result also clears the rest of the chain: the in-wall run and
+the `C5e` punch-down carry all four pairs correctly. Nothing else on the
+path is capped.
+
+Two things worth keeping from how long this took to find:
+
+- **Ethernet negotiates per segment.** `ethtool nic0` reports *only* the
+  link to whatever the host is directly plugged into. Everything past the
+  first hop is invisible to it — which is why the wall run and the patch
+  panel were suspected at length despite being downstream of the reading.
+- **Never read link speed off `vmbr0`.** See the box below.
+
+Why this was worth chasing: `.165` carries `pg02` (the Postgres
+**leader**, streaming to `pg01` on `.200`), `etcd-1`, `k8s-cp-01`,
+`k8s-worker-01`, and the Garage LXC that backs both Longhorn backups and
+the Zot registry's blobs. All of that had been crossing the LAN at
+~12 MB/s. Full diagnostic trail in `docs/bootstrap-test-notes.md`.
+
+> **Never read link speed off `vmbr0`.** A Linux bridge has no PHY and
+> reports a synthetic `10000Mb/s`. Query the physical NIC (`nic0`), or
+> enumerate real devices via `/sys/class/net/*/device` — bridges, `veth`,
+> and `tap` have no `device` symlink.
+
 ### MetalLB
 
 - **Mode:** L2 only (Freebox blocks BGP — see `DECISION.md` §2).
@@ -221,6 +284,13 @@ graph LR
   other Service here that isn't reached through Traefik, because `.lan` is a
   name Let's Encrypt can't issue for. Pinned for the same reason as `.233`:
   a DNS record and every node's containerd config both name it.
+> **Don't `ping` a MetalLB VIP.** The speaker answers ARP and forwards
+> TCP; no interface actually holds the address, so ICMP goes unanswered
+> even when the service is perfectly healthy. Test with `curl`. A `404`
+> on Traefik's bare VIP is the *correct* healthy response — no
+> `IngressRoute` matches a raw IP. See `docs/bootstrap-test-notes.md`
+> trap 5.
+
 - **Speaker:** tolerates `node-role.kubernetes.io/control-plane:NoSchedule`.
 - **Controller:** 2 replicas, pod anti-affinity keyed on
   `app=metallb,component=controller` / `topologyKey=kubernetes.io/hostname`.
@@ -260,8 +330,8 @@ A    proxmox.bnei.lan        → 192.168.1.165
 A    server1.bnei.lan        → 192.168.1.200
 A    ex-laptop.bnei.lan      → 192.168.1.161
 A    pi4.bnei.lan            → 192.168.1.55
-A    postgres-1.bnei.lan     → 192.168.1.205  (pg01 VM — current live role is Replica, not Primary; now on server1, migrated 2026-07-30, ADR-0029/patronictl)
-A    postgres-2.bnei.lan     → 192.168.1.207  (pg02 VM — current live Leader, stays on .165, ADR-0029)
+A    postgres-1.bnei.lan     → 192.168.1.205  (pg01 VM — current live Leader/Primary as of 2026-08-15; on server1, migrated 2026-07-30, ADR-0029/patronictl)
+A    postgres-2.bnei.lan     → 192.168.1.207  (pg02 VM — current live Replica, on .165, ADR-0029. Names never tracked roles; always confirm with patronictl)
 A    postgres.bnei.lan       → 192.168.1.232  (Pigsty HA floating VIP — apps/tests should use this, not postgres-1/2 directly)
 A    pg-etcd-witness.bnei.lan → 192.168.1.197  (ex-laptop — 3rd etcd DCS member, live 2026-07-30, ADR-0029)
 A    garage.bnei.lan         → 192.168.1.199
@@ -405,7 +475,7 @@ scripts — ADR-0022 / ADR-0023).
 
 | Node | Host | Role (live, confirmed 2026-07-30) |
 | --- | --- | --- |
-| pg02 (`192.168.1.207`) | proxmox PVE (`.165`) | **Leader/primary**, etcd DCS member (`etcd-1`) |
+| pg02 (`192.168.1.207`) | proxmox PVE (`.165`) | **Replica** as of 2026-08-15 (was Leader), etcd DCS member (`etcd-1`) |
 | pg01 (`192.168.1.205`) | server1 (`.200`) | Replica, streaming, lag 0 — migrated off `.165` via live migration; etcd DCS member (`etcd-2`) |
 | pg-etcd-witness (`192.168.1.197`) | ex-laptop | etcd DCS member only (`etcd-3`), no PG data |
 
@@ -440,15 +510,25 @@ healthy the entire time. See `docs/bootstrap-test-notes.md`'s 2026-07-30
 entries. The 3-node quorum above closes this gap — a single host going
 down (any of the 3) no longer takes DCS with it.
 
-**Still open**: the end-to-end proof this ADR exists to enable — stop
-`.207` (current Leader) and confirm `.205` promotes automatically with
-the VIP following, while DCS quorum survives on the remaining 2 of 3
-members — hasn't been performed yet.
+**Proven for real 2026-08-15**, unplanned: `.165` went down during the
+room switch replacement, taking the then-Leader `.207` and `etcd-1` with
+it. **`.205` promoted automatically and the `.232` VIP followed** — the
+VIP's new MAC was visible from a plain `arp -a` on the LAN, and DCS
+quorum survived on `etcd-2`/`etcd-3`. That is exactly the end-to-end test
+this ADR was written to enable, executed involuntarily and passed.
+
+**Replica rejoin took two manual steps**, 2026-08-15: `.207` came back on
+timeline 27 and never self-healed (`remove_data_directory_on_diverged_timelines:
+false`), so it needed `patronictl reinit`; that restored the data but left
+replication dead, because reinit reuses the old slot and this one was
+`wal_status=lost`. Dropping the slot let Patroni recreate it. Now
+`streaming`, `wal_status=reserved`, **lag 0** — verified. See
+`docs/bootstrap-test-notes.md`.
 
 ```mermaid
 graph LR
     subgraph Pigsty
-        P1[pg02 .207 — leader] -- streaming replication --> P2[pg01 .205 — replica, on server1]
+        P1[pg01 .205 — leader, on server1] -- streaming replication --> P2[pg02 .207 — replica, on .165]
         P1 --> Bouncer[PgBouncer]
         P1 --> Exporter[pg_exporter → Grafana]
         P1 -.->|etcd DCS| E1[.207 etcd-1]

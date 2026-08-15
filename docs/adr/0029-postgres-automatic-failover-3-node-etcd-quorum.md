@@ -175,8 +175,41 @@ not a graceful degrade.
      registration delegates to the `infra` group host). Fixed by running
      an `ssh-agent` with both keys loaded (`ssh-add`) instead, letting
      ansible/ssh pick whichever identity the target host accepts.
-- **Still open**: the real end-to-end test this ADR exists to enable —
-  stop `.207` (current Leader) and confirm `.205` promotes automatically
-  *and* the VIP follows, with DCS quorum (2 of 3) surviving the loss —
-  has not been performed yet. Next session's priority, and the actual
-  proof this rollout worked.
+- **Proven 2026-08-15 — unplanned, and it passed.** The end-to-end test
+  this ADR exists to enable never had to be scheduled: `.165` went down
+  while its room network switch was being replaced, taking the
+  then-Leader `.207` and `etcd-1` with it. Outcome:
+  - **`.205` promoted automatically** to Leader. Confirmed by the user
+    via `patronictl` after recovery.
+  - **The `.232` VIP followed** — `arp -a` from a LAN workstation showed
+    `.232` resolving to `pg01`/`.205`'s MAC (`bc:24:11:e8:da:d9`), with
+    no cluster access needed to see it.
+  - **DCS quorum survived** on `etcd-2` (`.205`) / `etcd-3` (`.197`) —
+    `floor(3/2)+1` = 2, exactly as designed.
+
+  This is the real proof the rollout worked, obtained from a genuine
+  ungraceful host loss rather than a controlled `systemctl stop`, which
+  makes it stronger evidence than the planned test would have been.
+
+  **The rejoin was not automatic** and took two manual steps the same day.
+  `.207` came back on timeline 27 against the leader's 30 and sat there:
+  `remove_data_directory_on_diverged_timelines: false` (a Pigsty default)
+  forbids the only recovery Patroni has for a diverged timeline, so it
+  logged `no action ... following a leader` indefinitely while the cluster
+  ran with **no working standby**. `patronictl reinit` restored the data,
+  but replication stayed dead — reinit reuses the existing slot, and
+  `pg_proxmox_2` was already `wal_status=lost` from the 61 GiB divergence.
+  Dropping the slot let Patroni recreate it; now `streaming`,
+  `wal_status=reserved`, lag 0, verified.
+
+  **Operational consequence for this ADR's HA claim:** automatic failover
+  works, but automatic *recovery of the demoted node* does not. Every
+  ungraceful failover with timeline divergence needs a human to reinit and
+  to check the slot afterwards. Until that is done the cluster is
+  single-node, and `patronictl list` will not say so — it reported
+  `Replica / running` at lag 4 KB the entire time it was disconnected.
+
+  No failback was performed, and none is planned: Patroni is symmetric,
+  and `.165` is the host that gets rebooted for gaming (§2), making it
+  the *worse* home for the Leader. See `docs/bootstrap-test-notes.md`'s
+  2026-08-15 entry for the switch-replacement incident itself.
