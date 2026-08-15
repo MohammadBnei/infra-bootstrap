@@ -284,6 +284,13 @@ the Zot registry's blobs. All of that had been crossing the LAN at
   other Service here that isn't reached through Traefik, because `.lan` is a
   name Let's Encrypt can't issue for. Pinned for the same reason as `.233`:
   a DNS record and every node's containerd config both name it.
+> **Don't `ping` a MetalLB VIP.** The speaker answers ARP and forwards
+> TCP; no interface actually holds the address, so ICMP goes unanswered
+> even when the service is perfectly healthy. Test with `curl`. A `404`
+> on Traefik's bare VIP is the *correct* healthy response — no
+> `IngressRoute` matches a raw IP. See `docs/bootstrap-test-notes.md`
+> trap 5.
+
 - **Speaker:** tolerates `node-role.kubernetes.io/control-plane:NoSchedule`.
 - **Controller:** 2 replicas, pod anti-affinity keyed on
   `app=metallb,component=controller` / `topologyKey=kubernetes.io/hostname`.

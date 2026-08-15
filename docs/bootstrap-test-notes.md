@@ -1875,6 +1875,46 @@ cable order** — 1000BASE-T mandates auto-negotiation and auto-MDI/MDI-X,
 so any port takes the uplink and crossover cables are irrelevant. The
 dedicated uplink port died with fast ethernet.
 
+### Trap 5 — do not `ping` a MetalLB VIP
+
+During the same recovery, `.233` (Traefik) and `.234` (zot) kept failing
+`ping` long after every other address returned. Since the two share no
+storage and no app code, the common factor looked like MetalLB, and a
+speaker/announcement fault was diagnosed on that basis.
+
+There was no fault. **MetalLB L2 VIPs do not reliably answer ICMP.** The
+speaker answers *ARP* for the address and forwards *TCP* to the service;
+no interface genuinely holds the IP, and with `kube-proxy` in IPVS +
+strict-ARP mode (this cluster's config) nothing is obliged to reply to a
+ping. A dead ping on a LoadBalancer IP is not evidence of anything.
+
+Test with TCP instead. Both were perfectly healthy the entire time:
+
+```bash
+curl -sk -m 8 -o /dev/null -w "%{http_code}\n" https://192.168.1.233/  # 404 = Traefik up
+curl -s  -m 8 -o /dev/null -w "%{http_code}\n" http://192.168.1.234:5000/v2/  # 200 = zot up
+curl -sk -m 8 -o /dev/null -w "%{http_code}\n" https://argocd.bnei.dev/       # 200 = ingress up
+```
+
+`404` on Traefik's bare VIP is the **correct** healthy response — no
+`IngressRoute` matches a raw IP, so there is nothing to route to. Only a
+connection failure or timeout would indicate a real problem.
+
+The in-cluster view said so too, and would have caught this before the
+ping did: `kubectl get svc -A | grep LoadBalancer` showed both
+EXTERNAL-IPs assigned, and `kubectl get endpoints -A` showed ready
+endpoints for both. **When an external probe disagrees with healthy
+cluster state, suspect the probe.**
+
+Post-outage health after `.165` returned, for the record: all 5 nodes
+`Ready`, all MetalLB speakers `Running` (the two on `.165` had restarted,
+8× and 13×), all 5 Longhorn volumes `healthy` with no RWO attach
+deadlock, and every ArgoCD Application `Synced`/`Healthy`.
+
+Same shape as traps 1-4, one layer up: **`vmbr0` was the wrong interface
+to measure, `ping` was the wrong protocol to measure with.** Both produced
+a confident, entirely wrong conclusion from a real reading.
+
 Worth knowing for later: the `TL-SG108E` is the *Easy Smart* model, so it
 has a web UI (`192.168.0.100`, off-subnet — reach it via a temporary
 `ip addr add 192.168.0.50/24 dev <iface>`) exposing per-port stats and
