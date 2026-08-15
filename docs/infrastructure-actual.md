@@ -64,19 +64,36 @@ any host here before this.
 counters are clean — `tx_errors 0`, `rx_errors 0`, `align_errors 0`,
 `tx_underrun 0`.
 
-That pairing is diagnostic. 100BASE-TX uses 2 pairs; 1000BASE-T needs all 4. A
-cable with only two pairs wired makes autonegotiation settle at 100 with a
-*perfectly healthy* link — which is why there are no errors. A damaged or
-marginal cable would instead show CRC/align errors. So the leading suspect is
-the **cable** (2-pair, or a broken pair in a longer run), then the **switch
-port**. Confirm which with:
+**Cause, confirmed.** `.165` does not reach the Freebox directly. Its path is
+`.165` → patch cable → wall socket → in-wall run → patch cable → **a TP-Link
+device (`.100`)** → Freebox. `server1` and `ex-laptop` have no such hop, which
+is exactly why they are at gigabit.
 
-```sh
-ethtool nic0 | grep -A4 "Link partner advertised link modes"
+`ethtool nic0 | grep -A6 "Link partner"` names the culprit:
+
+```
+Link partner advertised link modes:  10baseT/Half 10baseT/Full
+                                     100baseT/Half 100baseT/Full
 ```
 
-If the link partner advertises `1000baseT/Full` and the link still comes up at
-100, it is the cable. If the partner tops out at `100baseT`, it is the port.
+**No `1000baseT/Full`.** The device terminating `.165`'s copper is 100 Mb/s
+hardware. That also exonerates the wiring: a 2-pair run would still show the
+partner advertising gigabit — autonegotiation rides a single pair — and merely
+fail to reach it. This partner cannot do gigabit at all.
+
+`.100` does not answer ARP from `.165` (`ip neigh` → `INCOMPLETE`), so it has no
+reachable management address on this subnet. Irrelevant to the fault: a switch
+or powerline adapter is transparent at layer 2 and imposes its port speed
+whether or not it is manageable.
+
+**Fix: replace it with an unmanaged gigabit switch** — TP-Link TL-SG105 (~€15)
+or TL-SG108 (~€20), fanless, no configuration. Anything else hanging off that
+device is capped at 100 Mb/s today and gains from the swap too.
+
+Then re-check `ethtool nic0 | grep Speed`. If it is **still** 100 afterwards,
+the in-wall run is 2-pair — it has never been tested above 100 Mb/s, because
+nothing in the path has ever offered gigabit. Re-terminate if all four pairs are
+physically present, otherwise pull a new Cat6.
 
 **Why this one link matters more than any other.** `.165` hosts `k8s-cp-01`,
 **`k8s-worker-01`**, `pg02` (the current Patroni **leader**) and the
