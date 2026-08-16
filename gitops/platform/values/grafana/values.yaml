@@ -335,7 +335,7 @@ alerting:
                   to: 0
                 model:
                   queryType: range
-                  expr: 'sum by (namespace, pod) (rate({namespace=~".+"} |~ "(?i)error" [5m]))'
+                  expr: 'sum by (namespace, pod) (rate({namespace=~".+"} | json | level >= 40 [5m]))'
                   intervalMs: 60000
                   maxDataPoints: 43200
               # A Threshold expression fed directly by a range query (A has
@@ -359,9 +359,9 @@ alerting:
                   conditions:
                     - evaluator:
                         type: gt
-                        # ~1 error-level line every 2s sustained over the 5m
-                        # window — starting point, not tuned per-app; refine
-                        # once real log volume is visible.
+                        # ~1 warn/error line (level >= 40) every 2s sustained
+                        # over the 5m window — starting point, not tuned
+                        # per-app; refine once real log volume is visible.
                         params: [0.5]
 
 # Dashboards as code: the chart's own file-provisioning (no sidecar
