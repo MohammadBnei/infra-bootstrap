@@ -146,6 +146,24 @@ Two further practical constraints made this unavoidable anyway:
   cannot pick up jobs for `editable-blog`, the intended pilot. Personal
   GitHub accounts cannot register org-level runners, so a second Deployment
   was required regardless.
+
+  **Generalized 2026-08-17, when `agent-fleet` was migrated:** this is not a
+  one-off about `vos-monolith`, it is the standing shape. Every build repo
+  needs its own runner *instance*, because a repo-scoped runner serves only
+  that repo and org-level runners remain unavailable to a personal account.
+  Asked directly whether the runner could be shared, the answer is: **the
+  box yes, the registration no.** `build-runner-configure.yml` is therefore
+  config-driven off a `build_runner_repos` list (the same shape ADR-0030 gave
+  `garage-configure.yml`'s `garage_buckets`) — per-instance directory,
+  systemd unit and registration; shared user, packages, sudoers and, most
+  importantly, shared rootful buildah image store, so `golang:1.26` and
+  `oven/bun:1-slim` are pulled once for all repos.
+
+  The cost of that sharing, which is real and worth stating: **one instance
+  runs one job at a time.** `agent-fleet` builds six images, so its release
+  serializes — and it competes with `editable-blog`'s builds for the box.
+  That is the trade for the base-image cache and a 40GB disk that only has to
+  hold one copy of each base.
 - Builds use **buildah**, not kaniko — `GoogleContainerTools/kaniko` was
   archived upstream in June 2025. On the LXC it runs as real root, so none
   of the `subuid`/`seccomp`/`procMount` machinery an in-cluster attempt
@@ -258,4 +276,51 @@ Two further practical constraints made this unavoidable anyway:
   holds — the build pod has no ServiceAccount and therefore no cluster
   access.
 - Deferred and named so they are not mistaken for oversights: vulnerability
-  scanning, image signing, GC/retention policy, public exposure.
+  scanning, image signing, ~~GC/retention policy~~, public exposure.
+
+### Retention policy — no longer deferred (2026-08-17)
+
+Decision 8 above kept the *bound* and deferred the *policy*. Migrating
+`agent-fleet` is what forced the policy: six images per release, one of them
+multi-GB (`worker` carries Claude Code, Playwright deps and a Go toolchain),
+against a 40GB quota on a 200GB LXC that also holds `k8s-longhorn-backup`,
+`pg-backup`, `agent-fleet-files` and `ente-photos`.
+
+`storage.gc` + `storage.retention` in
+`gitops/platform/values/zot/values.yaml`: **last 5 tags per repository plus
+`latest`, `deleteUntagged`, `repositories: ["**"]`.**
+
+Three things about it are decisions rather than defaults:
+
+- **`mostRecentlyPushedCount`, never `mostRecentlyPulledCount` /
+  `pulledWithin`.** Those look like better signals — keep what's actually in
+  use — and they are actively wrong *given decision 3*. Retention's pull/push
+  statistics live in zot's metaDB, a boltdb under `storage.rootDirectory`,
+  which decision 3 put on an `emptyDir`. Push order survives, because a
+  metaDB rebuild recovers it from the manifests in S3; pull counts exist
+  nowhere else. After any restart every tag reads "never pulled", so a
+  pull-keyed policy deletes exactly the tags in service. This is the second
+  time decision 3's `emptyDir` has reached further than expected — worth
+  checking against it before adding anything that keeps registry-side state.
+- **`latest` pinned by its own `keepTags` pattern entry** (they are OR'd).
+  `gitops/platform/thot/deployment.yaml` and `agent-fleet`'s
+  `provisioner/internal/catalog/catalog.go` both float on
+  `agent-fleet-executor:latest` deliberately. Losing that tag breaks
+  `platform-thot` and every cluster-access session with no version bump to
+  point at.
+- **Ships `dryRun: true`.** This is the one part of the registry with a
+  genuinely one-way door: a GC'd blob is gone and the image must be rebuilt.
+  Two things get confirmed before it flips. That nothing currently pinned is
+  on the would-delete list — 5 is tight, though in steady state the deployed
+  tag is always the newest one, so the exposure is a rollback deeper than 5
+  releases rather than normal operation. And **that S3 blobs are actually
+  reclaimed**: zot's docs describe `gc` uniformly across storage backends and
+  never exclude remote ones, but that is not evidence, and the failure is
+  silent and asymmetric — manifests deleted (rollback depth gone) while
+  Garage usage is unchanged (quota still fills). Measure it with `garage
+  bucket info zot-registry` either side of a GC interval.
+
+Applying it is not automatic: `config.json` is mounted with `subPath`, which
+never picks up ConfigMap updates, and nothing notifies the Deployment. An
+ArgoCD sync updates the ConfigMap and leaves the pod on the old config — it
+takes a deliberate `kubectl -n zot rollout restart deploy/zot`.

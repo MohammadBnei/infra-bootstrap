@@ -152,6 +152,67 @@ extraVolumeMounts:
   - name: registry-cache
     mountPath: /var/lib/registry
 
+# -----------------------------------------------------------------------
+# Retention / GC (the storage.gc + storage.retention block below)
+#
+# ADR-0034 deferred a retention *policy* while keeping the bucket bound.
+# agent-fleet's cutover is what makes the policy necessary: six images per
+# release, one of them multi-GB (worker carries Claude Code, Playwright deps
+# and a Go toolchain), against a 40GB zot-registry quota on a 200GB Garage
+# LXC that also holds k8s-longhorn-backup, pg-backup, agent-fleet-files and
+# ente-photos. Left unbounded it does not just fill its own space, it
+# starves the backup system.
+#
+# `mostRecentlyPushedCount: 5`, and deliberately NOT
+# mostRecentlyPulledCount / pulledWithin. Those are the obvious knobs and
+# two of the three are traps *here specifically*: retention's pull/push
+# statistics live in zot's metaDB, a boltdb under storage.rootDirectory —
+# which is the emptyDir above. Push order survives that, because a metaDB
+# rebuild recovers it from the manifests in S3. Pull counts cannot; they
+# exist nowhere else. So after any restart (an ArgoCD sync, a node drain,
+# a `.165` reboot) every tag looks "never pulled", and a policy keyed on
+# pull recency would delete precisely the tags that are in service.
+#
+# The `patterns: ["latest"]` entry is load-bearing, not belt-and-braces.
+# keepTags entries are OR'd, so this pins `latest` unconditionally.
+# gitops/platform/thot/deployment.yaml and agent-fleet's
+# provisioner/internal/catalog/catalog.go both float on
+# agent-fleet-executor:latest on purpose — losing that tag breaks
+# platform-thot and every cluster-access session, with no version bump to
+# blame it on.
+#
+# gcDelay 2h (up from the 1h default) is the window protecting blobs of an
+# in-flight push, and agent-fleet's worker is the largest thing this
+# registry takes. deleteUntagged is where most of the space actually comes
+# back — dangling manifests left by overwritten `latest` pushes.
+#
+# `dryRun: true` is the shipping state, and this is the one genuinely
+# one-way door in the registry setup — a GC'd blob is gone and the image
+# has to be rebuilt. Two things must be confirmed before flipping it:
+#
+#   1. That S3 blobs are actually reclaimed. zot's docs describe `gc`
+#      uniformly across storage backends and never exclude remote ones, but
+#      that is not evidence. The bad failure is silent and asymmetric:
+#      manifests deleted (rollback depth gone) while Garage usage is
+#      unchanged (quota still fills). Measure with `garage bucket info
+#      zot-registry` before and after — see the /garage-ops skill.
+#   2. That nothing pinned in agent-fleet's k8s/core.yaml or
+#      k8s/provisioner/deployment.yaml is on the would-delete list. 5 is
+#      tight. In normal operation the deployed tag is always the newest one
+#      (agent-fleet's deploy job bumps to the release it just built), so the
+#      exposure is a rollback deeper than 5 releases, not steady state.
+#
+# `repositories: ["**"]` also applies this to editable-blog and anything
+# added later. That is intended — one policy beats a per-repo list to keep
+# in sync.
+#
+# Changing the JSON below is NOT self-applying: config.json is mounted with
+# subPath (see extraVolumeMounts), which never picks up ConfigMap updates,
+# and nothing here notifies the Deployment. An ArgoCD sync updates the
+# ConfigMap and leaves the running pod on the old config. It takes a
+# deliberate `kubectl -n zot rollout restart deploy/zot`, which also wipes
+# the emptyDir metaDB and forces a one-time rebuild-from-storage on boot.
+# -----------------------------------------------------------------------
 extraManifests:
   - |
     apiVersion: v1
@@ -166,6 +227,24 @@ extraManifests:
           "storage": {
             "rootDirectory": "/var/lib/registry",
             "dedupe": false,
+            "gc": true,
+            "gcDelay": "2h",
+            "gcInterval": "24h",
+            "retention": {
+              "dryRun": true,
+              "delay": "24h",
+              "policies": [
+                {
+                  "repositories": ["**"],
+                  "deleteUntagged": true,
+                  "deleteReferrers": true,
+                  "keepTags": [
+                    { "patterns": ["latest"] },
+                    { "mostRecentlyPushedCount": 5 }
+                  ]
+                }
+              ]
+            },
             "storageDriver": {
               "name": "s3",
               "bucket": "zot-registry",

@@ -16,7 +16,7 @@ Custom playbooks for things kubespray and pigsty don't cover:
 | `playbooks/garage-configure.yml` | Install/configure Garage on the bare LXC terraform/garage.tf creates — drafted, see below |
 | `playbooks/nfs-configure.yml` | Format + export NFS on the bare VM terraform/nfs.tf creates — two exports since ADR-0036, see below |
 | `playbooks/k9s-dashboard-configure.yml` | Install kubectl/k9s + write a cluster-admin kubeconfig on the bare k9s-dashboard LXC terraform/k9s-dashboard.tf creates — drafted, see below |
-| `playbooks/build-runner-configure.yml` | Install podman/buildah + register the GitHub Actions build runner on the bare LXC terraform/build-runner.tf creates (ADR-0034) — an LXC rather than a pod because buildah cannot extract image layers unprivileged |
+| `playbooks/build-runner-configure.yml` | Install podman/buildah + register **one GitHub Actions runner instance per build repo** on the bare LXC terraform/build-runner.tf creates (ADR-0034) — an LXC rather than a pod because buildah cannot extract image layers unprivileged. Config-driven via `build_runner_repos` (same shape as `garage-configure.yml`'s `garage_buckets`); adding a repo means adding an entry and re-running, plus widening the `ACCESS_TOKEN` PAT first. See the `build-runner-ops` skill |
 | `playbooks/pihole-configure.yml` | Install/configure Pi-hole on the Pi 4, authoritative for `bnei.lan` — drafted, see below |
 | `playbooks/self-drain-configure.yml` | Configure k8s-cp-01/k8s-worker-01 to drain + uncordon themselves around their own graceful reboot — drafted and run, see below |
 | `inventories/proxmox/hosts.yml` | Proxmox host inventory for `pve-postinstall.yml` (`.200`/`.161` — `.165` is a delegation target only) |
@@ -26,6 +26,7 @@ Custom playbooks for things kubespray and pigsty don't cover:
 | `inventories/build-runner/hosts.yml` | Single-host inventory for `build-runner-configure.yml` (`build-runner` LXC) |
 | `inventories/pihole/hosts.yml` | Single-host inventory for `pihole-configure.yml` (Pi 4, physical hardware) |
 | `requirements.yml` | Ansible collections needed by these playbooks (`ansible-galaxy collection install -r ansible/requirements.yml`) |
+| `tests/build-runner-expressions.yml` | Localhost-only check for `build-runner-configure.yml`'s two silent-failure Jinja expressions (`rejectattr` instance filtering, `zip` token pairing). No infra, no connection: `ansible-playbook -i localhost, ansible/tests/build-runner-expressions.yml` |
 
 ## Status
 
@@ -37,6 +38,7 @@ Custom playbooks for things kubespray and pigsty don't cover:
 - [x] `pihole-configure.yml` drafted — see below
 - [x] `self-drain-configure.yml` drafted and run (2026-07-30) — see below
 - [x] `build-runner-configure.yml` drafted and run (2026-08-13) — image build LXC, ADR-0034
+  - [ ] multi-instance rewrite (`build_runner_repos`) + `agent-fleet` instance — **not yet run**, needs the `ACCESS_TOKEN` PAT widened to `agent-fleet` first
 - [ ] `vm-provision.yml` drafted
 - [ ] `k8s-node-prereqs.yml` drafted (may not be needed if kubespray covers it)
 
