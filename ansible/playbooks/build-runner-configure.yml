@@ -143,6 +143,34 @@
         state: present
         update_cache: true
 
+    - name: Resolve unqualified image names against Docker Hub
+      # Debian's /etc/containers/registries.conf ships entirely commented out,
+      # so there is no `unqualified-search-registries` at all. Without it a
+      # short name only resolves if it happens to be in the packaged
+      # shortnames.conf alias table — which lists official/library images
+      # (`golang`, `debian`, `node`, `alpine`) and nothing else.
+      #
+      # So `FROM golang:1.26` worked and `FROM oven/bun:1-slim` did not:
+      #   short-name "oven/bun:1-slim" did not resolve to an alias and no
+      #   unqualified-search registries are defined
+      #
+      # That is why editable-blog never hit this (node:22-alpine is aliased)
+      # and agent-fleet did on its first real release: 3 of its 6 images use
+      # non-library bases (oven/bun, migrate/migrate). The partial coverage is
+      # the trap — half the builds work, which reads as "resolution is fine"
+      # rather than "resolution is a hardcoded list".
+      #
+      # Restores what every Dockerfile in the world assumes and what Docker
+      # does by default. Its own file rather than appended to the registry
+      # trust file below: this is a top-level TOML key and that file opens a
+      # [[registry]] table, so ordering would matter.
+      ansible.builtin.copy:
+        dest: /etc/containers/registries.conf.d/005-unqualified-search.conf
+        mode: "0644"
+        content: |
+          # Managed by ansible/playbooks/build-runner-configure.yml
+          unqualified-search-registries = ["docker.io"]
+
     - name: Trust the in-cluster registry over plain HTTP
       # registry.bnei.lan is a `.lan` name, so Let's Encrypt cannot issue for
       # it and there is no ingress — it is plain HTTP on a MetalLB address
