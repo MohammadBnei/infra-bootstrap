@@ -4,6 +4,13 @@
 # not auto-bumped by agent-fleet's docker.yml deploy job, since that job
 # only ever touches agent-fleet's own k8s/*.yaml). Bump the tag here by
 # hand until/unless that's automated.
+#
+# Now from registry.bnei.lan:5000 (ADR-0034). The floating `:latest` is why
+# zot's retention policy pins that tag by name with its own keepTags entry:
+# retention keeps the last 3 tags per image, and `latest` is not among the
+# most-recently-pushed *version* tags in any obvious sense — letting it age
+# out would break every cluster-access session, with no version bump anywhere
+# to point at. See gitops/platform/values/zot/values.yaml.
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -23,7 +30,7 @@ spec:
       serviceAccountName: thot-executor
       containers:
       - name: executor
-        image: mohammaddocker/agent-fleet-executor:latest
+        image: registry.bnei.lan:5000/agent-fleet-executor:latest
         ports:
         - name: grpc
           containerPort: 9090
