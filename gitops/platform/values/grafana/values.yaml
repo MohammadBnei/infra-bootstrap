@@ -335,7 +335,31 @@ alerting:
                   to: 0
                 model:
                   queryType: range
-                  expr: 'sum by (namespace, pod) (rate({namespace=~".+"} | json | level >= 40 [5m]))'
+                  # PR #144 (2026-08-16) switched this from a substring match
+                  # to `| json | level >= 40`, assuming every app logs a
+                  # numeric Pino-style level. It doesn't hold cluster-wide:
+                  # zap/controller-runtime/Grafana's own json logs all emit a
+                  # STRING level ("info"/"error"/...), so `| json` extracts a
+                  # `level` field that `>= 40` then tries to strconv.ParseFloat
+                  # and fails — Loki returns LabelFilterErr on nearly every
+                  # series, every evaluation, cluster-wide (confirmed live in
+                  # platform-grafana's own ngalert scheduler log:
+                  # "Failed to evaluate rule" / rule_uid=log-error-rate-spike).
+                  # With execErrState: Alerting, the errored-out rule fires
+                  # anyway but with no labels to fill $labels.namespace/pod —
+                  # that's the literal "[no value]/[no value]" in the summary,
+                  # not a real error-rate spike.
+                  #
+                  # `detected_level` is Loki's own query-time heuristic
+                  # (computed per line, not an indexed label — see
+                  # docs/bootstrap-test-notes.md's "Follow-up (PR #57)" note)
+                  # and is already proven against this cluster's actual mix of
+                  # JSON, logfmt, and plain-text logs (Gin access logs, zerolog
+                  # console output, custom HTTP loggers, plain Node output) —
+                  # exactly the unstructured-logs case PR #144 explicitly
+                  # skipped. No `| json` parse means no parse-time errors on
+                  # non-JSON or string-level lines.
+                  expr: 'sum by (namespace, pod) (rate({namespace=~".+"} | detected_level=~"error|critical" [5m]))'
                   intervalMs: 60000
                   maxDataPoints: 43200
               # A Threshold expression fed directly by a range query (A has
@@ -359,9 +383,9 @@ alerting:
                   conditions:
                     - evaluator:
                         type: gt
-                        # ~1 warn/error line (level >= 40) every 2s sustained
-                        # over the 5m window — starting point, not tuned
-                        # per-app; refine once real log volume is visible.
+                        # ~1 error/critical line (detected_level) every 2s
+                        # sustained over the 5m window — starting point, not
+                        # tuned per-app; refine once real log volume is visible.
                         params: [0.5]
 
 # Dashboards as code: the chart's own file-provisioning (no sidecar
