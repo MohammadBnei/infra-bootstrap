@@ -1,6 +1,6 @@
 ---
-# build-runner — GitHub Actions runner that builds container images and
-# pushes them to the in-cluster registry (ADR-0034).
+# build-runner — GitHub Actions runners that build container images and
+# push them to the in-cluster registry (ADR-0034).
 #
 # Runs against the bare LXC terraform/build-runner.tf creates. Terraform's
 # job stops at "bare, SSH-reachable container"; everything below is this
@@ -14,9 +14,18 @@
 # node-level escape risk. See terraform/build-runner.tf's header and
 # docs/bootstrap-test-notes.md.
 #
-# Safe to re-run: package installs are idempotent, the runner is only
-# re-registered when it isn't already configured, and the systemd unit is
-# templated rather than appended to.
+# ONE RUNNER INSTANCE PER BUILD REPO, all on this one LXC. A GitHub runner
+# registered at repo scope only picks up jobs for that repo, and org-level
+# runners need a GitHub organization — personal accounts cannot register them
+# (the same constraint ADR-0022 hit; ADR-0034 rejected migrating the repos
+# into an org because it would rewrite every repoURL in gitops/). So the
+# registration cannot be shared. What IS shared is this box and its rootful
+# buildah image store, which is where most of the value is: golang:1.26 and
+# oven/bun:1-slim are pulled once and reused by every repo.
+#
+# Safe to re-run: package installs are idempotent, an instance is only
+# registered when it isn't already, and the systemd units are templated
+# rather than appended to.
 - name: Configure the image build runner
   hosts: build-runner
   become: true
@@ -24,18 +33,47 @@
   vars:
     infisical_project_id: "{{ lookup('env', 'INFISICAL_PROJECT_ID') | default('b9043dd5-2956-43e4-9f1b-e9bf7a8e1edc', true) }}"
     infisical_env: "{{ lookup('env', 'INFISICAL_ENV') | default('prod', true) }}"
-    # Which repo this runner serves. One runner per repo: personal GitHub
-    # accounts cannot register org-level runners, so a second build repo
-    # means a second runner, not a relabel (same constraint ADR-0022 hit).
-    runner_repo_url: "https://github.com/MohammadBnei/editable-blog"
+    # One entry per build repo. Each gets its own runner directory, its own
+    # systemd unit and its own GitHub registration; everything else on the
+    # box is shared. To add a build repo, add an entry here and re-run —
+    # same config-driven shape as garage-configure.yml's garage_buckets
+    # (ADR-0030).
+    #
+    # `home` is optional and defaults to /opt/actions-runner-<name>.
+    #
+    # Adding an entry is NOT sufficient on its own: the repo must first be
+    # added to the ACCESS_TOKEN PAT's repository list, or "Mint a runner
+    # registration token" below 403s. That is a GitHub UI action on a
+    # fine-grained PAT — `gh` cannot edit PAT scopes.
+    build_runner_repos:
+      - name: editable-blog
+        url: https://github.com/MohammadBnei/editable-blog
+        # ponytail: explicit legacy path. This instance predates the
+        # multi-instance layout and is already registered at the un-suffixed
+        # /opt/actions-runner (which is also the runner user's home). Letting
+        # it take the derived path would strand a working registration and
+        # re-register it for nothing.
+        home: /opt/actions-runner
+      - name: agent-fleet
+        url: https://github.com/MohammadBnei/agent-fleet
     # NOT `ukubi` — that label belongs to the in-cluster runner holding a
     # ServiceAccount token with `create jobs` in vos/vos-dev. Builds must
     # not land there and cluster jobs must not land here.
+    #
+    # Deliberately identical across instances: the label does not
+    # disambiguate and does not need to, because repo scope already does. A
+    # workflow in either repo says `runs-on: [self-hosted, ukubi-build]`.
     runner_labels: "self-hosted,ukubi-build"
     runner_version: "2.336.0"
     runner_user: runner
-    runner_home: /opt/actions-runner
+    # The runner *user's* home, distinct from the per-instance directories
+    # above. It happens to equal editable-blog's instance directory for the
+    # historical reason recorded there.
+    runner_user_home: /opt/actions-runner
     registry_host: "registry.bnei.lan:5000"
+    # Builds pass `--storage-driver vfs` explicitly, so the prune timer must
+    # too — see "Install a weekly image prune timer" below.
+    build_storage_driver: vfs
 
   tasks:
     # -------------------------------------------------------------------
@@ -75,7 +113,7 @@
       failed_when: registry_dns.rc != 0
 
     # -------------------------------------------------------------------
-    # Build tooling
+    # Build tooling — shared by every instance
     # -------------------------------------------------------------------
     - name: Install podman/buildah and runner dependencies
       ansible.builtin.apt:
@@ -120,12 +158,12 @@
           insecure = true
 
     # -------------------------------------------------------------------
-    # Runner user + binaries
+    # Runner user — one user, shared by every instance
     # -------------------------------------------------------------------
     - name: Create the runner user
       ansible.builtin.user:
         name: "{{ runner_user }}"
-        home: "{{ runner_home }}"
+        home: "{{ runner_user_home }}"
         shell: /bin/bash
         create_home: true
         system: false
@@ -146,6 +184,11 @@
       # honest boundary here is the LXC itself — this box exists to run
       # untrusted build content and holds nothing else — but a narrow rule
       # still keeps "what the build can do as root" legible.
+      #
+      # Consequence worth knowing before writing a workflow: `sudo apt-get`
+      # and `sudo -E bash` do NOT work here. A workflow step that installs a
+      # tool at job time (the Infisical CLI bootstrap, for instance) will
+      # hang on a password prompt. Bake tooling into this playbook instead.
       ansible.builtin.copy:
         dest: /etc/sudoers.d/runner-buildah
         mode: "0440"
@@ -154,26 +197,111 @@
           # Managed by ansible/playbooks/build-runner-configure.yml
           {{ runner_user }} ALL=(root) NOPASSWD: /usr/bin/buildah
 
-    - name: Check whether the runner is already configured
+    # -------------------------------------------------------------------
+    # Retire the pre-multi-instance unit
+    # -------------------------------------------------------------------
+    - name: Check for the legacy single-instance systemd unit
       ansible.builtin.stat:
-        path: "{{ runner_home }}/.runner"
-      register: runner_configured
+        path: /etc/systemd/system/actions-runner.service
+      register: legacy_runner_unit
 
+    - name: Stop and disable the legacy single-instance runner unit
+      # Superseded by the per-instance actions-runner-<name>.service units
+      # below. Safe: the GitHub-side registration lives in the instance
+      # directory's .runner file, not in the unit, so moving which unit
+      # executes run.sh does not deregister anything. editable-blog's runner
+      # goes offline for the seconds between this and the enable task.
+      #
+      # Its GitHub-side runner NAME stays `ukubi-build` rather than becoming
+      # `ukubi-build-editable-blog`: renaming it would mean re-running
+      # config.sh on an already-working registration purely for cosmetics.
+      ansible.builtin.systemd:
+        name: actions-runner
+        state: stopped
+        enabled: false
+      when: legacy_runner_unit.stat.exists
+
+    - name: Remove the legacy single-instance unit file
+      ansible.builtin.file:
+        path: /etc/systemd/system/actions-runner.service
+        state: absent
+      when: legacy_runner_unit.stat.exists
+
+    # -------------------------------------------------------------------
+    # Per-instance directories and binaries
+    # -------------------------------------------------------------------
+    - name: Ensure each runner instance directory exists
+      ansible.builtin.file:
+        path: "{{ item.home | default('/opt/actions-runner-' + item.name) }}"
+        state: directory
+        owner: "{{ runner_user }}"
+        group: "{{ runner_user }}"
+        mode: "0755"
+      loop: "{{ build_runner_repos }}"
+      loop_control:
+        label: "{{ item.name }}"
+
+    - name: Check which runner instances are already configured
+      ansible.builtin.stat:
+        path: "{{ item.home | default('/opt/actions-runner-' + item.name) }}/.runner"
+      register: runner_configured
+      loop: "{{ build_runner_repos }}"
+      loop_control:
+        label: "{{ item.name }}"
+
+    - name: Determine which instances still need registering
+      # Collapsing the stat results into one list here means every task
+      # below can just `loop` over it — an empty list skips naturally, which
+      # reads better than threading `when: not item.stat.exists` through
+      # six tasks and their zips.
+      ansible.builtin.set_fact:
+        runner_pending: "{{ runner_configured.results | rejectattr('stat.exists') | map(attribute='item') | list }}"
+
+    - name: Report which instances would be registered
+      # The one thing worth reading out of a --check run: which instances the
+      # play considers pending. An already-registered one appearing here means
+      # its .runner is missing or its `home` is wrong, and the real run would
+      # re-register a working runner.
+      ansible.builtin.debug:
+        msg: >-
+          pending registration:
+          {{ (runner_pending | map(attribute='name') | list) | join(', ') | default('none', true) }}
+          — already configured:
+          {{ (build_runner_repos | map(attribute='name') | difference(runner_pending | map(attribute='name')) | list) | join(', ') | default('none', true) }}
+
+    # The four provisioning tasks below are skipped under --check, and that is
+    # deliberate rather than a limitation worked around. In check mode the
+    # instance directory is never really created, so `unarchive` fails with
+    # "dest must be an existing dir"; the PAT lookup and the token POST are
+    # both skipped, leaving gh_pat/gh_reg_tokens undefined for the templates
+    # that consume them. A dry run would therefore abort on a *new* instance
+    # every time — turning the one command that is supposed to be safe to run
+    # unattended into a false alarm. Nothing is lost by skipping them: check
+    # mode does not download the tarball or mint a token either, so there is
+    # no behaviour here it could have validated. The debug above is the real
+    # preview signal.
     - name: Download the Actions runner tarball
+      # Instance-independent: one tarball, unpacked into each pending
+      # instance directory below.
       ansible.builtin.get_url:
         url: "https://github.com/actions/runner/releases/download/v{{ runner_version }}/actions-runner-linux-x64-{{ runner_version }}.tar.gz"
         dest: "/tmp/actions-runner-{{ runner_version }}.tar.gz"
         mode: "0644"
-      when: not runner_configured.stat.exists
+      when:
+        - runner_pending | length > 0
+        - not ansible_check_mode
 
-    - name: Unpack the runner
+    - name: Unpack the runner into each pending instance
       ansible.builtin.unarchive:
         src: "/tmp/actions-runner-{{ runner_version }}.tar.gz"
-        dest: "{{ runner_home }}"
+        dest: "{{ item.home | default('/opt/actions-runner-' + item.name) }}"
         remote_src: true
         owner: "{{ runner_user }}"
         group: "{{ runner_user }}"
-      when: not runner_configured.stat.exists
+      loop: "{{ runner_pending }}"
+      loop_control:
+        label: "{{ item.name }}"
+      when: not ansible_check_mode
 
     # -------------------------------------------------------------------
     # Registration
@@ -193,34 +321,47 @@
       register: gh_pat
       changed_when: false
       no_log: true
-      when: not runner_configured.stat.exists
+      when:
+        - runner_pending | length > 0
+        - not ansible_check_mode
 
-    - name: Mint a runner registration token
+    - name: Mint a runner registration token per pending instance
       # Short-lived (1h) and single-use — the PAT itself never reaches the
       # LXC. Requires `Administration: Read and write` on the repo AND the
       # token holder to be the repo owner: personal-account repos have no
       # admin-collaborator role, so a bot PAT cannot do this (ADR-0034).
+      #
+      # A 403 here almost always means the repo is missing from the
+      # ACCESS_TOKEN PAT's repository list, not that the PAT is wrong.
       delegate_to: localhost
       become: false
       ansible.builtin.uri:
-        url: "https://api.github.com/repos/{{ runner_repo_url | regex_replace('^https://github.com/', '') }}/actions/runners/registration-token"
+        url: "https://api.github.com/repos/{{ item.url | regex_replace('^https://github.com/', '') }}/actions/runners/registration-token"
         method: POST
         headers:
           Authorization: "Bearer {{ gh_pat.stdout | trim }}"
           Accept: "application/vnd.github+json"
         status_code: [201]
-      register: gh_reg_token
+      register: gh_reg_tokens
       no_log: true
-      when: not runner_configured.stat.exists
+      loop: "{{ runner_pending }}"
+      loop_control:
+        label: "{{ item.name }}"
+      when: not ansible_check_mode
 
-    - name: Configure the runner
+    - name: Configure each pending runner instance
       # `become` is repeated here rather than inherited from the play: with
       # only `become_user`, ansible-lint's partial-become rule fails the
       # build (and the pairing is clearer to read at the task).
+      #
+      # zip against the token results rather than re-minting inside this
+      # task — same pairing idiom garage-configure.yml uses for
+      # garage_buckets | zip(garage_key_info.results). item.0 is the repo
+      # entry, item.1 its registration-token response.
       become: true
       become_user: "{{ runner_user }}"
       ansible.builtin.command:
-        chdir: "{{ runner_home }}"
+        chdir: "{{ item.0.home | default('/opt/actions-runner-' + item.0.name) }}"
         # Space-separated, NOT --flag=value. The runner's config.sh rejects
         # the `=` form outright — "Unrecognized command-line input arguments
         # for command configure" — and then fails with "Invalid
@@ -231,37 +372,44 @@
           - --unattended
           - --replace
           - --url
-          - "{{ runner_repo_url }}"
+          - "{{ item.0.url }}"
           - --token
-          - "{{ gh_reg_token.json.token }}"
+          - "{{ item.1.json.token }}"
           - --name
-          - ukubi-build
+          - "ukubi-build-{{ item.0.name }}"
           - --labels
           - "{{ runner_labels }}"
           - --work
           - _work
       no_log: true
-      when: not runner_configured.stat.exists
+      # default([]) so the loop expression itself survives check mode, where
+      # the token task above is skipped and registers no results. zip() then
+      # yields an empty list and this becomes a clean no-op rather than an
+      # undefined-attribute error while rendering the loop.
+      loop: "{{ runner_pending | zip(gh_reg_tokens.results | default([])) | list }}"
+      loop_control:
+        label: "{{ item.0.name }}"
+      when: not ansible_check_mode
 
     # -------------------------------------------------------------------
-    # Service
+    # Service — one unit per instance
     # -------------------------------------------------------------------
-    - name: Install the runner systemd unit
+    - name: Install a runner systemd unit per instance
       ansible.builtin.copy:
-        dest: /etc/systemd/system/actions-runner.service
+        dest: "/etc/systemd/system/actions-runner-{{ item.name }}.service"
         mode: "0644"
         content: |
           # Managed by ansible/playbooks/build-runner-configure.yml
           [Unit]
-          Description=GitHub Actions runner (image builds, ADR-0034)
+          Description=GitHub Actions runner for {{ item.name }} (image builds, ADR-0034)
           After=network-online.target
           Wants=network-online.target
 
           [Service]
           Type=simple
           User={{ runner_user }}
-          WorkingDirectory={{ runner_home }}
-          ExecStart={{ runner_home }}/run.sh
+          WorkingDirectory={{ item.home | default('/opt/actions-runner-' + item.name) }}
+          ExecStart={{ item.home | default('/opt/actions-runner-' + item.name) }}/run.sh
           Restart=always
           RestartSec=10
           KillMode=process
@@ -270,23 +418,59 @@
 
           [Install]
           WantedBy=multi-user.target
-      notify: Restart actions-runner
+      loop: "{{ build_runner_repos }}"
+      loop_control:
+        label: "{{ item.name }}"
+      notify: Restart actions runners
 
-    - name: Enable and start the runner
+    - name: Enable and start each runner instance
+      # Also check-mode-skipped, same reason as the provisioning tasks above:
+      # the unit files were only ever "would be written" in a dry run, so
+      # systemd genuinely does not know these names yet and the module fails
+      # with "Could not find the requested service". The unit content itself
+      # is fully previewable — the task above diffs it — so the dry run still
+      # shows what would change.
       ansible.builtin.systemd:
-        name: actions-runner
+        name: "actions-runner-{{ item.name }}"
         enabled: true
         state: started
         daemon_reload: true
+      loop: "{{ build_runner_repos }}"
+      loop_control:
+        label: "{{ item.name }}"
+      when: not ansible_check_mode
 
     # -------------------------------------------------------------------
     # Housekeeping — the disk is the thing that will fill
     # -------------------------------------------------------------------
-    - name: Install a weekly podman prune timer
-      # podman keeps every pulled base image and build layer and nothing
-      # removes them. On a 40GB disk that is a matter of weeks, and the
-      # failure mode is a build failing on ENOSPC rather than anything that
-      # names the real cause.
+    - name: Install a weekly image prune timer
+      # Builds keep every pulled base image and every intermediate layer and
+      # nothing removes them. On a 40GB disk shared by several build repos
+      # that is a matter of weeks, and the failure mode is a build failing on
+      # ENOSPC rather than anything that names the real cause.
+      #
+      # Two things here were wrong before and are load-bearing:
+      #
+      #   User=root, not the runner user. Every build runs `sudo buildah`, so
+      #   the store that actually fills is the ROOTFUL one under
+      #   /var/lib/containers. This unit previously ran as {{ runner_user }}
+      #   and therefore pruned the rootless store — which no build has ever
+      #   written to. It reported success weekly and reclaimed nothing.
+      #
+      #   --storage-driver {{ build_storage_driver }}, matching the builds.
+      #   Each driver keeps its own tree under the graph root, so a prune on
+      #   the default driver cannot see vfs images at all. Omitting this
+      #   reintroduces the same silent no-op in a subtler form.
+      #
+      # `rmi --prune` (dangling only), never `rmi --all`: the base-image
+      # cache shared across build repos is the point of putting them on one
+      # box. buildah, not podman — the sudoers rule grants /usr/bin/buildah
+      # only, and while this unit runs as real root, keeping the two on the
+      # same tool means what the timer prunes is what the builds create.
+      #
+      # The unit keeps its podman-prune name deliberately: renaming it would
+      # need another stop/disable/remove dance for no functional gain. The
+      # Description is the honest one.
       ansible.builtin.copy:
         dest: "/etc/systemd/system/{{ item.name }}"
         mode: "0644"
@@ -296,17 +480,17 @@
           content: |
             # Managed by ansible/playbooks/build-runner-configure.yml
             [Unit]
-            Description=Prune unused podman/buildah images and build cache
+            Description=Prune dangling buildah images from the rootful vfs store
 
             [Service]
             Type=oneshot
-            User={{ runner_user }}
-            ExecStart=/usr/bin/podman system prune --all --force
+            User=root
+            ExecStart=/usr/bin/buildah rmi --prune --force --storage-driver {{ build_storage_driver }}
         - name: podman-prune.timer
           content: |
             # Managed by ansible/playbooks/build-runner-configure.yml
             [Unit]
-            Description=Weekly podman prune
+            Description=Weekly buildah image prune
 
             [Timer]
             OnCalendar=weekly
@@ -327,21 +511,35 @@
     - name: Build runner configured
       ansible.builtin.debug:
         msg:
-          - "build-runner is up, registered against {{ runner_repo_url }}"
-          - "with labels: {{ runner_labels }}"
+          - "build-runner is up with {{ build_runner_repos | length }} runner instance(s):"
+          - "{{ build_runner_repos | map(attribute='name') | join(', ') }}"
+          - "all labelled: {{ runner_labels }}"
           - ""
           - "Verify:"
-          - "  systemctl status actions-runner"
-          - "  GitHub -> repo -> Settings -> Actions -> Runners (should show 'ukubi-build' idle)"
+          - "  systemctl status 'actions-runner-*'"
+          - "  GitHub -> each repo -> Settings -> Actions -> Runners (should be idle)"
           - ""
-          - "Adding a second build repo means a SECOND runner, not a relabel"
-          - "— personal accounts cannot register org-level runners. Copy this"
-          - "playbook's runner_repo_url and register a second instance, and"
-          - "add that repo to the ACCESS_TOKEN PAT's repository list first."
+          - "To add a build repo: add an entry to build_runner_repos and re-run"
+          - "— but add that repo to the ACCESS_TOKEN PAT's repository list FIRST,"
+          - "or the registration-token task 403s. One instance per repo: repo-scoped"
+          - "runners are repo-only and personal accounts cannot register org-level"
+          - "ones, so the registration cannot be shared — only this box and its"
+          - "buildah image cache are. See the /build-runner-ops skill."
 
   handlers:
-    - name: Restart actions-runner
+    - name: Restart actions runners
+      # Blunt on purpose: the unit content is templated identically for every
+      # instance, so a change to one is a change to all in practice, and
+      # per-instance handler notification would need a handler per entry.
+      #
+      # Check-mode-skipped like the enable task: a dry run notifies this
+      # handler off a unit file it only *would* have written, so systemd has
+      # nothing by that name to restart.
       ansible.builtin.systemd:
-        name: actions-runner
+        name: "actions-runner-{{ item.name }}"
         state: restarted
         daemon_reload: true
+      loop: "{{ build_runner_repos }}"
+      loop_control:
+        label: "{{ item.name }}"
+      when: not ansible_check_mode

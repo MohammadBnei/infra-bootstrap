@@ -1,0 +1,60 @@
+---
+# Guards the two non-obvious Jinja expressions in
+# ../playbooks/build-runner-configure.yml, both of which fail SILENTLY:
+#
+#   runner_pending = stat results | rejectattr('stat.exists') | map('item')
+#     If the dotted attribute path stops resolving, this yields either every
+#     instance (re-registering a working runner) or none (the new instance is
+#     never registered and the playbook still reports success).
+#
+#   runner_pending | zip(gh_reg_tokens.results)
+#     A mis-pairing hands one repo another repo's registration token. Both
+#     are opaque strings behind `no_log: true`, so the only symptom is a
+#     runner registered against the wrong repository.
+#
+# Runs against localhost with no connection and no infra — it exercises the
+# expressions on fixture data, not the real box:
+#
+#   ansible-playbook -i localhost, ansible/tests/build-runner-expressions.yml
+#
+# Keep the fixtures' shape in sync with build_runner_repos if that list
+# grows a key.
+- name: Check build-runner-configure.yml's list expressions
+  hosts: localhost
+  gather_facts: false
+  vars:
+    build_runner_repos:
+      - {name: editable-blog, url: "https://github.com/MohammadBnei/editable-blog", home: /opt/actions-runner}
+      - {name: agent-fleet, url: "https://github.com/MohammadBnei/agent-fleet"}
+    # simulates the stat loop: editable-blog already configured, agent-fleet not
+    fake_results:
+      - {item: {name: editable-blog, url: u1, home: /opt/actions-runner}, stat: {exists: true}}
+      - {item: {name: agent-fleet, url: u2}, stat: {exists: false}}
+    fake_tokens:
+      results:
+        - {json: {token: TOK-AF}}
+  tasks:
+    - ansible.builtin.set_fact:
+        runner_pending: "{{ fake_results | rejectattr('stat.exists') | map(attribute='item') | list }}"
+
+    - name: only the unconfigured instance is pending
+      ansible.builtin.assert:
+        that:
+          - runner_pending | length == 1
+          - runner_pending[0].name == 'agent-fleet'
+        fail_msg: "rejectattr filtering wrong: {{ runner_pending }}"
+
+    - name: home defaults per entry, legacy override respected
+      ansible.builtin.assert:
+        that:
+          - (build_runner_repos[0].home | default('/opt/actions-runner-' + build_runner_repos[0].name)) == '/opt/actions-runner'
+          - (build_runner_repos[1].home | default('/opt/actions-runner-' + build_runner_repos[1].name)) == '/opt/actions-runner-agent-fleet'
+
+    - name: zip pairing puts repo in item.0 and token in item.1
+      ansible.builtin.assert:
+        that:
+          - (runner_pending | zip(fake_tokens.results) | list)[0][0].name == 'agent-fleet'
+          - (runner_pending | zip(fake_tokens.results) | list)[0][1].json.token == 'TOK-AF'
+
+    - ansible.builtin.debug:
+        msg: "pending={{ runner_pending | map(attribute='name') | join(',') }}"

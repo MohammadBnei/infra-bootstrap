@@ -132,11 +132,20 @@ updated.
   Anonymous pull, authenticated push (htpasswd). Stateless by
   construction: `dedupe: false` and an `emptyDir` staging dir, so nothing
   durable lives in the cluster.
+  Retention is **last 5 tags per image plus `latest`** with
+  `deleteUntagged` — keyed on push order, never pull recency, because the
+  metaDB holding pull stats is that same `emptyDir` and resets on restart.
+  `latest` is pinned explicitly: thot's executor and `agent-fleet`'s
+  `catalog.go` both float on it.
   **Images are built on the `build-runner` LXC, never in the cluster** —
   buildah cannot extract layers without `CAP_SYS_ADMIN`, and the only
   in-cluster way to grant that is a privileged pod running app-repo
-  `Dockerfile`s. Adding a build repo means a *second* runner, not a
-  relabel, and adding it to the `ACCESS_TOKEN` PAT's repo list first.
+  `Dockerfile`s. Adding a build repo means **its own runner instance on
+  that same LXC** — an entry in `build_runner_repos` — plus adding it to the
+  `ACCESS_TOKEN` PAT's repo list first. The registration cannot be shared
+  (repo-scoped runners are repo-only; org-level ones need a GitHub org, and
+  personal accounts have none); the box and its buildah image cache are.
+  Current build repos: `editable-blog`, `agent-fleet`.
   See [ADR-0034](docs/adr/0034-in-cluster-oci-registry-zot-garage-backed.md).
 
 ## 3. Do not propose (quick reference — see linked ADR for full reasoning)
