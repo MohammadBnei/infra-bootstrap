@@ -132,7 +132,7 @@ updated.
   Anonymous pull, authenticated push (htpasswd). Stateless by
   construction: `dedupe: false` and an `emptyDir` staging dir, so nothing
   durable lives in the cluster.
-  Retention is **last 5 tags per image plus `latest`** with
+  Retention is **last 3 tags per image plus `latest`** with
   `deleteUntagged` — keyed on push order, never pull recency, because the
   metaDB holding pull stats is that same `emptyDir` and resets on restart.
   `latest` is pinned explicitly: thot's executor and `agent-fleet`'s

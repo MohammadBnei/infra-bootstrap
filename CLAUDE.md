@@ -23,7 +23,7 @@ then here. When in doubt, open those files.
 | Ingress | Traefik + `IngressRoute` only — no cert-manager, no Gateway API, no plain Ingress |
 | GitOps | ArgoCD, Pattern C (registry + `list`-generator ApplicationSets) |
 | CI/CD | Self-hosted GitHub Actions runner, in-cluster (`gitops/platform/actions-runner/`), RBAC-scoped to `vos`/`vos-dev` only — see ADR-0022. Drives `common-app-chart`'s `hooks:`/`oneOffJobs:` (ArgoCD sync hooks + a ledger-driven reusable workflow for one-time scripts) — see ADR-0023 |
-| Registry | Zot at `registry.bnei.lan:5000` (MetalLB `.234`), blobs on Garage S3, LAN-only plain HTTP — no `IngressRoute`, since Let's Encrypt can't issue for `.lan`. Anonymous pull, htpasswd push. 5-tag retention + GC, `latest` pinned. Images are built on the **`build-runner` LXC**, never in-cluster, **one runner instance per build repo** (`editable-blog`, `agent-fleet`) — see ADR-0034 and the `build-runner-ops` skill |
+| Registry | Zot at `registry.bnei.lan:5000` (MetalLB `.234`), blobs on Garage S3, LAN-only plain HTTP — no `IngressRoute`, since Let's Encrypt can't issue for `.lan`. Anonymous pull, htpasswd push. 3-tag retention + GC, `latest` pinned. Images are built on the **`build-runner` LXC**, never in-cluster, **one runner instance per build repo** (`editable-blog`, `agent-fleet`) — see ADR-0034 and the `build-runner-ops` skill |
 | Secrets | Infisical (project `infra-bootstrap-1-ge1`, id `8a3fa54f-be22-488a-bf51-55158f65c0f2`, domain `https://infisical.bnei.dev`, env `dev` — see `docs/secrets.md`) |
 | Database | Pigsty (vendored in `pigsty/`, has its **own** `pigsty/CLAUDE.md` — don't edit it, it's upstream) |
 | Observability | Prometheus + Grafana (metrics/dashboards), Loki + Grafana Alloy (logs, SingleBinary/filesystem + DaemonSet — see ADR-0027), Alertmanager (routes to Discord). Grafana alerting is native (LogQL rules against Loki), not Loki's Ruler. `common-app-chart`'s `logAlerts:` block lets a user app declare its own log alert rules from its own repo |
@@ -79,7 +79,7 @@ then here. When in doubt, open those files.
   PAT's repo list first. Add it to `build_runner_repos` in
   `ansible/playbooks/build-runner-configure.yml` and re-run — ADR-0034,
   `build-runner-ops` skill.
-- Registry retention: **last 5 tags per image plus `latest`**, with
+- Registry retention: **last 3 tags per image plus `latest`**, with
   `deleteUntagged`. `latest` is pinned explicitly because thot's executor
   and agent-fleet's `catalog.go` both float on it. Deliberately **not**
   keyed on pull recency — zot's metaDB is an `emptyDir`, so pull stats
