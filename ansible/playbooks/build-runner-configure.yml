@@ -257,6 +257,29 @@
       ansible.builtin.set_fact:
         runner_pending: "{{ runner_configured.results | rejectattr('stat.exists') | map(attribute='item') | list }}"
 
+    - name: Report which instances would be registered
+      # The one thing worth reading out of a --check run: which instances the
+      # play considers pending. An already-registered one appearing here means
+      # its .runner is missing or its `home` is wrong, and the real run would
+      # re-register a working runner.
+      ansible.builtin.debug:
+        msg: >-
+          pending registration:
+          {{ (runner_pending | map(attribute='name') | list) | join(', ') | default('none', true) }}
+          — already configured:
+          {{ (build_runner_repos | map(attribute='name') | difference(runner_pending | map(attribute='name')) | list) | join(', ') | default('none', true) }}
+
+    # The four provisioning tasks below are skipped under --check, and that is
+    # deliberate rather than a limitation worked around. In check mode the
+    # instance directory is never really created, so `unarchive` fails with
+    # "dest must be an existing dir"; the PAT lookup and the token POST are
+    # both skipped, leaving gh_pat/gh_reg_tokens undefined for the templates
+    # that consume them. A dry run would therefore abort on a *new* instance
+    # every time — turning the one command that is supposed to be safe to run
+    # unattended into a false alarm. Nothing is lost by skipping them: check
+    # mode does not download the tarball or mint a token either, so there is
+    # no behaviour here it could have validated. The debug above is the real
+    # preview signal.
     - name: Download the Actions runner tarball
       # Instance-independent: one tarball, unpacked into each pending
       # instance directory below.
@@ -264,7 +287,9 @@
         url: "https://github.com/actions/runner/releases/download/v{{ runner_version }}/actions-runner-linux-x64-{{ runner_version }}.tar.gz"
         dest: "/tmp/actions-runner-{{ runner_version }}.tar.gz"
         mode: "0644"
-      when: runner_pending | length > 0
+      when:
+        - runner_pending | length > 0
+        - not ansible_check_mode
 
     - name: Unpack the runner into each pending instance
       ansible.builtin.unarchive:
@@ -276,6 +301,7 @@
       loop: "{{ runner_pending }}"
       loop_control:
         label: "{{ item.name }}"
+      when: not ansible_check_mode
 
     # -------------------------------------------------------------------
     # Registration
@@ -295,7 +321,9 @@
       register: gh_pat
       changed_when: false
       no_log: true
-      when: runner_pending | length > 0
+      when:
+        - runner_pending | length > 0
+        - not ansible_check_mode
 
     - name: Mint a runner registration token per pending instance
       # Short-lived (1h) and single-use — the PAT itself never reaches the
@@ -319,6 +347,7 @@
       loop: "{{ runner_pending }}"
       loop_control:
         label: "{{ item.name }}"
+      when: not ansible_check_mode
 
     - name: Configure each pending runner instance
       # `become` is repeated here rather than inherited from the play: with
@@ -353,9 +382,14 @@
           - --work
           - _work
       no_log: true
-      loop: "{{ runner_pending | zip(gh_reg_tokens.results) | list }}"
+      # default([]) so the loop expression itself survives check mode, where
+      # the token task above is skipped and registers no results. zip() then
+      # yields an empty list and this becomes a clean no-op rather than an
+      # undefined-attribute error while rendering the loop.
+      loop: "{{ runner_pending | zip(gh_reg_tokens.results | default([])) | list }}"
       loop_control:
         label: "{{ item.0.name }}"
+      when: not ansible_check_mode
 
     # -------------------------------------------------------------------
     # Service — one unit per instance
@@ -390,6 +424,12 @@
       notify: Restart actions runners
 
     - name: Enable and start each runner instance
+      # Also check-mode-skipped, same reason as the provisioning tasks above:
+      # the unit files were only ever "would be written" in a dry run, so
+      # systemd genuinely does not know these names yet and the module fails
+      # with "Could not find the requested service". The unit content itself
+      # is fully previewable — the task above diffs it — so the dry run still
+      # shows what would change.
       ansible.builtin.systemd:
         name: "actions-runner-{{ item.name }}"
         enabled: true
@@ -398,6 +438,7 @@
       loop: "{{ build_runner_repos }}"
       loop_control:
         label: "{{ item.name }}"
+      when: not ansible_check_mode
 
     # -------------------------------------------------------------------
     # Housekeeping — the disk is the thing that will fill
@@ -490,6 +531,10 @@
       # Blunt on purpose: the unit content is templated identically for every
       # instance, so a change to one is a change to all in practice, and
       # per-instance handler notification would need a handler per entry.
+      #
+      # Check-mode-skipped like the enable task: a dry run notifies this
+      # handler off a unit file it only *would* have written, so systemd has
+      # nothing by that name to restart.
       ansible.builtin.systemd:
         name: "actions-runner-{{ item.name }}"
         state: restarted
@@ -497,3 +542,4 @@
       loop: "{{ build_runner_repos }}"
       loop_control:
         label: "{{ item.name }}"
+      when: not ansible_check_mode
