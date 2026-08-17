@@ -287,8 +287,15 @@ against a 40GB quota on a 200GB LXC that also holds `k8s-longhorn-backup`,
 `pg-backup`, `agent-fleet-files` and `ente-photos`.
 
 `storage.gc` + `storage.retention` in
-`gitops/platform/values/zot/values.yaml`: **last 5 tags per repository plus
+`gitops/platform/values/zot/values.yaml`: **last 3 tags per repository plus
 `latest`, `deleteUntagged`, `repositories: ["**"]`.**
+
+The count is 3 by explicit choice, tightened from the 5 this section first
+carried. It is the user's call on where to sit between disk headroom and
+rollback depth, and the trade is stated plainly below rather than treated as a
+tunable nobody has thought about: at 3, `agent-fleet` alone burns the whole
+window in three releases, so the *only* image guaranteed to be there is the one
+currently deployed plus its two predecessors.
 
 Three things about it are decisions rather than defaults:
 
@@ -311,7 +318,7 @@ Three things about it are decisions rather than defaults:
 - **Ships `dryRun: true`.** This is the one part of the registry with a
   genuinely one-way door: a GC'd blob is gone and the image must be rebuilt.
   Two things get confirmed before it flips. That nothing currently pinned is
-  on the would-delete list — 5 is tight, though in steady state the deployed
+  on the would-delete list — 3 is tight, though in steady state the deployed
   tag is always the newest one, so the exposure is a rollback deeper than 5
   releases rather than normal operation. And **that S3 blobs are actually
   reclaimed**: zot's docs describe `gc` uniformly across storage backends and

@@ -163,7 +163,7 @@ extraVolumeMounts:
 # ente-photos. Left unbounded it does not just fill its own space, it
 # starves the backup system.
 #
-# `mostRecentlyPushedCount: 5`, and deliberately NOT
+# `mostRecentlyPushedCount: 3`, and deliberately NOT
 # mostRecentlyPulledCount / pulledWithin. Those are the obvious knobs and
 # two of the three are traps *here specifically*: retention's pull/push
 # statistics live in zot's metaDB, a boltdb under storage.rootDirectory —
@@ -200,7 +200,7 @@ extraVolumeMounts:
 #      k8s/provisioner/deployment.yaml is on the would-delete list. 5 is
 #      tight. In normal operation the deployed tag is always the newest one
 #      (agent-fleet's deploy job bumps to the release it just built), so the
-#      exposure is a rollback deeper than 5 releases, not steady state.
+#      exposure is a rollback deeper than 3 releases, not steady state.
 #
 # `repositories: ["**"]` also applies this to editable-blog and anything
 # added later. That is intended — one policy beats a per-repo list to keep
@@ -240,7 +240,7 @@ extraManifests:
                   "deleteReferrers": true,
                   "keepTags": [
                     { "patterns": ["latest"] },
-                    { "mostRecentlyPushedCount": 5 }
+                    { "mostRecentlyPushedCount": 3 }
                   ]
                 }
               ]
