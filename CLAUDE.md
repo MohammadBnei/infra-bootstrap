@@ -163,6 +163,11 @@ This repo is mid-bootstrap, not finished:
   SSH once execution is authorized for the session; encodes the real
   gotchas hit during the first end-to-end bootstrap test (see
   `docs/bootstrap-test-notes.md`).
+- `/authentik-oidc` — connect an app to authentik as an OIDC client
+  (ADR-0039): declarative blueprint delivered as a Secret, credentials via
+  Infisical, nothing clicked in the UI. Carries the model names and field
+  shapes verified against the running instance — notably that `redirect_uris`
+  is a list of objects, not strings.
 - `/build-runner-ops` — the `build-runner` LXC's GitHub Actions runner
   instances (one per build repo, ADR-0034): add a build repo, inspect
   runner/build/disk state, debug a queued or failing image build.

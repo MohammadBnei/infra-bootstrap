@@ -80,9 +80,52 @@ datasources:
 
 # IngressRoute: gitops/bootstrap/grafana-ingressroute.yaml (Traefik
 # IngressRoute, ADR-0001 — not Gateway API/HTTPRoute).
+# OIDC client credentials arrive as env vars rather than being written into
+# grafana.ini, so the secret never lands in a ConfigMap. Grafana maps
+# GF_<SECTION>_<KEY> onto its ini config, so these two override
+# auth.generic_oauth's client_id/client_secret.
+envValueFrom:
+  GF_AUTH_GENERIC_OAUTH_CLIENT_ID:
+    secretKeyRef:
+      name: grafana-oidc
+      key: client_id
+  GF_AUTH_GENERIC_OAUTH_CLIENT_SECRET:
+    secretKeyRef:
+      name: grafana-oidc
+      key: client_secret
+
 grafana.ini:
   server:
     root_url: https://grafana.bnei.dev
+
+  # authentik OIDC federation (ADR-0039). The local admin from `admin:` above
+  # is DELIBERATELY kept — ADR-0039 Decision 6: a Traefik ClientIP() route can
+  # bypass a middleware but cannot bypass Grafana's own OIDC redirect, and
+  # ArgoCD is what deploys authentik. Dropping the local admin would make an
+  # authentik outage unrecoverable through anything but kubectl.
+  auth.generic_oauth:
+    enabled: true
+    name: authentik
+    # Discovery is not used: Grafana wants the three endpoints explicitly, and
+    # naming them makes a wrong one a startup error rather than a silent
+    # fallback.
+    auth_url: https://authentik.bnei.dev/application/o/authorize/
+    token_url: https://authentik.bnei.dev/application/o/token/
+    api_url: https://authentik.bnei.dev/application/o/userinfo/
+    scopes: openid email profile
+    # Matches the provider's sub_mode: user_email in the blueprint. If these
+    # two disagree, logins succeed and then map to the wrong Grafana user.
+    login_attribute_path: preferred_username
+    email_attribute_path: email
+    name_attribute_path: name
+    # No auto_login: it would remove the local-admin escape hatch from the UI
+    # entirely, which is the opposite of Decision 6.
+    auto_login: false
+    # Everyone who can authenticate gets Viewer. Role mapping via authentik
+    # groups is a follow-up; granting Admin by default would make OIDC a
+    # privilege escalation rather than a convenience.
+    role_attribute_path: "'Viewer'"
+    allow_assign_grafana_admin: false
   log.console:
     format: json
 
