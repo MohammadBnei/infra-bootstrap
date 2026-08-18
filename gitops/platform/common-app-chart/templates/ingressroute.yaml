@@ -19,7 +19,28 @@ spec:
     services:
     - name: {{ .Release.Name }}
       port: {{ .Values.service.port }}
-    {{- with .Values.ingress.middlewares }}
+    {{- /*
+      Baseline middlewares are PREPENDED to whatever the app declares, never
+      replace it. Traefik applies middlewares left to right, so rate limiting
+      comes first (reject abuse before doing any other work), then response
+      headers, then the app's own chain (auth, stripPrefix, ...).
+
+      Rendered by templates/middleware.yaml in this same release, so there is
+      no cross-Application ordering race. Opt out per app with
+      ingress.baseline.enabled: false in that app's values file — which works
+      for the external-repo apps too, since their values.yaml is a real source.
+    */}}
+    {{- $mw := list }}
+    {{- if .Values.ingress.baseline.enabled }}
+    {{- if .Values.ingress.baseline.rateLimit.enabled }}
+    {{- $mw = append $mw (dict "name" (printf "%s-baseline-ratelimit" .Release.Name) "namespace" .Release.Namespace) }}
+    {{- end }}
+    {{- if .Values.ingress.baseline.headers.enabled }}
+    {{- $mw = append $mw (dict "name" (printf "%s-baseline-headers" .Release.Name) "namespace" .Release.Namespace) }}
+    {{- end }}
+    {{- end }}
+    {{- $mw = concat $mw (.Values.ingress.middlewares | default list) }}
+    {{- with $mw }}
     middlewares:
       {{- toYaml . | nindent 4 }}
     {{- end }}

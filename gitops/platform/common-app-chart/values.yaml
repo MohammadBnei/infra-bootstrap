@@ -39,9 +39,69 @@ ingress:
   annotations: {}
   # Traefik Middleware refs: [{name, namespace}]. Define the Middleware
   # itself via extraManifests below (e.g. BasicAuth for an admin-only app).
+  # These are APPENDED after the baseline chain below, not instead of it.
   middlewares: []
 
+  # Baseline protection applied to every exposed app (ADR-0038). On by
+  # default and deliberately so: `middlewares` above is opt-in, which meant
+  # an app was unprotected unless someone remembered to protect it. The
+  # Middleware objects render into the app's own namespace via
+  # templates/middleware.yaml, so there is no shared object to race against.
+  #
+  # To opt out for one app, set `ingress.baseline.enabled: false` in that
+  # app's own values file. That works for the external-repo apps (blog,
+  # dreamer, vos-monolith, vos-monolith-dev, agent-fleet-core) too — their
+  # values.yaml is a real Helm source, even though the chart comes from this
+  # repo, which is also why they pick this up with no ApplicationSet change.
+  #
+  # LIMITATION, worth knowing before assuming coverage: the baseline is
+  # prepended only to the IngressRoute templates/ingressroute.yaml renders.
+  # Two escape hatches bypass it and must wire the refs themselves —
+  #   1. any IngressRoute declared through `extraManifests` (ente-web's
+  #      album.ente route does this; it references the Middlewares by name)
+  #   2. agent-fleet's e2e preview routes, which are built in Go by the
+  #      provisioner and never touch this chart at all
+  baseline:
+    enabled: true
+    rateLimit:
+      enabled: true
+      # Per source IP, per `period`. Abuse protection, not app policy — an
+      # app needing a real quota should define its own middleware.
+      average: 100
+      burst: 200
+      period: 1s
+      # Empty = bucket on the TCP peer address, which is the real client
+      # today because Traefik runs externalTrafficPolicy: Local. ADR-0038
+      # Phase 3 sets this to CF-Connecting-IP at the Cloudflare cutover —
+      # after that the peer is a Cloudflare edge IP and bucketing on it
+      # would put the whole internet in one bucket.
+      sourceHeader: ""
+    headers:
+      enabled: true
+      contentTypeNosniff: true
+      referrerPolicy: strict-origin-when-cross-origin
+      # 1 year. No includeSubDomains, no preload — see templates/middleware.yaml
+      # for why those two are excluded rather than merely unset.
+      stsSeconds: 31536000
+      customResponseHeaders: {}
+
 resources: {}
+
+# Pod- and container-level security context. The chart had neither until
+# ADR-0040, which is why gitops/platform/values/searxng/values.yaml carries a
+# `ponytail:` note saying hardening was skipped for lack of a field to put it
+# in. Both default to {} — empty means "whatever the image does", i.e. exactly
+# today's behaviour, so this is a no-op until an app opts in.
+#
+# ADR-0040 adds PodSecurityAdmission labels; an app that fails to schedule
+# under `restricted` needs something like:
+#   podSecurityContext: {runAsNonRoot: true, runAsUser: 1000, fsGroup: 1000,
+#                        seccompProfile: {type: RuntimeDefault}}
+#   securityContext: {allowPrivilegeEscalation: false,
+#                     readOnlyRootFilesystem: true,
+#                     capabilities: {drop: [ALL]}}
+podSecurityContext: {}
+securityContext: {}
 # requests:
 #   cpu: 100m
 #   memory: 128Mi

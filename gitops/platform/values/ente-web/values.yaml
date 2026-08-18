@@ -103,5 +103,16 @@ extraManifests:
           services:
             - name: ente-web-albums
               port: 3002
+          # An extraManifests IngressRoute does NOT inherit the chart's
+          # baseline chain — that is only prepended to the route
+          # templates/ingressroute.yaml renders. Referenced explicitly here,
+          # or this host is the one public route with no rate limit and no
+          # security headers. The Middlewares themselves are rendered into
+          # this namespace by the chart, so no cross-namespace ref is needed.
+          middlewares:
+            - name: {{ .Release.Name }}-baseline-ratelimit
+              namespace: {{ .Release.Namespace }}
+            - name: {{ .Release.Name }}-baseline-headers
+              namespace: {{ .Release.Namespace }}
       tls:
         certResolver: le
