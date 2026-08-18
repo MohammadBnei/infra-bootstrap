@@ -1,0 +1,85 @@
+# authentik blueprint declaring Grafana's OIDC provider + application
+# (ADR-0039, "Native OIDC" tier).
+#
+# Delivered as a SECRET rather than a ConfigMap because it embeds an OAuth2
+# client secret. The chart mounts blueprints from either
+# (`blueprints.configMaps` / `blueprints.secrets`) and discovers any key ending
+# in `.yaml`; a ConfigMap would put the client secret in plaintext in git.
+#
+# The blueprint's STRUCTURE still lives here in git — only the two credential
+# values are interpolated from Infisical by the operator. That keeps this
+# reviewable without keeping it secret-bearing.
+#
+# Every model name, field name and referenced slug below was read from the
+# RUNNING 2026.8.0 instance rather than from documentation:
+#   - model names from /blueprints/schema.json in the server pod
+#   - flow slugs and property-mapping `managed` strings from the authentik
+#     database directly
+# That matters because `redirect_uris` is NOT a list of strings in this
+# version — it is a list of objects with `matching_mode` and `url`, and a
+# string list is accepted as valid YAML while producing a provider that
+# refuses every callback.
+apiVersion: secrets.infisical.com/v1alpha1
+kind: InfisicalSecret
+metadata:
+  name: authentik-blueprint-grafana
+  namespace: infisical
+spec:
+  hostAPI: http://platform-infisical-backend.infisical.svc.cluster.local:8080/api
+  resyncInterval: 60
+  authentication:
+    universalAuth:
+      secretsScope:
+        projectSlug: "infra-bootstrap-1-ge1"
+        envSlug: dev
+        secretsPath: "/"
+      credentialsRef:
+        secretName: universal-auth-credentials
+        secretNamespace: infisical
+  managedSecretReference:
+    secretName: authentik-blueprint-grafana
+    secretNamespace: authentik
+    creationPolicy: Orphan
+    template:
+      data:
+        grafana-oidc.yaml: |
+          version: 1
+          metadata:
+            name: grafana-oidc
+            labels:
+              blueprints.goauthentik.io/instantiate: "true"
+          entries:
+            - model: authentik_providers_oauth2.oauth2provider
+              id: grafana-provider
+              identifiers:
+                name: grafana
+              attrs:
+                name: grafana
+                client_type: confidential
+                client_id: "{{ .GRAFANA_OIDC_CLIENT_ID.Value }}"
+                client_secret: "{{ .GRAFANA_OIDC_CLIENT_SECRET.Value }}"
+                # Object form is required in 2026.x. A bare string list parses
+                # fine and then rejects every callback.
+                redirect_uris:
+                  - matching_mode: strict
+                    url: https://grafana.bnei.dev/login/generic_oauth
+                sub_mode: user_email
+                # Implicit consent: this is a single-operator homelab and a
+                # consent screen on every login to your own Grafana is friction
+                # without a corresponding gain.
+                authorization_flow: !Find [authentik_flows.flow, [slug, default-provider-authorization-implicit-consent]]
+                invalidation_flow: !Find [authentik_flows.flow, [slug, default-provider-invalidation-flow]]
+                signing_key: !Find [authentik_crypto.certificatekeypair, [name, "authentik Self-signed Certificate"]]
+                property_mappings:
+                  - !Find [authentik_providers_oauth2.scopemapping, [managed, "goauthentik.io/providers/oauth2/scope-openid"]]
+                  - !Find [authentik_providers_oauth2.scopemapping, [managed, "goauthentik.io/providers/oauth2/scope-email"]]
+                  - !Find [authentik_providers_oauth2.scopemapping, [managed, "goauthentik.io/providers/oauth2/scope-profile"]]
+            - model: authentik_core.application
+              identifiers:
+                slug: grafana
+              attrs:
+                name: Grafana
+                slug: grafana
+                provider: !KeyOf grafana-provider
+                meta_launch_url: https://grafana.bnei.dev
+                meta_description: Metrics, dashboards and log alerting

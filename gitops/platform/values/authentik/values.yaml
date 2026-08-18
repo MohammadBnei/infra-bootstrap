@@ -43,6 +43,19 @@ authentik:
 postgresql:
   enabled: false
 
+# Blueprints are authentik's declarative config — providers, applications,
+# flows — applied at startup and reconciled from then on. Mounting them from a
+# SECRET rather than a ConfigMap because OAuth2 client secrets live inside;
+# the chart discovers any key ending in `.yaml` from either source.
+#
+# The blueprint bodies are in gitops/bootstrap/authentik-blueprint-*.yaml as
+# InfisicalSecret templates: structure in git, credentials interpolated by the
+# operator. That is what keeps ADR-0039's "OIDC federation" tier declarative
+# rather than a sequence of clicks nobody can review or rebuild.
+blueprints:
+  secrets:
+  - authentik-blueprint-grafana
+
 server:
   replicas: 1
   # No ingress here. ADR-0001 makes Traefik IngressRoute the only routing API
