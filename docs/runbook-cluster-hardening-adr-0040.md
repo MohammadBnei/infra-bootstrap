@@ -58,6 +58,21 @@ unattributable, and this repo has been burned by exactly that before.
   single replica, so draining its node withdraws the MetalLB VIP entirely —
   a blackhole, not a drain. Schedule accordingly.
 
+- **Always include the `download` tag when narrowing with `--tags`.**
+  kubespray stages binaries into `local_release_dir` (`/tmp/releases`) via the
+  `download` role, and the control-plane role then copies from
+  `{{ downloads.kubectl.dest }}`. Narrowing to `--tags control-plane` skips
+  `download`, and the run dies mid-flight with:
+  ```
+  fatal: [k8s-cp-01]: Source /tmp/releases/kubectl-1.35.4-amd64 not found
+  ```
+  **This is `/tmp`, so it does not survive a reboot.** Confirmed 2026-08-18:
+  `k8s-cp-01` (rebooted 2026-08-15 during the involuntary failover) had 0 files
+  there, while `k8s-cp-02`/`03` (up since 2026-07-30) still held all 19. So the
+  failure is per-node and appears only on whichever node last restarted — it
+  will not reproduce on a freshly-built cluster, and it is not a one-off.
+  Adding `download` selects 13 staging tasks instead of 3.
+
 - **Run from inside `kubespray/`, with relative paths.** Ansible looks for
   `ansible.cfg` in the CURRENT DIRECTORY, not beside the playbook, so invoking
   `kubespray/cluster.yml` from the repo root never loads `kubespray/ansible.cfg`
@@ -87,7 +102,7 @@ infisical run --projectId=8a3fa54f-be22-488a-bf51-55158f65c0f2 --env=dev -- \
   ../kubespray-venv/bin/ansible-playbook \
     -i ../inventory/ukubi/hosts.yaml \
     -e upgrade_cluster_setup=true \
-    --tags control-plane \
+    --tags control-plane,download \
     --become --diff \
     cluster.yml
 ```
@@ -118,7 +133,7 @@ cd kubespray
 infisical run --projectId=8a3fa54f-be22-488a-bf51-55158f65c0f2 --env=dev -- \
   ../kubespray-venv/bin/ansible-playbook \
     -i ../inventory/ukubi/hosts.yaml \
-    --tags network \
+    --tags network,download \
     --become --diff \
     cluster.yml
 ```
