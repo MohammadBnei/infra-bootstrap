@@ -2274,3 +2274,87 @@ happened, and neither is obvious:
 proxied `*.bnei.dev` matches. It returns Cloudflare anycast and then fails TLS,
 being three labels deep. The zone file's own header explains this rule; it is
 easy to assume deleting a record removes the name.
+
+---
+
+## 2026-08-18 — Origin wildcard cert (ADR-0038): rotating the Cloudflare token silently breaks ACME
+
+Adding a `*.bnei.dev` default TLS store certificate — the prerequisite for
+moving Cloudflare's SSL mode to `strict` — failed for a reason that had nothing
+to do with the change, and would have failed silently for up to 90 days if it
+had happened during a renewal instead of a first issuance.
+
+### The trap
+
+`CF_DNS_API_TOKEN` reaches Traefik as an **environment variable** via
+`secretKeyRef`. Environment variables are bound when the container starts and
+are never re-read. So this sequence leaves a broken cluster:
+
+1. Rotate the token in the Cloudflare dashboard (old one is revoked immediately)
+2. `infisical secrets set CF_ACCOUNT_TOKEN ...`
+3. The Infisical operator updates the Kubernetes Secret within its 60s resync
+
+Every one of those steps succeeds. `kubectl describe secret` shows the new
+value's length. **And the running Traefik pod still holds the revoked token.**
+
+### Why it is invisible
+
+Certificates already in `acme.json` keep serving normally. Only *new issuance
+and renewals* fail. Traefik logs the failure and carries on:
+
+```
+acme: error presenting token: cloudflare: failed to find zone bnei.dev.:
+ListZonesContext command failed: Invalid access token (9109)
+```
+
+Nothing is user-visible until a certificate actually expires. Had this happened
+without a new-cert order to expose it, the first symptom would have been an
+expired certificate up to 90 days later — the exact failure mode ADR-0038 exists
+to prevent, arriving through an entirely different door.
+
+Here it surfaced only because the new TLSStore was ordering a certificate it did
+not yet have, so an unseen SNI kept returning `CN=TRAEFIK DEFAULT CERT`.
+
+### Fix, and then the real fix
+
+Immediately:
+
+```bash
+ssh k9s kubectl rollout restart deploy/platform-traefik -n traefik
+```
+
+The wildcard was issued 40s later. But a restart-after-rotation checklist item
+is exactly the kind of thing that gets skipped once, so it was replaced with a
+structural fix: Traefik's Deployment now carries
+`secrets.infisical.com/auto-reload: "true"`, the same mechanism
+`common-app-chart` exposes as `infisical.autoReload`. The Infisical operator
+rolls any annotated Deployment when a Secret it manages changes content, so
+rotation is now just `infisical secrets set`.
+
+Accepted cost: a rotation now triggers an automatic Traefik rollout, and with
+`externalTrafficPolicy: Local` plus one replica that is a brief ingress outage
+(MetalLB stops announcing `.233`). A short, attributable outage beats a silent
+90-day fuse.
+
+**Anything that reads a rotated secret through `env:` + `secretKeyRef` has this
+property.** It is the environment-variable sibling of the `subPath` ConfigMap
+trap recorded on 2026-08-13: ArgoCD is `Synced`, the object matches git, and
+only the running process is stale.
+
+Upgrade path, not taken: lego also accepts `CF_DNS_API_TOKEN_FILE`. Mounting
+the Secret as a file would let kubelet propagate a rotation into the running
+pod with no restart.
+
+### Verification that the wildcard actually works
+
+An unseen SNI is the honest test, since existing hosts have their own certs:
+
+```
+$ openssl s_client -connect 192.168.1.233:443 -servername totally-new-host.bnei.dev
+subject=CN=*.bnei.dev
+X509v3 Subject Alternative Name: DNS:*.bnei.dev, DNS:bnei.dev
+```
+
+Per-host certs still win for their own SNI (`blog.bnei.dev` still presents
+`CN=blog.bnei.dev`), so the wildcard is a fallback and nothing already working
+changed. `strict` is now safe to enable.

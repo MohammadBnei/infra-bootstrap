@@ -14,6 +14,27 @@
 #     192.168.1.233-250; .230-.232 excluded (.232 is Pigsty's HA VIP)
 #   - kube-proxy retained (cilium chaining mode — do NOT enable kube-proxy replacement)
 
+# The Infisical operator restarts a Deployment carrying this annotation when a
+# Secret it manages changes content — same mechanism common-app-chart exposes
+# as `infisical.autoReload`. Required here because CF_DNS_API_TOKEN reaches
+# Traefik as an env var via secretKeyRef, and env vars are bound at container
+# start and never re-read. Without it, rotating the Cloudflare token leaves the
+# running pod holding the revoked one while every object looks correct, and the
+# breakage is invisible: existing certs keep serving and only issuance and
+# RENEWALS fail, so nothing surfaces until a cert expires up to 90 days later.
+# Hit for real on 2026-08-18 — see docs/bootstrap-test-notes.md.
+#
+# Accepted cost: a token rotation now triggers an automatic Traefik rollout,
+# which with externalTrafficPolicy: Local and one replica is a brief ingress
+# outage. A short, attributable outage beats a silent 90-day fuse.
+#
+# The managed Secret (traefik-cloudflare-dns) lands in THIS namespace — see
+# gitops/bootstrap/traefik-cloudflare-secret.yaml — which is what makes the
+# operator's watch match this Deployment.
+deployment:
+  annotations:
+    secrets.infisical.com/auto-reload: "true"
+
 service:
   type: LoadBalancer
   annotations:
