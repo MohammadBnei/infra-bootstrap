@@ -199,10 +199,17 @@ extraVolumeMounts:
 #      `garage bucket info zot-registry` read 3.3 GB / 144 objects against the
 #      40 GB quota immediately before arming.
 #
-# If the bucket does not shrink after a GC interval, zot is deleting manifests
-# without reclaiming S3 blobs — trading rollback depth for nothing — and this
-# goes back to `true`. That is the failure this staging exists to catch, and
-# it is silent in both directions otherwise.
+# CONFIRMED on the first armed pass: zot DOES reclaim S3 blobs on a remote
+# storage backend. editable-blog's 0.37.9/0.38.0/0.39.0 were deleted and the
+# Garage bucket went 144 -> 120 objects (3.1 -> 3.0 GiB). The size moved less
+# than the object count because those images share most of their layers with
+# the three kept tags, so only the unique blobs came back — which is the
+# expected shape, not a partial failure.
+#
+# That was the open question this staging existed to answer, and it is the one
+# that could not be answered without arming. If a future pass ever deletes
+# manifests while the bucket holds steady, that is the silent failure this
+# guarded against and `dryRun` goes back to `true`.
 #
 # `repositories: ["**"]` also applies this to editable-blog and anything
 # added later. That is intended — one policy beats a per-repo list to keep
