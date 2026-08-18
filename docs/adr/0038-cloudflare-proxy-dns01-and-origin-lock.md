@@ -1,6 +1,6 @@
 # ADR-0038: Proxy `bnei.dev` through Cloudflare; move `le` to DNS-01; lock the origin
 
-**Status:** Proposed
+**Status:** Accepted (implemented 2026-08-18 — see the implementation note at the end; what was built differs from Decisions 3, 5 and 7 as written)
 **Date:** 2026-08-18
 **Amends:** [ADR-0033](0033-dns-to-cloudflare-and-dns01-wildcard.md) (reverses its
 §3 "proxying is not adopted" and its §5 "`le` is untouched"),
@@ -209,3 +209,102 @@ Named explicitly so they are not later mistaken for oversights:
 - **Do nothing and rely on per-app authentication.** Rejected: it is the current
   state, and it leaves a hypervisor root login and a secrets store answering
   unauthenticated connections from the entire internet.
+
+
+---
+
+## Implementation note (added after the real run, 2026-08-18)
+
+Appended rather than edited into the decisions above, per `DECISION.md` §5.
+Two of the decisions as written are not what was built, and the reasons matter
+more than the outcome.
+
+### Decision 7 (hostname renames) was unnecessary. A proxied wildcard covers it.
+
+The renames were premised on free Universal SSL covering only the apex plus one
+wildcard level. That premise is correct. The conclusion drawn from it — that the
+deep hostnames must be renamed before anything can be proxied — was not.
+
+**Proxying a wildcard record is available on every Cloudflare plan**
+(*"Customers on all plans can create and proxy wildcard DNS records"*). The
+constraint is purely certificate depth. So proxying `bnei.dev` + `*.bnei.dev`
+covers every first-level host — the entire admin surface, including the two
+that actually justified this ADR (`proxmox`, `infisical`) — while the two-label
+hosts simply stay grey and keep working.
+
+What was actually done:
+
+| Record | State | Why |
+|---|---|---|
+| `bnei.dev`, `*.bnei.dev` | proxied | Universal SSL covers apex + one wildcard level |
+| `fleet.bnei.dev` | explicit grey A | ConnectRPC streaming; Cloudflare Free 524s at 100s |
+| `s3.bnei.dev` | explicit grey A | SigV4 vs proxy path normalization untested; Ente depends on it |
+| `*.ente.bnei.dev` | grey | Two labels deep — no edge cert. URLs already shared publicly |
+| `*.e2e.bnei.dev` | deleted | Previews to be renamed to `<id>-e2e` (first-level) |
+
+Explicit records beat the wildcard, which is the same mechanism the zone file
+already relies on for `em726320` and `link`.
+
+This is a materially cheaper decision than the one recorded above: it avoids two
+Go changes in `agent-fleet`, a provisioner image rebuild, Ente client
+reconfiguration, and breaking already-shared album links. The renames survive
+only as an optional follow-up, and buy nothing except WAF coverage for `ente`
+and the previews.
+
+The certificate-depth constraint was confirmed empirically, not from
+documentation: with `*.api.voconsteroid.com` proxied, `dev.api.voconsteroid.com`
+resolved to Cloudflare anycast and then returned **no certificate at all**,
+failing the handshake. `api.voconsteroid.com`, one label shallower, served
+normally from the `CN=voconsteroid.com` Universal cert.
+
+### Decision 3's "SSL mode is Full (strict)" is right as a destination, wrong as a precondition
+
+`full` does not validate the origin certificate. During a cutover that is a
+**safety net**, not a weakness: it is precisely what prevents the HTTP 526
+window this ADR's own Consequences describe, where Traefik serves its
+self-signed default while a new hostname's DNS-01 order completes (30–120s).
+
+The correct sequence is: flip on `full` → confirm certificates are healthy →
+tighten to `strict`. `strict` remains the destination and is still outstanding.
+
+### Decision 5 (origin lock) changes shape and is not yet implemented
+
+An entrypoint-level `ipAllowList` on `websecure` is no longer viable, because
+`fleet`, `s3` and `*.ente` are deliberately grey and must remain reachable
+directly. The lock has to become a **per-route** middleware applied only to
+proxied hosts. `common-app-chart`'s baseline chain is the natural place to hang
+it. Until then, an attacker who knows `82.65.231.50` can still bypass the WAF
+for proxied hostnames — the IP has been in public DNS and CT logs for months,
+so this should not be treated as latent.
+
+### Two things the flip silently broke, both fixed in the same session
+
+Neither is obvious, and both undid work completed the previous day:
+
+1. **Access logs went blind.** The TCP peer became a Cloudflare edge IP, so
+   every entry recorded Cloudflare as the client. Fixed with
+   `ports.websecure.forwardedHeaders.trustedIPs` set to Cloudflare's 22
+   published ranges. Verified by a single request showing
+   `ClientAddr: 172.68.151.37` (edge) against `ClientHost: 82.65.231.50` (real).
+2. **The baseline rate limiter bucketed the whole internet together**, since it
+   buckets per source IP. Fixed with
+   `sourceCriterion.requestHeaderName: CF-Connecting-IP`, chosen over an
+   X-Forwarded-For `ipStrategy` because Cloudflare guarantees that header holds
+   exactly the real client and overwrites client-supplied values.
+
+   **Any host left grey needs the opposite** — `CF-Connecting-IP` never appears
+   on a direct connection, so the default collapses grey hosts into a single
+   empty-key bucket. `ente-museum` and `ente-web` set `sourceHeader: ""`
+   explicitly. `agent-fleet-core` still needs the same in its own repo.
+
+### Still outstanding
+
+- `ssl` → `strict`; `min_tls_version` 1.0 → 1.2; Browser Integrity Check off
+  for `s3` (it rejects non-browser User-Agents, i.e. every S3 SDK)
+- The per-route origin allowlist (revised Decision 5 above)
+- e2e preview rename, and repointing `le-dns` from `*.e2e.bnei.dev` to
+  `*.bnei.dev` — which additionally removes the 526 issuance window for every
+  future hostname
+- `CF_ACCOUNT_TOKEN` rotation
+
+Full incident detail: `docs/bootstrap-test-notes.md`, 2026-08-18 entries.

@@ -58,9 +58,14 @@ updated.
   `bnei.lan`; `bnei.dev` is external, hosted at **Cloudflare** (registration
   stays at Squarespace) with **wildcard A records** — `*.bnei.dev`,
   `*.ente.bnei.dev`, `*.e2e.bnei.dev`, plus the apex. Adding an app hostname
-  no longer needs a DNS change. All records stay **DNS-only (grey cloud)** —
-  Cloudflare's proxy would terminate TLS at its edge and break Traefik's
-  TLS-ALPN-01 renewal. See [ADR-0033](docs/adr/0033-dns-to-cloudflare-and-dns01-wildcard.md),
+  no longer needs a DNS change. **The apex and `*.bnei.dev` are proxied
+  (orange cloud) as of 2026-08-18** — [ADR-0038](docs/adr/0038-cloudflare-proxy-dns01-and-origin-lock.md).
+  That became possible only because `le` moved to DNS-01 first; under
+  TLS-ALPN-01 a proxied record breaks renewal silently, which is why ADR-0033
+  declined proxying. Deliberately still grey: `fleet` (ConnectRPC streaming vs
+  Cloudflare's 100s origin timeout), `s3` (SigV4 vs proxy path normalization),
+  and `*.ente.bnei.dev` (two labels deep — free Universal SSL covers the apex
+  plus one wildcard level only). See [ADR-0033](docs/adr/0033-dns-to-cloudflare-and-dns01-wildcard.md),
   `docs/runbook-dns-cloudflare-migration.md`, and `ARCHITECTURE.md` §3.
   *Supersedes the previous "manual per-host A records at Squarespace DNS, no
   wildcard" — which was itself a correction of an older "Cloudflare" error
@@ -154,12 +159,15 @@ Never propose these without an explicit user greenlight, even as a
 "better alternative":
 
 - ❌ **cert-manager** as a secondary cert engine — [ADR-0001](docs/adr/0001-ingress-traefik-ingressroute-over-gateway-api.md). Unchanged and absolute.
-- ⚠️ **DNS-01 as the cert engine for `le`** (the resolver every `*.bnei.dev`
-  host renews through) — [ADR-0001](docs/adr/0001-ingress-traefik-ingressroute-over-gateway-api.md).
-  **One carve-out** ([ADR-0033](docs/adr/0033-dns-to-cloudflare-and-dns01-wildcard.md)):
-  a *second* resolver `le-dns` (Traefik-native lego, Cloudflare provider, no
-  plugin) issues the `*.e2e.bnei.dev` wildcard, which TLS-ALPN-01 structurally
-  cannot. `le` itself stays TLS-ALPN-01, and this is still not cert-manager.
+- ✅ **DNS-01 is now the cert engine for `le`** — reversed by
+  [ADR-0038](docs/adr/0038-cloudflare-proxy-dns01-and-origin-lock.md)
+  (2026-08-18), which supersedes this entry's former ⚠️ status. Cloudflare's
+  proxy terminates TLS at its edge, so TLS-ALPN-01 cannot renew a proxied
+  host — DNS-01 is the prerequisite for proxying anything, not a concession.
+  Both `le` and `le-dns` are DNS-01 via Cloudflare, and both remain
+  Traefik-native lego with no plugin. **cert-manager is still banned**
+  ([ADR-0001](docs/adr/0001-ingress-traefik-ingressroute-over-gateway-api.md));
+  only the DNS-01 half of that rejection is amended.
 - ❌ **Gateway API for app HTTPS routing** — [ADR-0001](docs/adr/0001-ingress-traefik-ingressroute-over-gateway-api.md)
 - ❌ **Plain K8s Ingress or Ingress-NGINX** — [ADR-0001](docs/adr/0001-ingress-traefik-ingressroute-over-gateway-api.md)
 - ❌ **Ceph** — [ADR-0002](docs/adr/0002-storage-longhorn-over-ceph-nfs.md)
