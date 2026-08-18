@@ -53,6 +53,51 @@ kube_cert_group: kube-cert
 # No GPU on test VMs — re-enable when k8s-worker-gpu is added
 nvidia_accelerator_enabled: false
 
+# --- ADR-0040 -------------------------------------------------------------
+# BOTH of these are apiserver flags, so a plain `cluster.yml` run does NOT
+# apply them to an already-running cluster — it completes clean and changes
+# nothing. They need `-e upgrade_cluster_setup=true`, confirmed the hard way
+# on 2026-08-01 (docs/bootstrap-test-notes.md).
+#
+# They apply TOGETHER and cannot be separated: `--tags control-plane` runs the
+# role that owns both, so one command sets both flags in one kubeadm
+# ClusterConfiguration rewrite and one apiserver restart. That is fine — the
+# separation that matters is apiserver vs CNI, since rolling the Cilium
+# DaemonSet in the same pass is what makes a failure unattributable. See
+# docs/runbook-cluster-hardening-adr-0040.md.
+
+# Encrypt Secrets at rest in etcd. Until this, every Secret — the Cloudflare
+# zone token, the Garage root token, the GitHub PAT, every DB URL — sat in
+# plaintext on all three control-plane nodes and in every etcd snapshot.
+#
+# NOT RETROACTIVE, and effectively ONE-WAY. Existing Secrets stay plaintext
+# until rewritten (`kubectl get secrets -A -o json | kubectl replace -f -`).
+# Once they ARE rewritten, removing this flag makes every Secret in etcd
+# undecryptable: secrets_encryption.yaml.j2 puts the cipher first and
+# `identity` last, so forward is safe and backward is not. Back up etcd first.
+#
+# The key is written to {{ credentials_dir }}/kube_encrypt_token.creds — a
+# TRACKED directory, which is why *.creds is in .gitignore. Losing that file
+# after the rewrite is unrecoverable; back it up to Infisical, not to git.
+# (kubespray keeps it consistent across control-plane nodes itself:
+# encrypt-at-rest.yml slurps an existing secrets_encryption.yaml and
+# propagates the token via delegate_facts, and on first enable the lookup
+# resolves once on the Ansible controller.)
+kube_encrypt_secret_data: true
+
+# API audit log. There was previously NO record of who did what against the
+# API server, which also made every downstream detection rule impossible to
+# write. Uses kubespray's default policy — the upstream one that drops
+# high-volume low-risk reads (kube-proxy watches, kubelet node gets) and logs
+# the rest. A custom policy is available via audit_policy_custom_rules; not
+# writing one speculatively.
+#
+# Disk: audit_log_maxsize 100MB x audit_log_maxbackups 10 = up to ~1GB per
+# control-plane node, at /var/log/audit/ on the host (NOT /var/log/pods, which
+# is why Alloy needs an explicit file source — see
+# gitops/platform/values/alloy/values.yaml).
+kubernetes_audit: true
+
 auto_renew_certificates: false
 
 event_ttl_duration: "1h0m0s"

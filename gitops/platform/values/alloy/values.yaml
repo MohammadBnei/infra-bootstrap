@@ -118,6 +118,42 @@ alloy:
         stage.cri {}
       }
 
+      // ADR-0040: the kube-apiserver audit log.
+      //
+      // It does NOT arrive via the pod_logs path above. kubespray writes it to
+      // audit_log_path (/var/log/audit/kube-apiserver-audit.log) on the HOST
+      // and hostPath-mounts it into the apiserver static pod, so it never
+      // appears under /var/log/pods. Without this block the audit log is
+      // produced, rotated and never read — a disk cost with no security value,
+      // and every downstream detection rule silently has no data.
+      //
+      // Reachable because mounts.varlog already puts the whole of /var/log in
+      // this container; no extra mount and no extra RBAC (file tailing needs
+      // none). The file only exists on control-plane nodes, so on workers this
+      // target simply never matches.
+      //
+      // Forwarded straight to loki.write, NOT through loki.process.pod_logs:
+      // that stage strips CRI framing ("<time> <stream> <flag> <content>"),
+      // which audit events do not have. They are already one JSON object per
+      // line, and stage.cri would mangle them.
+      //
+      // Query as {job="kube-apiserver-audit"}. Note Loki retention is 14d, so
+      // this is recent-forensics only, not an archive — and audit events carry
+      // usernames and resource names, which is exactly why they are useful and
+      // also why the retention window matters.
+      local.file_match "audit_logs" {
+        path_targets = [{
+          __path__ = "/var/log/audit/kube-apiserver-audit.log",
+          job      = "kube-apiserver-audit",
+          node     = sys.env("K8S_NODE_NAME"),
+        }]
+      }
+
+      loki.source.file "audit_logs" {
+        targets    = local.file_match.audit_logs.targets
+        forward_to = [loki.write.default.receiver]
+      }
+
       loki.write "default" {
         endpoint {
           // Loki SingleBinary chart's fullname convention not yet
