@@ -2482,3 +2482,75 @@ The second class needs a node check instead:
 ../kubespray-venv/bin/ansible -i ../inventory/ukubi/hosts.yaml kube_control_plane \
   -m shell -a "ls /tmp/releases/ | wc -l"
 ```
+
+---
+
+## 2026-08-18 — Phase 6 verification: one real bug, and four checks that lied
+
+Both kubespray runs succeeded. Everything below came out of *verifying* them,
+which took longer than running them.
+
+### The real bug: the audit log's container path is not its host path
+
+The Alloy source added alongside Phase 6 tailed
+`/var/log/audit/kube-apiserver-audit.log` and collected nothing.
+
+```
+--audit-log-path  /var/log/audit/kube-apiserver-audit.log   <- inside the static pod
+hostPath          /var/log/kubernetes/audit/                <- what a DaemonSet sees
+```
+
+kubespray derives `audit_log_mountpath` from `audit_log_path | dirname`, so the
+flag names the container path while the volume maps the host one onto it. Both
+paths are real; only one is reachable from a DaemonSet. Read the apiserver
+pod's `volumeMounts` against its `volumes` to tell them apart — the flag alone
+cannot.
+
+**Why it survived a verification pass.** `local.file_match` against a
+nonexistent path is not an error. Alloy loaded the component, evaluated it,
+logged `config reloaded`, and produced an empty stream. That was checked and
+read as success. It was success — the component was loaded and working, aimed
+at nothing.
+
+> **"The component loaded" and "the component is collecting" are different
+> claims.** Only the second is worth checking. The honest test is downstream:
+> `{job="kube-apiserver-audit"}` in Loki, which now returns 6 streams.
+
+### Four verification steps that returned misleading results
+
+Each of these looks like a different conclusion than the truth.
+
+1. **A reused probe Secret gave a false "encryption is broken".** Reading
+   `enc-probe` from etcd showed no `k8s:enc:` envelope. But that Secret was
+   created *before* the run as a baseline, and `kubectl create` had failed
+   `AlreadyExists` with stderr suppressed — so an old plaintext Secret was
+   being read. Always use a uniquely-named Secret when testing encryption at
+   rest, since the whole point is that it is not retroactive.
+
+2. **SSH's banner corrupts byte-level output.** `ssh k9s kubectl exec ...
+   etcdctl get ... | od -c` began `P s e u d o - t e r m i n a l`. The
+   "Pseudo-terminal will not be allocated" line lands in the stream. Any
+   byte-level inspection over `ssh` must filter it or the data is wrong from
+   byte zero.
+
+3. **A pipe masked a missing file.** `ansible -m shell -a "ls -l /path | awk
+   '{print $5}'"` returned `rc=0` with no output, which reads as "present but
+   unprintable". `ls` had failed and `awk` succeeded on empty input. Use
+   `-m stat` when existence is the question, never `ls` in a pipeline.
+
+4. **SSH re-shells the remote command, so LogQL breaks.** `(` in
+   `count_over_time(...)` produced `bash: syntax error near unexpected token`,
+   and `{` in a stream selector silently mangled the query into an empty
+   response. URL-encode instead: `%7Bjob%3D%22kube-apiserver-audit%22%7D`.
+
+Smaller: Loki's `query_range` returns `resultType: streams`, where entries
+carry a **`stream`** key — not `metric`, which is the matrix/vector shape. A
+parser written for one `KeyError`s on the other.
+
+### What the runs actually proved
+
+| Change | Evidence |
+|---|---|
+| etcd encryption | New Secret has `k8s:enc:secretbox:v1`; pre-run probe has none |
+| Audit log | 6 Loki streams across 3 CP nodes, e.g. `verb=get resource=leases user=system:kube-controller-manager decision=allow` |
+| Cilium WireGuard | `cilium_wg0`, 4 peers (correct for 5 nodes) |
