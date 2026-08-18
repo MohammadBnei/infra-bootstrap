@@ -122,6 +122,23 @@ spec:
         chartName: alloy
         valuesPath: gitops/platform/values/alloy/values.yaml
 
+      # authentik — identity provider (ADR-0039). Wave 5: it needs the
+      # infisical-operator (wave 1) to have materialised authentik-config
+      # before the pods start, since the chart reads ALL configuration from
+      # that Secret via authentik.existingSecret.
+      #
+      # Its Postgres is Pigsty's, OUTSIDE the cluster — so this Application
+      # being Healthy says nothing about whether the database exists. The
+      # `authentik` database and dbuser_authentik are declared in
+      # pigsty/pigsty.yml and created by a pigsty run, not by ArgoCD.
+      - name: authentik
+        namespace: authentik
+        syncWave: "5"
+        chartRepoURL: https://charts.goauthentik.io
+        chartRevision: "2026.5.6" # confirmed against `helm search repo authentik/authentik` 2026-08-19
+        chartName: authentik
+        valuesPath: gitops/platform/values/authentik/values.yaml
+
   template:
     metadata:
       name: 'platform-{{.name}}'

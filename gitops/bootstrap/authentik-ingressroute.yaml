@@ -1,0 +1,41 @@
+# authentik at authentik.bnei.dev (ADR-0039).
+#
+# Hand-written rather than chart-generated: ADR-0001 makes Traefik IngressRoute
+# the only routing API here, and `server.ingress.enabled: false` in
+# gitops/platform/values/authentik/values.yaml keeps the chart from emitting a
+# plain Ingress alongside it.
+#
+# The origin lock is load-bearing, not decoration. This host is about to become
+# the front door for argocd, grafana, alertmanager, pgweb and proxmox — an
+# attacker who can reach it directly at 82.65.231.50, bypassing Cloudflare's
+# WAF and geo rules, is attacking the thing that gates everything else. See
+# gitops/bootstrap/cloudflare-origin-lock-middleware.yaml; same shared object
+# every other platform route uses, same self-syncing Application, so no
+# ordering race.
+#
+# NO forwardAuth here, deliberately: authentik cannot authenticate the requests
+# that reach authentik. This is the one host in the tier that has to serve its
+# own login flow unauthenticated.
+#
+# Service name comes from the chart's fullname template with the
+# ApplicationSet's `platform-` release prefix: platform-authentik-server:80
+# (targetPort 9000). Confirmed via `helm template platform-authentik ...`.
+apiVersion: traefik.io/v1alpha1
+kind: IngressRoute
+metadata:
+  name: authentik
+  namespace: authentik
+spec:
+  entryPoints:
+  - websecure
+  routes:
+  - kind: Rule
+    match: Host(`authentik.bnei.dev`)
+    middlewares:
+    - name: cloudflare-origin-lock
+      namespace: default
+    services:
+    - name: platform-authentik-server
+      port: 80
+  tls:
+    certResolver: le
