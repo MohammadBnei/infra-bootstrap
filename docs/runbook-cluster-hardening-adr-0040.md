@@ -58,10 +58,21 @@ unattributable, and this repo has been burned by exactly that before.
   single replica, so draining its node withdraws the MetalLB VIP entirely —
   a blackhole, not a drain. Schedule accordingly.
 
-Reachability first:
+- **Run from inside `kubespray/`, with relative paths.** Ansible looks for
+  `ansible.cfg` in the CURRENT DIRECTORY, not beside the playbook, so invoking
+  `kubespray/cluster.yml` from the repo root never loads `kubespray/ansible.cfg`
+  and its `roles_path = roles:...` never applies. The run then dies immediately
+  with `the role 'dynamic_groups' was not found`, having searched
+  `kubespray/playbooks/roles` instead of `kubespray/roles`. This is the same
+  invocation `docs/runbook-k8s-bootstrap.md` already uses.
+
+Reachability, and a read-only check that roles resolve at all:
 
 ```bash
 kubespray-venv/bin/ansible -i inventory/ukubi/hosts.yaml k8s_cluster -m ping
+
+cd kubespray && ../kubespray-venv/bin/ansible-playbook \
+  -i ../inventory/ukubi/hosts.yaml --list-tags cluster.yml >/dev/null && echo OK
 ```
 
 ## 3. Steps
@@ -71,12 +82,14 @@ kubespray-venv/bin/ansible -i inventory/ukubi/hosts.yaml k8s_cluster -m ping
 One run, both flags — see the note in §1.
 
 ```bash
+cd kubespray
 infisical run --projectId=8a3fa54f-be22-488a-bf51-55158f65c0f2 --env=dev -- \
-  kubespray-venv/bin/ansible-playbook \
-    -i inventory/ukubi/hosts.yaml \
+  ../kubespray-venv/bin/ansible-playbook \
+    -i ../inventory/ukubi/hosts.yaml \
     -e upgrade_cluster_setup=true \
     --tags control-plane \
-    kubespray/cluster.yml
+    --become --diff \
+    cluster.yml
 ```
 
 Then **rewrite existing Secrets** — encryption is not retroactive, and until
@@ -101,11 +114,13 @@ written, rotated and never read.
 ### Run B — Cilium WireGuard + Hubble metrics
 
 ```bash
+cd kubespray
 infisical run --projectId=8a3fa54f-be22-488a-bf51-55158f65c0f2 --env=dev -- \
-  kubespray-venv/bin/ansible-playbook \
-    -i inventory/ukubi/hosts.yaml \
+  ../kubespray-venv/bin/ansible-playbook \
+    -i ../inventory/ukubi/hosts.yaml \
     --tags network \
-    kubespray/cluster.yml
+    --become --diff \
+    cluster.yml
 ```
 
 **Then roll every workload.** Enabling encryption makes Cilium recompute pod
