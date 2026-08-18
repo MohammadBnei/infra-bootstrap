@@ -2358,3 +2358,60 @@ X509v3 Subject Alternative Name: DNS:*.bnei.dev, DNS:bnei.dev
 Per-host certs still win for their own SNI (`blog.bnei.dev` still presents
 `CN=blog.bnei.dev`), so the wildcard is a fallback and nothing already working
 changed. `strict` is now safe to enable.
+
+---
+
+## 2026-08-18 — Cloudflare hardening: Full (strict), TLS 1.2 floor, edge HTTPS redirect
+
+Applied to both zones after the origin wildcard landed. Uneventful, which is the
+point — the preconditions were checked first rather than discovered afterwards.
+
+### Pre-flight that made it safe
+
+`strict` makes Cloudflare validate the origin certificate on **every** proxied
+request, so any host serving a self-signed or expired cert becomes a hard 526.
+Enumerating every hostname Traefik routes and checking each origin cert first
+is what turns this from a gamble into a change:
+
+```bash
+kubectl get ingressroute -A -o yaml | grep -oE 'Host\(`[^`]+`\)' | ...
+# then per host:
+openssl s_client -connect 192.168.1.233:443 -servername "$h" | openssl x509 -noout -subject -enddate
+```
+
+All 17 returned a valid per-host Let's Encrypt cert, none expiring before Oct 26.
+
+**Shell gotcha:** the first version of that loop iterated `$HOSTS` unquoted and
+processed the entire newline-separated list as ONE hostname — zsh does not word-
+split unquoted parameter expansions the way bash does. It reported a single
+`NO CERT` and looked like a catastrophic finding. Use `while IFS= read -r` over
+a file, not `for h in $VAR`.
+
+### What was changed
+
+| Setting | Before | After |
+|---|---|---|
+| `ssl` | `full` | `strict` (both zones) |
+| `min_tls_version` | `1.0` | `1.2` (both zones) |
+| `always_use_https` | `off` | `on` (both zones) |
+
+`browser_check` was left ON. It only applies to proxied traffic, so the two
+hosts most likely to have non-browser clients — `s3` and `fleet` — are
+unaffected, being grey. `api.voconsteroid.com` IS proxied and is an API; if
+SDK clients start getting challenged, that is the setting to look at.
+
+### Verified after
+
+- All 16 resolvable hosts serve; zero 526 and zero 525
+- TLS 1.1 refused, TLS 1.2 accepted
+- `http://` → 301 at the edge
+- **A brand-new hostname returns 301, not 526** — created a throwaway
+  IngressRoute and confirmed the origin presented `CN=*.bnei.dev`. That is the
+  whole reason the wildcard had to land first
+
+### Caveat carried forward
+
+The origin wildcard covers `*.bnei.dev` only. `voconsteroid.com` is also
+`strict` and its two existing hosts have valid per-host certs, so it is safe —
+but a NEW hostname in that zone will 526 for its issuance window, unlike a new
+`bnei.dev` one. Either add a second default store entry or accept the window.

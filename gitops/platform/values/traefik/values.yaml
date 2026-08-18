@@ -184,11 +184,14 @@ providers:
 # has no specific cert for. Without it, an unseen hostname gets
 # `CN=TRAEFIK DEFAULT CERT` (self-signed) for the 30–120s a DNS-01 order takes.
 #
-# That is invisible today only because Cloudflare's SSL mode is `full`, which
-# does not validate the origin certificate. Under `strict` — the intended
-# destination — the same window becomes HTTP 526, and becomes permanent if the
-# order ever fails, with Cloudflare's error page hiding the ACME error. So this
-# is the prerequisite for tightening to `strict`, not an optimisation.
+# Under Cloudflare's `strict` SSL mode — live on both zones since 2026-08-18 —
+# a self-signed origin cert is rejected outright, so that window would be HTTP
+# 526, and permanent if the order ever failed, with Cloudflare's error page
+# hiding the ACME error. This wildcard is what made `strict` safe to enable;
+# it is a prerequisite, not an optimisation. Removing it re-opens the 526.
+#
+# Verified after the flip: a brand-new hostname returned 301 immediately and
+# the origin presented CN=*.bnei.dev, not TRAEFIK DEFAULT CERT.
 #
 # One wildcard covers every first-level host, so a new app is served correctly
 # from its very first handshake and never triggers a per-host order. It also

@@ -705,11 +705,22 @@ own cert on first request, `certResolver: le` on its `IngressRoute`.
 
 On-demand issuance is worth knowing about: Traefik orders on the first TLS
 handshake for an unseen SNI and serves a self-signed default meanwhile. DNS-01
-propagation makes that window 30–120s. Cloudflare's SSL mode is `full`, which
-does not validate the origin cert and therefore tolerates it; under `strict`
-the same window returns HTTP 526. Issuing a `*.bnei.dev` wildcard through
-`le-dns` and using it as the default store cert would remove the window
-entirely — not yet done.
+propagation makes that window 30–120s, and under Cloudflare's `strict` SSL mode
+a self-signed origin cert returns HTTP 526.
+
+**Both are resolved as of 2026-08-18.** `le-dns` issues a `*.bnei.dev` wildcard
+(SAN `bnei.dev`) served as Traefik's default TLS store certificate, so an
+unseen hostname is covered from its first handshake and never presents
+`TRAEFIK DEFAULT CERT`. Per-host certs from `le` still win for their own SNI —
+the wildcard is a fallback, not a replacement. With that in place both zones
+moved to **Full (strict)**, verified by creating a brand-new hostname and
+getting 301 rather than 526.
+
+> **Caveat for `voconsteroid.com`:** that zone is also `strict`, but the origin
+> wildcard covers `*.bnei.dev` only. Its two hosts have valid per-host certs,
+> so it is safe today — but a *new* `voconsteroid.com` hostname WILL return 526
+> for its issuance window, unlike a new `bnei.dev` one. Add a second default
+> store entry, or expect the window.
 
 **One wildcard exists:** `*.e2e.bnei.dev`, issued by the second resolver
 `le-dns` (ACME DNS-01 via Cloudflare) — TLS-ALPN-01 and HTTP-01 structurally
