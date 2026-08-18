@@ -2182,3 +2182,95 @@ with the argument check above, not with the ArgoCD Application status — the
 Application was `Synced` at the right revision while the old pod was still
 serving, which is the same class of gap as the `subPath` ConfigMap trap
 recorded on 2026-08-13.
+
+---
+
+## 2026-08-18 — Cloudflare proxy cutover (ADR-0038, PRs #157/#158): five findings, four of them self-inflicted
+
+`*.bnei.dev` + apex went proxied. The DNS flip itself was uneventful. Everything
+that went wrong was in the config around it, and every one of them was silent —
+valid YAML, clean exit codes, nothing in any log.
+
+### The plan was wrong about which records need renaming
+
+The original plan renamed the deep hostnames (`api.ente` → `ente-api`, etc.)
+because free Universal SSL covers only the apex plus **one** wildcard level.
+That is true, but the conclusion did not follow. **A proxied wildcard is fine on
+all plans** ("Customers on all plans can create and proxy wildcard DNS records")
+— the constraint is purely certificate depth. So proxying `*.bnei.dev` alone
+covers every first-level host, and the two-label hosts simply stay grey.
+
+That collapses a cross-repo migration (two Go changes in `agent-fleet`, a
+provisioner image rebuild, Ente client reconfiguration, broken shared links)
+into a one-afternoon DNS change. Renames become an optional follow-up that only
+buys WAF coverage for ente and the previews.
+
+Confirmed empirically rather than from docs: with `*.api.voconsteroid.com`
+proxied, `dev.api.voconsteroid.com` resolved to Cloudflare anycast fine but the
+TLS handshake failed with **no certificate returned at all**. Its sibling
+`api.voconsteroid.com`, one label shallower, served normally from the
+`CN=voconsteroid.com` Universal cert.
+
+### `full` is the correct SSL mode *during* a cutover, not `strict`
+
+Stated backwards in the plan. `full` does not validate the origin certificate,
+which during the cutover is a **safety net**: it is what prevents HTTP 526 while
+Traefik serves its self-signed default during a 30–120s DNS-01 issuance for a
+hostname it has never seen. Flip on `full`, confirm certs, then tighten to
+`strict`. Two steps, no exposed window in either.
+
+### Two config edits that rendered nothing, both valid YAML
+
+1. **Wrong indentation.** `ports.websecure.forwardedHeaders.trustedIPs` was
+   written with the CIDR list at 4 spaces under a key at 6, so the items were
+   not children of the key. `helm template` exited 0 and rendered **zero**
+   ranges. Same silent-no-op class as the Infisical and Loki values-nesting
+   incidents already in the `k8s-ops` skill. Caught only by grepping the
+   *rendered process arguments*, never the values file.
+2. **Duplicate top-level key.** An `ingress.baseline.rateLimit.sourceHeader`
+   override was appended to the end of `ente-{web,museum}/values.yaml`, both of
+   which already have a top-level `ingress:`. A duplicate YAML key means the
+   later block wins outright and the first is **silently discarded** — which
+   would have removed `hostname` and taken both routes down. Always
+   `grep -c '^<key>:'` before appending to a values file.
+
+### Verification that produced a false negative twice
+
+- **Rate limiter.** 300 requests in 2.07s returned zero 429s, which reads as a
+  broken limiter. It was correct: the token bucket allowed ~200 burst +
+  100/s × 2.07s ≈ 407 > 300. **A burst test sized under
+  `burst + average × duration` always passes.** Redone at 1000 requests /
+  310 req/s: 500×200, 500×429.
+- **Live arg check.** `grep -c forwardedheaders` against the Deployment returned
+  0 for three minutes while the config was in fact applied — the real arg is
+  camelCase `forwardedHeaders.trustedIPs`. Use `grep -i` when checking Traefik
+  args, or you will roll back a working change.
+
+### What the flip actually changed, and what it broke
+
+Two things that were correct *before* the flip became wrong the instant it
+happened, and neither is obvious:
+
+- **Access logs went blind.** The TCP peer is now a Cloudflare edge IP, so every
+  line recorded Cloudflare as `ClientHost` — silently undoing both the access
+  logs and the `externalTrafficPolicy: Local` work from the day before. Fixed
+  with `forwardedHeaders.trustedIPs` = Cloudflare's 22 published ranges.
+  Verified: `ClientAddr: 172.68.151.37` (edge) vs `ClientHost: 82.65.231.50`
+  (real client) on the same request.
+- **The rate limiter bucketed the entire internet together**, since it buckets
+  per source IP. Fixed with `sourceCriterion.requestHeaderName: CF-Connecting-IP`
+  — chosen over an X-Forwarded-For `ipStrategy` because Cloudflare guarantees
+  that header holds exactly the real client and overwrites client-supplied
+  values, whereas XFF's shape depends on client input.
+
+  **Grey hosts need the opposite.** `CF-Connecting-IP` never appears on a direct
+  connection, so the default collapses them into one empty-key bucket. Any host
+  left grey must set `sourceHeader: ""` explicitly.
+
+### RFC 4592 again: deleting `*.e2e.bnei.dev` did not stop e2e names resolving
+
+`<id>.e2e.bnei.dev` still resolves after the wildcard was deleted, because
+`e2e.bnei.dev` is not a node — so the closest encloser is `bnei.dev` and the
+proxied `*.bnei.dev` matches. It returns Cloudflare anycast and then fails TLS,
+being three labels deep. The zone file's own header explains this rule; it is
+easy to assume deleting a record removes the name.
