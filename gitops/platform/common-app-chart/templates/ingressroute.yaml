@@ -21,9 +21,11 @@ spec:
       port: {{ .Values.service.port }}
     {{- /*
       Baseline middlewares are PREPENDED to whatever the app declares, never
-      replace it. Traefik applies middlewares left to right, so rate limiting
-      comes first (reject abuse before doing any other work), then response
-      headers, then the app's own chain (auth, stripPrefix, ...).
+      replace it. Traefik applies middlewares left to right, and the order is
+      cheapest-rejection-first: origin lock (drop anything that did not come
+      through Cloudflare), then rate limiting, then response headers, then the
+      app's own chain (auth, stripPrefix, ...). Putting the origin lock last
+      would mean rate-limiting and header work on traffic about to be 403'd.
 
       Rendered by templates/middleware.yaml in this same release, so there is
       no cross-Application ordering race. Opt out per app with
@@ -32,6 +34,9 @@ spec:
     */}}
     {{- $mw := list }}
     {{- if .Values.ingress.baseline.enabled }}
+    {{- if .Values.ingress.baseline.originLock.enabled }}
+    {{- $mw = append $mw (dict "name" (printf "%s-baseline-originlock" .Release.Name) "namespace" .Release.Namespace) }}
+    {{- end }}
     {{- if .Values.ingress.baseline.rateLimit.enabled }}
     {{- $mw = append $mw (dict "name" (printf "%s-baseline-ratelimit" .Release.Name) "namespace" .Release.Namespace) }}
     {{- end }}
