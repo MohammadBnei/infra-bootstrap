@@ -39,6 +39,19 @@ service:
 # the actual IngressRoute on the old hostname.
 ingress:
   hostname: api.ente.bnei.dev
+  # This host stays GREY (direct to origin, not proxied through Cloudflare):
+  # *.ente.bnei.dev is two labels deep, and free Universal SSL covers only the
+  # apex plus ONE wildcard level, so a proxied record here serves no
+  # certificate at all. Confirmed live 2026-08-18 — the identical setup on
+  # *.api.voconsteroid.com returned no cert and failed the handshake.
+  #
+  # Consequence for the baseline rate limiter: CF-Connecting-IP never appears
+  # on this path, so the chart default would bucket every request under one
+  # empty key. Empty restores per-client bucketing off the real peer address,
+  # which is correct here because Traefik runs externalTrafficPolicy: Local.
+  baseline:
+    rateLimit:
+      sourceHeader: ""
 
 resources:
   requests:
