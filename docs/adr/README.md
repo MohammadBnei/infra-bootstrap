@@ -47,3 +47,4 @@ ADR-000N` (replaced by a later decision).
 | [0034](0034-in-cluster-oci-registry-zot-garage-backed.md) | In-cluster OCI registry (Zot, Garage-backed), builds moved in-house | Accepted (builder is an LXC, not a pod — corrected in-ADR after a live failure) |
 | [0035](0035-self-hosted-forgejo-authoritative-github-mirror.md) | Self-hosted Forgejo authoritative, GitHub demoted to push-mirror | Proposed |
 | [0036](0036-nfs-storage-class-for-k8s.md) | Second, unreplicated `nfs` StorageClass on the existing `nfs-storage` VM | Accepted |
+| [0037](0037-worker-cpu-capacity-vs-agent-fleet-burst.md) | Worker node CPU capacity vs. agent-fleet session bursts | Proposed |
