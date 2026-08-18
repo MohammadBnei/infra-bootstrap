@@ -52,3 +52,14 @@ Thumbs.db
 
 # graphify
 graphify-out/
+
+# kubespray credentials_dir (= inventory/<name>/credentials) — ADR-0040.
+# kubespray writes generated secrets here as *.creds via lookup('password', ...):
+# kubeadm_certificate_key.creds today, kube_encrypt_token.creds once
+# kube_encrypt_secret_data is enabled. The existing *.secret / host_vars vault
+# rules miss this extension, which is how two of these ended up committed.
+#
+# NOTE: kube_encrypt_token.creds is NOT regenerable — losing it after Secrets
+# have been rewritten makes every Secret in etcd undecryptable. It must be
+# backed up to Infisical, not to git. See docs/secrets.md.
+*.creds
