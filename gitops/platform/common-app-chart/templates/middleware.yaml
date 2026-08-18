@@ -7,11 +7,33 @@ separate ArgoCD Application from the one rendering this IngressRoute — so on a
 fresh app, or a rebuild, the route can reference a Middleware that has not
 synced yet, and Traefik puts the router in error until it does. Rendering here
 means the Middleware and the route that references it are always in the same
-Application and always sync together. The cost is N copies of two small CRs,
-which is cheaper than an ordering race that presents as a broken app.
+Application and always sync together. The cost is N copies of small CRs, which
+is cheaper than an ordering race that presents as a broken app.
+
+Each block is emitted as its own YAML document with a leading `---`, rather
+than threading conditional separators between optional blocks — that pattern
+stops being readable at the third toggle.
 */}}
 {{- if and .Values.ingress.enabled .Values.ingress.hostname .Values.ingress.baseline.enabled }}
+{{- if .Values.ingress.baseline.originLock.enabled }}
+---
+apiVersion: traefik.io/v1alpha1
+kind: Middleware
+metadata:
+  name: {{ .Release.Name }}-baseline-originlock
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "common-app-chart.labels" . | nindent 4 }}
+spec:
+  ipAllowList:
+    # Evaluated against the TCP peer address, NOT X-Forwarded-For — confirmed
+    # live, and load-bearing: behind Cloudflare the peer is an edge IP while
+    # the real client never is, so an XFF-based check would reject everything.
+    sourceRange:
+      {{- toYaml .Values.ingress.baseline.originLock.sourceRange | nindent 6 }}
+{{- end }}
 {{- if .Values.ingress.baseline.rateLimit.enabled }}
+---
 apiVersion: traefik.io/v1alpha1
 kind: Middleware
 metadata:
@@ -33,11 +55,9 @@ spec:
     sourceCriterion:
       requestHeaderName: {{ . }}
     {{- end }}
+{{- end }}
 {{- if .Values.ingress.baseline.headers.enabled }}
 ---
-{{- end }}
-{{- end }}
-{{- if .Values.ingress.baseline.headers.enabled }}
 apiVersion: traefik.io/v1alpha1
 kind: Middleware
 metadata:

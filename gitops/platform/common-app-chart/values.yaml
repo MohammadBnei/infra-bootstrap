@@ -63,6 +63,61 @@ ingress:
   #      provisioner and never touch this chart at all
   baseline:
     enabled: true
+    # Origin lock — ADR-0038 Decision 5, revised. Since the 2026-08-18 cutover
+    # every *.bnei.dev host is proxied, so legitimate traffic always arrives
+    # from a Cloudflare edge address. Without this, anyone who learns
+    # 82.65.231.50 connects straight to Traefik with any Host header they like
+    # and every WAF rule, geo rule and bot check is bypassed. That IP has been
+    # in public DNS and Certificate Transparency logs for months, so treat it
+    # as known, not secret.
+    #
+    # Verified on a throwaway host before shipping: Traefik's ipAllowList
+    # evaluates the TCP PEER, not X-Forwarded-For, even with the entrypoint
+    # trusting forwarded headers. Via Cloudflare -> 301; direct to the origin
+    # with a spoofed Host -> 403. If it read X-Forwarded-For this design could
+    # not work at all, since the real client is never a Cloudflare address.
+    #
+    # MUST be disabled for any host left GREY, where the peer IS the client:
+    # ente-museum, ente-web here, and agent-fleet-core in its own repo.
+    originLock:
+      enabled: true
+      # ponytail: hardcoded from cloudflare.com/ips-v4 + ips-v6 (2026-08-18).
+      # Duplicated in gitops/platform/values/traefik/values.yaml's
+      # forwardedHeaders.trustedIPs — Helm cannot share a list across two
+      # charts, and a generator for 22 near-static CIDRs is not worth it.
+      # Cloudflare announces changes; re-check if a new range shows up.
+      sourceRange:
+      - 173.245.48.0/20
+      - 103.21.244.0/22
+      - 103.22.200.0/22
+      - 103.31.4.0/22
+      - 141.101.64.0/18
+      - 108.162.192.0/18
+      - 190.93.240.0/20
+      - 188.114.96.0/20
+      - 197.234.240.0/22
+      - 198.41.128.0/17
+      - 162.158.0.0/15
+      - 104.16.0.0/13
+      - 104.24.0.0/14
+      - 172.64.0.0/13
+      - 131.0.72.0/22
+      - 2400:cb00::/32
+      - 2606:4700::/32
+      - 2803:f800::/32
+      - 2405:b500::/32
+      - 2405:8100::/32
+      - 2a06:98c0::/29
+      - 2c0f:f248::/32
+      # LAN — keeps the ADR-0039 break-glass route reachable and lets
+      # LAN-side tooling hit public hostnames directly. Any device on the flat
+      # 192.168.1.0/24 can therefore bypass the WAF; that is the accepted
+      # trade for not being locked out, and it is why this is a homelab
+      # decision rather than a general one.
+      - 192.168.1.0/24
+      # Pod CIDR — in-cluster workloads that resolve a public hostname arrive
+      # with a pod address, not a Cloudflare one.
+      - 10.233.64.0/18
     rateLimit:
       enabled: true
       # Per source IP, per `period`. Abuse protection, not app policy — an

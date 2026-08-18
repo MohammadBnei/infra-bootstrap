@@ -50,6 +50,12 @@ ingress:
   # empty key. Empty restores per-client bucketing off the real peer address,
   # which is correct here because Traefik runs externalTrafficPolicy: Local.
   baseline:
+    # Same reason as the sourceHeader below: this host is grey, so the TCP peer
+    # is the real client rather than a Cloudflare edge address. The origin lock
+    # allowlists Cloudflare's ranges as the peer, so leaving it enabled would
+    # 403 every legitimate request to this host.
+    originLock:
+      enabled: false
     rateLimit:
       sourceHeader: ""
 
