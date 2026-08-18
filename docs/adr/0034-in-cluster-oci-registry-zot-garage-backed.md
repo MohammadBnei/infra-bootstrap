@@ -376,13 +376,21 @@ Three things about it are decisions rather than defaults:
   always the newest, so the exposure is a rollback deeper than 3 releases
   rather than normal operation.
 
-  The second — **that S3 blobs are actually reclaimed** — cannot be answered
-  without arming, which is why the baseline was recorded first: 3.3 GB / 144
-  objects against the 40 GB quota. zot's docs describe `gc` uniformly across
-  storage backends and never exclude remote ones, but that is not evidence,
-  and the failure is silent and asymmetric — manifests deleted (rollback depth
-  gone) while Garage usage is unchanged (quota still fills). If the bucket
-  does not shrink across a GC interval, this reverts to `true`.
+  The second — **that S3 blobs are actually reclaimed** — could not be
+  answered without arming, which is why the baseline was recorded first: 3.3
+  GB / 144 objects against the 40 GB quota. zot's docs describe `gc` uniformly
+  across storage backends and never exclude remote ones, but that is not
+  evidence, and the failure would have been silent and asymmetric: manifests
+  deleted (rollback depth gone) while Garage usage is unchanged (quota still
+  fills).
+
+  **It does.** The first armed pass deleted `editable-blog` `0.37.9`/`0.38.0`/
+  `0.39.0` and the bucket went 144 -> 120 objects, 3.1 -> 3.0 GiB. Size moved
+  less than the object count because those images share most layers with the
+  three kept tags, so only unique blobs came back — the expected shape, not a
+  partial failure. Recorded here because "the docs imply it works" and "it
+  reclaimed 24 objects on this cluster" are different claims, and only the
+  second one survives a quota alert at 3am.
 
 Applying it is not automatic: `config.json` is mounted with `subPath`, which
 never picks up ConfigMap updates, and nothing notifies the Deployment. An
