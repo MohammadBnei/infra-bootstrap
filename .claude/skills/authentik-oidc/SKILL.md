@@ -167,6 +167,17 @@ authentik outage unrecoverable through anything but `kubectl`.
 equivalent. Granting admin on first login makes OIDC a privilege escalation
 rather than a convenience.
 
+## `required: []` in that schema means nothing
+
+The oauth2provider model declares **no required fields at all**. A missing field
+is never flagged — it is silently defaulted, and some defaults are unusable.
+`grant_types` defaulting to empty is the sharp one: empty permits nothing, so
+every login fails while the provider, the application and the discovery document
+all look correct.
+
+So schema validation passing tells you the YAML is well-formed, not that the
+provider will function. The only proof is a real login.
+
 ## Getting the runtime facts yourself
 
 Do not trust this file's slugs after an authentik upgrade — re-read them.
@@ -192,6 +203,51 @@ a broken Vagrant `private_key_file`, so override it — see
 cd pigsty && ansible 192.168.1.205 -b --private-key="$SP/oldpg_key" -m shell \
   -a "su - postgres -c \"psql -d authentik -tAc 'SELECT slug FROM authentik_flows_flow ORDER BY slug'\""
 rm -f "$SP/oldpg_key"
+```
+
+## Changing a blueprint: the four-step propagation chain
+
+**Skipping either restart leaves everything looking healthy while nothing has
+changed.** This is the single most time-consuming thing about the workflow, and
+none of it surfaces as an error.
+
+```
+1. merge                     -> ArgoCD applies the updated InfisicalSecret CR
+2. restart infisical-operator -> ONLY needed when the CR TEMPLATE changed
+3. restart authentik worker   -> discovery re-reads and re-applies the blueprint
+4. restart the client app     -> only if ITS credentials changed (env vars)
+```
+
+### Step 2 is the non-obvious one
+
+The Infisical operator reconciles on **Infisical value changes**, not on CR
+template changes. Verified 2026-08-19: ArgoCD applied a CR whose template gained
+a new field, the live CR contained it, and the managed Secret kept its old
+content indefinitely. Restarting the operator forces a full reconcile:
+
+```bash
+ssh k9s kubectl rollout restart deploy/platform-infisi-controller-manager -n infisical
+```
+
+**Do NOT delete the managed Secret to force regeneration.** These use
+`creationPolicy: Orphan`, so the operator does not own them and will not
+recreate one that vanishes — observed staying gone for 105 seconds until the
+operator was restarted anyway. Deleting is strictly worse than restarting: same
+outcome, plus a window where the app's mount is missing.
+
+### Verifying each step rather than assuming
+
+```bash
+# 1. did ArgoCD apply the CR?
+ssh k9s kubectl get infisicalsecret <name> -n infisical -o yaml | grep <new-field>
+
+# 2. did the operator re-render the Secret? (decode, do not cat the mount)
+kubectl get secret <name> -n authentik -o json | python3 -c \
+  "import sys,json,base64;print(base64.b64decode(json.load(sys.stdin)['data']['<key>.yaml']).decode())" \
+  | grep <new-field>
+
+# 3. did authentik apply it? (the DB is the only honest answer)
+psql -d authentik -tAc "SELECT grant_types FROM authentik_providers_oauth2_oauth2provider"
 ```
 
 ## The blueprint will not apply until you restart the worker

@@ -2697,3 +2697,61 @@ exec payloads). Assume anything with shell metacharacters needs stdin.
 `kubectl exec ... -- cat` on the mounted blueprint printed the OAuth2 client id
 and secret in full. Both were rotated immediately. Read the InfisicalSecret
 manifest in git instead — identical structure, values templated out.
+
+---
+
+## 2026-08-19 — Grafana OIDC login working; the four-step propagation chain
+
+Login confirmed end to end. Two more findings from getting there, both of the
+same family as everything else recorded today: the object is correct, the system
+reports healthy, and nothing has actually taken effect.
+
+### `grant_types` defaults to empty, and empty permits nothing
+
+Every login failed with Grafana's generic "Login provider denied login request".
+The only place the cause appeared was authentik's own log:
+
+```
+"event": "Invalid grant_type for provider", "grant_type": "authorization_code"
+```
+
+The blueprint never set `grant_types`. Confirmed against the stored value:
+`grant_types: {}`.
+
+Everything else looked right — the provider existed, the application resolved,
+the authorize endpoint returned 302, and the **discovery document still
+advertised `authorization_code` as supported**. The client saw only
+`invalid_request / The request is otherwise malformed`.
+
+Root cause of the mistake: the oauth2provider model declares `required: []` — it
+has **no required fields**. A missing field is never flagged, only silently
+defaulted. Schema validation passing means the YAML is well-formed, nothing more.
+
+### Changing a blueprint takes four steps, and two are invisible
+
+```
+merge -> ArgoCD applies the CR
+      -> restart infisical-operator   (only if the CR TEMPLATE changed)
+      -> restart authentik worker     (discovery re-reads the blueprint)
+      -> restart the client app       (only if ITS credentials changed)
+```
+
+**The operator does not re-render on template-only changes.** ArgoCD applied a CR
+whose template had gained `grant_types`, the live CR contained it, and the
+managed Secret kept its old content indefinitely. The operator reconciles on
+Infisical *value* changes. Restarting
+`platform-infisi-controller-manager` forces a full reconcile.
+
+**Deleting the managed Secret to force regeneration does not work and is worse
+than restarting.** These use `creationPolicy: Orphan`, so the operator does not
+own them: the Secret stayed deleted for 105 seconds, and the app's mount was
+missing that whole time. Restarting the operator was needed anyway.
+
+### Ordering lesson, repeated
+
+Three separate times today the same mistake shape appeared: theorising about why
+input was rejected before checking whether the consuming step ran at all. First
+with the audit log (Alloy loaded, pointed at nothing), then blueprint discovery
+(enqueued, never executed), now the operator (CR updated, never re-rendered).
+
+In each case a green status was reporting on the wrong question.
