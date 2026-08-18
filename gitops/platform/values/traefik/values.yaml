@@ -18,9 +18,41 @@ service:
   type: LoadBalancer
   annotations:
     metallb.universe.tf/loadBalancerIPs: 192.168.1.233
+  # ADR-0038. Without this the Service takes Kubernetes' default `Cluster`
+  # policy, kube-proxy SNATs every inbound request to a node IP, and Traefik
+  # sees 192.168.1.20x as the client for ALL external traffic. That silently
+  # breaks anything IP-based: the Cloudflare origin allowlist, rate-limit
+  # bucketing, the LAN `ClientIP()` break-glass route in ADR-0039, and any
+  # forensic value the access logs below would otherwise have.
+  #
+  # COST, stated plainly because it is real: MetalLB's L2 speaker only
+  # announces the VIP from a node that holds a READY LOCAL endpoint. Traefik
+  # runs replicas:1 with updateStrategy Recreate (mandatory — the acme.json
+  # PVC is RWO and ADR-0001 forbids concurrent ACME writers), so during any
+  # rollout there are zero endpoints and NOTHING answers ARP for .233. That
+  # is a blackhole, not a drain: clients get SYN timeouts rather than a
+  # refused connection, and the window is bounded by Longhorn detach/attach,
+  # not by pod start. Consequences:
+  #   - Traefik values changes are deliberate maintenance, not routine.
+  #   - Draining the node running Traefik (i.e. every kubespray run) is an
+  #     ingress outage of the same shape.
+  # Adding replicas is NOT the fix — two pods would both mount acme.json.
+  spec:
+    externalTrafficPolicy: Local
 
 logs:
   general:
+    format: json
+  # ADR-0038. There was no record whatsoever of who reached what from the
+  # internet before this — no forensics after the fact, and nothing for a
+  # detection rule to read. Alloy already tails /var/log/pods on every node,
+  # so these land in Loki under {namespace="traefik"} with no collector
+  # change; ADR-0040's 401/403-spike rule reads them from there.
+  #
+  # Only useful once externalTrafficPolicy above is Local — otherwise every
+  # line records a node IP as the client.
+  access:
+    enabled: true
     format: json
 
 # Chart's default podSecurityContext (runAsUser/runAsGroup: 65532) has no
@@ -49,6 +81,18 @@ ports:
   # "permission denied". Chart defaults already give us what we want: web
   # listens on 8000 internally, exposed externally as 80 (exposedPort);
   # websecure listens on 8443 internally, exposed externally as 443.
+  web:
+    # The Freebox forwards :80 but no router matches it, so plain-HTTP
+    # requests currently 404 instead of redirecting. ADR-0038.
+    #
+    # Note this entrypoint stays OUTSIDE the origin allowlist, which attaches
+    # to websecure only — :80 remains world-reachable. It serves nothing but
+    # this redirect, so that is acceptable, but it is not filtered.
+    redirections:
+      entryPoint:
+        to: websecure
+        scheme: https
+        permanent: true
   websecure:
     # Entrypoint-level ACME wiring — every IngressRoute router using this
     # entrypoint gets the "le" cert resolver automatically.
