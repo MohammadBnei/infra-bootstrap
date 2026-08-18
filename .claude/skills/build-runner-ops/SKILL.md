@@ -9,7 +9,6 @@ allowed-tools:
   - Bash(ssh -i ~/.ssh/id_build_runner root@192.168.1.111 systemctl status podman-prune.timer)
   - Bash(ssh -i ~/.ssh/id_build_runner root@192.168.1.111 journalctl -u actions-runner-* --no-pager -n *)
   - Bash(ssh -i ~/.ssh/id_build_runner root@192.168.1.111 buildah images)
-  - Bash(ssh -i ~/.ssh/id_build_runner root@192.168.1.111 buildah images --storage-driver vfs)
   - Bash(ssh -i ~/.ssh/id_build_runner root@192.168.1.111 df -h /)
   - Bash(gh api repos/MohammadBnei/*/actions/runners)
   - Bash(gh run list -R MohammadBnei/* *)
@@ -132,7 +131,7 @@ downstream as `...:` → `invalid reference format`.
 
 ```bash
 ssh -i ~/.ssh/id_build_runner root@192.168.1.111 systemctl status 'actions-runner-*'
-ssh -i ~/.ssh/id_build_runner root@192.168.1.111 buildah images --storage-driver vfs
+ssh -i ~/.ssh/id_build_runner root@192.168.1.111 buildah images
 ssh -i ~/.ssh/id_build_runner root@192.168.1.111 df -h /
 gh api repos/MohammadBnei/<repo>/actions/runners --jq '.runners[] | {name, status, labels: [.labels[].name]}'
 curl -s http://registry.bnei.lan:5000/v2/_catalog            # anonymous read
@@ -141,21 +140,34 @@ curl -s http://registry.bnei.lan:5000/v2/<image>/tags/list
 
 `buildah images` needs no `sudo` over SSH — the inventory's `ansible_user` is
 `root`, so an interactive session is already root and reads the same rootful
-store the builds write. **Pass `--storage-driver vfs`**: builds specify it
-explicitly, each driver keeps its own tree under the graph root, and a query
-against the default driver simply will not see the build images.
+store the builds write. No `--storage-driver` flag anywhere any more: the
+driver is pinned to `overlay` in `/etc/containers/storage.conf` by the
+playbook, so builds, the prune timer and this query all read one setting and
+cannot drift onto separate stores. If you ever do pass the flag, remember each
+driver keeps its own tree under the graph root — querying a different one
+shows an empty store rather than an error.
 
 ## Disk is the thing that fills
 
-40GB, shared by every build repo, with `--storage-driver vfs` — which copies
-whole layers rather than stacking them. The failure mode is a build dying on
+40GB, shared by every build repo. The failure mode is a build dying on
 ENOSPC, which names nothing useful.
 
+The driver is `overlay`, pinned in `/etc/containers/storage.conf`. It was
+`vfs` until 2026-08-18 — inherited from ADR-0034's abandoned in-cluster
+attempt, where it was genuinely required. On a real-root LXC it only cost:
+measured over a full six-image agent-fleet release, **340s -> 273s** of build
+time, and the store went from 5.2GB holding only base images to 3.8GB holding
+those *plus* all six built images.
+
+If you ever edit that file, `runroot` and `graphroot` are mandatory. buildah
+uses built-in defaults only while no `storage.conf` exists; once one does it
+stops falling back and every command dies with `runroot must be set`.
+
 - A weekly timer (`podman-prune.timer`, name kept for continuity) runs
-  `buildah rmi --prune --force --storage-driver vfs` as **root**. Both the
-  user and the driver flag are load-bearing: it previously ran as the runner
-  user against the default driver, which pruned a store no build has ever
-  written to — reporting success weekly and reclaiming nothing.
+  `buildah rmi --prune --force` as **root**. The user is load-bearing: it
+  previously ran as the runner user, pruning the rootless store that no build
+  has ever written to — reporting success weekly and reclaiming nothing. It
+  needs no driver flag now that the driver is pinned in one place.
 - **Never `buildah rmi --all`** on this box. The shared base-image cache is
   the entire point of putting multiple repos on one machine; `--all` evicts
   the other repo's bases too. Workflows should prune per-component after

@@ -71,9 +71,17 @@
     # historical reason recorded there.
     runner_user_home: /opt/actions-runner
     registry_host: "registry.bnei.lan:5000"
-    # Builds pass `--storage-driver vfs` explicitly, so the prune timer must
-    # too — see "Install a weekly image prune timer" below.
-    build_storage_driver: vfs
+    # Pinned on the box rather than passed per-build. buildah's built-in
+    # default is already overlay and there is no /etc/containers/storage.conf
+    # on Debian, so this is written to make the choice explicit and immune to
+    # a package default changing under us — the same class of implicit
+    # assumption that made unqualified image names silently unresolvable.
+    #
+    # Was vfs, inherited from ADR-0034's abandoned in-cluster attempt where
+    # it was genuinely needed. On a real-root LXC it is just slower and
+    # fatter: measured over a full six-image agent-fleet release, build time
+    # 340s -> 273s and the store 5.2GB -> 3.8GB while holding MORE.
+    build_storage_driver: overlay
 
   tasks:
     # -------------------------------------------------------------------
@@ -170,6 +178,38 @@
         content: |
           # Managed by ansible/playbooks/build-runner-configure.yml
           unqualified-search-registries = ["docker.io"]
+
+    - name: Pin the container storage driver
+      # No /etc/containers/storage.conf ships on Debian at all, so the driver
+      # was whatever buildah compiled in. That happened to be overlay, which
+      # is what we want — but "happens to be right" is how the missing
+      # unqualified-search-registries got here too.
+      #
+      # overlay stacks layers; vfs copies them whole. On this box that is
+      # 340s -> 273s of build time per agent-fleet release and a store that
+      # holds six built images in 3.8GB where vfs needed 5.2GB for the base
+      # images alone.
+      #
+      # Requires real root and a non-overlay backing filesystem: this LXC has
+      # both (ext4, and root is why ADR-0034 moved the builder out of the
+      # cluster). There is no /dev/fuse here, so this is native overlayfs and
+      # NOT fuse-overlayfs — do not add a fuse fallback without also giving
+      # the container the device.
+      ansible.builtin.copy:
+        dest: /etc/containers/storage.conf
+        mode: "0644"
+        content: |
+          # Managed by ansible/playbooks/build-runner-configure.yml
+          [storage]
+          driver = "{{ build_storage_driver }}"
+          # runroot/graphroot are NOT optional once this file exists. buildah
+          # uses built-in defaults only while there is no storage.conf at all;
+          # the moment one appears it stops falling back and dies on every
+          # command with "runroot must be set". Confirmed live — writing a
+          # driver-only file broke builds instantly. These are the same paths
+          # buildah defaulted to, written out so the file is self-sufficient.
+          runroot = "/run/containers/storage"
+          graphroot = "/var/lib/containers/storage"
 
     - name: Trust the in-cluster registry over plain HTTP
       # registry.bnei.lan is a `.lan` name, so Let's Encrypt cannot issue for
@@ -471,6 +511,21 @@
     # -------------------------------------------------------------------
     # Housekeeping — the disk is the thing that will fill
     # -------------------------------------------------------------------
+    - name: Drop the abandoned vfs store
+      # Switching the driver orphans whatever the old one held: the prune
+      # timer only ever sees the active driver's tree, so a stale vfs store
+      # would sit there forever holding gigabytes nothing can reach. It was
+      # 5.2GB of base images on a 40GB disk when this changed.
+      #
+      # Safe because this directory is a pure cache — every layer in it is
+      # re-pullable, and nothing but buildah writes here. Guarded on the
+      # driver actually being something else, so re-running the playbook
+      # while still on vfs cannot delete the store in use.
+      ansible.builtin.file:
+        path: /var/lib/containers/storage/vfs
+        state: absent
+      when: build_storage_driver != "vfs"
+
     - name: Install a weekly image prune timer
       # Builds keep every pulled base image and every intermediate layer and
       # nothing removes them. On a 40GB disk shared by several build repos
@@ -485,10 +540,12 @@
       #   and therefore pruned the rootless store — which no build has ever
       #   written to. It reported success weekly and reclaimed nothing.
       #
-      #   --storage-driver {{ build_storage_driver }}, matching the builds.
-      #   Each driver keeps its own tree under the graph root, so a prune on
-      #   the default driver cannot see vfs images at all. Omitting this
-      #   reintroduces the same silent no-op in a subtler form.
+      #   The driver must match the builds. Each driver keeps its own tree
+      #   under the graph root, so a prune against a different one cannot see
+      #   the build images at all — the same silent no-op in a subtler form.
+      #   This no longer needs a flag: the driver is pinned in
+      #   /etc/containers/storage.conf above, so builds and prune both take
+      #   it from one place and cannot drift apart.
       #
       # `rmi --prune` (dangling only), never `rmi --all`: the base-image
       # cache shared across build repos is the point of putting them on one
@@ -513,7 +570,7 @@
             [Service]
             Type=oneshot
             User=root
-            ExecStart=/usr/bin/buildah rmi --prune --force --storage-driver {{ build_storage_driver }}
+            ExecStart=/usr/bin/buildah rmi --prune --force
         - name: podman-prune.timer
           content: |
             # Managed by ansible/playbooks/build-runner-configure.yml

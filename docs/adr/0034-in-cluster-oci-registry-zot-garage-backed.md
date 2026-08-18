@@ -278,6 +278,54 @@ Two further practical constraints made this unavoidable anyway:
 - Deferred and named so they are not mistaken for oversights: vulnerability
   scanning, image signing, ~~GC/retention policy~~, public exposure.
 
+### The storage driver is overlay, not vfs (2026-08-18)
+
+The section above records that the in-cluster attempt used `buildah` with
+`--isolation chroot --storage-driver vfs`. When the builder moved to the LXC,
+`vfs` came with it — carried into `build-runner-configure.yml` and into both
+build workflows without anyone re-asking whether it was still needed. It was
+not. `vfs` existed to survive an unprivileged pod; on a real-root LXC it only
+costs, because it copies whole layers where `overlay` stacks them.
+
+Measured on the box, cold cache, per component:
+
+| component | vfs | overlay |
+|---|---|---|
+| worker | 129s | 96s |
+| core | 69s | 61s |
+| provisioner | 70s | 60s |
+| sidecar | 34s | 26s |
+| executor | 33s | 27s |
+| migration | 5s | 3s |
+| **build total** | **340s** | **273s** |
+
+Store size moved the same way: `vfs` held 5.2GB carrying only base images
+(per-component images are pruned after each push), `overlay` holds 3.8GB
+carrying those base images *plus* all six built ones.
+
+Two things this surfaced that are worth keeping:
+
+- **There was no `/etc/containers/storage.conf` at all.** The driver was
+  whatever buildah compiled in, which happened to be `overlay` — so the
+  explicit `--storage-driver vfs` in the workflows was the only thing
+  selecting the slow path. It is now pinned in that file by the playbook, and
+  the flag is gone from every workflow, so builds and the prune timer read one
+  setting and cannot drift onto separate stores.
+- **`runroot` and `graphroot` are mandatory once that file exists.** buildah
+  falls back to built-in defaults only while there is no `storage.conf`;
+  creating a driver-only one broke every buildah command instantly with
+  `runroot must be set`. Found by verifying rather than by the next release
+  failing.
+
+Switching drivers orphans the old store — the prune timer only ever sees the
+active driver's tree — so the playbook removes `storage/vfs`, guarded on the
+driver not being `vfs`. That reclaimed 5.2GB; the box went from 7.9GB used to
+3.9GB of 40GB.
+
+Native overlayfs, not fuse-overlayfs: there is no `/dev/fuse` in this LXC and
+the rootfs is ext4. Granting the device would be a Proxmox-host change, and
+nothing needs it.
+
 ### Retention policy — no longer deferred (2026-08-17)
 
 Decision 8 above kept the *bound* and deferred the *policy*. Migrating
