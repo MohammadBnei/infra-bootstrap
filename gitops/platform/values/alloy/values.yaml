@@ -120,17 +120,28 @@ alloy:
 
       // ADR-0040: the kube-apiserver audit log.
       //
-      // It does NOT arrive via the pod_logs path above. kubespray writes it to
-      // audit_log_path (/var/log/audit/kube-apiserver-audit.log) on the HOST
-      // and hostPath-mounts it into the apiserver static pod, so it never
-      // appears under /var/log/pods. Without this block the audit log is
-      // produced, rotated and never read — a disk cost with no security value,
-      // and every downstream detection rule silently has no data.
+      // It does NOT arrive via the pod_logs path above, and the path here is
+      // the HOST path, which is NOT the same as the apiserver's --audit-log-path.
+      //
+      //   container: /var/log/audit/kube-apiserver-audit.log   <- --audit-log-path
+      //   host:      /var/log/kubernetes/audit/                <- the hostPath
+      //
+      // kubespray derives audit_log_mountpath from audit_log_path | dirname, so
+      // the flag describes where the file sits INSIDE the static pod, while the
+      // volume mounts host /var/log/kubernetes/audit at that container path.
+      // Targeting the container path from a DaemonSet silently matches nothing —
+      // no error, no log line, just an empty stream. Confirmed live 2026-08-18:
+      // the file is 4-14 MB per control-plane node at the host path below.
+      //
+      // Without this block the audit log is produced, rotated and never read —
+      // a disk cost with no security value, and every downstream detection rule
+      // silently has no data.
       //
       // Reachable because mounts.varlog already puts the whole of /var/log in
       // this container; no extra mount and no extra RBAC (file tailing needs
-      // none). The file only exists on control-plane nodes, so on workers this
-      // target simply never matches.
+      // none). The file is mode 0600 root:root and Alloy runs as root here, so
+      // it is readable — verified by exec'ing into the DaemonSet. It only
+      // exists on control-plane nodes, so on workers this target never matches.
       //
       // Forwarded straight to loki.write, NOT through loki.process.pod_logs:
       // that stage strips CRI framing ("<time> <stream> <flag> <content>"),
@@ -143,7 +154,7 @@ alloy:
       // also why the retention window matters.
       local.file_match "audit_logs" {
         path_targets = [{
-          __path__ = "/var/log/audit/kube-apiserver-audit.log",
+          __path__ = "/var/log/kubernetes/audit/kube-apiserver-audit.log",
           job      = "kube-apiserver-audit",
           node     = sys.env("K8S_NODE_NAME"),
         }]

@@ -93,9 +93,15 @@ kube_encrypt_secret_data: true
 # writing one speculatively.
 #
 # Disk: audit_log_maxsize 100MB x audit_log_maxbackups 10 = up to ~1GB per
-# control-plane node, at /var/log/audit/ on the host (NOT /var/log/pods, which
-# is why Alloy needs an explicit file source — see
-# gitops/platform/values/alloy/values.yaml).
+# control-plane node.
+#
+# Two different paths, and confusing them costs you the whole feature:
+#   --audit-log-path  /var/log/audit/...          (inside the static pod)
+#   hostPath          /var/log/kubernetes/audit/  (what a DaemonSet sees)
+# kubespray derives audit_log_mountpath from audit_log_path | dirname, so the
+# flag names the container path while the volume maps the host one. Alloy tails
+# the HOST path — see gitops/platform/values/alloy/values.yaml. Neither is under
+# /var/log/pods, which is why an explicit file source is needed at all.
 kubernetes_audit: true
 
 auto_renew_certificates: false
