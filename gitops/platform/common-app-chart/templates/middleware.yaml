@@ -1,0 +1,71 @@
+{{- /*
+Baseline Traefik middlewares, rendered per-release in the app's OWN namespace.
+
+Deliberately NOT a single shared Middleware in `default` (the shape
+basic-admin-auth uses). A shared object lives in gitops/bootstrap/, which is a
+separate ArgoCD Application from the one rendering this IngressRoute — so on a
+fresh app, or a rebuild, the route can reference a Middleware that has not
+synced yet, and Traefik puts the router in error until it does. Rendering here
+means the Middleware and the route that references it are always in the same
+Application and always sync together. The cost is N copies of two small CRs,
+which is cheaper than an ordering race that presents as a broken app.
+*/}}
+{{- if and .Values.ingress.enabled .Values.ingress.hostname .Values.ingress.baseline.enabled }}
+{{- if .Values.ingress.baseline.rateLimit.enabled }}
+apiVersion: traefik.io/v1alpha1
+kind: Middleware
+metadata:
+  name: {{ .Release.Name }}-baseline-ratelimit
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "common-app-chart.labels" . | nindent 4 }}
+spec:
+  rateLimit:
+    # Per-source-IP. Generous on purpose: this is abuse/DoS protection, not
+    # application policy — an app that needs a real quota should say so itself.
+    average: {{ .Values.ingress.baseline.rateLimit.average }}
+    burst: {{ .Values.ingress.baseline.rateLimit.burst }}
+    period: {{ .Values.ingress.baseline.rateLimit.period }}
+    {{- with .Values.ingress.baseline.rateLimit.sourceHeader }}
+    # ADR-0038 Phase 3: once traffic arrives via Cloudflare, the TCP peer is a
+    # Cloudflare edge IP and bucketing on it would put the entire internet in
+    # one bucket. Set this to CF-Connecting-IP at cutover.
+    sourceCriterion:
+      requestHeaderName: {{ . }}
+    {{- end }}
+{{- if .Values.ingress.baseline.headers.enabled }}
+---
+{{- end }}
+{{- end }}
+{{- if .Values.ingress.baseline.headers.enabled }}
+apiVersion: traefik.io/v1alpha1
+kind: Middleware
+metadata:
+  name: {{ .Release.Name }}-baseline-headers
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "common-app-chart.labels" . | nindent 4 }}
+spec:
+  headers:
+    contentTypeNosniff: {{ .Values.ingress.baseline.headers.contentTypeNosniff }}
+    referrerPolicy: {{ .Values.ingress.baseline.headers.referrerPolicy | quote }}
+    # HSTS. Deliberately WITHOUT includeSubDomains and WITHOUT preload — those
+    # are the parts that are genuinely hard to undo (preload requires a removal
+    # request and a browser release cycle; includeSubDomains would cover every
+    # *.bnei.dev name including ones not yet created). A bare max-age only
+    # commits hosts that have already served it, and every host here is
+    # HTTPS-only with a permanent :80 redirect already.
+    #
+    # `| int64` is load-bearing: without it Helm emits 31536000 as
+    # 3.1536e+07, which the Traefik CRD rejects as not-an-integer. Caught by
+    # `helm template`, not by any YAML linter — the output is valid YAML.
+    stsSeconds: {{ .Values.ingress.baseline.headers.stsSeconds | int64 }}
+    # frameDeny is NOT in the baseline: it breaks any app that is legitimately
+    # embedded (shared album views, dashboard panels). Apps that want it add
+    # their own Middleware via extraManifests + ingress.middlewares.
+    {{- with .Values.ingress.baseline.headers.customResponseHeaders }}
+    customResponseHeaders:
+      {{- toYaml . | nindent 6 }}
+    {{- end }}
+{{- end }}
+{{- end }}

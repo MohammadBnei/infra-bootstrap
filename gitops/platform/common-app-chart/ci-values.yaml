@@ -30,3 +30,20 @@ oneOffJobs:
 
 podDisruptionBudget:
   enabled: true
+
+# ADR-0040 securityContext passthrough. Both default to {} (= today's
+# behaviour, nothing rendered), so without these two blocks CI would never
+# render that path and kubeconform would never schema-check it.
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 1000
+  fsGroup: 1000
+  seccompProfile:
+    type: RuntimeDefault
+
+securityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  capabilities:
+    drop:
+    - ALL
