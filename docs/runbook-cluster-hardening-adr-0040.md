@@ -9,17 +9,28 @@ Turn on the control-plane defaults this cluster skipped:
 
 | Run | Change | Reversible? |
 |---|---|---|
-| **A** | `kube_encrypt_secret_data: true` — Secrets encrypted at rest in etcd | **No**, once Secrets are rewritten |
-| **B** | `kubernetes_audit: true` — API audit log, plus an Alloy source to collect it | Yes |
-| **C** | `cilium_encryption_enabled` + `wireguard`, and Hubble flow metrics | Yes |
+| **A** | `kube_encrypt_secret_data` + `kubernetes_audit` — both apiserver flags | Encryption: **no**, once Secrets are rewritten. Audit: yes |
+| **B** | `cilium_encryption_enabled` + `wireguard`, and Hubble flow metrics | Yes |
+
+**Why two runs and not three.** An earlier draft of this runbook listed etcd
+encryption and the audit log as separate runs — but both are apiserver flags
+applied by the same role, so `--tags control-plane` applies *both* and the
+identical command cannot separate them. Splitting them would need a second PR
+staging the vars, or an `-e kubernetes_audit=false` override on the first pass,
+and neither buys anything: they are one kubeadm `ClusterConfiguration` rewrite
+and one apiserver restart either way.
+
+The separation that *does* matter is **apiserver vs CNI**. Rolling the CNI
+DaemonSet in the same pass as an apiserver restart is what makes a failure
+unattributable, and this repo has been burned by exactly that before.
 
 ## 2. Prereqs
 
-- **`-e upgrade_cluster_setup=true` on Runs A and B.** Both set apiserver
-  flags, and `cluster.yml` alone does **not** reach an already-running
-  cluster's kubeadm `ClusterConfiguration` — it completes clean and changes
-  nothing. Confirmed on 2026-08-01 (`docs/bootstrap-test-notes.md`). Run C
-  does not need it; it touches the CNI, not the apiserver.
+- **`-e upgrade_cluster_setup=true` on Run A.** It sets apiserver flags, and
+  `cluster.yml` alone does **not** reach an already-running cluster's kubeadm
+  `ClusterConfiguration` — it completes clean and changes nothing. Confirmed
+  on 2026-08-01 (`docs/bootstrap-test-notes.md`). Run B does not need it; it
+  touches the CNI, not the apiserver.
 - **Ansible version is a hard gate.** kubespray v2.31.0 requires
   `2.18.0 ≤ ansible-core < 2.19.0`. Homebrew's `ansible-playbook` is almost
   certainly newer and fails at kubespray's own assertion. Verified present:
@@ -44,7 +55,9 @@ kubespray-venv/bin/ansible -i inventory/ukubi/hosts.yaml k8s_cluster -m ping
 
 ## 3. Steps
 
-### Run A — Secrets encrypted at rest
+### Run A — Secrets encrypted at rest AND the API audit log
+
+One run, both flags — see the note in §1.
 
 ```bash
 infisical run --projectId=8a3fa54f-be22-488a-bf51-55158f65c0f2 --env=dev -- \
@@ -70,22 +83,11 @@ ssh k9s kubectl get secrets -A -o json | ssh k9s kubectl replace -f -
 > (`*.creds`). **Back it up to Infisical.** Losing it is equivalent to losing
 > every Secret.
 
-### Run B — API audit log
-
-```bash
-infisical run --projectId=8a3fa54f-be22-488a-bf51-55158f65c0f2 --env=dev -- \
-  kubespray-venv/bin/ansible-playbook \
-    -i inventory/ukubi/hosts.yaml \
-    -e upgrade_cluster_setup=true \
-    --tags control-plane \
-    kubespray/cluster.yml
-```
-
-The Alloy side is GitOps, not ansible — it lands when
+The Alloy side of the audit log is GitOps, not ansible — it lands when
 `gitops/platform/values/alloy/values.yaml` merges. Without it the log is
 written, rotated and never read.
 
-### Run C — Cilium WireGuard + Hubble metrics
+### Run B — Cilium WireGuard + Hubble metrics
 
 ```bash
 infisical run --projectId=8a3fa54f-be22-488a-bf51-55158f65c0f2 --env=dev -- \
@@ -125,7 +127,7 @@ ETCDCTL_API=3 etcdctl \
 Expect `k8s:enc:secretbox:v1:...` rather than readable YAML. Create a throwaway
 Secret first — an old one is still plaintext until the rewrite above.
 
-**Run B** — the file exists and grows on each control-plane node, and reaches
+**Audit log** — the file exists and grows on each control-plane node, and reaches
 Loki:
 
 ```bash
@@ -133,7 +135,7 @@ ssh k9s kubectl logs -n monitoring -l app.kubernetes.io/name=alloy --tail=20 | g
 # then in Grafana: {job="kube-apiserver-audit"}
 ```
 
-**Run C** — inside the Cilium agent pod. Note the binary is `cilium-dbg`; the
+**Run B** — inside the Cilium agent pod. Note the binary is `cilium-dbg`; the
 standalone `cilium` CLI is not installed by kubespray:
 
 ```bash
@@ -148,8 +150,8 @@ between pods to confirm MTU is not silently dropping traffic.
 
 | Run | How |
 |---|---|
-| **A** | **Only before the Secret rewrite.** Set `kube_encrypt_secret_data: false`, re-run with `upgrade_cluster_setup=true`. After the rewrite, restore etcd from the pre-run backup — there is no flag that recovers it |
-| **B** | `kubernetes_audit: false`, re-run. Revert the Alloy values block |
-| **C** | `cilium_encryption_enabled: false`, re-run `--tags network`, then roll workloads again so pod MTU returns to the unencrypted value |
+| **A** (encryption) | **Only before the Secret rewrite.** Set `kube_encrypt_secret_data: false`, re-run with `upgrade_cluster_setup=true`. After the rewrite, restore etcd from the pre-run backup — there is no flag that recovers it |
+| **A** (audit) | `kubernetes_audit: false`, re-run. Revert the Alloy values block |
+| **B** | `cilium_encryption_enabled: false`, re-run `--tags network`, then roll workloads again so pod MTU returns to the unencrypted value |
 
 Log anything surprising to `docs/bootstrap-test-notes.md`, not to memory.

@@ -57,8 +57,14 @@ nvidia_accelerator_enabled: false
 # BOTH of these are apiserver flags, so a plain `cluster.yml` run does NOT
 # apply them to an already-running cluster — it completes clean and changes
 # nothing. They need `-e upgrade_cluster_setup=true`, confirmed the hard way
-# on 2026-08-01 (docs/bootstrap-test-notes.md). Run them SEPARATELY, not in
-# one pass, so a failure is attributable.
+# on 2026-08-01 (docs/bootstrap-test-notes.md).
+#
+# They apply TOGETHER and cannot be separated: `--tags control-plane` runs the
+# role that owns both, so one command sets both flags in one kubeadm
+# ClusterConfiguration rewrite and one apiserver restart. That is fine — the
+# separation that matters is apiserver vs CNI, since rolling the Cilium
+# DaemonSet in the same pass is what makes a failure unattributable. See
+# docs/runbook-cluster-hardening-adr-0040.md.
 
 # Encrypt Secrets at rest in etcd. Until this, every Secret — the Cloudflare
 # zone token, the Garage root token, the GitHub PAT, every DB URL — sat in
