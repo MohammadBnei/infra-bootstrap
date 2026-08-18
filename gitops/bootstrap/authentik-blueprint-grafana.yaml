@@ -63,6 +63,16 @@ spec:
                 redirect_uris:
                   - matching_mode: strict
                     url: https://grafana.bnei.dev/login/generic_oauth
+                # WITHOUT THIS THE PROVIDER REJECTS EVERY LOGIN. The field
+                # defaults to empty, and an empty grant_types means no grant is
+                # permitted — authentik logs "Invalid grant_type for provider"
+                # and the client sees only a generic "malformed request".
+                # Nothing about the provider looks wrong until you read
+                # authentik's own log; the discovery document is still served
+                # and still advertises authorization_code.
+                grant_types:
+                  - authorization_code
+                  - refresh_token
                 sub_mode: user_email
                 # Implicit consent: this is a single-operator homelab and a
                 # consent screen on every login to your own Grafana is friction

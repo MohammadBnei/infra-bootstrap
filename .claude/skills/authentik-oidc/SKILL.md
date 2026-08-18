@@ -83,6 +83,12 @@ against the running 2026.8.0 instance**, not taken from docs.
     redirect_uris:
       - matching_mode: strict
         url: https://<app>.bnei.dev/<callback path>
+    # REQUIRED. Defaults to empty, and empty means no grant is permitted —
+    # every login fails with "Invalid grant_type for provider" in authentik's
+    # log while the client shows only a generic malformed-request error.
+    grant_types:
+      - authorization_code
+      - refresh_token
     sub_mode: user_email
     authorization_flow: !Find [authentik_flows.flow, [slug, default-provider-authorization-implicit-consent]]
     invalidation_flow: !Find [authentik_flows.flow, [slug, default-provider-invalidation-flow]]
@@ -118,6 +124,13 @@ Deliver `client_id`/`client_secret` as **env vars from a Secret**, never written
 into a ConfigMap-backed config file.
 
 ## Traps
+
+**`grant_types` must be set explicitly.** It defaults to empty, and empty
+permits nothing. The provider is created, the discovery document is served and
+still advertises `authorization_code`, and every login fails. authentik logs
+`Invalid grant_type for provider`; the client sees only
+`invalid_request / The request is otherwise malformed`, which points nowhere
+near the cause. Confirmed by reading the stored value: `grant_types: {}`.
 
 **`redirect_uris` is a list of OBJECTS, not strings.** In 2026.x it is
 `[{matching_mode, url}]`. A bare string list is valid YAML, is accepted, and
