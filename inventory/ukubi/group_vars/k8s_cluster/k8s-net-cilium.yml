@@ -10,6 +10,48 @@ cilium_l2announcements: false
 # Hubble enabled for observability (MISSION §4)
 cilium_enable_hubble: true
 cilium_enable_hubble_ui: true
+# cilium_enable_hubble_metrics is a NO-OP in kubespray v2.31.0 — the variable
+# is annotated deprecated in the role's defaults and referenced nowhere else.
+# The template renders `hubble.metrics.enabled` from cilium_hubble_metrics,
+# which defaults to []. Setting the boolean alone exports nothing; the list is
+# what actually does it. Left false to match the deprecated variable's default
+# rather than implying it does something.
 cilium_enable_hubble_metrics: false
+# Hubble was already running and feeding nothing. `http` is deliberately
+# excluded: L7 visibility means Hubble parses application payloads, which is a
+# different privacy and performance posture and belongs in its own decision.
+cilium_hubble_metrics: [dns, drop, tcp, flow, icmp]
+
+# --- ADR-0040: transparent pod-to-pod encryption ---------------------------
+# NOT the VPN mesh ADR-0009 rejected. That was WireGuard/Tailscale as a remote
+# ACCESS path; this is WireGuard as a datapath transport between nodes that
+# already trust each other, with no new listener reachable from outside the
+# LAN. ADR-0006's Consequences name this mechanism explicitly as the answer to
+# plaintext pod traffic ("the lazy fix is enabling Cilium's built-in
+# encryption ... not standing up a CA"), so this executes an instruction
+# already on the books.
+#
+# cilium_encryption_type is NOT optional: kubespray defaults it to `ipsec`.
+cilium_encryption_enabled: true
+cilium_encryption_type: wireguard
+
+# KNOWN HAZARD, silent and delayed. cilium_tunnel_mode is at kubespray's
+# default `vxlan` with cilium_mtu unset (auto). Enabling encryption makes
+# Cilium recompute pod MTU downward — roughly 50 bytes for VXLAN plus 60 for
+# WireGuard — but ALREADY-RUNNING pods keep the veth MTU they were created
+# with. Until every pod restarts, oversized packets are dropped inside the
+# tunnel with DF set: TLS handshakes and small requests succeed, while large
+# POSTs, big query results and image pulls hang. It presents as an
+# intermittent application bug, not a network change.
+#
+# So: after this run, roll every workload (or pin cilium_mtu).
+#
+# `cni.enableRouteMTUForCNIChaining` is NOT the mitigation and NOT a kubespray
+# variable — zero hits in v2.31.0, so setting it here would be inert. It is
+# also the wrong knob: this cluster chains via cni.chainingMode=portmap
+# (cilium_enable_portmap above), where Cilium still owns the datapath and sets
+# the MTU itself. That option exists for chaining on top of a FOREIGN CNI,
+# which is the configuration Cilium documents as unsupported for encryption —
+# portmap chaining is not that case.
 cilium_hubble_install: true
 cilium_hubble_tls_generate: true
