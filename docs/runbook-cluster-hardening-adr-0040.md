@@ -40,6 +40,17 @@ unattributable, and this repo has been burned by exactly that before.
   Recreate if missing:
   `python3.12 -m venv kubespray-venv && kubespray-venv/bin/pip install -r kubespray/requirements.txt`
 - **Back up etcd before Run A.** It is the one genuinely one-way step here.
+  ```bash
+  ssh k9s kubectl exec -n kube-system etcd-k8s-cp-01 -- etcdctl \
+    --endpoints=https://127.0.0.1:2379 \
+    --cacert=/etc/kubernetes/ssl/etcd/ca.crt \
+    --cert=/etc/kubernetes/ssl/etcd/server.crt \
+    --key=/etc/kubernetes/ssl/etcd/server.key \
+    snapshot save /var/lib/etcd/pre-adr0040.db
+  ```
+  That writes inside the etcd pod's `/var/lib/etcd`, which is a hostPath on
+  the node — so the file survives the pod. Copy it off the node afterwards;
+  a backup that only exists on the machine it protects is not a backup.
 - `ansible_become: true` is already set per-host in `inventory/ukubi/hosts.yaml`,
   so no `-b` on the command line.
 - **Each run rolls the control plane or the CNI, and ingress goes down with
@@ -113,19 +124,36 @@ done
 ## 4. Verification
 
 **Run A** — `kubectl get secret` always shows plaintext (the apiserver
-decrypts), so it proves nothing. Read etcd directly, on a control-plane node:
+decrypts), so it proves nothing. Read etcd directly.
+
+Two details verified live on 2026-08-18, both of which an earlier draft of this
+runbook got wrong:
+
+- etcd here is a **kubeadm-managed static pod**, so its certs are at
+  `/etc/kubernetes/ssl/etcd/{ca.crt,server.crt,server.key}` — NOT the
+  `/etc/ssl/etcd/ssl/member-*.pem` layout kubespray uses for external etcd.
+- the etcd image is **distroless**: there is no shell, so
+  `kubectl exec ... -- sh -c '...'` fails with
+  `exec: "sh": executable file not found`. Call `etcdctl` directly.
 
 ```bash
-ETCDCTL_API=3 etcdctl \
+# create a throwaway Secret first — pre-existing ones stay plaintext until the
+# rewrite above, so an old Secret proves nothing either
+ssh k9s kubectl create secret generic enc-probe -n default --from-literal=k=v
+
+ssh k9s kubectl exec -n kube-system etcd-k8s-cp-01 -- etcdctl \
   --endpoints=https://127.0.0.1:2379 \
-  --cacert=/etc/ssl/etcd/ssl/ca.pem \
-  --cert=/etc/ssl/etcd/ssl/member-$(hostname).pem \
-  --key=/etc/ssl/etcd/ssl/member-$(hostname)-key.pem \
-  get /registry/secrets/default/<a-newly-created-secret>
+  --cacert=/etc/kubernetes/ssl/etcd/ca.crt \
+  --cert=/etc/kubernetes/ssl/etcd/server.crt \
+  --key=/etc/kubernetes/ssl/etcd/server.key \
+  get /registry/secrets/default/enc-probe
+
+ssh k9s kubectl delete secret enc-probe -n default
 ```
 
-Expect `k8s:enc:secretbox:v1:...` rather than readable YAML. Create a throwaway
-Secret first — an old one is still plaintext until the rewrite above.
+Expect the value to begin `k8s:enc:secretbox:v1:...`. Before Run A the same
+command returns readable YAML — worth running once beforehand so the
+difference is visible rather than assumed.
 
 **Audit log** — the file exists and grows on each control-plane node, and reaches
 Loki:
