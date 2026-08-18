@@ -363,17 +363,26 @@ Three things about it are decisions rather than defaults:
   `agent-fleet-executor:latest` deliberately. Losing that tag breaks
   `platform-thot` and every cluster-access session with no version bump to
   point at.
-- **Ships `dryRun: true`.** This is the one part of the registry with a
-  genuinely one-way door: a GC'd blob is gone and the image must be rebuilt.
-  Two things get confirmed before it flips. That nothing currently pinned is
-  on the would-delete list — 3 is tight, though in steady state the deployed
-  tag is always the newest one, so the exposure is a rollback deeper than 5
-  releases rather than normal operation. And **that S3 blobs are actually
-  reclaimed**: zot's docs describe `gc` uniformly across storage backends and
-  never exclude remote ones, but that is not evidence, and the failure is
-  silent and asymmetric — manifests deleted (rollback depth gone) while
-  Garage usage is unchanged (quota still fills). Measure it with `garage
-  bucket info zot-registry` either side of a GC interval.
+- **Shipped `dryRun: true`, armed 2026-08-18.** This is the one part of the
+  registry with a genuinely one-way door: a GC'd blob is gone and the image
+  must be rebuilt. Staging it as a dry run is what made the two preconditions
+  checkable instead of assumed.
+
+  The first — nothing currently pinned on the would-delete list — was
+  confirmed against a real pass: `editable-blog` `0.41.0` keep, `0.39.0` /
+  `0.38.0` / `0.37.9` delete, with the live blog running `0.41.0`, so every
+  deletion sat below the deployed tag. `agent-fleet` had exactly 3 version
+  tags and lost nothing. 3 is tight, but in steady state the deployed tag is
+  always the newest, so the exposure is a rollback deeper than 3 releases
+  rather than normal operation.
+
+  The second — **that S3 blobs are actually reclaimed** — cannot be answered
+  without arming, which is why the baseline was recorded first: 3.3 GB / 144
+  objects against the 40 GB quota. zot's docs describe `gc` uniformly across
+  storage backends and never exclude remote ones, but that is not evidence,
+  and the failure is silent and asymmetric — manifests deleted (rollback depth
+  gone) while Garage usage is unchanged (quota still fills). If the bucket
+  does not shrink across a GC interval, this reverts to `true`.
 
 Applying it is not automatic: `config.json` is mounted with `subPath`, which
 never picks up ConfigMap updates, and nothing notifies the Deployment. An

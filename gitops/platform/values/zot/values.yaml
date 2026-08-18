@@ -186,21 +186,23 @@ extraVolumeMounts:
 # registry takes. deleteUntagged is where most of the space actually comes
 # back — dangling manifests left by overwritten `latest` pushes.
 #
-# `dryRun: true` is the shipping state, and this is the one genuinely
-# one-way door in the registry setup — a GC'd blob is gone and the image
-# has to be rebuilt. Two things must be confirmed before flipping it:
+# ARMED 2026-08-18 (`dryRun: false`). It shipped as a dry run because a GC'd
+# blob is gone and the image has to be rebuilt — the one genuinely one-way
+# door in this setup. Both preconditions were checked against a real dry-run
+# pass before flipping, rather than reasoned about:
 #
-#   1. That S3 blobs are actually reclaimed. zot's docs describe `gc`
-#      uniformly across storage backends and never exclude remote ones, but
-#      that is not evidence. The bad failure is silent and asymmetric:
-#      manifests deleted (rollback depth gone) while Garage usage is
-#      unchanged (quota still fills). Measure with `garage bucket info
-#      zot-registry` before and after — see the /garage-ops skill.
-#   2. That nothing pinned in agent-fleet's k8s/core.yaml or
-#      k8s/provisioner/deployment.yaml is on the would-delete list. 5 is
-#      tight. In normal operation the deployed tag is always the newest one
-#      (agent-fleet's deploy job bumps to the release it just built), so the
-#      exposure is a rollback deeper than 3 releases, not steady state.
+#   1. Nothing pinned was on the would-delete list. The pass decided
+#      editable-blog 0.41.0 keep / 0.39.0, 0.38.0, 0.37.9 delete, and the live
+#      blog runs 0.41.0 — every deletion older than what is deployed.
+#      agent-fleet had exactly 3 version tags, so it lost nothing.
+#   2. Baseline recorded so reclamation is falsifiable rather than assumed:
+#      `garage bucket info zot-registry` read 3.3 GB / 144 objects against the
+#      40 GB quota immediately before arming.
+#
+# If the bucket does not shrink after a GC interval, zot is deleting manifests
+# without reclaiming S3 blobs — trading rollback depth for nothing — and this
+# goes back to `true`. That is the failure this staging exists to catch, and
+# it is silent in both directions otherwise.
 #
 # `repositories: ["**"]` also applies this to editable-blog and anything
 # added later. That is intended — one policy beats a per-repo list to keep
@@ -231,7 +233,7 @@ extraManifests:
             "gcDelay": "2h",
             "gcInterval": "24h",
             "retention": {
-              "dryRun": true,
+              "dryRun": false,
               "delay": "24h",
               "policies": [
                 {
