@@ -106,23 +106,57 @@ updateStrategy:
 
 # chart >=33.0.0 renamed this key from certResolvers and nested config under .acme
 #
-# Using tlsChallenge (TLS-ALPN-01, validated over port 443 only) instead of
-# httpChallenge (HTTP-01, port 80). Real-world debugging after the Freebox
-# cutover found that Let's Encrypt's external HTTP-01 validation requests
-# on port 80 got a 404 that never reached Traefik's own ACME handler code
-# path (confirmed via logs — an equivalent internal test against the same
-# handler logged "Cannot retrieve the ACME challenge", but nothing
-# equivalent ever appeared for the real external attempts), while port 443
-# was already confirmed working end-to-end externally. Root cause on the
-# port-80 path was never pinned down (suspected transparent ISP proxy/cache
-# mangling port 80) — tlsChallenge sidesteps it entirely. Still Traefik's
-# built-in ACME, no change to the cert-manager/DNS-01 rejection in ADR-0001.
+# `le` is DNS-01 via Cloudflare as of ADR-0038. It was TLS-ALPN-01 until then,
+# for the reason kept below; that reason is now moot, because the blocker is no
+# longer port 80 but port 443.
+#
+# WHY IT CHANGED: Cloudflare's proxy terminates TLS at its edge, so an
+# ACME TLS-ALPN-01 challenge on 443 is answered by Cloudflare, never by Traefik.
+# Any proxied host stops renewing — silently, and only visibly ~90 days later
+# when the cert actually expires. DNS-01 validates over a TXT record instead and
+# is indifferent to who terminates 443, so it is the prerequisite for proxying
+# anything (ADR-0038 Decision 2).
+#
+# WHAT DELIBERATELY DID NOT CHANGE: the resolver is still named `le` and still
+# stores at /data/acme.json. acme.json is keyed by resolver name and records no
+# challenge type, so the existing ACME account and every issued cert are reused
+# as-is — nothing re-issues on startup, no IngressRoute anywhere needs editing,
+# and renewal at T-30d simply uses the new challenge. Renaming the resolver
+# would orphan every cert in that file.
+#
+# The 1.1.1.1/8.8.8.8 resolvers are NOT optional: lego's propagation check must
+# not go through the pod resolver, which forwards to Pi-hole first, and Pi-hole
+# is authoritative for bnei.lan with no business answering for bnei.dev.
+#
+# The token behind CF_DNS_API_TOKEN must carry Zone→Zone→Read AND Zone→DNS→Edit
+# on BOTH bnei.dev and voconsteroid.com — the latter also renews through `le`.
+# Read-only is not enough: lego creates and then deletes the _acme-challenge
+# record, and a read-only token fails at renewal, which is invisible until
+# expiry. Verified working on both zones 2026-08-18.
+#
+# HISTORICAL, kept because it explains why HTTP-01 is not the fallback:
+# tlsChallenge was chosen over httpChallenge after the Freebox cutover, when
+# Let's Encrypt's external HTTP-01 requests on port 80 got a 404 that never
+# reached Traefik's own ACME handler (confirmed via logs — an equivalent
+# internal test against the same handler logged "Cannot retrieve the ACME
+# challenge", but nothing equivalent ever appeared for the real external
+# attempts), while 443 was already proven end-to-end. Root cause on the port-80
+# path was never pinned down (suspected transparent ISP proxy mangling port 80).
+# So if DNS-01 ever needs backing out, TLS-ALPN-01 is the fallback, not HTTP-01
+# — and backing out means un-proxying every record first.
+#
+# Still Traefik's own built-in ACME (lego, Cloudflare is a native provider, no
+# plugin to install or maintain). cert-manager remains banned — ADR-0001.
 certificatesResolvers:
   le:
     acme:
       email: account@bnei.dev
       storage: /data/acme.json
-      tlsChallenge: true
+      dnsChallenge:
+        provider: cloudflare
+        resolvers:
+        - "1.1.1.1:53"
+        - "8.8.8.8:53"
   # Second resolver, DNS-01 via Cloudflare — ADR-0033. Exists solely to issue
   # the *.e2e.bnei.dev wildcard that agent-fleet's per-task preview subdomains
   # ride on. TLS-ALPN-01 (and HTTP-01) physically cannot issue a wildcard; only
@@ -131,9 +165,18 @@ certificatesResolvers:
   # (lego, Cloudflare is a native provider — there is no plugin to install or
   # maintain, contrary to ADR-0001's premise); cert-manager remains banned.
   #
-  # `le` above is deliberately untouched: it took three chained bugs to get
-  # working (docs/bootstrap-test-notes.md, 2026-07-28) and every existing
-  # *.bnei.dev host still renews through it. Nothing here re-issues those.
+  # NOTE (ADR-0038, 2026-08-18): `le` above is no longer TLS-ALPN-01 — it is
+  # DNS-01 too, so both resolvers now share a provider and a token and are one
+  # failure domain. ADR-0033 split them precisely so a DNS-01 failure could not
+  # take down the resolver serving every other host; that separation now buys
+  # two files and nothing else. Kept rather than collapsed because merging them
+  # is a second cert migration, not because the rationale still holds. A revoked
+  # or expired CF_DNS_API_TOKEN now stops renewal for every host in both zones,
+  # which is why ADR-0040 adds an expiry alert on traefik_tls_certs_not_after.
+  #
+  # `le` still took three chained bugs to get working originally
+  # (docs/bootstrap-test-notes.md, 2026-07-28); changing the challenge type does
+  # not re-issue anything, since acme.json is keyed by resolver name.
   le-dns:
     acme:
       email: account@bnei.dev

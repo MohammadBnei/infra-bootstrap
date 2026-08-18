@@ -390,9 +390,25 @@ as each new host is actually provisioned, never speculatively.
 ## 4. Ingress & TLS
 
 **WHAT:** Traefik in-cluster (Helm + ArgoCD), Service `LoadBalancer` via
-MetalLB, `IngressRoute` for all app HTTPS routing, native ACME
-**TLS-ALPN-01** (resolver `le`), `acme.json` on a PVC (RWX or `replicas: 1`,
+MetalLB, `IngressRoute` for all app HTTPS routing, native ACME **DNS-01 via
+Cloudflare** (resolver `le`), `acme.json` on a PVC (RWX or `replicas: 1`,
 never `emptyDir`).
+
+> **Changed 2026-08-18 ([ADR-0038](docs/adr/0038-cloudflare-proxy-dns01-and-origin-lock.md), Proposed):**
+> `le` was TLS-ALPN-01 until this change. Cloudflare's proxy terminates TLS at
+> its edge, so a TLS-ALPN-01 challenge on 443 is answered by Cloudflare and
+> never reaches Traefik — any proxied host stops renewing, silently, until the
+> cert expires ~90 days later. DNS-01 validates over a TXT record and does not
+> care who terminates 443, so it is the prerequisite for proxying anything.
+> The resolver keeps its name and its `/data/acme.json` storage, so no
+> `IngressRoute` changed and no existing cert was re-issued.
+>
+> Confirmed live on 2026-08-18: with `*.api.voconsteroid.com` **proxied**,
+> `dev.api.voconsteroid.com` returned no certificate at all — Cloudflare's free
+> Universal SSL covers the apex and first-level subdomains only, so a
+> second-level name has nothing to present. This is why ADR-0038 renames the
+> deep hostnames (`ente-api`, `ente-album`, `<id>-e2e`, `dev-api`) rather than
+> buying Advanced Certificate Manager.
 
 A **second resolver `le-dns`** (ACME DNS-01 via Cloudflare, own storage at
 `/data/acme-dns.json`) issues the `*.e2e.bnei.dev` wildcard cert that

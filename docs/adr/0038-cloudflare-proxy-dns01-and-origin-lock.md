@@ -108,9 +108,17 @@ Three constraints surfaced during review and shape the decision below:
    replicas is not available: ADR-0001 mandates a single `acme.json` writer.
 
 7. **Deep wildcards are renamed, not purchased.** `api.ente` → `ente-api`,
-   `album.ente` → `ente-album`, `<shortId>.e2e` → `<shortId>-e2e`, all first-level
-   and therefore covered by Universal SSL for nothing. `*.ente.bnei.dev` and
-   `*.e2e.bnei.dev` are deleted. This is preferred over Advanced Certificate
+   `album.ente` → `ente-album`, `<shortId>.e2e` → `<shortId>-e2e`, and
+   `dev.api.voconsteroid.com` → `dev-api.voconsteroid.com` — all first-level and
+   therefore covered by Universal SSL for nothing. `*.ente.bnei.dev`,
+   `*.e2e.bnei.dev` and `*.api.voconsteroid.com` are deleted.
+
+   The voconsteroid case was confirmed live on 2026-08-18: with
+   `*.api.voconsteroid.com` proxied, `dev.api.voconsteroid.com` returned no
+   certificate at all and the TLS handshake failed before HTTP — the edge has
+   nothing to present for a second-level name. `api.voconsteroid.com`, one level
+   deep, served normally from the `CN=voconsteroid.com` Universal SSL cert. That
+   is the whole constraint, reproduced. This is preferred over Advanced Certificate
    Manager because it is a one-time change against a recurring fee.
 
 8. **Traefik access logging is enabled** (JSON, matching `logs.general`). Alloy
