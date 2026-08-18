@@ -258,8 +258,16 @@ deliberate minority voter, so losing it never costs quorum.
 
 ### Access (current)
 
-- SA token: `ukubi-sa` in namespace `ukubi-system`
-- Token expires: 2036-08-12
+- ~~SA token: `ukubi-sa` in namespace `ukubi-system`, expires 2036-08-12~~
+  **Stale — does not exist on ukubi-cluster.** Verified live 2026-08-18:
+  no `ukubi-role` ClusterRole, no ClusterRoleBinding, no `ukubi-system`
+  namespace, no ServiceAccount. It belonged to the legacy cluster
+  (`k8s-cluster/ukubi-ai/clusterrole.yml`, applied by hand via that repo's
+  `run.sh`) and was never applied here. This mattered: a security audit
+  flagged it as the single highest-severity item in the cluster, because
+  that ClusterRole grants cluster-wide `pods/exec create` — a
+  container-escape-to-every-workload primitive — on a token valid until 2036.
+  It was a false positive created entirely by this doc claiming it was live.
 - Kubeconfig saved at `/home/hermes/kubeconfig`
 - `kubectl` v1.36.1 installed at `/tmp/kubectl`
 
@@ -553,8 +561,9 @@ host-level config/data still don't.
 
 ### K8s
 
-- Service account: `ukubi-sa` in `ukubi-system`
-- Token expires 2036
+- ~~Service account: `ukubi-sa` in `ukubi-system`, token expires 2036~~
+  **Stale — legacy cluster only, absent here.** See the correction in §3
+  "Access (current)". Verified live 2026-08-18.
 
 ### GitHub
 
