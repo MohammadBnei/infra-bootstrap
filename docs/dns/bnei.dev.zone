@@ -9,9 +9,12 @@
 ;; SOA and apex NS are deliberately omitted — Cloudflare manages both.
 ;; Authoritative NS are brady.ns.cloudflare.com / sasha.ns.cloudflare.com.
 ;;
-;; !! All A records are DNS-only (grey cloud). !!
-;; A proxied record terminates TLS at Cloudflare's edge, which breaks Traefik's
-;; TLS-ALPN-01 renewal for that host — silently, up to 90 days later.
+;; !! Proxy state is per-record and load-bearing — see the web block below. !!
+;; The apex and *.bnei.dev are PROXIED as of 2026-08-18 (ADR-0038). That was
+;; impossible while `le` used TLS-ALPN-01: a proxied record terminates TLS at
+;; Cloudflare's edge, so the challenge never reaches Traefik and renewal fails
+;; silently up to 90 days later. `le` is DNS-01 now, which is indifferent to
+;; who terminates 443.
 
 $TTL 300
 
@@ -26,10 +29,25 @@ $TTL 300
 ;; node blocks the parent wildcard for everything beneath it — hence the two
 ;; extra wildcards. Deleting either A record would change this behaviour.
 ;; ---------------------------------------------------------------------------
+;; PROXIED (orange). Universal SSL covers the apex + one wildcard level.
 bnei.dev.                     300  IN  A      82.65.231.50
 *.bnei.dev.                   300  IN  A      82.65.231.50
+
+;; GREY (DNS-only), each for a specific reason. An explicit record beats the
+;; proxied wildcard above — same mechanism as the SMTP2GO CNAMEs below.
+;;   fleet — ConnectRPC streaming; Cloudflare Free 524s at 100s idle origin
+;;   s3    — Garage SigV4 signs the encoded path; CF normalizes URI paths
+;;   ente  — two labels deep, so Universal SSL has no cert to present
+fleet.bnei.dev.               300  IN  A      82.65.231.50
+s3.bnei.dev.                  300  IN  A      82.65.231.50
 *.ente.bnei.dev.              300  IN  A      82.65.231.50
-*.e2e.bnei.dev.               300  IN  A      82.65.231.50
+
+;; *.e2e.bnei.dev was DELETED at the 2026-08-18 cutover. Note this did NOT stop
+;; <id>.e2e.bnei.dev resolving: e2e.bnei.dev is not a node, so the closest
+;; encloser is bnei.dev and the proxied *.bnei.dev matches (RFC 4592, same rule
+;; explained above). It resolves to Cloudflare and then fails TLS, being three
+;; labels deep. Previews are to be renamed <id>-e2e.bnei.dev, which is
+;; first-level and therefore covered.
 
 ;; ---------------------------------------------------------------------------
 ;; Inbound mail — Cloudflare Email Routing, catch-all @bnei.dev -> a personal
