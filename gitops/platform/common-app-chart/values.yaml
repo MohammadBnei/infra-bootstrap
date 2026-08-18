@@ -70,12 +70,25 @@ ingress:
       average: 100
       burst: 200
       period: 1s
-      # Empty = bucket on the TCP peer address, which is the real client
-      # today because Traefik runs externalTrafficPolicy: Local. ADR-0038
-      # Phase 3 sets this to CF-Connecting-IP at the Cloudflare cutover —
-      # after that the peer is a Cloudflare edge IP and bucketing on it
-      # would put the whole internet in one bucket.
-      sourceHeader: ""
+      # Set at the 2026-08-18 Cloudflare cutover. *.bnei.dev is now proxied,
+      # so the TCP peer is a Cloudflare edge IP — bucketing on it would put
+      # the entire internet into one 100/s bucket. CF-Connecting-IP is chosen
+      # over an X-Forwarded-For ipStrategy because Cloudflare guarantees it
+      # holds exactly the real client and overwrites any value a client
+      # supplies, whereas XFF is a list whose shape depends on what the
+      # client sent.
+      #
+      # Set this back to "" for any host left GREY (direct to origin) — the
+      # header is absent there, so every request would share one empty-key
+      # bucket. Currently: ente-museum, ente-web. Also agent-fleet-core
+      # (fleet.bnei.dev), whose values live in its own repo and therefore
+      # needs a PR there — until then its limiter is global rather than
+      # per-IP, which is wrong but not harmful at this traffic level.
+      #
+      # A client hitting the origin IP directly could forge this header to
+      # dodge the limiter. The real fix for that is the origin allowlist
+      # (ADR-0038 Decision 5), not this field.
+      sourceHeader: "CF-Connecting-IP"
     headers:
       enabled: true
       contentTypeNosniff: true

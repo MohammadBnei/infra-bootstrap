@@ -27,9 +27,9 @@ spec:
     burst: {{ .Values.ingress.baseline.rateLimit.burst }}
     period: {{ .Values.ingress.baseline.rateLimit.period }}
     {{- with .Values.ingress.baseline.rateLimit.sourceHeader }}
-    # ADR-0038 Phase 3: once traffic arrives via Cloudflare, the TCP peer is a
-    # Cloudflare edge IP and bucketing on it would put the entire internet in
-    # one bucket. Set this to CF-Connecting-IP at cutover.
+    # Traffic arrives via Cloudflare since the 2026-08-18 cutover, so the TCP
+    # peer is a Cloudflare edge IP — bucketing on it would put the entire
+    # internet in one bucket. Empty for hosts deliberately left grey.
     sourceCriterion:
       requestHeaderName: {{ . }}
     {{- end }}
