@@ -2101,3 +2101,84 @@ ADR-0029's HA claim is true rather than merely reported.
 3. **Check `wal_status` on slots after any long divergence.** `lost` is
    terminal — the slot must be dropped and recreated, and no amount of
    re-cloning fixes it.
+
+---
+
+## 2026-08-18 — `le` cutover to DNS-01 (ADR-0038, PRs #154/#155): verified live, and two verification traps
+
+Moving the `le` resolver from TLS-ALPN-01 to DNS-01 is the prerequisite for
+proxying anything through Cloudflare (a proxied host answers the :443 challenge
+at Cloudflare's edge, so TLS-ALPN-01 renewal fails silently until the cert
+expires ~90 days later). The cutover itself worked first try. Verifying it did
+not, and both traps produce false negatives that would have read as "the
+migration failed."
+
+### Trap 1: `Starting provider *acme.ChallengeTLSALPN` appears even with no `tlsChallenge` configured
+
+Traefik logs this at startup regardless of challenge type — it initialises the
+component unconditionally. Seeing it after the cutover looks exactly like the
+change not having applied. **It is not evidence of anything.** Check the
+process arguments instead, which are authoritative:
+
+```bash
+ssh k9s kubectl get deploy/platform-traefik -n traefik \
+  -o jsonpath='{.spec.template.spec.containers[0].args}' | tr ',' '\n' | grep acme
+```
+
+After the cutover there is no `tlsChallenge` argument at all — only
+`--certificatesresolvers.le.acme.dnsChallenge.provider=cloudflare`.
+
+### Trap 2: polling Cloudflare for the `_acme-challenge` TXT record misses it
+
+lego creates the challenge record, waits for propagation, validates, and
+**deletes it within seconds**. Polling the Cloudflare API every 15s for
+`_acme-challenge.<host>` returned zero hits across 135 seconds while the
+issuance was in fact succeeding. The record's absence proves nothing.
+
+**The reliable evidence is the certificate itself.** Traefik has no command to
+force a renewal — `acme.json` is held in memory, sits on an RWO PVC under a
+non-root pod, and must stay mode 0600, so editing it is not an option and
+deleting it wipes the ACME account plus every cert. The only honest test is a
+hostname that has no cert yet:
+
+```bash
+# throwaway IngressRoute, tls.domains makes Traefik order at config load
+# rather than waiting for a TLS handshake on that SNI
+cat scratch/acmeprobe.yaml | ssh k9s kubectl apply -f -
+echo | openssl s_client -connect 192.168.1.233:443 -servername acmeprobe.bnei.dev 2>/dev/null \
+  | openssl x509 -noout -subject -issuer -enddate
+ssh k9s kubectl delete ingressroute acmeprobe -n traefik
+```
+
+Result: `CN=acmeprobe.bnei.dev`, issuer `Let's Encrypt YR1`, ~2 minutes after
+apply, with no `tlsChallenge` on the process. That can only have come from
+DNS-01. Note the issued cert stays in `acme.json` afterwards and expires on its
+own; that is harmless but it is not "cleaned up" by deleting the IngressRoute.
+
+### Confirmed as a side effect: `externalTrafficPolicy: Local` works
+
+The same access logs that PR #155 enabled showed `ClientHost` as a real
+external address rather than `192.168.1.20x`. Before that change kube-proxy
+SNAT'd every inbound request to a node IP, which would have silently reduced
+the planned Cloudflare origin allowlist, the LAN `ClientIP()` break-glass route
+and all rate limiting to no-ops. One log line proves the whole chain.
+
+### Also confirmed, uncomfortably: a brand-new hostname is scanned within seconds
+
+`acmeprobe.bnei.dev` existed for about three minutes. In that window a single
+external address hit it repeatedly with `GET /.env` and `GET /.git/HEAD`. The
+hostname was never published, linked or announced anywhere — the `*.bnei.dev`
+wildcard plus Certificate Transparency logs are enough. This is the concrete
+version of the risk ADR-0038 §Context describes: **creating an IngressRoute
+publishes to the internet with no DNS step and no review gate**, and the
+internet notices immediately. Anything created "temporarily" is exposed for the
+whole of its temporary life.
+
+### Sequencing note for the rest of ADR-0038
+
+`le` being DNS-01 in *git* is not the same as in the *cluster*. Traefik must
+have rolled and picked it up before any record is flipped to proxied. Confirm
+with the argument check above, not with the ArgoCD Application status — the
+Application was `Synced` at the right revision while the old pod was still
+serving, which is the same class of gap as the `subPath` ConfigMap trap
+recorded on 2026-08-13.
