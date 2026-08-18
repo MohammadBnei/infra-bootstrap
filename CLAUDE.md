@@ -83,7 +83,9 @@ then here. When in doubt, open those files.
   `deleteUntagged`. `latest` is pinned explicitly because thot's executor
   and agent-fleet's `catalog.go` both float on it. Deliberately **not**
   keyed on pull recency — zot's metaDB is an `emptyDir`, so pull stats
-  reset on every restart. Ships `dryRun: true`; a GC'd blob is gone.
+  reset on every restart. Armed (`dryRun: false`) 2026-08-18 after a real
+  dry-run pass confirmed nothing deployed was on the delete list; a GC'd blob
+  is gone and the image must be rebuilt.
 - Storage: `longhorn` is the **default** StorageClass and the only one with
   replication + backups (ADR-0002/0019). `nfs`
   (`nfs-storage.bnei.lan:/export/k8s` via `csi-driver-nfs`, ADR-0036) is a
