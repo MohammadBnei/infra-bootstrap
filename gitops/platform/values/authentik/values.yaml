@@ -1,17 +1,22 @@
 # authentik — the cluster's identity provider (ADR-0039).
 #
 # Chart schema checked with `helm show values authentik/authentik --version
-# 2026.5.6` before writing this, per the k8s-ops skill's hardest-won lesson:
+# 2026.8.0` before writing this, per the k8s-ops skill's hardest-won lesson:
 # Helm silently accepts unknown top-level keys, so a file nested under a key
 # the chart does not have is a no-op for an entire session (the Infisical and
 # Loki incidents).
 #
 # NO REDIS. ADR-0039 said Redis would be an in-cluster subchart; that was
-# wrong for this version. authentik 2026.5.6 declares exactly two chart
-# dependencies — postgresql (condition: postgresql.enabled) and
-# authentik-remote-cluster — and its values expose no redis/cache/broker keys
-# at all. Upstream moved session and task state onto Postgres. One fewer
-# component to run, patch and back up.
+# wrong. authentik declares exactly two chart dependencies — postgresql
+# (condition: postgresql.enabled) and authentik-remote-cluster — and its values
+# expose no redis/cache/broker keys at all. Upstream moved session and task
+# state onto Postgres. One fewer component to run, patch and back up. Re-checked
+# on the 2026.8.0 bump: still true.
+#
+# TODO after the 2026.8.0 upgrade: set the new **Base URL** system setting at
+# System > Settings in the authentik UI. It is optional in 2026.8 and becomes
+# REQUIRED in 2026.11, so setting it now turns a future breaking upgrade into a
+# no-op. It is UI state, not chart config — nothing here can express it.
 
 authentik:
   # Every configuration value, including the non-secret ones, comes from this
