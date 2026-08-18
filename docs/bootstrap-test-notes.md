@@ -2415,3 +2415,70 @@ The origin wildcard covers `*.bnei.dev` only. `voconsteroid.com` is also
 `strict` and its two existing hosts have valid per-host certs, so it is safe —
 but a NEW hostname in that zone will 526 for its issuance window, unlike a new
 `bnei.dev` one. Either add a second default store entry or accept the window.
+
+---
+
+## 2026-08-18 — Phase 6 first attempt: two invocation failures, both before anything changed
+
+Neither touched the cluster, and both are repeatable footguns rather than
+one-offs.
+
+### 1. `cluster.yml` must be run from inside `kubespray/`
+
+```
+ERROR! the role 'dynamic_groups' was not found in
+/Users/moha/Code/infra-bootstrap/kubespray/playbooks/roles:...
+```
+
+Ansible looks for `ansible.cfg` in the **current directory**, not beside the
+playbook. `kubespray/ansible.cfg` sets `roles_path = roles:...`, so invoking
+`kubespray/cluster.yml` from the repo root never loads it — note the search path
+is `kubespray/playbooks/roles` while the roles live in `kubespray/roles`.
+
+`docs/runbook-k8s-bootstrap.md` already had the correct form. The lesson is to
+reuse a recorded invocation rather than compose a new one:
+
+```bash
+cd kubespray
+../kubespray-venv/bin/ansible-playbook -i ../inventory/ukubi/hosts.yaml ... cluster.yml
+```
+
+Fails at role resolution, before connecting to any node.
+
+### 2. `--tags` narrowing silently drops the `download` role
+
+```
+fatal: [k8s-cp-01]: Source /tmp/releases/kubectl-1.35.4-amd64 not found
+```
+
+kubespray stages binaries into `local_release_dir` (`/tmp/releases`) via the
+`download` role — `{ role: download, tags: download }` — and the control-plane
+role copies from `{{ downloads.kubectl.dest }}`. `--tags control-plane` skips
+the staging and keeps the consumer.
+
+**The part that makes this non-obvious: it is `/tmp`, so it is per-node and
+appears only on whichever node most recently rebooted.**
+
+| Node | `/tmp/releases` | Booted |
+|---|---|---|
+| `k8s-cp-01` | **0 files** | 2026-08-15 (the involuntary failover) |
+| `k8s-cp-02` | 19 files | 2026-07-30 |
+| `k8s-cp-03` | 19 files | 2026-07-30 |
+
+So the same command succeeds on two nodes and fails on the third, and would
+have worked entirely if run a week earlier. Always add `download` when
+narrowing: `--tags control-plane,download` selects 13 staging tasks versus 3.
+
+### Cheap pre-flight that catches the first class without touching anything
+
+```bash
+cd kubespray && ../kubespray-venv/bin/ansible-playbook \
+  -i ../inventory/ukubi/hosts.yaml --list-tags cluster.yml >/dev/null && echo OK
+```
+
+The second class needs a node check instead:
+
+```bash
+../kubespray-venv/bin/ansible -i ../inventory/ukubi/hosts.yaml kube_control_plane \
+  -m shell -a "ls /tmp/releases/ | wc -l"
+```
