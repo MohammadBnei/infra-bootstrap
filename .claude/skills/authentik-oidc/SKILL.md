@@ -127,6 +127,16 @@ produces a provider that rejects every callback with no useful error.
 with an app expecting a username means logins succeed and map to the wrong user
 — worse than failing.
 
+**Never `cat` a mounted blueprint.** It contains the client secret in
+plaintext. Read the InfisicalSecret manifest in git instead — it has the same
+structure with the values templated out. (Learned by leaking a pair this way on
+2026-08-19 and having to rotate.)
+
+**Rotating means restarting BOTH sides.** authentik's copy arrives as a mounted
+file, which kubelet syncs within ~60s but which discovery only re-reads on a
+worker restart. The app's copy is an env var, bound at container start and never
+re-read.
+
 **Env vars are bound at container start.** Rotating a client secret updates the
 Secret but not the running process. The app's pod must be restarted, or it keeps
 presenting the old one. This is the same trap that silently broke ACME renewal
@@ -170,6 +180,57 @@ cd pigsty && ansible 192.168.1.205 -b --private-key="$SP/oldpg_key" -m shell \
   -a "su - postgres -c \"psql -d authentik -tAc 'SELECT slug FROM authentik_flows_flow ORDER BY slug'\""
 rm -f "$SP/oldpg_key"
 ```
+
+## The blueprint will not apply until you restart the worker
+
+**This is the step that costs an hour if you do not know it.**
+
+Blueprints are applied by the **worker**, not the server — only the worker
+deployment gets the `blueprints.secrets` volume, so describing
+`platform-authentik-server` and finding no mount is expected and means nothing.
+
+`blueprints_discovery` is enqueued when the worker boots. Observed on 2026-08-19:
+it was enqueued at pod start and **never executed** — the log showed
+`Task enqueued` with no matching `Task started` or `Task finished`, while other
+tasks in the same queue ran normally. The blueprint sat mounted and correct,
+and no provider was created. Nothing reported an error anywhere.
+
+So after adding or changing a blueprint Secret:
+
+```bash
+ssh k9s kubectl rollout restart deploy/platform-authentik-worker -n authentik
+```
+
+Discovery then runs and the objects appear within seconds.
+
+### Diagnosing when it still does not work
+
+In order, because each step rules out the one below:
+
+```bash
+# 1. is the file actually in the WORKER pod? (not the server)
+ssh k9s kubectl exec -n authentik deploy/platform-authentik-worker -- \
+  find /blueprints/mounted -maxdepth 3
+
+# 2. did discovery run, or only get enqueued?
+ssh k9s kubectl logs -n authentik deploy/platform-authentik-worker --since=20m \
+  | grep blueprints_discovery
+
+# 3. is the blueprint registered, and did it apply?
+#    (via a Pigsty node — see docs/bootstrap-test-notes.md for the key override)
+psql -d authentik -tAc \
+  "SELECT name,path,status FROM authentik_blueprints_blueprintinstance"
+
+# 4. did the objects appear?
+psql -d authentik -tAc "SELECT count(*) FROM authentik_providers_oauth2_oauth2provider"
+```
+
+A Kubernetes Secret mount looks alarming but is fine: it creates `..data` and
+`..<timestamp>` symlink directories alongside the real filename. authentik's
+discovery skips any path containing a part starting with `.`
+(`blueprints/v1/tasks.py`), so the timestamped copy is ignored and the plain
+symlink is picked up. Verified — `rglob` yields both and only the dotted one is
+filtered.
 
 ## Verify
 

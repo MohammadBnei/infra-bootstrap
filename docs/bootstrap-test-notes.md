@@ -2623,3 +2623,77 @@ not a footnote to an authentik PR.
 
 `docs/secrets.md` now carries a correction block so it stops asserting secrets
 that do not exist.
+
+---
+
+## 2026-08-19 — First authentik OIDC client: the blueprint applies only on a worker restart
+
+Grafana federated to authentik (ADR-0039). The config was right on the first
+try; getting it to take effect was not, and the reason is invisible.
+
+### The blueprint sat mounted, correct, and unapplied
+
+After merge, everything looked healthy — Application `Synced`, pods `1/1`, both
+Secrets materialised, blueprint file present and correctly interpolated in the
+pod — and `/application/o/grafana/.well-known/openid-configuration` returned
+**404** for twenty minutes. Zero providers in the database.
+
+Cause: `blueprints_discovery` is enqueued when the worker boots, and on that
+boot **it never executed**. The log shows `Task enqueued` with no matching
+`Task started` or `Task finished`, while other tasks in the same queue ran
+normally. No error, anywhere.
+
+```bash
+ssh k9s kubectl rollout restart deploy/platform-authentik-worker -n authentik
+```
+
+Discovery then ran and the provider appeared immediately.
+
+### Three wrong turns, worth recording because each looked convincing
+
+1. **Describing the wrong deployment.** Only the WORKER gets the
+   `blueprints.secrets` volume — blueprint application is a background task.
+   `kubectl describe deploy platform-authentik-server` showed `Volumes: <none>`,
+   which is correct and means nothing. That sent me looking for a chart problem
+   that did not exist.
+
+2. **Blaming ArgoCD's manifest cache.** The repo-server logs are full of
+   `manifest cache hit`, and for Helm chart sources the cache key ends in the
+   CHART version rather than a git SHA — so a values-only change plausibly
+   serves stale. It was a real observation and the wrong explanation: Grafana's
+   values changed in the same commit and applied fine, and the sync at
+   `22:50:14Z` was seven seconds after the commit at `22:50:07Z`.
+
+3. **Suspecting the `..data` symlink.** Kubernetes Secret mounts create `..data`
+   and `..<timestamp>` symlink directories, and authentik's discovery skips any
+   path with a part starting with `.` (`blueprints/v1/tasks.py:129`). That looked
+   like an exact match for the symptom. Testing `rglob` inside the pod disproved
+   it: it yields both the plain symlink and the dotted copy, and only the dotted
+   one is filtered.
+
+The lesson is the ordering — check whether the task *ran* before theorising
+about why its input was rejected.
+
+### SSH re-shelling, again, four more times
+
+Every `kubectl exec` with parentheses, braces or spaces in the payload was
+mangled: `python3 -c "..."`, jsonpath `{range ...}`, `grep -A12 'for path in
+root.rglob'`, even a base64 one-liner (the `(` in `b64decode(...)`). Two forms
+that work:
+
+```bash
+# single-word grep patterns
+ssh k9s kubectl exec ... -- grep -n -A14 rglob /path/file.py
+
+# scripts over stdin — nothing to quote
+ssh k9s "kubectl exec -i -n ns deploy/x -- python3 -" < /tmp/probe.py
+```
+
+This is the fourth distinct instance today (LogQL queries, jsonpath, awk, now
+exec payloads). Assume anything with shell metacharacters needs stdin.
+
+### And a self-inflicted one
+
+`kubectl exec ... -- cat` on the mounted blueprint printed the OAuth2 client id
+and secret in full. Both were rotated immediately. Read the InfisicalSecret
+manifest in git instead — identical structure, values templated out.
