@@ -2554,3 +2554,72 @@ parser written for one `KeyError`s on the other.
 | etcd encryption | New Secret has `k8s:enc:secretbox:v1`; pre-run probe has none |
 | Audit log | 6 Loki streams across 3 CP nodes, e.g. `verb=get resource=leases user=system:kube-controller-manager decision=allow` |
 | Cilium WireGuard | `cilium_wg0`, 4 peers (correct for 5 nodes) |
+
+---
+
+## 2026-08-19 — Pigsty DB passwords are plaintext in git, and the docs describe a mechanism that never existed
+
+Found while adding authentik's database user (ADR-0039). Not fixed here — the
+blast radius is wider than the change that surfaced it — so it is written down
+rather than left as folklore.
+
+### What is actually true
+
+`pigsty/pigsty.yml` is **tracked in git** and every `pg_users` entry carries a
+plaintext password:
+
+```
+dbuser_infisical   dbInfiPass
+dbuser_n8n         dbN8nPass
+dbuser_openwebui   dbOpenWebPass
+dbuser_vocon       dbvocOnPass
+dbuser_blog        dbblogPass
+```
+
+These are the databases behind Infisical itself, n8n, OpenWebUI, vos-monolith
+and the blog. That is `DECISION.md` §3's "secrets/keys/tokens committed to this
+repo".
+
+### What the docs claimed
+
+`docs/secrets.md` listed `DBUSER_META_PASSWORD`, `DBUSER_VIEW_PASSWORD`,
+`DBUSER_INFISICAL_PASSWORD` and `DBUSER_ORY_PASSWORD` as live secrets, "agent
+(random 32B)", consumed by "pigsty `pg_users` block". A check against the
+project found **284 secrets and not one `DBUSER_*`**. None of them exist.
+
+The same file (§112) refers to `pigsty.yml.j2` as the place where secret *names*
+rather than values are committed. **There is no such file** — `find` returns only
+`pigsty/pigsty.yml` and worktree copies of it. The convention was documented but
+never implemented, which is worse than not documenting it: anyone reading
+`docs/secrets.md` would conclude the passwords are already handled.
+
+### The workaround used for authentik
+
+`ALTER USER` accepts a pre-computed verifier, so `dbuser_authentik` commits a
+**SCRAM-SHA-256 verifier** instead of a password:
+
+```
+pigsty/roles/pgsql/templates/pg-user.sql:63
+ALTER USER "{{ user.name }}" PASSWORD '{{ user.password | replace("'", "''") }}';
+```
+
+Postgres stores a well-formed verifier as-is rather than hashing it again, so
+authentication is unchanged while what lands in git is not reversible. The
+plaintext lives only in Infisical as `DBUSER_AUTHENTIK_PASSWORD`.
+
+Worth knowing if this pattern gets extended to the other five: the generator
+must produce a real verifier, so it is worth self-checking against RFC 5802's
+worked example (password `pencil`, salt `W22ZaJ0SNY7soEsUEjb6gQ==`, 4096
+iterations) before trusting it. An almost-correct verifier fails authentication
+in a way that looks like a wrong password.
+
+### Why it was not fixed here
+
+Rotating five live passwords means, for each: generate, update Infisical, update
+`pigsty.yml`, run the Pigsty playbook, and update every consuming app's
+connection string **in lockstep** — Infisical's own database is on that list,
+which makes the ordering circular. That is its own change with its own runbook,
+not a footnote to an authentik PR.
+
+`docs/secrets.md` now carries a correction block so it stops asserting secrets
+that do not exist.

@@ -40,6 +40,8 @@ everything.
 | `DBUSER_VIEW_PASSWORD` | `dbuser_view` — read-only viewer, dashboards/monitoring | agent (random 32B) | pigsty `pg_users` block |
 | `DBUSER_INFISICAL_PASSWORD` | `dbuser_infisical` — the live in-cluster Infisical server's own database user | agent (random 32B) | pigsty `pg_users` block |
 | `DBUSER_ORY_PASSWORD` | `dbuser_ory` — Ory Kratos (identity platform) database user | agent (random 32B) | pigsty `pg_users` block |
+| `DBUSER_AUTHENTIK_PASSWORD` | `dbuser_authentik` — authentik's database user (ADR-0039). **The PLAINTEXT.** What is committed in `pigsty/pigsty.yml` is its SCRAM-SHA-256 *verifier*, which is not reversible — rotation must regenerate both halves together or they drift apart silently | agent (random 32B alnum) | `gitops/bootstrap/authentik-secret.yaml` → `AUTHENTIK_POSTGRESQL__PASSWORD` |
+| `AUTHENTIK_SECRET_KEY` | authentik cookie signing + unique user IDs. Upstream is explicit that changing it after first install invalidates every session | agent (`openssl rand -base64 32`) | `gitops/bootstrap/authentik-secret.yaml` → `AUTHENTIK_SECRET_KEY` |
 | `GRAFANA_ADMIN_PASSWORD` | Grafana admin login | agent (random 32B) | pigsty `grafana_admin_password` |
 | `K8S_GRAFANA_ADMIN_PASSWORD` | k8s cluster's own Grafana (kube-prometheus-stack, `monitoring` ns) admin login — separate from `GRAFANA_ADMIN_PASSWORD` above, which is Pigsty's unrelated Grafana instance | agent (random 32B) | `gitops/bootstrap/grafana-admin-secret.yaml` (InfisicalSecret) |
 | `HAPROXY_ADMIN_PASSWORD` | HAProxy stats page admin login | agent (random 32B) | pigsty `haproxy_stats` |
@@ -53,6 +55,26 @@ everything.
 | `REDIS_MAIN_PASSWORD` | Shared Pigsty Redis (`redis-main` cluster, pg02) password — mirrors `pigsty.yml`'s `redis_password: 'Redis.Main'` | reused from the existing `pigsty.yml` value (not rotated) | `gitops/bootstrap/argocd-redis-secret.yaml` (InfisicalSecret) → ArgoCD's `externalRedis` (argocd-application.yaml) |
 | `CF_ACCOUNT_TOKEN` | Cloudflare API token for Traefik's `le-dns` ACME DNS-01 resolver ([ADR-0033](adr/0033-dns-to-cloudflare-and-dns01-wildcard.md)). Must carry `Zone → DNS → Edit`; prefer scoping to the `bnei.dev` zone alone, since a zone-wide token can repoint every production hostname. lego uses it only to create/delete `_acme-challenge` TXT records | user (Cloudflare → My Profile → API Tokens) | `gitops/bootstrap/traefik-cloudflare-secret.yaml` (InfisicalSecret) → `traefik-cloudflare-dns` Secret in ns `traefik` → `gitops/platform/values/traefik/values.yaml`'s `env:` as `CF_DNS_API_TOKEN` (name fixed by lego) |
 | `CF_ACCOUNT_ID` | Cloudflare account identifier. **Not consumed by anything** — lego's DNS-01 provider resolves the zone from the challenge FQDN and never takes an account ID. Kept for future Cloudflare tooling | user (Cloudflare dashboard) | *(nothing)* |
+
+> **Correction, 2026-08-19 — the `DBUSER_*` rows above are aspirational, not
+> live.** A check against the project (`infisical secrets`, 284 entries) found
+> **no `DBUSER_*` secret of any kind** except `DBUSER_AUTHENTIK_PASSWORD`, added
+> that day. `DBUSER_META_PASSWORD`, `DBUSER_VIEW_PASSWORD`,
+> `DBUSER_INFISICAL_PASSWORD` and `DBUSER_ORY_PASSWORD` do not exist.
+>
+> Where those passwords actually live is `pigsty/pigsty.yml`, **in plaintext,
+> tracked in git** — `dbInfiPass`, `dbN8nPass`, `dbOpenWebPass`, `dbvocOnPass`,
+> `dbblogPass`. The `pigsty.yml.j2` template referenced further down this file
+> as the mechanism that keeps values out of git **does not exist and never
+> did**.
+>
+> That is a `DECISION.md` §3 violation ("secrets/keys/tokens committed to this
+> repo") with a wide blast radius: rotating them touches Infisical, Pigsty and
+> every consuming app, so it is its own change rather than a footnote. Tracked
+> in `docs/bootstrap-test-notes.md` (2026-08-19). `dbuser_authentik` sidesteps
+> it by committing a SCRAM verifier instead — see ADR-0039's implementation
+> note for why that is safe.
+
 
 `<PREFIX>_S3_ACCESS_KEY` / `<PREFIX>_S3_SECRET` (e.g. `LONGHORN_S3_*`,
 `PGBACKREST_S3_*` above) is the naming convention for **any** Garage-issued

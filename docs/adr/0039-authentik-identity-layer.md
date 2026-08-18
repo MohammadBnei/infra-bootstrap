@@ -1,6 +1,6 @@
 # ADR-0039: authentik as the cluster's identity layer
 
-**Status:** Proposed
+**Status:** Proposed (implementation started 2026-08-19 — see the implementation note at the end; Decision 2's Redis clause is wrong)
 **Date:** 2026-08-18
 **Depends on:** [ADR-0038](0038-cloudflare-proxy-dns01-and-origin-lock.md)
 (`externalTrafficPolicy: Local` is what makes the LAN break-glass route below
@@ -171,3 +171,77 @@ issue client certificates from. An IP allowlist does not survive roaming.
   Oathkeeper; `DBUSER_ORY_PASSWORD` is still a live row in `docs/secrets.md`).
   Rejected: three services to operate where one suffices, and it was already
   abandoned once.
+
+
+---
+
+## Implementation note (added during implementation, 2026-08-19)
+
+Appended rather than edited into the decisions above, per `DECISION.md` §5.
+
+### Decision 2's Redis clause is wrong — there is no Redis
+
+Decision 2 says *"Redis stays an in-cluster subchart on `longhorn`."* That is
+not true of the version being deployed. authentik **2026.5.6** declares exactly
+two chart dependencies:
+
+```
+postgresql              (condition: postgresql.enabled)
+authentik-remote-cluster
+```
+
+and its values expose **no** redis, cache or broker keys at all — `authentik.*`
+contains only `enabled, log_level, secret_key, events, web, email, outposts,
+error_reporting, postgresql`. Upstream moved session and task state onto
+Postgres. The only string matching "redis" anywhere in the chart is a Bitnami
+common template vendored inside the postgresql subchart.
+
+So the deployment is Postgres-only: one fewer component to run, patch, back up
+and reason about. This is a simplification of the accepted decision, not a
+deviation from its intent.
+
+### The database password is committed as a SCRAM verifier, not plaintext
+
+Decision 2 chose Pigsty for the database. Acting on that surfaced a problem the
+ADR did not anticipate: `pigsty/pigsty.yml` is tracked in git and every existing
+`pg_users` entry carries a **plaintext** password. `docs/secrets.md` §112 refers
+to a `pigsty.yml.j2` that would keep values out of git — that file does not
+exist, and Infisical contains no `DBUSER_*` secrets at all despite the docs
+listing four. The documented convention was never implemented.
+
+Rather than commit a sixth plaintext credential, `dbuser_authentik` stores a
+**SCRAM-SHA-256 verifier**. `pigsty/roles/pgsql/templates/pg-user.sql:63` passes
+`user.password` verbatim into `ALTER USER … PASSWORD '…'`, and Postgres stores a
+well-formed verifier as-is instead of hashing it again, so authentication is
+identical while what lands in git is non-reversible. The plaintext exists only
+in Infisical as `DBUSER_AUTHENTIK_PASSWORD`.
+
+Consequence: rotation now regenerates **both halves together**. A verifier
+cannot be turned back into the password it verifies, so the two can silently
+drift apart if only one is changed.
+
+The five pre-existing plaintext passwords are a separate problem with a wider
+blast radius (rotating them touches Infisical, Pigsty and every consuming app);
+recorded in `docs/bootstrap-test-notes.md` rather than fixed here.
+
+### The whole configuration goes through one Secret
+
+`authentik.existingSecret.secretName` makes the chart skip creating its own
+Secret and read **all** configuration from the named one — its own warning is
+*"when set, `authentik.*` secret values are ignored"*. So the non-secret values
+(host, database name, user, port) live in
+`gitops/bootstrap/authentik-secret.yaml` too. They are not secrets; the
+mechanism is simply all-or-nothing.
+
+Key names are the chart's: `templates/_helpers.tpl` flattens nested maps with a
+**double** underscore and uppercases, so `authentik.postgresql.password` becomes
+`AUTHENTIK_POSTGRESQL__PASSWORD`. A single underscore silently does nothing.
+
+### Port 5432, not pgbouncer's 6432
+
+Pigsty runs pgbouncer alongside Postgres. authentik is a Django application, and
+Pigsty's pgbouncer defaults to transaction pooling, which breaks prepared
+statements and persistent connections. The connection targets Postgres directly.
+`postgres.bnei.lan` is used rather than `192.168.1.232` because
+`ARCHITECTURE.md` §3 records that CoreDNS forwards to Pi-hole explicitly so that
+pods can resolve the Pigsty VIP by name.

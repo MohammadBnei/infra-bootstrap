@@ -89,6 +89,23 @@ all:
             roles: [dbrole_readwrite] # optional, belonged roles. default roles are: dbrole_{admin,readonly,readwrite,offline}
             pool_connlimit: -1 # optional, max database connections at user level, default -1 disable limit
 
+          # authentik (ADR-0039). The password below is a SCRAM-SHA-256
+          # VERIFIER, not a plaintext password — unlike every other user in
+          # this block. pigsty passes user.password verbatim into
+          # `ALTER USER ... PASSWORD '...'` (roles/pgsql/templates/pg-user.sql
+          # line 63), and Postgres stores a well-formed verifier as-is rather
+          # than hashing it again, so this authenticates identically while
+          # committing something non-reversible.
+          #
+          # The plaintext lives ONLY in Infisical as DBUSER_AUTHENTIK_PASSWORD,
+          # which is what authentik connects with. Rotating means regenerating
+          # both halves together — a verifier cannot be turned back into the
+          # password it verifies.
+          - name: dbuser_authentik
+            password: 'SCRAM-SHA-256$4096:lQnGZm3zRLDSquRID2ki3Q==$ORpsD/MHVWzn0wcZ+K5ZEIXkrYWcM4/CIodj6caexp8=:Ze+z3eX4VJw9Ebze4+V7jlBscfZy9aJ/o3VSpUbGkDY='
+            pgbouncer: true
+            comment: authentik identity provider (ADR-0039)
+            roles: [dbrole_readwrite]
           - name: dbuser_blog # REQUIRED, `name` is the only mandatory field of a user definition
             password: dbblogPass # optional, password, can be a scram-sha-256 hash string or plain text
             pgbouncer: true # optional, add this user to pgbouncer user-list? false by default (production user should be true explicitly)
@@ -162,6 +179,9 @@ all:
             extensions: # optional, additional extensions to be installed: array of `{name[,schema]}`
               - { name: vector, schema: public }
             pool_auth_user: dbuser_n8n
+          - name: authentik
+            comment: authentik identity provider (ADR-0039)
+            owner: dbuser_authentik
           - name: openwebdb # REQUIRED, `name` is the only mandatory field of a database definition
             owner: dbuser_openwebui # optional, database owner, postgres by default
             extensions: # optional, additional extensions to be installed: array of `{name[,schema]}`
