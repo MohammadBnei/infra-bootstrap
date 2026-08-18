@@ -159,6 +159,37 @@ providers:
   kubernetesIngress:
     enabled: false
 
+# Default TLS store — ADR-0038. Traefik serves this certificate for any SNI it
+# has no specific cert for. Without it, an unseen hostname gets
+# `CN=TRAEFIK DEFAULT CERT` (self-signed) for the 30–120s a DNS-01 order takes.
+#
+# That is invisible today only because Cloudflare's SSL mode is `full`, which
+# does not validate the origin certificate. Under `strict` — the intended
+# destination — the same window becomes HTTP 526, and becomes permanent if the
+# order ever fails, with Cloudflare's error page hiding the ACME error. So this
+# is the prerequisite for tightening to `strict`, not an optimisation.
+#
+# One wildcard covers every first-level host, so a new app is served correctly
+# from its very first handshake and never triggers a per-host order. It also
+# absorbs agent-fleet's e2e previews now that they are <id>-e2e.bnei.dev rather
+# than a label deeper (agent-fleet#207) — those used to carry their own
+# *.e2e.bnei.dev cert.
+#
+# Issued through `le-dns` rather than `le`: a wildcard is structurally
+# impossible over TLS-ALPN-01 and only DNS-01 can obtain one. Per-host certs
+# from `le` still win for their own SNI; this is the fallback, not a
+# replacement.
+tlsStore:
+  default:
+    defaultGeneratedCert:
+      resolver: le-dns
+      domain:
+        main: "*.bnei.dev"
+        # A wildcard does not match the zone apex, so bnei.dev needs to be an
+        # explicit SAN on the same certificate.
+        sans:
+        - "bnei.dev"
+
 # acme.json must be on a PVC, never emptyDir (ADR-0001)
 persistence:
   enabled: true
@@ -245,11 +276,14 @@ certificatesResolvers:
         resolvers:
         - "1.1.1.1:53"
         - "8.8.8.8:53"
-  # Second resolver, DNS-01 via Cloudflare — ADR-0033. Exists solely to issue
-  # the *.e2e.bnei.dev wildcard that agent-fleet's per-task preview subdomains
-  # ride on. TLS-ALPN-01 (and HTTP-01) physically cannot issue a wildcard; only
-  # DNS-01 can, which is why ADR-0001's DNS-01 rejection got a narrow carve-out
-  # once bnei.dev moved to Cloudflare. This is still Traefik's own built-in ACME
+  # Second resolver, DNS-01 via Cloudflare — ADR-0033, repurposed by ADR-0038.
+  # It was created solely for the *.e2e.bnei.dev wildcard agent-fleet's preview
+  # subdomains rode on. It now issues the *.bnei.dev wildcard used as the
+  # default TLS store cert above, which covers those previews too once they are
+  # first-level (agent-fleet#207) — so the narrower e2e wildcard is retired
+  # rather than replaced. TLS-ALPN-01 (and HTTP-01) physically cannot issue a
+  # wildcard; only DNS-01 can, which is why ADR-0001's DNS-01 rejection got a
+  # narrow carve-out once bnei.dev moved to Cloudflare. This is still Traefik's own built-in ACME
   # (lego, Cloudflare is a native provider — there is no plugin to install or
   # maintain, contrary to ADR-0001's premise); cert-manager remains banned.
   #
