@@ -9,6 +9,9 @@ spec:
   routes:
   - kind: Rule
     match: Host(`infisical.bnei.dev`)
+    middlewares:
+    - name: cloudflare-origin-lock
+      namespace: default
     services:
     # platform.applicationset.yaml names the ArgoCD Application (and hence
     # the Helm release, since no releaseName override is set)

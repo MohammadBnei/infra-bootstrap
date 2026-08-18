@@ -18,6 +18,8 @@ spec:
   - kind: Rule
     match: Host(`alertmanager.bnei.dev`)
     middlewares:
+    - name: cloudflare-origin-lock
+      namespace: default
     - name: basic-admin-auth
       namespace: default
     services:

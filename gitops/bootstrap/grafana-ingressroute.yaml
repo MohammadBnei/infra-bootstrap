@@ -9,6 +9,9 @@ spec:
   routes:
   - kind: Rule
     match: Host(`grafana.bnei.dev`)
+    middlewares:
+    - name: cloudflare-origin-lock
+      namespace: default
     services:
     - name: platform-grafana
       port: 80
