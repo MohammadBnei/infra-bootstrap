@@ -56,7 +56,17 @@ spec:
       port: 8006
       scheme: https
       serversTransport: proxmox-insecure
-    # middlewares: []   # add Traefik Middleware refs here, e.g.
+    # ADR-0038: proxmox.bnei.dev is a HYPERVISOR ROOT LOGIN reachable from the
+    # internet. The origin lock is not optional here — without it, anyone who
+    # knows 82.65.231.50 reaches this login form directly, skipping the WAF,
+    # geo rules and bot checks entirely.
+    #
+    # It is NOT authentication. ADR-0039 puts authentik forwardAuth in front of
+    # this host and requires a WebAuthn passkey; until that lands, PVE's own
+    # login is still the only credential check.
+    middlewares:
+    - name: cloudflare-origin-lock
+      namespace: default
     #   - name: basic-admin-auth
     #     namespace: default
   tls:

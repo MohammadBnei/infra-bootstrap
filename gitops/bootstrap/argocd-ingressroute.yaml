@@ -9,6 +9,9 @@ spec:
   routes:
   - kind: Rule
     match: Host(`argocd.bnei.dev`)
+    middlewares:
+    - name: cloudflare-origin-lock
+      namespace: default
     services:
     - name: argocd-server
       port: 80
