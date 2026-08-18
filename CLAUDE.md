@@ -49,13 +49,19 @@ then here. When in doubt, open those files.
 ## Locked decisions (condensed — full detail + rationale in `DECISION.md` and `docs/adr/`)
 
 - Ingress: Traefik + `IngressRoute` only (Gateway API rejected — see
-  ADR-0001). Cert engine: Traefik built-in ACME **TLS-ALPN-01** (resolver
-  `le`), `acme.json` on a PVC (never `emptyDir`). A second resolver `le-dns`
-  (DNS-01 via Cloudflare) exists **only** for the `*.e2e.bnei.dev` wildcard —
-  ADR-0033.
-- DNS: `bnei.dev` is at Cloudflare with **wildcard A records**, all DNS-only
-  (grey cloud — proxying breaks TLS-ALPN-01 renewal). Adding an app hostname
-  needs no DNS change. ADR-0033.
+  ADR-0001). Cert engine: Traefik built-in ACME **DNS-01 via Cloudflare**
+  (resolver `le`) since ADR-0038 — it was TLS-ALPN-01 until 2026-08-18, and
+  had to change before any record could be proxied. `acme.json` on a PVC
+  (never `emptyDir`). `le-dns` is a second DNS-01 resolver with its own
+  storage file; both now share a provider and a token, so the blast-radius
+  split ADR-0033 gave them no longer buys anything. cert-manager stays banned.
+- DNS: `bnei.dev` is at Cloudflare with **wildcard A records**. The apex and
+  `*.bnei.dev` are **proxied** (ADR-0038, 2026-08-18) — possible only because
+  `le` moved to DNS-01 first; under TLS-ALPN-01 a proxied record breaks renewal
+  silently. Still grey on purpose: `fleet` (streaming vs CF's 100s timeout),
+  `s3` (SigV4 vs path normalization), `*.ente.bnei.dev` (two labels deep — free
+  Universal SSL covers apex + one wildcard level only). Adding an app hostname
+  needs no DNS change. ADR-0033, ADR-0038.
 - MetalLB L2 only (Freebox blocks BGP), pool `192.168.1.233-250`, `.233`
   reserved for the Traefik VIP — `.232` is Pigsty's HA floating VIP,
   `.230`/`.231` excluded alongside it.
@@ -99,8 +105,8 @@ then here. When in doubt, open those files.
 
 ## Forbidden patterns (quick check — full list + reasons in `DECISION.md` §3 and `docs/adr/`)
 
-cert-manager · DNS-01 for the `le` resolver (one carve-out: `le-dns` for the
-`*.e2e.bnei.dev` wildcard, ADR-0033) · Gateway API / Ingress-NGINX / plain
+cert-manager (still banned — ADR-0038 amended only the DNS-01 half of
+ADR-0001's rejection, not this) · Gateway API / Ingress-NGINX / plain
 `Ingress` · Cilium Gateway API · per-app Helm chart · per-app Applications
 spawned one-by-one bypassing the registry · Ceph · Wireguard/Tailscale ·
 Infisical as SSH/TLS CA · Vagrant for Proxmox · Flatcar · external managed

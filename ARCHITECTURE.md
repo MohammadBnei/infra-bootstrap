@@ -370,8 +370,23 @@ TXT  smtp._domainkey    → (DKIM)
 Three wildcards rather than one because DNS wildcards match exactly one label
 (RFC 4592), so `*.bnei.dev` does not cover `api.ente.bnei.dev`.
 
-All records are **DNS-only (grey cloud)**. Cloudflare's proxy would terminate
-TLS at its edge and silently break Traefik's TLS-ALPN-01 renewal for that host.
+**The apex and `*.bnei.dev` are proxied (orange cloud) as of 2026-08-18** —
+[ADR-0038](docs/adr/0038-cloudflare-proxy-dns01-and-origin-lock.md). This was
+impossible until `le` moved to DNS-01: Cloudflare's proxy terminates TLS at its
+edge, so a TLS-ALPN-01 challenge on 443 is answered by Cloudflare and never
+reaches Traefik, and the renewal fails silently up to 90 days later. DNS-01
+validates over a TXT record and does not care who terminates 443.
+
+Three things stay **grey (DNS-only)**, each for a specific reason:
+
+| Record | Why it stays grey |
+|---|---|
+| `fleet.bnei.dev` | ConnectRPC streaming; Cloudflare Free returns 524 when the origin sends nothing for 100s |
+| `s3.bnei.dev` | Garage SigV4 signs the encoded path, and Cloudflare normalizes URI paths — untested, and a mismatch reads as an auth bug |
+| `*.ente.bnei.dev` | Two labels deep. Free Universal SSL covers the apex plus **one** wildcard level, so a proxied record here serves no certificate at all |
+
+Both explicit A records override the proxied wildcard — an explicit record always
+beats a wildcard, the same mechanism the SMTP2GO CNAMEs rely on.
 
 *Previously: manual per-host A records, no wildcard, on Google Cloud DNS
 nameservers (`ns-cloud-d*.googledomains.com`) — described loosely in these docs
@@ -420,11 +435,14 @@ Why (Gateway API reversal, cert-manager rejection): see
 [ADR-0001](docs/adr/0001-ingress-traefik-ingressroute-over-gateway-api.md).
 cert-manager stays banned; only the DNS-01 half of that ADR is amended.
 
-> **Doc note:** ADR-0001 and parts of these docs say "HTTP-01". The live
-> config has been **TLS-ALPN-01** since the 2026-07-28 Freebox cutover —
-> LE's external HTTP-01 validation on port 80 never reached Traefik's
-> challenge handler (suspected transparent ISP proxy), while 443 was already
-> proven. See `docs/bootstrap-test-notes.md`.
+> **Doc note:** the challenge type has changed twice. ADR-0001 and parts of
+> these docs say "HTTP-01"; it was **TLS-ALPN-01** from the 2026-07-28 Freebox
+> cutover (LE's external HTTP-01 validation on port 80 never reached Traefik's
+> challenge handler — suspected transparent ISP proxy — while 443 was already
+> proven), and is **DNS-01** since 2026-08-18 (ADR-0038), because Cloudflare's
+> proxy answers 443 at its edge. If DNS-01 ever needs backing out, TLS-ALPN-01
+> is the fallback and HTTP-01 is not — and backing out means un-proxying every
+> record first. See `docs/bootstrap-test-notes.md`.
 
 ```mermaid
 sequenceDiagram
@@ -438,7 +456,7 @@ sequenceDiagram
     C->>FB: HTTPS request to *.bnei.dev
     FB->>MLB: forward to VIP
     MLB->>TR: L2-announced traffic
-    TR->>TR: TLS terminate (ACME TLS-ALPN-01 cert)
+    TR->>TR: TLS terminate (ACME DNS-01 cert, resolver le)
     TR->>SVC: route by IngressRoute match
     SVC->>POD: forward to pod
     POD-->>C: response
@@ -681,9 +699,17 @@ New service accounts per app; Infisical for app secrets.
 
 ### TLS
 
-Per-hostname certs via Traefik ACME **TLS-ALPN-01** (§4 above, resolver
-`le`). Each `*.bnei.dev` host gets its own cert on first request,
-`certResolver: le` on its `IngressRoute`.
+Per-hostname certs via Traefik ACME **DNS-01 via Cloudflare** (§4 above,
+resolver `le` — TLS-ALPN-01 until ADR-0038). Each `*.bnei.dev` host gets its
+own cert on first request, `certResolver: le` on its `IngressRoute`.
+
+On-demand issuance is worth knowing about: Traefik orders on the first TLS
+handshake for an unseen SNI and serves a self-signed default meanwhile. DNS-01
+propagation makes that window 30–120s. Cloudflare's SSL mode is `full`, which
+does not validate the origin cert and therefore tolerates it; under `strict`
+the same window returns HTTP 526. Issuing a `*.bnei.dev` wildcard through
+`le-dns` and using it as the default store cert would remove the window
+entirely — not yet done.
 
 **One wildcard exists:** `*.e2e.bnei.dev`, issued by the second resolver
 `le-dns` (ACME DNS-01 via Cloudflare) — TLS-ALPN-01 and HTTP-01 structurally
