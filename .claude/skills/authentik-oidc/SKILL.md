@@ -210,10 +210,16 @@ which read as authoritative and is not. The token had groups all along.
 
 Acting on that misreading, `enableUserInfoGroups: true` +
 `userInfoPath` were set on ArgoCD — and **that broke login for everyone**.
-`authentik.bnei.dev` is proxied at Cloudflare, and a server-side request from
-a pod is answered with Cloudflare **error 1010** (Browser Integrity Check
-blocks non-browser user agents). ArgoCD tries to parse HTML as JSON and
-invalidates the session:
+
+ArgoCD builds the userinfo URL by appending `userInfoPath` to the **issuer**,
+and authentik's issuer is already per-application:
+
+```
+https://authentik.bnei.dev/application/o/argocd/  +  /application/o/userinfo/
+= https://authentik.bnei.dev/application/o/argocd/application/o/userinfo/   -> 404, HTML body
+```
+
+ArgoCD parses that HTML as JSON, fails, and discards the session:
 
 ```
 invalid session: error fetching user info endpoint:
@@ -222,12 +228,35 @@ invalid character '<' looking for beginning of value
 ```
 
 Every logged-in user is signed out — the userinfo path fails **open into a
-total outage**, not closed into a lower role.
+total outage**, not closed into a lower role. And no value of `userInfoPath`
+fixes it: authentik's userinfo endpoint is not underneath its issuer, so it
+cannot be expressed as a path relative to it.
 
-The general rule: **an in-cluster caller reaching a `*.bnei.dev` name transits
-Cloudflare**, so anything on that path must survive Browser Integrity Check.
-Prefer a claim already in the token, or an in-cluster Service address, over a
-server-side call to a public hostname.
+Verified by requesting both URLs directly. The correct one answers `401` with
+an **empty** body; the doubled one answers `404` with `<!DOCTYPE html>` — which
+is the byte ArgoCD choked on.
+
+### Probe with the user agent that matters
+
+The first diagnosis of this blamed Cloudflare, on the strength of a probe from
+an in-cluster pod that returned `error code: 1010` (Browser Integrity Check).
+That was real, and it was irrelevant: BIC here rejects **only**
+`Python-urllib` — the probe's own user agent. `curl`, `Go-http-client`,
+`argocd`, `Grafana` and a browser string all pass straight through.
+
+Because both candidate URLs were probed with that same blocked agent, both
+returned 1010 and the difference between them — the thing that actually
+mattered — was invisible.
+
+```bash
+# always pin a realistic user agent, or the probe answers a question
+# about the probe
+ssh k9s kubectl exec -n authentik deploy/platform-authentik-server -- python3 -c "
+import urllib.request, urllib.error
+req=urllib.request.Request('<url>', headers={'User-Agent':'Go-http-client/2.0'})
+try: r=urllib.request.urlopen(req,timeout=10); print(r.status, r.headers.get('Content-Type'), r.read(80))
+except urllib.error.HTTPError as e: print(e.code, e.headers.get('Content-Type'), e.read(80))"
+```
 
 Verify the result rather than the config — ArgoCD will answer directly:
 
