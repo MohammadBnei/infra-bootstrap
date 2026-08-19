@@ -55,6 +55,7 @@ postgresql:
 blueprints:
   secrets:
   - authentik-blueprint-grafana
+  - authentik-blueprint-argocd
 
 server:
   replicas: 1
