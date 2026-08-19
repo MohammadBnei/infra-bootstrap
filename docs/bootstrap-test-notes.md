@@ -2912,3 +2912,72 @@ showed `active (running)`, and the doubled job setup renders byte-identical in
 the web UI and in `gh run view --log`. Every dashboard was green while two
 processes fought over one workspace. The check that would have caught it is a
 per-instance process count — now the last task in the playbook.
+
+---
+
+## 2026-08-19 — an authentik blueprint that never applied, because the restart came first
+
+Adding the `platform-admins` group blueprint (PR #184). Merged, ArgoCD synced,
+worker restarted per the documented propagation chain — and the group did not
+exist. The blueprint was not even *registered*: `BlueprintInstance` held the
+grafana and argocd entries and nothing else.
+
+Every check said the change had landed:
+
+- ConfigMap present in the `authentik` namespace with the right content
+- volume `blueprints-cm-authentik-blueprint-groups` on the worker Deployment
+- the file itself present in the pod at
+  `/blueprints/mounted/cm-authentik-blueprint-groups/platform-groups.yaml`
+- `blueprints_discovery` logged `Task started` **and** `Task finished` — not the
+  known enqueued-and-never-ran failure
+- no warning, no error, no traceback at any level
+
+Reading authentik's own `blueprints_find()` out of the pod
+(`/authentik/blueprints/v1/tasks.py`) and calling it by hand from the worker
+returned the file correctly, with the right metadata and version. So the file
+was findable, the parser was happy, and the task had run. Those two facts do not
+fit together — unless they were true at different times.
+
+### Cause
+
+They were. The worker pod started at **10:23:55** and ran its only discovery at
+**10:24:25**. The manual call that found the file ran around **10:26**.
+
+`blueprints_discovery` reads the directory at boot and on a slow schedule; it
+does not watch it. Kubelet syncs a ConfigMap or Secret volume asynchronously,
+roughly a minute behind the API object. Restarting the worker as soon as ArgoCD
+reported `Synced` therefore booted a pod *before* its blueprint file existed,
+discovery ran against a directory that did not yet contain it, and the next
+scheduled run was far enough away to look like never.
+
+The pod was healthy. The blueprint was valid. The restart was simply early.
+
+### Fix
+
+Restart again, once the file is confirmed present:
+
+```bash
+ssh k9s kubectl exec -n authentik deploy/platform-authentik-worker -- \
+  find /blueprints/mounted -maxdepth 2 -name '*.yaml'
+ssh k9s kubectl rollout restart deploy/platform-authentik-worker -n authentik
+```
+
+The group appeared immediately, `BlueprintInstance` showed `platform-groups
+successful`, and `argocd admin settings rbac can platform-admins sync
+applications '*/*'` returned `Yes`.
+
+### Lesson
+
+Two, and the second is the expensive one.
+
+**Check the file before restarting, not after.** A restart is the documented fix
+for "the blueprint did not apply", which makes it tempting to fire it the moment
+the merge lands. That is precisely when it is most likely to be too early.
+
+**A restart that was too early is indistinguishable from every other blueprint
+failure** — same absent object, same clean logs, same green Application. Worth
+re-reading the 2026-08-19 Grafana entry above in that light: it was recorded as
+`blueprints_discovery` being enqueued and never executing, which is a real
+authentik behaviour, but the mount-timing race produces an identical symptom and
+was not ruled out at the time. Try a second restart before believing any deeper
+theory.
