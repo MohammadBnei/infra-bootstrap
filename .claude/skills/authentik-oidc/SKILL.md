@@ -167,6 +167,42 @@ authentik outage unrecoverable through anything but `kubectl`.
 equivalent. Granting admin on first login makes OIDC a privilege escalation
 rather than a convenience.
 
+## When the app's config file is rewritten by its own chart
+
+Grafana takes its credentials as env vars from a Secret, which is the easy
+case. Some apps only read OIDC config out of a ConfigMap their chart owns and
+overwrites on every sync — ArgoCD's `argocd-cm` is the example in this repo.
+Writing the client secret there means committing it to git.
+
+ArgoCD's escape hatch is a `$<secret-name>:<key>` reference in the ConfigMap,
+resolved at runtime against a Secret in ArgoCD's own namespace. **That Secret
+must carry the label `app.kubernetes.io/part-of: argocd`** or the reference
+does not resolve — and it does not fail loudly: ArgoCD hands the literal string
+`$argocd-oidc:clientSecret` to authentik as the client secret, so the failure
+surfaces at the token endpoint, long after startup, looking like a wrong
+credential.
+
+`managedSecretReference` has no labels field (checked against the installed
+CRD). The lever is that **the Infisical operator copies the CR's labels and
+annotations onto the managed Secret** — so the label goes on the
+`InfisicalSecret`'s own `metadata.labels`, in the `infisical` namespace, and
+lands on the Secret it creates in `argocd`. See
+`gitops/bootstrap/argocd-oidc-secret.yaml`.
+
+Check for this shape before assuming the Grafana pattern applies: if the app's
+Helm chart renders the config the credential goes into, the credential cannot
+live in the values file.
+
+## Redirect URIs: the CLI is a second one
+
+An app with a command-line client usually authenticates through a loopback
+listener, which is a **different redirect URI on the same provider**. ArgoCD's
+`argocd login --sso` uses `http://localhost:8085/auth/callback` alongside the
+web UI's `https://argocd.bnei.dev/auth/callback`.
+
+Omitting it does not break the browser login, so the gap shows up later, only
+for the CLI, as a `redirect_uri` mismatch. Add both up front.
+
 ## `required: []` in that schema means nothing
 
 The oauth2provider model declares **no required fields at all**. A missing field

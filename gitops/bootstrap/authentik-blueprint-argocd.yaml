@@ -1,0 +1,87 @@
+# authentik blueprint declaring ArgoCD's OIDC provider + application
+# (ADR-0039, "Native OIDC" tier). Same shape as the Grafana blueprint next to
+# it — see that file and the `/authentik-oidc` skill for why this is a Secret
+# rather than a ConfigMap, and for the field shapes that are verified against
+# the running 2026.8.0 instance rather than taken from documentation.
+apiVersion: secrets.infisical.com/v1alpha1
+kind: InfisicalSecret
+metadata:
+  name: authentik-blueprint-argocd
+  namespace: infisical
+spec:
+  hostAPI: http://platform-infisical-backend.infisical.svc.cluster.local:8080/api
+  resyncInterval: 60
+  authentication:
+    universalAuth:
+      secretsScope:
+        projectSlug: "infra-bootstrap-1-ge1"
+        envSlug: dev
+        secretsPath: "/"
+      credentialsRef:
+        secretName: universal-auth-credentials
+        secretNamespace: infisical
+  managedSecretReference:
+    secretName: authentik-blueprint-argocd
+    secretNamespace: authentik
+    creationPolicy: Orphan
+    template:
+      data:
+        argocd-oidc.yaml: |
+          version: 1
+          metadata:
+            name: argocd-oidc
+            labels:
+              blueprints.goauthentik.io/instantiate: "true"
+          entries:
+            - model: authentik_providers_oauth2.oauth2provider
+              id: argocd-provider
+              identifiers:
+                name: argocd
+              attrs:
+                name: argocd
+                client_type: confidential
+                client_id: "{{ .ARGOCD_OIDC_CLIENT_ID.Value }}"
+                client_secret: "{{ .ARGOCD_OIDC_CLIENT_SECRET.Value }}"
+                # Object form, not a bare string list — a string list parses as
+                # valid YAML and then rejects every callback.
+                #
+                # TWO redirect URIs, not one. The second is the ArgoCD CLI's
+                # loopback listener (`argocd login --sso`), which is a different
+                # OAuth client flow on the same provider. Omitting it does not
+                # break the web UI, so it fails only later, only for the CLI,
+                # with a redirect_uri mismatch.
+                redirect_uris:
+                  - matching_mode: strict
+                    url: https://argocd.bnei.dev/auth/callback
+                  - matching_mode: strict
+                    url: http://localhost:8085/auth/callback
+                # REQUIRED — defaults to empty, and empty permits no grant at
+                # all. See the Grafana blueprint for the full account of how
+                # this fails (silently, with a misleading client-side error).
+                grant_types:
+                  - authorization_code
+                  - refresh_token
+                # Matches nothing in ArgoCD's config by name: ArgoCD takes the
+                # `sub` claim as the user identity, so `user_email` makes the
+                # ArgoCD username an email address. Consistent with Grafana.
+                sub_mode: user_email
+                authorization_flow: !Find [authentik_flows.flow, [slug, default-provider-authorization-implicit-consent]]
+                invalidation_flow: !Find [authentik_flows.flow, [slug, default-provider-invalidation-flow]]
+                signing_key: !Find [authentik_crypto.certificatekeypair, [name, "authentik Self-signed Certificate"]]
+                property_mappings:
+                  - !Find [authentik_providers_oauth2.scopemapping, [managed, "goauthentik.io/providers/oauth2/scope-openid"]]
+                  - !Find [authentik_providers_oauth2.scopemapping, [managed, "goauthentik.io/providers/oauth2/scope-email"]]
+                  - !Find [authentik_providers_oauth2.scopemapping, [managed, "goauthentik.io/providers/oauth2/scope-profile"]]
+            - model: authentik_core.application
+              identifiers:
+                slug: argocd
+              attrs:
+                name: ArgoCD
+                # The slug is load-bearing beyond cosmetics: authentik derives
+                # the OIDC issuer from it, so ArgoCD's `issuer:` below must be
+                # https://authentik.bnei.dev/application/o/argocd/ exactly,
+                # trailing slash included.
+                slug: argocd
+                provider: !KeyOf argocd-provider
+                meta_launch_url: https://argocd.bnei.dev
+                meta_description: GitOps continuous delivery for ukubi-cluster

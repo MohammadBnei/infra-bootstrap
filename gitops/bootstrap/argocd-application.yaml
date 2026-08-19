@@ -53,6 +53,45 @@ spec:
               jsonPointers:
               - /spec/conversion/webhook/clientConfig/caBundle
               - /spec/preserveUnknownFields
+
+            # authentik OIDC federation (ADR-0039, "Native OIDC" tier).
+            #
+            # `issuer` MUST carry the trailing slash and MUST match the
+            # application slug in gitops/bootstrap/authentik-blueprint-argocd.yaml
+            # — ArgoCD compares the issuer in the ID token against this string
+            # exactly, so a missing slash fails verification AFTER a successful
+            # login, which reads as a broken callback rather than a typo.
+            #
+            # clientID/clientSecret are `$<secret>:<key>` references, not
+            # literals. They resolve against the `argocd-oidc` Secret in this
+            # namespace, which exists only because its InfisicalSecret CR
+            # carries `app.kubernetes.io/part-of: argocd` — see
+            # gitops/bootstrap/argocd-oidc-secret.yaml. This indirection is what
+            # keeps the credential out of git despite the chart rewriting both
+            # argocd-cm and argocd-secret on every selfHeal.
+            #
+            # The local `admin` account stays ENABLED (chart default). ADR-0039
+            # Decision 6: a Traefik ClientIP() break-glass route can bypass a
+            # middleware but not an app's own OIDC redirect, and ArgoCD is what
+            # deploys authentik — dropping local admin makes an authentik
+            # outage recoverable only through kubectl.
+            oidc.config: |
+              name: authentik
+              issuer: https://authentik.bnei.dev/application/o/argocd/
+              clientID: $argocd-oidc:clientID
+              clientSecret: $argocd-oidc:clientSecret
+              requestedScopes:
+                - openid
+                - profile
+                - email
+          rbac:
+            # Everyone who can authenticate gets read-only, matching Grafana's
+            # `role_attribute_path: "'Viewer'"`. Granting more by default would
+            # make OIDC a privilege escalation rather than a convenience.
+            # Admin is the retained local account until an authentik group ->
+            # `role:admin` mapping is added here deliberately.
+            policy.default: role:readonly
+            scopes: "[groups, email]"
           params:
             # TLS terminated at Traefik — ArgoCD serves plain HTTP inside the cluster
             "server.insecure": "true"

@@ -650,10 +650,13 @@
       # that matters: /opt/actions-runner/bin/... is not a substring of
       # /opt/actions-runner-agent-fleet/bin/..., since the segment ends at /bin.
       #
-      # failed_when: false because `pgrep -c` exits 1 when the count is zero;
-      # letting the module judge rc would fail with a bare non-zero-rc error
-      # instead of the retry loop reporting the actual count. `until` is the
-      # only judge.
+      # failed_when must restate the condition, not be `false`. `pgrep -c`
+      # exits 1 when the count is zero, so the module's default rc check would
+      # fail with a bare non-zero-rc error rather than the count — but a plain
+      # `failed_when: false` also suppresses the retries-exhausted failure that
+      # `until` raises, and the task then reports ok after burning all 12
+      # attempts. Confirmed live on the first real run: editable-blog retried
+      # 12 times at count 2 and the play still ended failed=0.
       #
       # 12 x 5s: a recorded cold reconnect took 32s (22:08:09 start ->
       # 22:08:41 "Runner reconnected"), and a runner self-update waits up to a
@@ -665,7 +668,7 @@
           - "{{ item.home | default('/opt/actions-runner-' + item.name) }}/bin/Runner.Listener"
       register: listener_count
       changed_when: false
-      failed_when: false
+      failed_when: listener_count.stdout | trim != "1"
       retries: 12
       delay: 5
       until: listener_count.stdout | trim == "1"
