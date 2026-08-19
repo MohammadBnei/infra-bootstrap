@@ -2981,3 +2981,145 @@ re-reading the 2026-08-19 Grafana entry above in that light: it was recorded as
 authentik behaviour, but the mount-timing race produces an identical symptom and
 was not ruled out at the time. Try a second restart before believing any deeper
 theory.
+
+---
+
+## 2026-08-19 — ArgoCD login taken down by a claim that was never missing
+
+Symptom, reported by the user: logging into ArgoCD through authentik succeeds,
+and the UI then says you are not logged in.
+
+Introduced by PR #184 an hour earlier and merged with CI green, because nothing
+in CI can drive a login.
+
+### The immediate cause
+
+`argocd-server` was explicit once the right filter was applied — most of the log
+is per-RPC noise, and the useful line only appears if you exclude
+`grpc.request.claims`:
+
+```
+rpc error: code = Unauthenticated desc = invalid session:
+error fetching user info endpoint: failed to decode response body to struct:
+invalid character '<' looking for beginning of value
+```
+
+`'<'` means HTML where JSON was expected. #184 had set
+`enableUserInfoGroups: true` + `userInfoPath: /application/o/userinfo/`, so
+ArgoCD was calling authentik's userinfo endpoint server-side on every request.
+Probed from inside the cluster:
+
+```
+URL:: https://authentik.bnei.dev/application/o/userinfo/ => 403 :: b'error code: 1010\n'
+```
+
+Cloudflare **error 1010** is Browser Integrity Check — it blocks non-browser user
+agents. `authentik.bnei.dev` is proxied (ADR-0038), and **a pod resolving a
+`*.bnei.dev` name resolves it publicly**, so an in-cluster call to authentik
+leaves the cluster, hits Cloudflare, and is refused.
+
+ArgoCD does not treat that as "no groups". It treats the session as invalid and
+signs the user out. **The path fails open into a total outage, not closed into a
+lower role** — the opposite of what the comment shipped in #184 asserted, which
+was reasoned rather than tested.
+
+Why it was invisible until now: the OIDC *token exchange* takes the same route
+and works, as does Grafana's own userinfo call. Whatever user agent those
+present, Browser Integrity Check accepts them. It only surfaced when something
+with a plainer one tried the same path.
+
+### The real cause — the config was never needed
+
+#184 added userinfo because the ID token appeared to carry no `groups` claim.
+That came from ArgoCD's `grpc.request.claims` log field, which listed `name`,
+`given_name`, `preferred_username`, `nickname`, `picture`, `email` and no
+`groups`.
+
+Reading the token authentik actually issued:
+
+```bash
+ssh k9s kubectl exec -n authentik deploy/platform-authentik-server -- ak shell -c "
+from authentik.providers.oauth2.models import AccessToken
+t=AccessToken.objects.filter(provider__name='argocd').order_by('-expires').first()
+print('TOK::', sorted(dict(t.id_token).keys()))
+print('TOK:: groups=', dict(t.id_token).get('groups','ABSENT'))" | grep TOK::
+```
+
+```
+TOK:: keys= ['acr','aud','auth_time','email','email_verified','exp','given_name',
+             'groups','iat','iss','jti','name','nickname','picture',
+             'preferred_username','sid','sub']
+TOK:: groups= ['authentik Admins', 'platform-admins']
+```
+
+The claim was there the whole time. `grpc.request.claims` is a derived summary,
+not the token.
+
+### What the investigation did instead, and why it felt rigorous
+
+Before shipping #184 the following were all checked, live, against the running
+instance:
+
+- authentik's `profile` scope mapping — emits
+  `"groups": [group.name for group in request.user.groups.all()]`
+- `include_claims_in_id_token` on both providers — `True`
+- `user.groups.all()` for the account — returns the group
+- the full list of scope mappings — no dedicated `groups` mapping exists, so
+  `profile` is the right one
+
+Four checks, all correct, all pointing at the claim being present. One output
+said it was absent. The conclusion drawn was "unexplained, so route around it",
+and the anomaly was written into the ADR follow-up and the runbook as an open
+question.
+
+The check never performed was the one-line query above. Reading the token would
+have ended it before any config changed, and neither the outage nor the
+documentation of a non-existent anomaly would have happened.
+
+### Fix
+
+#187 removes the three userinfo keys. Groups come from the ID token, where they
+already were; `policy.csv` and `scopes` are untouched. Verified live: the keys
+are gone from `argocd-cm`, `argocd-rbac-cm` is unchanged, and there have been no
+`user info endpoint` errors since `argocd-server` was restarted.
+
+Note the propagation is two-hop and the intermediate state is misleading: the
+`bootstrap` Application must sync the `argocd` Application manifest first, and
+only then does the `argocd` Application rewrite `argocd-cm`. `kubectl get
+application argocd` reported `Synced` while `argocd-cm` still held the old keys.
+Check the ConfigMap, not the Application status.
+
+### Lessons
+
+**Read the artefact, not a report about the artefact.** This is the third
+instance of the same shape recorded in this file, and the sharpest:
+
+| What was trusted | What it actually was |
+|---|---|
+| Alloy reporting its component loaded | a `local.file_match` against a path that did not exist — not an error |
+| `blueprints_discovery` logging `Task finished` | a directory read completing before the file landed in it |
+| ArgoCD's `grpc.request.claims` | a derived summary of the token, not the token |
+
+Each looked authoritative, each answered a slightly different question than the
+one being asked, and each cost real time. When an input and an output disagree,
+the next step is to read the object itself — not to add a fifth check on the
+inputs.
+
+**Do not write "fails closed" without making it fail.** #184's comment asserted
+that a failed userinfo call would drop the user to `policy.default`. It was
+plausible, it was reassuring, and it was wrong — the failure mode was a
+sign-out. A single `curl` from in-cluster at the time would have produced error
+1010 immediately, and neither change would have shipped.
+
+**An in-cluster caller reaching a `*.bnei.dev` name transits Cloudflare.** Pods
+resolve those names publicly, so anything on that path must survive Browser
+Integrity Check and every other edge control. Prefer a claim already in the
+token, or an in-cluster Service address, over a server-side call to a public
+hostname. The root fix — a CoreDNS rewrite to the Traefik VIP, or BIC exemptions
+for hostnames serving API clients — is still open; the perimeter plan already
+anticipated such exemptions for `s3`, `ente-api` and `fleet`, and `authentik`
+belongs on that list.
+
+**CI cannot catch this class.** `helm template` proved the keys rendered into
+`argocd-cm` exactly as intended. They did. The config was valid, correctly
+placed, and wrong. Only a real login distinguishes the two.

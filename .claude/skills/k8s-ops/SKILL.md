@@ -242,6 +242,31 @@ ssh k9s kubectl -n argocd rollout restart statefulset/argocd-application-control
 ssh k9s kubectl -n argocd rollout restart deploy/argocd-applicationset-controller
 ```
 
+### `Synced` on the Application is not `applied` on the resource
+
+Anything under `gitops/bootstrap/` propagates in **two hops**: the `bootstrap`
+Application syncs the *Application manifest*, and only then does that
+Application rewrite what it owns. So for a values change to `argocd-cm`:
+
+```
+merge -> bootstrap Application syncs the argocd Application manifest
+      -> argocd Application syncs argocd-cm
+```
+
+Observed 2026-08-19: `kubectl get application argocd` reported `Synced` at the
+merge revision while `argocd-cm` still held the previous content — hop one was
+done, hop two was not. `.status.health.status` was `Progressing`, which is the
+only field that gave it away, and it is not the field anyone reads.
+
+**Check the resource, not the Application status.** For a values change, read the
+ConfigMap; for an image bump, read the pod. And read the live
+`.spec.source.helm.values` to confirm hop one landed before blaming hop two:
+
+```bash
+ssh k9s kubectl get application <name> -n argocd -o jsonpath='{.spec.source.helm.values}' | grep <your-key>
+ssh k9s kubectl get cm <name> -n argocd -o jsonpath='{.data.<key>}'
+```
+
 ## ApplicationSet Go-template: non-string fields are typed strictly, before rendering
 
 A shared list-generator `template:` block is validated against the target
