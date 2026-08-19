@@ -10,6 +10,12 @@ allowed-tools:
   - Bash(ssh -i ~/.ssh/id_build_runner root@192.168.1.111 journalctl -u actions-runner-* --no-pager -n *)
   - Bash(ssh -i ~/.ssh/id_build_runner root@192.168.1.111 buildah images)
   - Bash(ssh -i ~/.ssh/id_build_runner root@192.168.1.111 df -h /)
+  - Bash(ssh -i ~/.ssh/id_build_runner root@192.168.1.111 ps -ef)
+  - Bash(ssh -i ~/.ssh/id_build_runner root@192.168.1.111 pgrep -fc *)
+  - Bash(ssh -i ~/.ssh/id_build_runner root@192.168.1.111 systemctl show actions-runner-* *)
+  - Bash(ssh -i ~/.ssh/id_build_runner root@192.168.1.111 systemd-cgls *)
+  - Bash(gh api repos/MohammadBnei/*/actions/jobs/*)
+  - Bash(gh api repos/MohammadBnei/*/actions/runs/*/jobs)
   - Bash(gh api repos/MohammadBnei/*/actions/runners)
   - Bash(gh run list -R MohammadBnei/* *)
   - Bash(gh secret list -R MohammadBnei/*)
@@ -146,6 +152,71 @@ playbook, so builds, the prune timer and this query all read one setting and
 cannot drift onto separate stores. If you ever do pass the flag, remember each
 driver keeps its own tree under the graph root — querying a different one
 shows an empty store rather than an error.
+
+## Two listeners, one registration
+
+The worst failure this box has had (issue #179, 2026-08-19, full write-up in
+`docs/bootstrap-test-notes.md`). **Triage this first** whenever a build fails
+*after* buildah has already succeeded.
+
+Symptom: the image builds and pushes fine, then the step dies on its last line
+with
+
+```
+_work/_temp/_runner_file_commands/set_output_<uuid>: No such file or directory
+```
+
+or the job reports `The operation was canceled` a minute or two in. Two
+`Runner.Listener` processes share one registration, both accept the same job,
+and the second one's setup clears `_work/_temp` under the first.
+
+Count per instance directory — **never a global count**, which passes with the
+bug present whenever one instance is inside its `RestartSec` gap:
+
+```bash
+ssh -i ~/.ssh/id_build_runner root@192.168.1.111 \
+  'for d in /opt/actions-runner /opt/actions-runner-agent-fleet; do
+     printf "%s: %s\n" "$d" "$(pgrep -fc "$d/bin/Runner.Listener")"; done'   # each must be 1
+```
+
+Two confirmations, in order of strength:
+
+```bash
+# strongest: two PIDs taking the same job in the same second
+ssh ... journalctl -u actions-runner-agent-fleet --since today | grep 'Running job'
+
+# the orphan's birth certificate, 4s after a restart
+ssh ... journalctl -u actions-runner-agent-fleet | grep -iE 'left-over|remains running'
+
+# from GitHub: two "Set up job" records. Invisible in the web UI and in
+# `gh run view --log` — the two blocks render byte-identical.
+JOB=$(gh api repos/MohammadBnei/<repo>/actions/runs/<run>/jobs \
+      -q '.jobs[] | select(.name=="build-push") | .id')
+gh api repos/MohammadBnei/<repo>/actions/jobs/$JOB -q '[.steps[] | select(.number==1)] | length'
+```
+
+**A unit that has stopped restarting can be the bad state.** While the orphan
+holds the only session the new listener crash-loops on
+`A session for this runner already exists` and every build still passes — on the
+orphan. The damage starts when both hold a session at once, i.e. when
+`NRestarts` freezes. Check `systemctl show <unit> -p NRestarts -p
+ActiveEnterTimestamp`: a large `NRestarts` that is no longer climbing is the
+signature.
+
+Fix: **`reboot` the box.** Do not `systemctl stop` + `kill` the orphan PIDs —
+that orphans the current trees the same way and leaves you where you started,
+and it cannot reach orphans in a deleted unit's cgroup at all. Do not
+`config.sh --replace`; it rewrites `.runner` and leaves two processes on one
+registration. Nothing on this LXC survives PID 1 restarting.
+
+Then check what the losing job pushed before it died — a cancelled job can
+still have completed `buildah push` on the way down, and has overwritten a
+release tag and `latest` once already.
+
+The unit template no longer has `KillMode=process` (upstream's value, only safe
+with upstream's `ExecStart=runsvc.sh`) and uses `Restart=on-failure`. The
+playbook's last task counts listeners per instance and fails if any is not 1,
+so a re-run is also the regression test.
 
 ## Disk is the thing that fills
 

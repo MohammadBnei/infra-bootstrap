@@ -2755,3 +2755,160 @@ with the audit log (Alloy loaded, pointed at nothing), then blueprint discovery
 (enqueued, never executed), now the operator (CR updated, never re-rendered).
 
 In each case a green status was reporting on the wrong question.
+
+## 2026-08-19 — Two GitHub runner listeners on one registration: `KillMode=process` orphans everything `run.sh` starts
+
+`agent-fleet`'s `build-push` job failed on every attempt while buildah itself
+succeeded every time. The build finished, tagged the image, and then died on the
+step's last line:
+
+```
+/opt/actions-runner-agent-fleet/_work/_temp/<uuid>.sh: line 55:
+/opt/actions-runner-agent-fleet/_work/_temp/_runner_file_commands/set_output_<uuid>:
+No such file or directory
+```
+
+Other attempts showed `##[error]The operation was canceled` ~73s in. Both are the
+same event seen from the two sides of a race.
+
+### The root cause is one line copied from the right template into the wrong ExecStart
+
+`ansible/playbooks/build-runner-configure.yml` installed GitHub's shipped
+`bin/actions.runner.service.template` almost verbatim, including
+`KillMode=process`. That value is correct **for upstream's
+`ExecStart=runsvc.sh`**, which installs `trap 'kill -INT $PID' TERM INT` and
+forwards the signal to its child. The playbook uses `ExecStart=run.sh`, whose
+default `run()` path installs no trap and forwards nothing. (`run.sh` does have a
+`runWithManualTrap()` path behind `RUNNER_MANUALLY_TRAP_SIG` — see below for why
+it is not the fix.)
+
+So on every restart systemd SIGTERMed `run.sh` alone and left the rest alive.
+The signature is in the journal, four seconds after each restart, and it names
+itself:
+
+```
+actions-runner-agent-fleet.service: Deactivated successfully.
+actions-runner-agent-fleet.service: Unit process 61251 (run-helper.sh) remains running
+actions-runner-agent-fleet.service: Unit process 61255 (Runner.Listener) remains running
+actions-runner-agent-fleet.service: Found left-over process 61255 (Runner.Listener)
+actions-runner-agent-fleet.service: This usually indicates unclean termination
+```
+
+Two orphans existed on the box, born exactly that way:
+
+| PIDs | instance dir | born | orphaned |
+|---|---|---|---|
+| 2655/2659 | `/opt/actions-runner` (editable-blog) | Aug 13 21:32:27 | 21:32:31 |
+| 61251/61255 | `/opt/actions-runner-agent-fleet` | Aug 17 22:07:22 | 22:07:27 |
+
+`2655/2659` came from the legacy single-instance `actions-runner.service` that
+the multi-instance migration stopped and deleted. They sit in an **abandoned
+`/system.slice/actions-runner.service` cgroup whose unit file no longer exists**,
+so no `KillMode` change to any current unit can ever reap them — only a reboot.
+
+### Two listeners is latent; two *sessions* is the incident
+
+This is the part that took the longest to see, and the part that makes the
+timeline make sense. GitHub allows one session per registration, so an orphan is
+harmless while it consistently wins or consistently loses:
+
+- **`editable-blog` had two listeners for six days with zero failures.** The
+  orphan permanently owned the session; the systemd one never got in and
+  crash-looped instead — `NRestarts=286`, cycling `A session for this runner
+  already exists` → `Stop retry on SessionConflictException after retried for 240
+  seconds` → exit 5 → `Restart=always` → repeat every ~7m17s. Every build passed
+  the whole time, on the orphan.
+- **`agent-fleet` crash-looped the same harmless way** from Aug 17 22:07 until
+  Aug 18 22:08:41, when the systemd listener finally won a session *while the
+  orphan still held one*. `NRestarts` froze at 333 and both held sessions
+  continuously from then on.
+
+**The failure began when the crash loop stopped, not because of it.** A green
+unit that has stopped restarting was the bad state; the loop was the safe one.
+
+The decisive evidence is not the doubled `Set up job` in the GitHub API — that is
+downstream. It is two PIDs taking the same job in the same second, on every run:
+
+```
+Aug 19 08:48:52 run.sh[61255]:  Running job: build-push
+Aug 19 08:48:52 run.sh[715002]: Running job: build-push
+```
+
+Two `Runner.Worker` processes then set up that job in the same `_work`, and the
+second setup clears `_work/_temp` — deleting the first's
+`_runner_file_commands` mid-step. `set -euo pipefail` does the rest.
+
+### `Restart=always` was a local addition and made it worse
+
+Upstream's template has **no `Restart=` at all**, and `run-helper.sh` exits 0 on a
+session conflict with the explicit message *"stop the service, no retry needed."*
+The playbook overrode that. The result was 333 + 286 silent restarts, each one a
+fresh roll of the dice on whether both listeners would end up holding sessions —
+and no visibly dead unit anywhere to notice. Now `Restart=on-failure`.
+
+### What was wrong about the first three fixes considered
+
+- **`config.sh --replace`** does not clear an orphaned listener. It rewrites
+  `.runner` and leaves two processes on the same registration.
+- **`KillMode=mixed` + `Environment=RUNNER_MANUALLY_TRAP_SIG=1`** looks gentler
+  and is not. `runWithManualTrap()` does `kill -INT -$PID` — **negative PID, the
+  whole process group** under `set -m` — which includes `Runner.Worker`, `sudo`
+  and `buildah`. It kills an in-flight build exactly as hard as the default
+  `control-group` mode does, for two extra lines. (`KillMode=mixed` alone is
+  worse still: SIGTERM reaches only the trapless `run.sh`, so *every* restart,
+  idle ones included, blocks the full `TimeoutStopSec=5min` before SIGKILL.)
+  The fix is to **delete** `KillMode=process` and take systemd's default.
+- **`systemctl stop && kill <orphan pids>`** reproduces the bug while fixing it:
+  the `stop` still runs under `KillMode=process` and orphans the *current* trees,
+  which are not in the kill list. The reap is `reboot` — race-free, needs no PID
+  list, and is the only thing that reaches the deleted unit's cgroup.
+
+### The verification that looks right and isn't
+
+```bash
+ps -ef | grep -c '[R]unner.Listener'   # "expect 2, one per instance"
+```
+
+This is a **global sum across instances** and passes with the bug fully present
+whenever one instance happens to be inside its 10s `RestartSec` gap: 1 orphan +
+1 real on one instance, 0 on the other, total 2. Count per instance directory:
+
+```bash
+pgrep -fc /opt/actions-runner-agent-fleet/bin/Runner.Listener   # must be 1
+```
+
+Also: `sleep 10` after a restart is not enough to assert anything. A recorded
+cold reconnect took 32s (22:08:09 start → 22:08:41 `Runner reconnected`). Wait
+for `Listening for Jobs` in the journal, not for a fixed duration.
+
+`journalctl | grep left-over` is a config test, not an outcome test — with the
+`KillMode` fixed the message is absent by construction.
+
+### Collateral: an abandoned worker pushed to the registry
+
+At 09:16:11, from a job GitHub had already recorded as `failure` at 09:15:32, out
+of a workspace a second worker was concurrently checking out:
+
+```
+buildah push --tls-verify=false registry.bnei.lan:5000/agent-fleet-core:4.2.0
+buildah push --tls-verify=false registry.bnei.lan:5000/agent-fleet-core:latest
+```
+
+Both tags resolved to `sha256:2d830cbc…` afterwards, overwriting the green Aug 18
+v4.2.0 release build. A losing job is not a job that did nothing — it can still
+have completed side effects on the way down. `catalog.go` and thot's executor
+both float on `latest`, so those tags had to be rebuilt rather than reasoned
+about.
+
+Minor, left alone: a killed build leaves a `golang-working-container` behind, and
+the weekly `buildah rmi --prune` timer cannot reclaim layers a working container
+holds (they are not dangling). Disk was 5.0G/40G, so this is a note, not work.
+
+### Lesson
+
+The same shape as the ordering lesson above, one level up: **a green status
+reporting on the wrong question.** The runner showed `online` on GitHub, the unit
+showed `active (running)`, and the doubled job setup renders byte-identical in
+the web UI and in `gh run view --log`. Every dashboard was green while two
+processes fought over one workspace. The check that would have caught it is a
+per-instance process count — now the last task in the playbook.

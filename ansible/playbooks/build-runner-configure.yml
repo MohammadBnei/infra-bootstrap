@@ -463,6 +463,41 @@
     # Service — one unit per instance
     # -------------------------------------------------------------------
     - name: Install a runner systemd unit per instance
+      # Two lines here deviate from GitHub's shipped
+      # bin/actions.runner.service.template, and both deviations are the fix
+      # for the double-dispatch incident of 2026-08-19 (issue #179,
+      # docs/bootstrap-test-notes.md).
+      #
+      #   NOT KillMode=process. That IS upstream's value — but upstream pairs
+      #   it with ExecStart=runsvc.sh, which installs `trap 'kill -INT $PID'
+      #   TERM INT` and forwards the signal to its child. We run run.sh, whose
+      #   default run() path installs no trap and forwards nothing. Under
+      #   process mode systemd therefore SIGTERMs run.sh alone and leaves
+      #   run-helper.sh + Runner.Listener alive ("Found left-over process ...
+      #   indicates unclean termination", 4s after every restart). The orphan
+      #   keeps the GitHub-side session for the registration, and once the new
+      #   listener also wins one, BOTH accept the same job and set it up in the
+      #   same _work — the second setup wipes _work/_temp out from under the
+      #   first. Default control-group mode SIGTERMs the whole cgroup, so
+      #   systemd guarantees no orphan whether or not the script cooperates.
+      #   KillMode=mixed was considered and rejected: SIGTERM would still reach
+      #   only the trapless run.sh, so every restart — idle ones included —
+      #   would block the full TimeoutStopSec before SIGKILL.
+      #
+      #   Restart=on-failure, not always. Upstream has no Restart= at all, and
+      #   run-helper.sh exits 0 on a session conflict with the explicit message
+      #   "stop the service, no retry needed". Restart=always overrode that and
+      #   rerolled the two-session race every ~7.5 minutes — 333 restarts on
+      #   agent-fleet, 286 on editable-blog, all silent. on-failure respects the
+      #   runner's own contract and still catches a genuine crash; a runner that
+      #   deliberately stops now stays visibly stopped.
+      #
+      # Consequence, accepted rather than solved: the runner has no
+      # drain-on-stop when launched via run.sh, so any restart cancels an
+      # in-flight build. TimeoutStopSec only bounds the SIGTERM->SIGKILL gap.
+      # Restarts here are human-initiated playbook runs and a cancelled build
+      # is re-runnable. If that stops being true, gate the handler below on
+      # `busy: false` from GET /repos/<repo>/actions/runners.
       ansible.builtin.copy:
         dest: "/etc/systemd/system/actions-runner-{{ item.name }}.service"
         mode: "0644"
@@ -478,9 +513,8 @@
           User={{ runner_user }}
           WorkingDirectory={{ item.home | default('/opt/actions-runner-' + item.name) }}
           ExecStart={{ item.home | default('/opt/actions-runner-' + item.name) }}/run.sh
-          Restart=always
+          Restart=on-failure
           RestartSec=10
-          KillMode=process
           KillSignal=SIGTERM
           TimeoutStopSec=5min
 
@@ -592,6 +626,53 @@
         enabled: true
         state: started
         daemon_reload: true
+
+    # -------------------------------------------------------------------
+    # Regression check — the failure this playbook's unit template used to
+    # cause is completely silent until a job races
+    # -------------------------------------------------------------------
+    - name: Flush handlers before counting listeners
+      # The restart handler is what proves the KillMode change actually reaps.
+      # Without this it fires at the end of the play, after the check below,
+      # which would then be counting the pre-restart state.
+      ansible.builtin.meta: flush_handlers
+
+    - name: Verify exactly one listener per runner instance
+      # Two Runner.Listener processes on one instance directory means one is an
+      # orphan holding the same GitHub registration. Nothing reports this: the
+      # runner shows "online" on GitHub, the unit shows "active (running)", and
+      # the doubled job setup renders byte-identical in the web UI and in
+      # `gh run view --log`. It surfaces only as a build failing on its last
+      # line with a missing _runner_file_commands path. See issue #179.
+      #
+      # The instance path is what disambiguates the two instances — a bare
+      # `pgrep -f Runner.Listener` matches both. It works in the one direction
+      # that matters: /opt/actions-runner/bin/... is not a substring of
+      # /opt/actions-runner-agent-fleet/bin/..., since the segment ends at /bin.
+      #
+      # failed_when: false because `pgrep -c` exits 1 when the count is zero;
+      # letting the module judge rc would fail with a bare non-zero-rc error
+      # instead of the retry loop reporting the actual count. `until` is the
+      # only judge.
+      #
+      # 12 x 5s: a recorded cold reconnect took 32s (22:08:09 start ->
+      # 22:08:41 "Runner reconnected"), and a runner self-update waits up to a
+      # further 30s before re-launching.
+      ansible.builtin.command:
+        argv:
+          - pgrep
+          - -fc
+          - "{{ item.home | default('/opt/actions-runner-' + item.name) }}/bin/Runner.Listener"
+      register: listener_count
+      changed_when: false
+      failed_when: false
+      retries: 12
+      delay: 5
+      until: listener_count.stdout | trim == "1"
+      loop: "{{ build_runner_repos }}"
+      loop_control:
+        label: "{{ item.name }}"
+      when: not ansible_check_mode
 
     - name: Build runner configured
       ansible.builtin.debug:
