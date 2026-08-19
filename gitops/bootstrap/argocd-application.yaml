@@ -85,17 +85,25 @@ spec:
             # profile claim and no `groups` key. That log field is not the
             # token. The token had it all along.
             #
-            # And the userinfo call cannot work from here anyway:
-            # `authentik.bnei.dev` is proxied at Cloudflare (ADR-0038), and a
-            # server-side request from this pod is answered with Cloudflare
-            # error 1010 — Browser Integrity Check, which blocks non-browser
-            # user agents. ArgoCD then fails to parse HTML as JSON and
-            # invalidates the whole session:
+            # And `enableUserInfoGroups` cannot work against authentik at
+            # all, for a structural reason. ArgoCD builds the userinfo URL by
+            # appending `userInfoPath` to the ISSUER, and authentik's issuer is
+            # already per-application:
+            #   https://authentik.bnei.dev/application/o/argocd/
+            #     + /application/o/userinfo/
+            #   = .../application/o/argocd/application/o/userinfo/
+            # which authentik answers with a 404 whose body is its HTML error
+            # page. ArgoCD parses that as JSON, fails, and throws the session
+            # away:
             #   invalid session: error fetching user info endpoint:
             #   failed to decode response body to struct:
             #   invalid character '<' looking for beginning of value
             # Every logged-in user is signed out, not merely un-grouped. The
             # failure is NOT fail-closed the way the old comment claimed.
+            #
+            # There is no `userInfoPath` that fixes this: authentik's userinfo
+            # endpoint is not underneath its issuer, so it cannot be expressed
+            # as a path relative to it.
             #
             # The local `admin` account stays ENABLED (chart default). ADR-0039
             # Decision 6: a Traefik ClientIP() break-glass route can bypass a

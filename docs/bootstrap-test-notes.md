@@ -2992,7 +2992,13 @@ and the UI then says you are not logged in.
 Introduced by PR #184 an hour earlier and merged with CI green, because nothing
 in CI can drive a login.
 
-### The immediate cause
+> **Correction, same day.** The cause below was first written up as Cloudflare
+> Browser Integrity Check blocking the call. That was wrong — see
+> "Correction: the cause was a doubled path, not Cloudflare" at the end of this
+> entry. The wrong diagnosis is left in place because how it was reached is the
+> most useful part of the entry.
+
+### The immediate cause — as first diagnosed, and wrong
 
 `argocd-server` was explicit once the right filter was applied — most of the log
 is per-RPC noise, and the useful line only appears if you exclude
@@ -3123,3 +3129,73 @@ belongs on that list.
 **CI cannot catch this class.** `helm template` proved the keys rendered into
 `argocd-cm` exactly as intended. They did. The config was valid, correctly
 placed, and wrong. Only a real login distinguishes the two.
+
+### Correction: the cause was a doubled path, not Cloudflare
+
+The Cloudflare account above survived about an hour. It was checked, it
+reproduced, and it was still wrong.
+
+The probe that produced `error code: 1010` ran from an in-cluster pod with
+python's default user agent. Re-running it across several agents:
+
+```
+UA:: Python-urllib/3.14   => 403 :: b'error code: 1010\n'
+UA:: curl/8.5.0           => 401 :: b''
+UA:: Go-http-client/2.0   => 401 :: b''
+UA:: argocd/v3.4.5        => 401 :: b''
+UA:: Grafana/12.0.0       => 401 :: b''
+UA:: Mozilla/5.0 (X11...) => 401 :: b''
+```
+
+Browser Integrity Check rejects **only `Python-urllib`** on this zone. Every
+client that matters — including ArgoCD's Go HTTP client — passes straight
+through. So Cloudflare never touched ArgoCD's request.
+
+Two candidate URLs had been probed, the correct one and the one ArgoCD might
+construct by appending `userInfoPath` to the issuer. **Both were probed with the
+same blocked user agent, so both returned 1010** and the difference between them
+— the thing that actually mattered — was invisible. The probe answered a
+question about the probe.
+
+With a realistic agent the two URLs are completely different:
+
+```
+U:: correct     => 401 :: text/html; charset=utf-8 :: b''
+U:: issuer+path => 404 :: text/html; charset=utf-8 :: b'\n\n\n\n\n<!DOCTYPE html>\n<html\n    lang="en"...'
+```
+
+The correct endpoint answers `401` with an **empty** body — which cannot produce
+`invalid character '<'`. The doubled one answers `404` with `<!DOCTYPE html>`,
+which is exactly the byte ArgoCD choked on.
+
+So: ArgoCD builds the userinfo URL by appending `userInfoPath` to the **issuer**,
+and authentik's issuer is already per-application:
+
+```
+https://authentik.bnei.dev/application/o/argocd/  +  /application/o/userinfo/
+= https://authentik.bnei.dev/application/o/argocd/application/o/userinfo/
+```
+
+`enableUserInfoGroups` therefore cannot work against authentik at all, and no
+value of `userInfoPath` fixes it — authentik's userinfo endpoint is not
+underneath its issuer, so it cannot be expressed as a path relative to it. #187's
+fix (remove the keys, take groups from the ID token) was right for a reason
+nobody had established yet.
+
+### Lesson, fourth instance
+
+Same shape as the three tabulated above, and this time the derived view was one
+I built myself: **a probe is a report about the artefact, not the artefact.**
+
+Reproducing a failure with a *different client* than the one that failed proves
+nothing about the original. Pin the real user agent, the real URL and the real
+headers, or accept that the result describes your probe.
+
+The tell was available and ignored: the correct endpoint returns an empty body,
+and an empty body cannot yield `invalid character '<'`. The error message named
+the mechanism from the start.
+
+What stands unchanged: it is still true that a pod resolving a `*.bnei.dev` name
+resolves it publicly and leaves the cluster, so edge controls do sit in that
+path. It is worth knowing and it is worth fixing at the root. It just was not
+this.
