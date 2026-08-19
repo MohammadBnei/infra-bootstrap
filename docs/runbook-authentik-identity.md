@@ -21,19 +21,29 @@ Blueprints do not hot-reload, the Infisical operator does not re-render on
 template changes, and a blueprint that fails to apply logs and carries on. None
 of those surfaces as an error anywhere.
 
-Three instances of it, each one a **derived view mistaken for the thing itself**:
+Four instances of it, each one a **derived view mistaken for the thing itself**:
 
 | What was read | What it actually was | Cost |
 |---|---|---|
 | Alloy reporting a loaded component | a component tailing a host path that did not exist | audit log written, rotated, never read |
 | `blueprints_discovery` logging `Task finished` | a run that read the directory ~30s before the file landed | a blueprint that never applied, diagnosed for hours |
 | ArgoCD's `grpc.request.claims` log field | a summary ArgoCD emits, not the token authentik issued | a fictional anomaly, a config change to route around it, and a total login outage (§6) |
+| a probe of the failing URL | a request from a *different client* than the one that failed | the outage blamed on Cloudflare, wrongly, for a full round of documentation (§10) |
 
 **The rule: read the artefact, not a report about the artefact.** The database,
 not the Application status. The stored token, not the log line naming the claims.
 The file in the pod, not the ConfigMap in the API. Every verification command in
-§11 is chosen on that basis, and the third row above is the sharpest: a config
-change was shipped on the strength of a log field and it took login down.
+§11 is chosen on that basis.
+
+The **fourth** row is the strongest, because the derived view was a probe built
+*during this very investigation, to avoid exactly this mistake*. A tool written to
+check reality is still a report about reality: run with the wrong user agent it
+answered a question about itself, and it did so twice, hiding the difference
+between the two candidate URLs that was the entire answer.
+
+And the tell was there from the beginning. The correct endpoint returns an **empty
+body**, and an empty body cannot yield `invalid character '<'`. The error message
+named the mechanism before any probe was written; nobody read it that closely.
 
 ## 2. Prerequisites
 
@@ -248,19 +258,19 @@ anomaly, and a config change to route around it.
 
 The change made to route around the non-existent anomaly was
 `enableUserInfoGroups: true` + `userInfoPath: /application/o/userinfo/` +
-`userInfoCacheExpiration: 5m` in `argocd-cm`. It made ArgoCD call authentik's
-userinfo endpoint **server-side, from a pod**.
+`userInfoCacheExpiration: 5m` in `argocd-cm`. It signed out every user who had
+logged in through authentik.
 
-`authentik.bnei.dev` is proxied at Cloudflare (ADR-0038), and that request was
-answered by Cloudflare, not authentik:
+**ArgoCD builds the userinfo URL by appending `userInfoPath` to the `issuer`**,
+and authentik's issuer is already per-application:
 
 ```
-URL:: https://authentik.bnei.dev/application/o/userinfo/ => 403 :: b'error code: 1010\n'
+https://authentik.bnei.dev/application/o/argocd/  +  /application/o/userinfo/
+= https://authentik.bnei.dev/application/o/argocd/application/o/userinfo/
 ```
 
-Error 1010 is Cloudflare's **Browser Integrity Check**, which blocks non-browser
-user agents. ArgoCD then tried to parse Cloudflare's HTML error page as JSON and
-discarded the session:
+That path does not exist. authentik answers it with a 404 **HTML** page, ArgoCD
+parses the HTML as JSON, fails, and treats the session as invalid:
 
 ```
 rpc error: code = Unauthenticated desc = invalid session: error fetching user info
@@ -268,7 +278,23 @@ endpoint: failed to decode response body to struct: invalid character '<' lookin
 for beginning of value
 ```
 
-Every user who had logged in through authentik saw "not logged in".
+Requesting both URLs directly is what settles it — verified 2026-08-19 with
+`argocd/v3.4.5` as the user agent:
+
+| URL | Status | Body |
+|---|---|---|
+| `…/application/o/userinfo/` (correct) | `401` | **0 bytes** |
+| `…/application/o/argocd/application/o/userinfo/` (issuer + path) | `404` | 5562 bytes, opens `<!DOCTYPE html>` |
+
+The correct endpoint returns an empty body, which cannot produce
+`invalid character '<'`. The doubled one returns exactly the byte ArgoCD choked
+on. The error message named the mechanism from the start.
+
+**No value of `userInfoPath` fixes this.** authentik's userinfo endpoint is not
+underneath its issuer, so it cannot be expressed as a path relative to it. This is
+not an environmental problem to be worked around — `enableUserInfoGroups` is
+structurally incompatible with authentik's per-application issuer, and the ID
+token already carries the claim anyway.
 
 > **The userinfo path fails OPEN into a total outage, not closed into a lower
 > role.** An earlier revision of this document claimed the opposite — that a
@@ -283,13 +309,20 @@ Fixed in **PR #187** by removing the three keys. Groups now come from the ID tok
 and `requestedScopes` only, and the current `argocd-server` pod's log contains
 zero `user info endpoint` errors.
 
+The first diagnosis of this outage blamed Cloudflare and was wrong; how that was
+reached and unwound is in `docs/bootstrap-test-notes.md` (2026-08-19), which is
+where incident history belongs. §10 carries the operational rule it produced.
+
 ### Grafana's `api_url` is a separate matter and stays
 
-Grafana's `api_url: https://authentik.bnei.dev/application/o/userinfo/` is
-unchanged. It takes the same public path and evidently passes Browser Integrity
-Check today — but that is an observation about Cloudflare's current heuristics,
-not a guarantee, and §10 covers the general rule. Grafana's group mapping has
-never been observed resolving to Admin end to end; see §13.
+Grafana takes the **full URL**, not a path appended to the issuer, so it hits
+`https://authentik.bnei.dev/application/o/userinfo/` directly and does not
+reproduce ArgoCD's doubling. That difference is the whole reason one app broke and
+the other did not.
+
+It is unchanged and stays. Grafana's group mapping has nonetheless never been
+observed resolving to Admin end to end — a login that lands in Viewer looks
+identical whether the group arrived or not. See §13.
 
 ## 7. The ArgoCD credential plumbing
 
@@ -502,31 +535,60 @@ the reference and the rationale; the skill is what to follow. The shape it walks
 5. Configure the app: `authorize` and `token` endpoints, `issuer` with its
    trailing slash, and a group→role mapping that fails closed. **Take groups from
    the ID token** — the `profile` scope carries them (§6). Configure a server-side
-   `userinfo` call only if the app cannot read the claim, and then read §10 first:
-   that call leaves the cluster and comes back through Cloudflare.
+   `userinfo` call only if the app cannot read the claim, and check first whether
+   the app takes a **full URL** or a **path appended to the issuer**: authentik's
+   userinfo endpoint does not sit under its per-application issuer, so the second
+   form cannot be made to work (§6).
 6. Walk the propagation chain (§9.1), then verify with §11.
 
 ## 10. Traps and safety rules
 
-**An in-cluster caller reaching a `*.bnei.dev` name transits Cloudflare.** Pods
-resolve those names publicly, so a pod-to-pod-looking request to
-`https://authentik.bnei.dev/...` leaves the cluster, is answered by Cloudflare's
-edge, and must survive **Browser Integrity Check** — which exists to block
-non-browser user agents, i.e. exactly what a server-side HTTP client is. When it
-does not survive, the caller receives an HTML error page (`error code: 1010`) with
-a 403, and whatever was expecting JSON fails in whichever way that library fails.
+**A probe is a report about the artefact, not the artefact.** Reproducing a
+failure with a different client than the one that failed proves nothing, and it
+produces evidence that looks conclusive.
 
-This holds today for the OIDC authorization redirect (a browser makes it) and for
-Grafana's userinfo call, which is precisely why it stayed invisible until
-something with a plainer user agent tried the same path and took ArgoCD login down
-(§6). It is heuristic, not a rule: a probe from a pod with `curl` returned
-authentik's own **401** rather than Cloudflare's 1010 on 2026-08-19, so *one*
-client getting through proves nothing about another.
+This cost a whole wrong diagnosis. The ArgoCD outage in §6 was first blamed on
+Cloudflare, because a probe from an in-cluster pod returned
+`403 :: error code: 1010` — Browser Integrity Check. That result was real and
+irrelevant: BIC on this zone rejects **only `Python-urllib`**, which was the
+probe's own user agent. Everything that matters passes straight through, verified
+2026-08-19 against `…/application/o/userinfo/`:
 
-> **Prefer a claim already in the token, or an in-cluster Service address
-> (`platform-authentik-server.authentik.svc.cluster.local`), over a server-side
-> call to a public hostname.** If a public hostname is unavoidable, exercise the
-> exact failure — the success path tells you nothing.
+```
+Python-urllib/3.14      => 403 :: error code: 1010
+curl/8.5.0              => 401 :: (empty)
+Go-http-client/2.0      => 401 :: (empty)
+argocd/v3.4.5           => 401 :: (empty)
+Grafana/12.0.0          => 401 :: (empty)
+Mozilla/5.0 (X11; ...)  => 401 :: (empty)
+```
+
+Worse, two candidate URLs were probed with that same blocked agent, so both
+returned 1010 and **the difference between them — the entire answer — was
+invisible**. Pinning a realistic agent separates them immediately (§6).
+
+> **Pin the real user agent, URL and headers, or the result describes your probe.**
+> The working form, from inside the cluster:
+>
+> ```bash
+> ssh k9s kubectl run uaprobe-$RANDOM --rm -i --restart=Never \
+>   --image=curlimages/curl:latest -- \
+>   -s -o /dev/null -w 'HTTP:%{http_code} type:%{content_type} bytes:%{size_download}\n' \
+>   -A 'argocd/v3.4.5' '<url>'
+> ```
+>
+> Read the **status, content type and body size together**. `401` with 0 bytes and
+> `404` with 5562 bytes of HTML are different answers to different questions, and
+> a status code alone hides that.
+
+**Pods resolve `*.bnei.dev` publicly**, so an in-cluster caller using one of those
+names leaves the cluster and comes back through the edge — Cloudflare's controls
+sit in that path whether or not they fire today. That was **not** the cause of the
+§6 outage, and it is not currently breaking anything; it is a standing property of
+the topology, on the follow-up list in §13. Where a choice exists, prefer a claim
+already in the token or an in-cluster Service address
+(`platform-authentik-server.authentik.svc.cluster.local`) over a server-side call
+to a public hostname.
 
 **Do NOT delete a managed Secret to force a re-render.** These use
 `creationPolicy: Orphan`, so the operator does not own them and will not recreate
@@ -679,20 +741,23 @@ user ID. Treat it as immutable.
   `ClientIP()` match never fires.
 - **Re-check the Base URL setting** (§8) before the forwardAuth tier and after any
   upgrade — it is UI state that no manifest can reconstruct.
-- **In-cluster traffic to `*.bnei.dev` hairpins through Cloudflare** (§10). PR #187
-  removed the one caller that this broke; the underlying condition is untouched and
-  will bite the next server-side integration. Two options, neither taken yet:
+- **In-cluster traffic to `*.bnei.dev` leaves the cluster and returns through the
+  edge** (§10). **This did not cause the §6 outage** — that was a doubled path, and
+  Browser Integrity Check rejects only `Python-urllib` on this zone. It is general
+  hygiene rather than a fix for anything currently broken: edge controls sit in a
+  path that looks internal, so a future rule change lands on in-cluster callers
+  with no warning. Two options, neither taken:
   - a **CoreDNS rewrite** pointing `*.bnei.dev` at the Traefik VIP `192.168.1.233`,
-    which keeps the traffic on the LAN and out of Cloudflare entirely — the same
-    split-horizon idea the break-glass routes need from Pi-hole, one layer down;
+    which keeps the traffic on the LAN entirely — the same split-horizon idea the
+    break-glass routes need from Pi-hole, one layer down;
   - a **Cloudflare Configuration Rule disabling Browser Integrity Check** for
     hostnames that serve API clients. The perimeter plan already anticipated such
     exemptions for `s3`, `ente-api` and `fleet`; `authentik` belongs on that list,
     since it is by definition talked to by machines.
 - **Confirm Grafana's `role_attribute_path` actually resolves to Admin.** It has
-  never been observed working end to end — a login that lands in Viewer is
-  indistinguishable from one where the group never arrived, and Grafana's userinfo
-  call takes the same Cloudflare path that broke ArgoCD's. It evidently passes
-  Browser Integrity Check today; that is an observation, not a guarantee.
+  never been observed working end to end, and a login that lands in Viewer is
+  indistinguishable from one where the group never arrived. Grafana's userinfo call
+  does not have ArgoCD's doubling problem — it takes a full URL — so there is no
+  known reason for it to fail; that is not the same as having seen it succeed.
 
 Log anything surprising to `docs/bootstrap-test-notes.md`, not to memory.

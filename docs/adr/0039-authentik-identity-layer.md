@@ -296,16 +296,21 @@ authentik's `profile` scope mapping emits `groups`, both providers have
 An earlier revision of this note and of the runbook recorded an "open anomaly"
 here — an ID token that arrived without `groups`. What had been read was ArgoCD's
 `grpc.request.claims` **log field**, a derived summary, not the token. Routing
-around the non-existent anomaly with `enableUserInfoGroups` made ArgoCD call
-authentik's userinfo endpoint server-side; `authentik.bnei.dev` is proxied, and
-Cloudflare answered the pod with error 1010 (Browser Integrity Check). ArgoCD
-parsed the HTML error page as JSON and discarded every session — a total login
-outage, fixed in PR #187 by removing the three keys.
+around the non-existent anomaly with `enableUserInfoGroups` broke login for
+everyone: ArgoCD appends `userInfoPath` to the **issuer**, and authentik's issuer
+is already per-application, so the request went to
+`…/application/o/argocd/application/o/userinfo/` — a 404 with an HTML body, which
+ArgoCD parsed as JSON and treated as an invalid session. Fixed in PR #187 by
+removing the three keys.
 
-Two consequences worth carrying forward: **in-cluster traffic to a `*.bnei.dev`
-name transits Cloudflare** and must survive Browser Integrity Check, and the
-userinfo path **fails open into an outage**, not closed into a lower role. See the
-runbook §6 and §10.
+**No value of `userInfoPath` fixes it.** authentik's userinfo endpoint is not
+underneath its issuer, so it cannot be expressed as a path relative to it —
+`enableUserInfoGroups` is structurally incompatible with this IdP, not
+environmentally unlucky. A first diagnosis blamed Cloudflare's Browser Integrity
+Check and was wrong; the history is in `docs/bootstrap-test-notes.md`.
+
+The consequence worth carrying forward: the userinfo path **fails open into an
+outage**, not closed into a lower role. See the runbook §6 and §10.
 
 ### Consequence for Decision 3's remaining tiers
 
