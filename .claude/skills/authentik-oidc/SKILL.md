@@ -298,6 +298,9 @@ none of it surfaces as an error.
 1. merge                     -> ArgoCD applies the updated InfisicalSecret CR
 2. restart infisical-operator -> ONLY needed when the CR TEMPLATE changed
 3. restart authentik worker   -> discovery re-reads and re-applies the blueprint
+                              -> CHECK THE FILE IS MOUNTED FIRST; kubelet syncs
+                                 the volume ~a minute behind the API object, and
+                                 discovery only reads at boot
 4. restart the client app     -> only if ITS credentials changed (env vars)
 ```
 
@@ -354,6 +357,31 @@ ssh k9s kubectl rollout restart deploy/platform-authentik-worker -n authentik
 ```
 
 Discovery then runs and the objects appear within seconds.
+
+### Restart AFTER the file is mounted, not on merge
+
+**Order matters, and getting it wrong looks exactly like the failure above.**
+`blueprints_discovery` reads the directory at boot and on a slow schedule — it
+does not watch it. Kubelet syncs a ConfigMap or Secret volume asynchronously,
+around a minute behind the API object. So a restart fired on merge boots a pod
+whose blueprint file has not landed yet, discovery finds nothing, and the next
+run is far away.
+
+Measured 2026-08-19: worker pod up at 10:23:55, the only discovery run at
+10:24:25 registered nothing, and calling `blueprints_find()` by hand in that
+same pod two minutes later returned the file. The pod was fine. The restart was
+just early.
+
+Confirm the file is there, *then* restart:
+
+```bash
+ssh k9s kubectl exec -n authentik deploy/platform-authentik-worker -- \
+  find /blueprints/mounted -maxdepth 2 -name '*.yaml'
+ssh k9s kubectl rollout restart deploy/platform-authentik-worker -n authentik
+```
+
+A second restart is the fix whenever the objects have not appeared and the file
+is present — cheap, and the first thing to try before reading any logs.
 
 ### Diagnosing when it still does not work
 
