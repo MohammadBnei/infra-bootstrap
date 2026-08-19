@@ -70,18 +70,32 @@ spec:
             # keeps the credential out of git despite the chart rewriting both
             # argocd-cm and argocd-secret on every selfHeal.
             #
-            # Groups come from the USERINFO endpoint below
-            # (`enableUserInfoGroups`), not from the ID token — not the obvious
-            # choice, so: authentik's `profile` scope mapping does emit
-            # `groups: [name, ...]` (read off the running instance) and this
-            # provider has `include_claims_in_id_token = True`, yet the ID
-            # token ArgoCD actually received carried no `groups` key at all
-            # while every other profile claim was present. Unexplained.
-            # Depending on a claim that demonstrably did not arrive is not a
-            # plan; the userinfo call is also what authentik's own ArgoCD
-            # integration documents. If it fails the user simply has no
-            # groups and falls through to `policy.default` — read-only, so it
-            # fails closed.
+            # Groups come from the ID TOKEN. There is deliberately no
+            # `enableUserInfoGroups` / `userInfoPath` here, and adding them
+            # back will break login outright — see below.
+            #
+            # authentik's `profile` scope mapping emits
+            # `groups: [name, ...]`, and this provider has
+            # `include_claims_in_id_token = True`, so the token already
+            # carries what RBAC needs. Read off the issued token itself:
+            #   groups = ['authentik Admins', 'platform-admins']
+            #
+            # An earlier revision set `enableUserInfoGroups: true` because
+            # ArgoCD's own `grpc.request.claims` log field showed every other
+            # profile claim and no `groups` key. That log field is not the
+            # token. The token had it all along.
+            #
+            # And the userinfo call cannot work from here anyway:
+            # `authentik.bnei.dev` is proxied at Cloudflare (ADR-0038), and a
+            # server-side request from this pod is answered with Cloudflare
+            # error 1010 — Browser Integrity Check, which blocks non-browser
+            # user agents. ArgoCD then fails to parse HTML as JSON and
+            # invalidates the whole session:
+            #   invalid session: error fetching user info endpoint:
+            #   failed to decode response body to struct:
+            #   invalid character '<' looking for beginning of value
+            # Every logged-in user is signed out, not merely un-grouped. The
+            # failure is NOT fail-closed the way the old comment claimed.
             #
             # The local `admin` account stays ENABLED (chart default). ADR-0039
             # Decision 6: a Traefik ClientIP() break-glass route can bypass a
@@ -97,9 +111,6 @@ spec:
                 - openid
                 - profile
                 - email
-              enableUserInfoGroups: true
-              userInfoPath: /application/o/userinfo/
-              userInfoCacheExpiration: 5m
           rbac:
             # Read-only for anyone who can authenticate; admin comes from
             # membership of the `platform-admins` authentik group, declared in
