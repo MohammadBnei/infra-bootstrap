@@ -286,14 +286,26 @@ removes the operator from its propagation chain. Nothing is created by clicking.
 authentik's built-in `authentik Admins`, which would have made "can administer the
 IdP" and "can administer the cluster" the same claim. Both expressions fail closed.
 
-### One open anomaly, recorded rather than resolved
+### Groups come from the ID token — and one outage caused by believing otherwise
 
-authentik's `profile` scope mapping emits `groups`, and both providers have
-`include_claims_in_id_token = True` — yet an ID token was observed carrying every
-other profile claim and **no `groups` key at all** (absent, not empty).
-Unexplained. Both apps therefore read groups from the **userinfo endpoint**, which
-is also what authentik's own ArgoCD integration documents and which fails closed.
-See the runbook §6.
+authentik's `profile` scope mapping emits `groups`, both providers have
+`include_claims_in_id_token = True`, and the issued token carries
+`groups: ['authentik Admins', 'platform-admins']`. Verified by reading the stored
+`AccessToken.id_token` on 2026-08-19.
+
+An earlier revision of this note and of the runbook recorded an "open anomaly"
+here — an ID token that arrived without `groups`. What had been read was ArgoCD's
+`grpc.request.claims` **log field**, a derived summary, not the token. Routing
+around the non-existent anomaly with `enableUserInfoGroups` made ArgoCD call
+authentik's userinfo endpoint server-side; `authentik.bnei.dev` is proxied, and
+Cloudflare answered the pod with error 1010 (Browser Integrity Check). ArgoCD
+parsed the HTML error page as JSON and discarded every session — a total login
+outage, fixed in PR #187 by removing the three keys.
+
+Two consequences worth carrying forward: **in-cluster traffic to a `*.bnei.dev`
+name transits Cloudflare** and must survive Browser Integrity Check, and the
+userinfo path **fails open into an outage**, not closed into a lower role. See the
+runbook §6 and §10.
 
 ### Consequence for Decision 3's remaining tiers
 

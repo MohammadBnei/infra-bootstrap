@@ -21,6 +21,20 @@ Blueprints do not hot-reload, the Infisical operator does not re-render on
 template changes, and a blueprint that fails to apply logs and carries on. None
 of those surfaces as an error anywhere.
 
+Three instances of it, each one a **derived view mistaken for the thing itself**:
+
+| What was read | What it actually was | Cost |
+|---|---|---|
+| Alloy reporting a loaded component | a component tailing a host path that did not exist | audit log written, rotated, never read |
+| `blueprints_discovery` logging `Task finished` | a run that read the directory ~30s before the file landed | a blueprint that never applied, diagnosed for hours |
+| ArgoCD's `grpc.request.claims` log field | a summary ArgoCD emits, not the token authentik issued | a fictional anomaly, a config change to route around it, and a total login outage (§6) |
+
+**The rule: read the artefact, not a report about the artefact.** The database,
+not the Application status. The stored token, not the log line naming the claims.
+The file in the pod, not the ConfigMap in the API. Every verification command in
+§11 is chosen on that basis, and the third row above is the sharpest: a config
+change was shipped on the strength of a log field and it took login down.
+
 ## 2. Prerequisites
 
 - `ssh k9s` reaches the cluster and `kubectl` there is bound to `ukubi-cluster`.
@@ -149,10 +163,16 @@ applications read; it grants nothing inside authentik itself.
 entire membership of the group. Deleting a line removes that person's access
 everywhere the group is honoured — which is the point, and also the trap.
 
-**Both role expressions fail closed.** A missing `groups` claim yields Viewer in
-Grafana and `policy.default` (`role:readonly`) in ArgoCD, never admin. An
-expression that defaults high turns a broken group lookup into privilege
-escalation; given §6, that is not a theoretical concern here.
+**Both role expressions fail closed *on a missing claim*.** A `groups` claim that
+is absent or does not contain `platform-admins` yields Viewer in Grafana and
+`policy.default` (`role:readonly`) in ArgoCD, never admin. An expression that
+defaults high turns a broken group lookup into privilege escalation.
+
+That property covers the *mapping*, and nothing else. It says nothing about how
+the surrounding machinery fails: ArgoCD configured to fetch groups from the
+userinfo endpoint does **not** degrade to `policy.default` when that call breaks —
+it rejects the session outright and nobody logs in. See §6. Do not generalise
+"the role expression fails closed" into "the login path fails closed".
 
 `allow_assign_grafana_admin: false` grants org Admin, not Grafana **server**
 admin. Server admin manages users, orgs and the instance itself; nothing about
@@ -164,7 +184,13 @@ an application's own OIDC redirect. ArgoCD is also what deploys authentik, so
 dropping its local admin would make an authentik outage recoverable only through
 `kubectl`. Federation here is additive, never a replacement.
 
-## 6. Where the `groups` claim comes from — and one open question
+## 6. Where the `groups` claim comes from
+
+**It comes from the ID token.** An earlier revision of this runbook recorded an
+"open anomaly" here — that the ID token arrived without a `groups` key. That was
+wrong, and acting on it took ArgoCD login down. Both the misdiagnosis and the
+outage are documented below, because the mistake is more instructive than the
+correct answer.
 
 There is **no dedicated `groups` scope mapping** in this instance. The complete
 set present on 2026.8.0, read from the database:
@@ -181,34 +207,89 @@ Groups come from the **`profile`** mapping, whose expression includes:
 ```
 
 `user.groups.all()` returns `['authentik Admins', 'platform-admins']` for the
-`akadmin` account (only `authentik Admins` at the time the token below was
-captured — the group did not exist yet), and both OAuth2 providers have
-`include_claims_in_id_token = True`.
+`akadmin` account, and both OAuth2 providers have `include_claims_in_id_token =
+True`. That is the whole mechanism. Nothing else is required, and **no server-side
+call to the userinfo endpoint is needed to obtain groups.**
 
-### The anomaly
+### Read the token authentik actually issued
 
-**And yet** the ID token ArgoCD actually received carried `name`, `given_name`,
-`preferred_username`, `nickname`, `picture`, `email` and `email_verified` — and
-**no `groups` key at all**. Not an empty list; absent. `delete_none_values` in
-that mapping only drops `None`, so an empty list would have survived it.
+Not a log line about it — the stored token:
 
-This is **unexplained**. It is recorded here as an open question rather than
-rationalised, because every plausible explanation checked so far is contradicted
-by the values above.
+```bash
+cat > /tmp/tok.py <<'PY'
+from authentik.providers.oauth2.models import AccessToken
+t = AccessToken.objects.filter(provider__name='argocd').order_by('-expires').first()
+d = t.id_token.to_dict()          # NOT dict(t.id_token) — IDToken is not iterable
+print('TOK:: keys=', sorted(d.keys()))
+print('TOK:: groups=', d.get('groups', 'ABSENT'))
+PY
+ssh k9s "kubectl exec -i -n authentik deploy/platform-authentik-server -- ak shell" < /tmp/tok.py | grep 'TOK::'
+```
 
-### The consequence
+Verified 2026-08-19:
 
-Because of it, neither app depends on the ID token for groups. Both read the
-**userinfo endpoint** instead:
+```
+TOK:: keys= ['acr','aud','auth_time','email','email_verified','exp','given_name',
+             'groups','iat','iss','jti','name','nickname','picture',
+             'preferred_username','sid','sub']
+TOK:: groups= ['authentik Admins', 'platform-admins']
+```
 
-- Grafana: `api_url: https://authentik.bnei.dev/application/o/userinfo/`
-- ArgoCD: `enableUserInfoGroups: true` + `userInfoPath: /application/o/userinfo/`
-  + `userInfoCacheExpiration: 5m`
+The claim was there all along.
 
-That is also what authentik's own ArgoCD integration documents, and it fails
-closed: if the call breaks the user has no groups and falls through to the
-read-only default. Depending on a claim that demonstrably did not arrive is not a
-plan.
+### The misdiagnosis: a log field is not the token
+
+What had been read was ArgoCD's `grpc.request.claims` **log field**, which is a
+derived summary emitted by ArgoCD — not the token authentik issued. It omitted
+`groups`. Reading it as "the claims" produced a confident, entirely fictional
+anomaly, and a config change to route around it.
+
+### ArgoCD MUST NOT be given `enableUserInfoGroups`
+
+The change made to route around the non-existent anomaly was
+`enableUserInfoGroups: true` + `userInfoPath: /application/o/userinfo/` +
+`userInfoCacheExpiration: 5m` in `argocd-cm`. It made ArgoCD call authentik's
+userinfo endpoint **server-side, from a pod**.
+
+`authentik.bnei.dev` is proxied at Cloudflare (ADR-0038), and that request was
+answered by Cloudflare, not authentik:
+
+```
+URL:: https://authentik.bnei.dev/application/o/userinfo/ => 403 :: b'error code: 1010\n'
+```
+
+Error 1010 is Cloudflare's **Browser Integrity Check**, which blocks non-browser
+user agents. ArgoCD then tried to parse Cloudflare's HTML error page as JSON and
+discarded the session:
+
+```
+rpc error: code = Unauthenticated desc = invalid session: error fetching user info
+endpoint: failed to decode response body to struct: invalid character '<' looking
+for beginning of value
+```
+
+Every user who had logged in through authentik saw "not logged in".
+
+> **The userinfo path fails OPEN into a total outage, not closed into a lower
+> role.** An earlier revision of this document claimed the opposite — that a
+> broken userinfo call would merely demote the user to `policy.default`. It does
+> not. ArgoCD treats the failure as an invalid session and rejects the request
+> outright. A reassuring claim about a failure mode that had never been exercised
+> is worse than no claim.
+
+Fixed in **PR #187** by removing the three keys. Groups now come from the ID token;
+`policy.csv` and `scopes` are unchanged and were never the problem. Verified live:
+`argocd-cm`'s `oidc.config` carries `name`, `issuer`, `clientID`, `clientSecret`
+and `requestedScopes` only, and the current `argocd-server` pod's log contains
+zero `user info endpoint` errors.
+
+### Grafana's `api_url` is a separate matter and stays
+
+Grafana's `api_url: https://authentik.bnei.dev/application/o/userinfo/` is
+unchanged. It takes the same public path and evidently passes Browser Integrity
+Check today — but that is an observation about Cloudflare's current heuristics,
+not a guarantee, and §10 covers the general rule. Grafana's group mapping has
+never been observed resolving to Admin end to end; see §13.
 
 ## 7. The ArgoCD credential plumbing
 
@@ -418,11 +499,34 @@ the reference and the rationale; the skill is what to follow. The shape it walks
 4. Write `gitops/bootstrap/<app>-oidc-secret.yaml` to materialise the same pair
    into the app's namespace — and check §7 first: if the app's chart rewrites the
    file the credential goes into, the Grafana pattern does not apply.
-5. Configure the app: `authorize`, `token`, `userinfo` endpoints, `issuer` with its
-   trailing slash, group→role mapping that fails closed.
+5. Configure the app: `authorize` and `token` endpoints, `issuer` with its
+   trailing slash, and a group→role mapping that fails closed. **Take groups from
+   the ID token** — the `profile` scope carries them (§6). Configure a server-side
+   `userinfo` call only if the app cannot read the claim, and then read §10 first:
+   that call leaves the cluster and comes back through Cloudflare.
 6. Walk the propagation chain (§9.1), then verify with §11.
 
 ## 10. Traps and safety rules
+
+**An in-cluster caller reaching a `*.bnei.dev` name transits Cloudflare.** Pods
+resolve those names publicly, so a pod-to-pod-looking request to
+`https://authentik.bnei.dev/...` leaves the cluster, is answered by Cloudflare's
+edge, and must survive **Browser Integrity Check** — which exists to block
+non-browser user agents, i.e. exactly what a server-side HTTP client is. When it
+does not survive, the caller receives an HTML error page (`error code: 1010`) with
+a 403, and whatever was expecting JSON fails in whichever way that library fails.
+
+This holds today for the OIDC authorization redirect (a browser makes it) and for
+Grafana's userinfo call, which is precisely why it stayed invisible until
+something with a plainer user agent tried the same path and took ArgoCD login down
+(§6). It is heuristic, not a rule: a probe from a pod with `curl` returned
+authentik's own **401** rather than Cloudflare's 1010 on 2026-08-19, so *one*
+client getting through proves nothing about another.
+
+> **Prefer a claim already in the token, or an in-cluster Service address
+> (`platform-authentik-server.authentik.svc.cluster.local`), over a server-side
+> call to a public hostname.** If a public hostname is unavoidable, exercise the
+> exact failure — the success path tells you nothing.
 
 **Do NOT delete a managed Secret to force a re-render.** These use
 `creationPolicy: Orphan`, so the operator does not own them and will not recreate
@@ -484,6 +588,9 @@ curl -s https://authentik.bnei.dev/application/o/<slug>/.well-known/openid-confi
 # does ArgoCD actually grant what you think? Yes/No, no interpretation needed.
 ssh k9s kubectl exec -n argocd deploy/argocd-server -- \
   argocd admin settings rbac can platform-admins sync applications '*/*' --namespace argocd
+
+# what claims did authentik ACTUALLY issue? (see the script in §6 — read the
+# stored token, never a log field claiming to summarise it)
 ```
 
 `argocd admin settings rbac can <subject>` evaluates a subject **in isolation**,
@@ -499,9 +606,24 @@ so a green ArgoCD Application proves nothing:
 ssh k9s kubectl logs -n authentik deploy/platform-authentik-worker --since=20m | grep blueprints_discovery
 ```
 
-Finally: **drive a real login.** "The provider exists" and "a user can log in" are
-different claims, and §8 is a list of ways the first can be true while the second
-is false.
+**None of the above proves a login works.** They test the objects, not the
+exchange. `argocd-cm` should also be read directly after any OIDC change — the
+chart rewrites it on every selfHeal, so what is in git and what is served are
+separate facts:
+
+```bash
+ssh k9s "kubectl get cm argocd-cm -n argocd -o jsonpath='{.data.oidc\.config}'"
+ssh k9s kubectl logs -n argocd deploy/argocd-server --since=1h | grep -c 'user info endpoint'
+```
+
+Expect the config to carry `name`, `issuer`, `clientID`, `clientSecret` and
+`requestedScopes` and **nothing about userinfo** (§6), and the error count to be
+zero.
+
+Finally: **drive a real login, and check the role it lands in.** "The provider
+exists", "a user can log in" and "that user is an admin" are three different
+claims. §8 is a list of ways the first can be true while the second is false, and
+§6 is what happens when the third is assumed from a log line.
 
 **Last verified state (2026-08-19):**
 
@@ -511,6 +633,9 @@ BP:: argocd-oidc successful
 BP:: platform-groups successful
 GROUP:: platform-admins ['akadmin']
 platform-admins sync applications '*/*' -> Yes
+TOK:: groups= ['authentik Admins', 'platform-admins']
+argocd-cm oidc.config: no userinfo keys (PR #187)
+argocd-server 'user info endpoint' errors: 0
 ```
 
 ## 12. Rollback
@@ -554,5 +679,20 @@ user ID. Treat it as immutable.
   `ClientIP()` match never fires.
 - **Re-check the Base URL setting** (§8) before the forwardAuth tier and after any
   upgrade — it is UI state that no manifest can reconstruct.
+- **In-cluster traffic to `*.bnei.dev` hairpins through Cloudflare** (§10). PR #187
+  removed the one caller that this broke; the underlying condition is untouched and
+  will bite the next server-side integration. Two options, neither taken yet:
+  - a **CoreDNS rewrite** pointing `*.bnei.dev` at the Traefik VIP `192.168.1.233`,
+    which keeps the traffic on the LAN and out of Cloudflare entirely — the same
+    split-horizon idea the break-glass routes need from Pi-hole, one layer down;
+  - a **Cloudflare Configuration Rule disabling Browser Integrity Check** for
+    hostnames that serve API clients. The perimeter plan already anticipated such
+    exemptions for `s3`, `ente-api` and `fleet`; `authentik` belongs on that list,
+    since it is by definition talked to by machines.
+- **Confirm Grafana's `role_attribute_path` actually resolves to Admin.** It has
+  never been observed working end to end — a login that lands in Viewer is
+  indistinguishable from one where the group never arrived, and Grafana's userinfo
+  call takes the same Cloudflare path that broke ArgoCD's. It evidently passes
+  Browser Integrity Check today; that is an observation, not a guarantee.
 
 Log anything surprising to `docs/bootstrap-test-notes.md`, not to memory.
