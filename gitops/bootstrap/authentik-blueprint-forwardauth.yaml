@@ -1,0 +1,101 @@
+# The whole forwardAuth tier, in ONE file (ADR-0039 Decision 3).
+#
+# ONE FILE IS NOT A STYLE CHOICE. The embedded outpost's `providers` list is
+# REPLACED on every apply, not appended to. One blueprint per app — the way the
+# Native OIDC tier does it, correctly, because oauth2providers bind to nothing
+# shared — would mean each file silently unbinds the previous one, leaving
+# whichever applied last as the only working app and no error anywhere.
+#
+# So every proxy provider that wants the embedded outpost lives here, and the
+# single outpost binding at the bottom lists all of them. Adding Alertmanager,
+# pgweb or Proxmox later means editing this file, not adding another.
+#
+# WHY forwardAuth HERE AND NOT NATIVE OIDC: the e2e preview hosts route to a
+# session's own dev-server pod — whatever the agent happened to start and pass
+# to expose(). There is no fleet code in that request path to terminate OIDC
+# with. `fleet.bnei.dev` itself goes the other way (native OIDC in core, see
+# authentik-blueprint-fleet.yaml) precisely because there IS code there, and
+# because a middleware cannot gate the pod-network callers that agent-fleet#200
+# is about.
+apiVersion: secrets.infisical.com/v1alpha1
+kind: InfisicalSecret
+metadata:
+  name: authentik-blueprint-forwardauth
+  namespace: infisical
+spec:
+  hostAPI: http://platform-infisical-backend.infisical.svc.cluster.local:8080/api
+  resyncInterval: 60
+  authentication:
+    universalAuth:
+      secretsScope:
+        projectSlug: "infra-bootstrap-1-ge1"
+        envSlug: dev
+        secretsPath: "/"
+      credentialsRef:
+        secretName: universal-auth-credentials
+        secretNamespace: infisical
+  managedSecretReference:
+    secretName: authentik-blueprint-forwardauth
+    secretNamespace: authentik
+    creationPolicy: Orphan
+    template:
+      data:
+        forwardauth.yaml: |
+          version: 1
+          metadata:
+            name: forwardauth-tier
+            labels:
+              blueprints.goauthentik.io/instantiate: "true"
+          entries:
+            - model: authentik_providers_proxy.proxyprovider
+              id: previews-proxy-provider
+              identifiers:
+                name: e2e-previews
+              attrs:
+                name: e2e-previews
+                # forward_domain, NOT forward_single. Preview hostnames are
+                # minted at RUNTIME by agent-fleet's provisioner
+                # (internal/k8s/expose.go builds <shortid>-e2e.bnei.dev per
+                # session), so there is no point at which a per-host provider
+                # could be declared — the host does not exist when this file is
+                # written, and a blueprint cannot be written when it does.
+                mode: forward_domain
+                # The cost of forward_domain, stated rather than discovered:
+                # the authentik proxy session cookie is scoped to bnei.dev and
+                # therefore sent to every host in the zone, including the public
+                # ones. It is authentik's own cookie, not a credential to those
+                # apps, but it is a real widening.
+                #
+                # It is also why core's own session cookie is named
+                # __Host-fleet_session: that prefix forbids a Domain attribute
+                # at the browser level, so an agent-authored dev server on a
+                # same-site sibling cannot shadow the console's session cookie.
+                cookie_domain: bnei.dev
+                external_host: https://fleet.bnei.dev
+                authorization_flow: !Find [authentik_flows.flow, [slug, default-provider-authorization-implicit-consent]]
+                invalidation_flow: !Find [authentik_flows.flow, [slug, default-provider-invalidation-flow]]
+                # Defence in depth only — all three are in-cluster today and
+                # have no IngressRoute, so nothing external reaches them. Here
+                # so that a future route does not silently put a probe endpoint
+                # behind a login, or a webhook behind one.
+                skip_path_regex: "^/healthz$|^/metrics$|^/webhook/alertmanager$"
+            - model: authentik_core.application
+              identifiers:
+                slug: e2e-previews
+              attrs:
+                name: E2E Previews
+                slug: e2e-previews
+                provider: !KeyOf previews-proxy-provider
+                meta_description: Per-session preview hosts, minted at runtime by the fleet provisioner
+            # THE TRAP. A proxy provider does nothing at all until it is bound
+            # to an outpost, and the embedded outpost ships with providers = [].
+            # Verified live: `authentik Embedded Outpost :: proxy :: providers= []`.
+            #
+            # This list is REPLACED, not merged. Everything in the forwardAuth
+            # tier must be listed here together — see the header.
+            - model: authentik_outposts.outpost
+              identifiers:
+                managed: goauthentik.io/outposts/embedded
+              attrs:
+                providers:
+                  - !KeyOf previews-proxy-provider
