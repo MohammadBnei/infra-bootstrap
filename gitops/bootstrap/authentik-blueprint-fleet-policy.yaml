@@ -1,0 +1,56 @@
+# Restricts the `fleet` application to the platform-admins group, at authentik,
+# so a directory user who is not an operator cannot obtain a token for it at
+# all.
+#
+# DELIBERATELY A SEPARATE FILE from authentik-blueprint-fleet.yaml, and this is
+# the whole reason it exists as its own blueprint rather than two more entries
+# in that one.
+#
+# The enforcing gate is core's own check of the `groups` claim, which is Go, is
+# unit-tested, and fails closed. This binding is defence in depth. Its model and
+# field shapes have NOT been verified against the running 2026.8.0 instance the
+# way the provider's were, and this repo's own experience is that authentik
+# schemas defeat assumptions: `redirect_uris` is a list of objects rather than
+# strings, `grant_types` defaults to permitting nothing, and the model schema
+# declares no required fields at all so validation passing means only that the
+# YAML is well-formed.
+#
+# Split this way, an unverified shape costs the extra layer and nothing else: a
+# blueprint that fails to apply logs and carries on, so the provider still
+# exists and login still works, gated by core. Folded into the provider's file,
+# the same mistake could take the whole application down and read as a total
+# outage.
+#
+# A plain ConfigMap, like authentik-blueprint-groups.yaml: there is no
+# credential here, so nothing to interpolate, and one fewer restart in the
+# propagation chain (no Infisical operator in the path).
+#
+# TO VERIFY, against the instance rather than against docs:
+#   ssh k9s kubectl exec -n authentik deploy/platform-authentik-server -- \
+#     cat /blueprints/schema.json | python3 -c "
+#   import sys,json; d=json.load(sys.stdin)
+#   defs=d.get('definitions') or d.get('\$defs')   # 'definitions', not '\$defs',
+#   m=defs['model_authentik_policies.policybinding']  # is why a first pass finds nothing
+#   print(sorted(m['properties']))"
+# then confirm it applied by reading the database, not the log:
+#   psql -d authentik -tAc 'SELECT * FROM authentik_policies_policybinding'
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: authentik-blueprint-fleet-policy
+  namespace: authentik
+data:
+  fleet-policy.yaml: |
+    version: 1
+    metadata:
+      name: fleet-policy
+      labels:
+        blueprints.goauthentik.io/instantiate: "true"
+    entries:
+      - model: authentik_policies.policybinding
+        identifiers:
+          target: !Find [authentik_core.application, [slug, fleet]]
+          group: !Find [authentik_core.group, [name, platform-admins]]
+          order: 0
+        attrs:
+          enabled: true

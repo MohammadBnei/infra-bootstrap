@@ -59,13 +59,22 @@ issue client certificates from. An IP allowlist does not survive roaming.
    | Tier | Hosts | Gate |
    |---|---|---|
    | Public | `blog`, `dreamer`, `searxng`, `ente-*`, `api.voconsteroid.com` | Baseline middleware chain only |
-   | Native OIDC | Grafana, ArgoCD | Federated to authentik as an OIDC provider |
-   | forwardAuth | Alertmanager, pgweb, Proxmox, `fleet`, e2e previews | authentik proxy provider |
+   | Native OIDC | Grafana, ArgoCD, `fleet` | Federated to authentik as an OIDC provider |
+   | forwardAuth | Alertmanager, pgweb, Proxmox, e2e previews | authentik proxy provider |
    | Critical | Proxmox, ArgoCD, Infisical, Alertmanager | The above **plus** a policy requiring WebAuthn |
 
    forwardAuth is used only where the application cannot federate. Where it can,
    OIDC is preferred: a forwardAuth header in front of a service that still has its
    own login is two authentication systems, not one.
+
+   > **Amended 2026-08-19 by [ADR-0041](0041-fleet-native-oidc-not-forwardauth.md).**
+   > `fleet` was in the forwardAuth row above, on the correct premise that
+   > agent-fleet's `core` did not speak OIDC. It now does, and the rule in this
+   > paragraph then points the other way. The move is not a preference: a
+   > middleware gates the ingress, and the hole on that host (agent-fleet#200) is
+   > a caller on the pod network that never reaches the ingress. The e2e previews
+   > stay here — they route to a session's own dev-server pod, with no fleet code
+   > in the request path to terminate OIDC with.
 
 4. **"Special access for my devices" is WebAuthn passkeys, not client certificates.**
    A passkey is hardware-bound, non-exportable and phishing-resistant — the same

@@ -59,9 +59,19 @@ blueprints:
   # interpolate from Infisical and one fewer restart in the propagation chain.
   configMaps:
   - authentik-blueprint-groups
+  # No credential in the fleet policy binding either — it only references an
+  # application and a group by name. Kept out of the fleet provider's own
+  # blueprint on purpose: see that file's header for why an unverified model
+  # shape must not be able to take the provider down with it.
+  - authentik-blueprint-fleet-policy
   secrets:
   - authentik-blueprint-grafana
   - authentik-blueprint-argocd
+  - authentik-blueprint-fleet
+  # The whole forwardAuth tier is one blueprint, deliberately — the embedded
+  # outpost's provider list is replaced rather than appended to, so splitting it
+  # per app makes each file silently unbind the last.
+  - authentik-blueprint-forwardauth
 
 server:
   replicas: 1

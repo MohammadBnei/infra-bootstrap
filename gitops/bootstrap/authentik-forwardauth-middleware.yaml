@@ -1,0 +1,46 @@
+# Traefik forwardAuth middleware for the authentik proxy provider tier
+# (ADR-0039 Decision 3, provider declared in
+# authentik-blueprint-forwardauth.yaml).
+#
+# In `default`, alongside basic-admin-auth and for the same reason: a
+# cross-namespace `{name, namespace: default}` reference is what lets any app
+# point at one shared object instead of each rendering its own copy. That
+# matters here beyond tidiness — agent-fleet's provisioner builds preview
+# IngressRoutes in Go, from a namespace whose Role deliberately grants no
+# `middlewares` verbs, so it can only ever REFERENCE a middleware it does not
+# manage.
+apiVersion: traefik.io/v1alpha1
+kind: Middleware
+metadata:
+  name: authentik-forwardauth
+  namespace: default
+spec:
+  forwardAuth:
+    # Port 80, not 9000. This deployment's authentik Service exposes 80/443
+    # only — the 9000 the upstream docs use is not present here.
+    #
+    # `platform-` is not a typo and not optional: the platform ApplicationSet
+    # templates every release as `platform-{{.name}}`, so the Service is
+    # platform-authentik-server. Getting this prefix wrong has already cost
+    # this repo twice, in both directions (see the warning comments on
+    # agent-fleet's k8s/core.yaml and prometheus' values.yaml). A wrong
+    # hostname here fails as a 500 on every gated request, not as a config
+    # error at apply time.
+    address: http://platform-authentik-server.authentik.svc.cluster.local/outpost.goauthentik.io/auth/traefik
+    # The outpost is behind Traefik, so it sees Traefik as the client. Without
+    # this it builds its redirect from the wrong host and the sign-in loop
+    # never terminates.
+    trustForwardHeader: true
+    # Per-user attribution, free, for anything downstream that wants it.
+    #
+    # agent-fleet deliberately does NOT read these (see its docs/adr): a worker
+    # pod that can reach a service on the pod network can forge any header it
+    # likes, so trusting them turns an authorization gap into an impersonation
+    # one. They are copied through because a service that is ONLY reachable via
+    # Traefik can legitimately use them; that is not true of core, which is why
+    # core terminates OIDC itself instead.
+    authResponseHeaders:
+      - X-authentik-username
+      - X-authentik-email
+      - X-authentik-groups
+      - X-authentik-uid
