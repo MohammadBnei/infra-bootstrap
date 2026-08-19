@@ -1,0 +1,47 @@
+# authentik group membership — the one place that says who is an operator of
+# this cluster (ADR-0039).
+#
+# A plain ConfigMap, NOT an InfisicalSecret, unlike every other blueprint here.
+# Group membership carries no credential, so there is nothing to interpolate
+# and nothing to hide. That also shortens the propagation chain by one step:
+# no operator restart is needed, because there is no operator in the path.
+#
+# `platform-admins` is deliberately NOT authentik's built-in `authentik Admins`
+# group, which already exists and already contains this user. Reusing it would
+# make "can administer the identity provider" and "can administer the cluster"
+# the same claim — so making someone an authentik admin, for any reason, would
+# silently hand them ArgoCD admin and Grafana admin as well. Two separate
+# powers, two separate groups.
+#
+# `is_superuser` is deliberately unset. This group is a label that applications
+# read; it grants nothing inside authentik itself.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: authentik-blueprint-groups
+  namespace: authentik
+data:
+  platform-groups.yaml: |
+    version: 1
+    metadata:
+      name: platform-groups
+      labels:
+        blueprints.goauthentik.io/instantiate: "true"
+    entries:
+      - model: authentik_core.group
+        id: platform-admins
+        identifiers:
+          name: platform-admins
+        attrs:
+          name: platform-admins
+          # REPLACED, not merged, on every apply — the same trap the outpost
+          # `providers` list has. This list is the whole membership of the
+          # group; adding a person means adding a line here, and removing a
+          # line removes their access everywhere the group is honoured.
+          #
+          # `!Find` resolves to the user's primary key. It does NOT create the
+          # user, and it does not manage them — declaring an
+          # `authentik_core.user` entry instead would put this file in charge
+          # of the account itself, which is not what is wanted.
+          users:
+            - !Find [authentik_core.user, [username, akadmin]]

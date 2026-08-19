@@ -70,6 +70,19 @@ spec:
             # keeps the credential out of git despite the chart rewriting both
             # argocd-cm and argocd-secret on every selfHeal.
             #
+            # Groups come from the USERINFO endpoint below
+            # (`enableUserInfoGroups`), not from the ID token — not the obvious
+            # choice, so: authentik's `profile` scope mapping does emit
+            # `groups: [name, ...]` (read off the running instance) and this
+            # provider has `include_claims_in_id_token = True`, yet the ID
+            # token ArgoCD actually received carried no `groups` key at all
+            # while every other profile claim was present. Unexplained.
+            # Depending on a claim that demonstrably did not arrive is not a
+            # plan; the userinfo call is also what authentik's own ArgoCD
+            # integration documents. If it fails the user simply has no
+            # groups and falls through to `policy.default` — read-only, so it
+            # fails closed.
+            #
             # The local `admin` account stays ENABLED (chart default). ADR-0039
             # Decision 6: a Traefik ClientIP() break-glass route can bypass a
             # middleware but not an app's own OIDC redirect, and ArgoCD is what
@@ -84,13 +97,27 @@ spec:
                 - openid
                 - profile
                 - email
+              enableUserInfoGroups: true
+              userInfoPath: /application/o/userinfo/
+              userInfoCacheExpiration: 5m
           rbac:
-            # Everyone who can authenticate gets read-only, matching Grafana's
-            # `role_attribute_path: "'Viewer'"`. Granting more by default would
-            # make OIDC a privilege escalation rather than a convenience.
-            # Admin is the retained local account until an authentik group ->
-            # `role:admin` mapping is added here deliberately.
+            # Read-only for anyone who can authenticate; admin comes from
+            # membership of the `platform-admins` authentik group, declared in
+            # gitops/bootstrap/authentik-blueprint-groups.yaml.
+            #
+            # The group is the whole point: it is the one place that says who
+            # operates this cluster, and Grafana reads the same group name for
+            # its own Admin role. Adding a person is a line in that file, not
+            # a per-app RBAC edit here and in Grafana's values and in whatever
+            # comes next.
+            #
+            # `scopes` tells ArgoCD which claims may carry a subject for policy
+            # matching. `groups` first so a group rule wins; `email` remains
+            # because `sub_mode: user_email` makes the subject an address, and
+            # a per-user rule has to stay expressible.
             policy.default: role:readonly
+            policy.csv: |
+              g, platform-admins, role:admin
             scopes: "[groups, email]"
           params:
             # TLS terminated at Traefik — ArgoCD serves plain HTTP inside the cluster

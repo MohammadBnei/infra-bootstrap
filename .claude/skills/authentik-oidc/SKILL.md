@@ -167,6 +167,53 @@ authentik outage unrecoverable through anything but `kubectl`.
 equivalent. Granting admin on first login makes OIDC a privilege escalation
 rather than a convenience.
 
+## Roles: one group, read by every app
+
+Do not write a per-app allowlist. Membership lives in **one** blueprint —
+`gitops/bootstrap/authentik-blueprint-groups.yaml`, a plain ConfigMap because
+group membership carries no credential — and every app maps the same group
+name to its own admin role:
+
+| App | Where |
+|---|---|
+| ArgoCD | `configs.rbac.policy.csv: g, platform-admins, role:admin` |
+| Grafana | `role_attribute_path: contains(groups[*], 'platform-admins') && 'Admin' \|\| 'Viewer'` |
+
+Adding a person is then one line in one file, not an edit per app.
+
+`platform-admins` is deliberately **not** authentik's built-in
+`authentik Admins`. Reusing that would make "can administer the IdP" and "can
+administer the cluster" the same claim, so making someone an authentik admin
+would silently grant them everything else too.
+
+Write the expression so a **missing** claim yields the LOW role. Both forms
+above do: no `groups` claim means no match means Viewer / `policy.default`. An
+expression that defaults high turns a broken group lookup into privilege
+escalation.
+
+### Getting the claim to actually arrive
+
+authentik's `profile` scope mapping emits `groups`, and providers default to
+`include_claims_in_id_token = True` — and yet an ID token was observed
+carrying every other profile claim and **no `groups` key at all**. Cause
+unknown.
+
+So do not depend on the ID token. Both apps here read groups from the
+**userinfo endpoint**: Grafana via `api_url`, ArgoCD via
+`enableUserInfoGroups: true` + `userInfoPath: /application/o/userinfo/`.
+
+Verify the result rather than the config — ArgoCD will answer directly:
+
+```bash
+ssh k9s kubectl exec -n argocd deploy/argocd-server -- \
+  argocd admin settings rbac can <email> sync applications '*/*' --namespace argocd
+```
+
+`Yes`/`No`, no interpretation needed. **The UI is not evidence**: ArgoCD hides
+nothing based on RBAC — a read-only user sees every application, every
+settings page and every action button, and only finds out on the click. That
+is why a read-only login was mistaken for an admin one.
+
 ## When the app's config file is rewritten by its own chart
 
 Grafana takes its credentials as env vars from a Secret, which is the easy

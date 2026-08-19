@@ -121,10 +121,20 @@ grafana.ini:
     # No auto_login: it would remove the local-admin escape hatch from the UI
     # entirely, which is the opposite of Decision 6.
     auto_login: false
-    # Everyone who can authenticate gets Viewer. Role mapping via authentik
-    # groups is a follow-up; granting Admin by default would make OIDC a
-    # privilege escalation rather than a convenience.
-    role_attribute_path: "'Viewer'"
+    # Admin for members of the `platform-admins` authentik group, Viewer for
+    # everyone else. The group is declared in
+    # gitops/bootstrap/authentik-blueprint-groups.yaml and ArgoCD reads the
+    # SAME group name for its own `role:admin` — one membership list, honoured
+    # by both apps, rather than a per-app allowlist that drifts.
+    #
+    # JMESPath, evaluated against the claims Grafana has after calling
+    # `api_url` (userinfo) above. authentik's `profile` scope mapping is what
+    # puts `groups` there. If the claim is missing the expression yields
+    # Viewer, so a broken group lookup demotes rather than escalates.
+    role_attribute_path: contains(groups[*], 'platform-admins') && 'Admin' || 'Viewer'
+    # Org Admin, not Grafana *server* admin. Server admin manages users, orgs
+    # and the instance itself; nothing about operating this cluster needs it,
+    # and the local admin already has it.
     allow_assign_grafana_admin: false
   log.console:
     format: json
