@@ -191,16 +191,43 @@ above do: no `groups` claim means no match means Viewer / `policy.default`. An
 expression that defaults high turns a broken group lookup into privilege
 escalation.
 
-### Getting the claim to actually arrive
+### Groups are in the ID token. Do NOT reach for userinfo.
 
 authentik's `profile` scope mapping emits `groups`, and providers default to
-`include_claims_in_id_token = True` — and yet an ID token was observed
-carrying every other profile claim and **no `groups` key at all**. Cause
-unknown.
+`include_claims_in_id_token = True`, so the ID token already carries what RBAC
+needs. Read it from the token authentik actually issued, not from a log line:
 
-So do not depend on the ID token. Both apps here read groups from the
-**userinfo endpoint**: Grafana via `api_url`, ArgoCD via
-`enableUserInfoGroups: true` + `userInfoPath: /application/o/userinfo/`.
+```bash
+ssh k9s kubectl exec -n authentik deploy/platform-authentik-server -- ak shell -c "
+from authentik.providers.oauth2.models import AccessToken
+t=AccessToken.objects.filter(provider__name='<app>').order_by('-expires').first()
+print('TOK::', dict(t.id_token).get('groups','ABSENT'))" | grep TOK::
+```
+
+**An application's own log of 'the claims' is not the token.** ArgoCD's
+`grpc.request.claims` field showed every profile claim and no `groups` key,
+which read as authoritative and is not. The token had groups all along.
+
+Acting on that misreading, `enableUserInfoGroups: true` +
+`userInfoPath` were set on ArgoCD — and **that broke login for everyone**.
+`authentik.bnei.dev` is proxied at Cloudflare, and a server-side request from
+a pod is answered with Cloudflare **error 1010** (Browser Integrity Check
+blocks non-browser user agents). ArgoCD tries to parse HTML as JSON and
+invalidates the session:
+
+```
+invalid session: error fetching user info endpoint:
+failed to decode response body to struct:
+invalid character '<' looking for beginning of value
+```
+
+Every logged-in user is signed out — the userinfo path fails **open into a
+total outage**, not closed into a lower role.
+
+The general rule: **an in-cluster caller reaching a `*.bnei.dev` name transits
+Cloudflare**, so anything on that path must survive Browser Integrity Check.
+Prefer a claim already in the token, or an in-cluster Service address, over a
+server-side call to a public hostname.
 
 Verify the result rather than the config — ArgoCD will answer directly:
 
