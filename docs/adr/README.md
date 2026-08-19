@@ -48,5 +48,5 @@ ADR-000N` (replaced by a later decision).
 | [0035](0035-self-hosted-forgejo-authoritative-github-mirror.md) | Self-hosted Forgejo authoritative, GitHub demoted to push-mirror | Proposed |
 | [0036](0036-nfs-storage-class-for-k8s.md) | Second, unreplicated `nfs` StorageClass on the existing `nfs-storage` VM | Accepted |
 | [0038](0038-cloudflare-proxy-dns01-and-origin-lock.md) | Proxy `bnei.dev` through Cloudflare; `le` moves to DNS-01; origin locked to Cloudflare | Accepted (implemented 2026-08-18 — proxied wildcard used instead of the Decision 7 renames; Decisions 3 and 5 also revised. See the in-ADR implementation note) |
-| [0039](0039-authentik-identity-layer.md) | authentik as the cluster's identity layer (forwardAuth + OIDC + passkeys) | Proposed |
+| [0039](0039-authentik-identity-layer.md) | authentik as the cluster's identity layer (forwardAuth + OIDC + passkeys) | Accepted (Native OIDC tier built; forwardAuth/passkeys pending — see its implementation notes) |
 | [0040](0040-cluster-internal-hardening-baseline.md) | Cluster-internal hardening baseline (etcd encryption, audit log, Cilium encryption, PSA, default-deny) | Proposed |

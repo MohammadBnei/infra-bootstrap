@@ -1,6 +1,6 @@
 # ADR-0039: authentik as the cluster's identity layer
 
-**Status:** Proposed (implementation started 2026-08-19 — see the implementation note at the end; Decision 2's Redis clause is wrong)
+**Status:** Accepted (Native OIDC tier implemented 2026-08-19; forwardAuth, WebAuthn and `basic-admin-auth` retirement still pending — see the implementation notes at the end. Decision 2's Redis clause is wrong)
 **Date:** 2026-08-18
 **Depends on:** [ADR-0038](0038-cloudflare-proxy-dns01-and-origin-lock.md)
 (`externalTrafficPolicy: Local` is what makes the LAN break-glass route below
@@ -245,3 +245,59 @@ statements and persistent connections. The connection targets Postgres directly.
 `postgres.bnei.lan` is used rather than `192.168.1.232` because
 `ARCHITECTURE.md` §3 records that CoreDNS forwards to Pi-hole explicitly so that
 pods can resolve the Pigsty VIP by name.
+
+---
+
+## Implementation note 2 — what was actually built (2026-08-19)
+
+Appended, not merged into the sections above, per `DECISION.md` §5.
+
+**The operational reference is now
+[`docs/runbook-authentik-identity.md`](../runbook-authentik-identity.md)** — what
+is deployed, how a change propagates, what fails silently, and the field shapes
+verified against the running instance. `/authentik-oidc`
+(`.claude/skills/authentik-oidc/SKILL.md`) remains the step-by-step procedure for
+connecting a new app.
+
+### Built vs. proposed
+
+| Decision | State |
+|---|---|
+| 1 — authentik from the upstream chart, as a platform app | **Built.** 2026.8.0 (deployed at 2026.5.6, upgraded in PR #174), `gitops/bootstrap/platform.applicationset.yaml` sync wave 5, values in `gitops/platform/values/authentik/values.yaml`, route in `gitops/bootstrap/authentik-ingressroute.yaml` behind `cloudflare-origin-lock` |
+| 2 — Pigsty Postgres | **Built**, at `postgres.bnei.lan:5432` rather than the VIP literal and deliberately not pgbouncer's 6432. The Redis clause is void — see implementation note 1. The Consequences section's `AUTHENTIK_PG_PASSWORD` shipped as `DBUSER_AUTHENTIK_PASSWORD`, matching Pigsty's user naming |
+| 3 — four access tiers | **Native OIDC tier only.** Grafana and ArgoCD are federated. The forwardAuth and critical tiers are not built (infra-bootstrap #183, agent-fleet #209) |
+| 4 — WebAuthn passkeys | **Not built.** No policy binding exists yet |
+| 5 — LAN `ClientIP()` break-glass | **Not built.** Blocked on the Pi-hole split-horizon entries, which are its enabling condition, not an optimisation |
+| 6 — local admins kept | **Built and load-bearing.** `admin` on ArgoCD and Grafana both still work; this is what makes the whole layer revertible |
+| 7 — `basic-admin-auth` retired | **Not done.** Its consumers span three repos and have to change in one go |
+
+### Two structural findings the ADR did not anticipate
+
+**Everything is a blueprint, in one of two shapes.** Anything embedding an OAuth2
+client secret is an `InfisicalSecret` whose *template is the blueprint*: structure
+in git, credentials interpolated by the operator. Anything that carries no
+credential — currently only group membership — is a plain `ConfigMap`, which also
+removes the operator from its propagation chain. Nothing is created by clicking.
+
+**Roles converged onto one group.** `platform-admins`, declared in
+`gitops/bootstrap/authentik-blueprint-groups.yaml`, is read by ArgoCD
+(`g, platform-admins, role:admin` over a `role:readonly` default) and by Grafana
+(`role_attribute_path`, defaulting to `Viewer`). It is deliberately **not**
+authentik's built-in `authentik Admins`, which would have made "can administer the
+IdP" and "can administer the cluster" the same claim. Both expressions fail closed.
+
+### One open anomaly, recorded rather than resolved
+
+authentik's `profile` scope mapping emits `groups`, and both providers have
+`include_claims_in_id_token = True` — yet an ID token was observed carrying every
+other profile claim and **no `groups` key at all** (absent, not empty).
+Unexplained. Both apps therefore read groups from the **userinfo endpoint**, which
+is also what authentik's own ArgoCD integration documents and which fails closed.
+See the runbook §6.
+
+### Consequence for Decision 3's remaining tiers
+
+The embedded outpost's `providers` list is **replaced, not appended**, so the
+entire forwardAuth tier has to live in a single blueprint file — unlike the Native
+OIDC tier, which has one file per app. Separate files would silently unbind each
+other. Runbook §8 carries the verified proxy-provider shape.

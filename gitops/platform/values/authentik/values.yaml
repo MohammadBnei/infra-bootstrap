@@ -13,10 +13,12 @@
 # state onto Postgres. One fewer component to run, patch and back up. Re-checked
 # on the 2026.8.0 bump: still true.
 #
-# TODO after the 2026.8.0 upgrade: set the new **Base URL** system setting at
-# System > Settings in the authentik UI. It is optional in 2026.8 and becomes
-# REQUIRED in 2026.11, so setting it now turns a future breaking upgrade into a
-# no-op. It is UI state, not chart config — nothing here can express it.
+# The **Base URL** system setting (System > Settings) is optional in 2026.8 and
+# becomes REQUIRED in 2026.11. It is UI state, not chart config — nothing here
+# can express it, and nothing here can restore it. Read live on 2026-08-19 as
+# https://authentik.bnei.dev, i.e. already non-empty; re-check it after any
+# upgrade and before the forwardAuth tier lands, since proxy providers build
+# their redirect URLs from it. See docs/runbook-authentik-identity.md §8.
 
 authentik:
   # Every configuration value, including the non-secret ones, comes from this

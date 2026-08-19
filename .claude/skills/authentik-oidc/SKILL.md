@@ -297,7 +297,9 @@ Model names and field shapes, from the instance's own schema:
 ```bash
 ssh k9s kubectl exec -n authentik deploy/platform-authentik-server -- cat /blueprints/schema.json \
   | python3 -c "
-import sys,json; d=json.load(sys.stdin); defs=d.get('\$defs',{})
+# models live under 'definitions', NOT '\$defs' — querying '\$defs' returns an
+# empty dict and makes every model look absent
+import sys,json; d=json.load(sys.stdin); defs=d['definitions']
 m=defs['model_authentik_providers_oauth2.oauth2provider']
 print('required:', m.get('required')); print('properties:', sorted(m['properties']))
 print('redirect_uris:', json.dumps(m['properties']['redirect_uris'])[:300])"
