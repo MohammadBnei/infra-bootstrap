@@ -82,6 +82,16 @@ spec:
         # (not k8s/core.yaml) is the source of truth.
         hostname: fleet.bnei.dev
 
+      - name: wedding-2026
+        namespace: wedding-2026
+        syncWave: "10"
+        repoURL: https://github.com/MohammadBnei/wedding-2026.git
+        valuesPath: [helm/values.yaml]
+        targetRevision: main
+        # See gitops/apps/registry.yaml's matching entry for why this
+        # hostname (not helm/values.yaml) is the source of truth.
+        hostname: wedding.bnei.dev
+
   template:
     metadata:
       name: '{{.name}}'

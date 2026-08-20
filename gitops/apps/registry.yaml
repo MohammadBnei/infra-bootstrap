@@ -123,6 +123,18 @@
   # ingress.hostname always wins over a values-file setting of the same key.
   hostname: fleet.bnei.dev
 
+- name: wedding-2026
+  namespace: wedding-2026
+  syncWave: "10"
+  repoURL: https://github.com/MohammadBnei/wedding-2026.git
+  valuesPath: [helm/values.yaml]
+  targetRevision: main
+  # One label deep on purpose: the proxied *.bnei.dev record and the le-dns
+  # wildcard default cert cover it, so no Cloudflare change is needed. The
+  # weding.bnei.dev typo host is handled by an extraManifests IngressRoute in
+  # the app's own helm/values.yaml, not here.
+  hostname: wedding.bnei.dev
+
 # searxng and pgweb are NOT here: they're public-image tools with no
 # app-specific code, so they're driven as platform apps instead — see
 # gitops/bootstrap/platform-common-apps.applicationset.yaml and
