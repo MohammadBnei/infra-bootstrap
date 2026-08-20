@@ -106,6 +106,17 @@ all:
             pgbouncer: true
             comment: authentik identity provider (ADR-0039)
             roles: [dbrole_readwrite]
+          # ADR-0039's pattern, not the older plaintext entries above: what is
+          # committed here is a SCRAM-SHA-256 VERIFIER, not the password. Pigsty
+          # passes `password` verbatim into ALTER USER ... PASSWORD, and Postgres
+          # stores a well-formed verifier as-is. The plaintext lives only in
+          # Infisical as WEDDING_DB_PASSWORD. Rotating means regenerating both
+          # halves together — a verifier cannot be turned back into its password.
+          - name: dbuser_wedding
+            password: 'SCRAM-SHA-256$4096:tp0ULDyf+zB4GrfTbZ3Q9g==$L5BZRVGJVhMdLpcpKPlb6isgwkeCgN9Ju190HPlRLXI=:mtsjKGGdT1qNjwPwosOU3BO1uFT3+w8cvdBSvvIdnY0='
+            pgbouncer: true
+            comment: wedding.bnei.dev — guest RSVPs and chatbot transcripts
+            roles: [dbrole_readwrite]
           - name: dbuser_blog # REQUIRED, `name` is the only mandatory field of a user definition
             password: dbblogPass # optional, password, can be a scram-sha-256 hash string or plain text
             pgbouncer: true # optional, add this user to pgbouncer user-list? false by default (production user should be true explicitly)
@@ -182,6 +193,9 @@ all:
           - name: authentik
             comment: authentik identity provider (ADR-0039)
             owner: dbuser_authentik
+          - name: weddingdb
+            comment: wedding.bnei.dev — guest RSVPs and chatbot transcripts
+            owner: dbuser_wedding
           - name: openwebdb # REQUIRED, `name` is the only mandatory field of a database definition
             owner: dbuser_openwebui # optional, database owner, postgres by default
             extensions: # optional, additional extensions to be installed: array of `{name[,schema]}`

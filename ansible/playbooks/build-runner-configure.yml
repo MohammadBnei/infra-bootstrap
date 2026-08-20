@@ -56,6 +56,8 @@
         home: /opt/actions-runner
       - name: agent-fleet
         url: https://github.com/MohammadBnei/agent-fleet
+      - name: wedding-2026
+        url: https://github.com/MohammadBnei/wedding-2026
     # NOT `ukubi` — that label belongs to the in-cluster runner holding a
     # ServiceAccount token with `create jobs` in vos/vos-dev. Builds must
     # not land there and cluster jobs must not land here.
