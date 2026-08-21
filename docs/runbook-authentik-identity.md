@@ -472,8 +472,15 @@ CR contained it, and the managed Secret kept its old content indefinitely.
 ssh k9s kubectl rollout restart deploy/platform-infisi-controller-manager -n infisical
 ```
 
-Not needed for `authentik-blueprint-groups.yaml`, which is a plain ConfigMap with
-no operator in its path.
+Not needed for the ConfigMap blueprints — `groups`, `fleet-policy`,
+`previews-policy`, `forwardauth` — which have no operator in their path. The rule
+for which wrapper a blueprint gets: **only a blueprint that interpolates a
+credential is an InfisicalSecret.** That is the three oauth2providers (grafana,
+argocd, fleet), whose `client_id`/`client_secret` are agreed with the app.
+Everything else — group membership, policy bindings, and the whole forwardAuth
+tier, since a proxy provider generates its own OAuth pair internally — is a
+plain ConfigMap. Reaching for the Secret wrapper "to match the others" buys a
+restart and a way to be silently stale, and buys nothing else.
 
 **Step 3 — ordering, and this is the part that costs hours.** Blueprints are
 applied by the **worker**, not the server: only the worker deployment gets the
