@@ -71,7 +71,25 @@ spec:
                 # at the browser level, so an agent-authored dev server on a
                 # same-site sibling cannot shadow the console's session cookie.
                 cookie_domain: bnei.dev
-                external_host: https://fleet.bnei.dev
+                # THE AUTHENTICATION HOST, not the application's. In
+                # forward_domain mode this is where the browser is sent to
+                # /outpost.goauthentik.io/start, so it must be a host whose
+                # IngressRoute reaches the outpost — and the embedded outpost
+                # is inside platform-authentik-server, which is what
+                # authentik.bnei.dev routes to.
+                #
+                # It said https://fleet.bnei.dev until 2026-08-21, which never
+                # worked and could not: agent-fleet's core serves that host and
+                # has no /outpost.goauthentik.io route (ADR-0041 moved fleet to
+                # native OIDC and its k8s/core.yaml carries no middlewares at
+                # all), so the sign-in redirect landed on a 404 and the loop
+                # never terminated. Nothing surfaced it because this tier had
+                # no consumers until wedding-2026's /admin became the first.
+                #
+                # authentik.bnei.dev is also safe to point at precisely because
+                # its own IngressRoute deliberately carries no forwardAuth —
+                # see authentik-ingressroute.yaml — so there is no loop.
+                external_host: https://authentik.bnei.dev
                 authorization_flow: !Find [authentik_flows.flow, [slug, default-provider-authorization-implicit-consent]]
                 invalidation_flow: !Find [authentik_flows.flow, [slug, default-provider-invalidation-flow]]
                 # Defence in depth only — all three are in-cluster today and
