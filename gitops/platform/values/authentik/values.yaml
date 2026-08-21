@@ -64,6 +64,10 @@ blueprints:
   # blueprint on purpose: see that file's header for why an unverified model
   # shape must not be able to take the provider down with it.
   - authentik-blueprint-fleet-policy
+  # Same shape, same isolation, for the forwardAuth tier's one shared
+  # application — see that file's header for why an application with no binding
+  # is authenticated but not authorized.
+  - authentik-blueprint-previews-policy
   secrets:
   - authentik-blueprint-grafana
   - authentik-blueprint-argocd

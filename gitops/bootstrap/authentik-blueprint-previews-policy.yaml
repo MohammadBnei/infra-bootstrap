@@ -1,0 +1,41 @@
+# Restricts the `e2e-previews` application to the platform-admins group.
+#
+# Without this, the forwardAuth tier authenticates but does not authorize: the
+# provider is domain-level (cookie_domain bnei.dev), so ONE application object
+# gates every host carrying the `authentik-forwardauth` middleware — today the
+# runtime-minted preview hosts and wedding.bnei.dev/admin — and an application
+# with no policy binding admits any user the directory can authenticate.
+#
+# Unlike fleet, there is no second gate behind this one. core checks the
+# `groups` claim itself and fails closed (ADR-0041); a preview host is whatever
+# dev server an agent happened to start, and wedding's /admin is the app's own
+# admin surface. The binding IS the authorization for both.
+#
+# SEPARATE FILE, same reasoning as authentik-blueprint-fleet-policy.yaml: the
+# policybinding model shape is still unverified against the running 2026.8.0
+# instance, and a blueprint that fails to apply logs and carries on. Folded into
+# authentik-blueprint-forwardauth.yaml, the same mistake could unbind the
+# provider from the embedded outpost and take every guarded page down.
+#
+# A plain ConfigMap: no credential to interpolate, so no Infisical operator in
+# the propagation chain and one fewer restart (runbook §9.1).
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: authentik-blueprint-previews-policy
+  namespace: authentik
+data:
+  previews-policy.yaml: |
+    version: 1
+    metadata:
+      name: previews-policy
+      labels:
+        blueprints.goauthentik.io/instantiate: "true"
+    entries:
+      - model: authentik_policies.policybinding
+        identifiers:
+          target: !Find [authentik_core.application, [slug, e2e-previews]]
+          group: !Find [authentik_core.group, [name, platform-admins]]
+          order: 0
+        attrs:
+          enabled: true

@@ -398,18 +398,42 @@ loopback listener at `http://localhost:8085/auth/callback` — a different clien
 flow on the same provider. Omitting it does not break the browser login at all, so
 the gap surfaces later, only for the CLI, as a `redirect_uri` mismatch.
 
-### `model_authentik_providers_proxy.proxyprovider` — reference only, **not deployed**
+### `model_authentik_providers_proxy.proxyprovider` — deployed since 2026-08-20
 
-Carried here so the forwardAuth tier (§13) does not have to rediscover it.
+The `e2e-previews` provider in `gitops/bootstrap/authentik-blueprint-forwardauth.yaml`.
 
+- **`external_host` is the auth domain, not the app.** In `forward_domain` mode
+  it names the host serving the embedded outpost's own `/outpost.goauthentik.io/*`
+  endpoints — here `https://authentik.bnei.dev`, the only host that answers them
+  (`/outpost.goauthentik.io/ping` → 204). authentik builds the OAuth
+  `redirect_uri` from it verbatim, so pointing it at a protected app instead
+  sends the callback to that app. **This failure is invisible until after a
+  successful login**: the redirect to authentik, the login flow and the `code`
+  are all correct, and only the return leg lands nowhere. It cost this repo a
+  round of "the app crashes post-auth" reports when it was set to
+  `https://fleet.bnei.dev` — a host which, per ADR-0041, deliberately has no
+  outpost in its request path at all. Symptom to recognise instantly: the
+  browser sits on `<some-other-host>/outpost.goauthentik.io/callback?code=…`,
+  and the `redirect` claim inside the `state` JWT still holds the page you
+  wanted.
+- Protected hosts do **not** need a `/outpost.goauthentik.io/` route of their
+  own. That is the `forward_single` recipe. For the preview hosts it is also
+  unbuildable: the provisioner's Role grants no `middlewares` verbs and the
+  hostnames do not exist until runtime.
+- **A proxy provider authenticates; it does not authorize.** One domain-level
+  provider gates every host carrying the middleware, through one application
+  object, and an application with no policy binding admits any user in the
+  directory — see `gitops/bootstrap/authentik-blueprint-previews-policy.yaml`.
 - `mode` enum: `proxy | forward_single | forward_domain`. The schema's own
   description: *"Enable support for forwardAuth in traefik and nginx auth_request.
   Exclusive with internal_host."*
 - Other relevant properties: `cookie_domain`, `skip_path_regex`,
   `intercept_header_auth`, `basic_auth_enabled`, `external_host`, `internal_host`.
 - The **embedded outpost** is named `authentik Embedded Outpost`, managed string
-  `goauthentik.io/outposts/embedded`, and currently has **zero providers**. A proxy
-  provider does nothing until it is bound to an outpost.
+  `goauthentik.io/outposts/embedded`, and shipped with **zero providers**. A proxy
+  provider does nothing until it is bound to one. Live check that the binding took:
+  the server log prints `loaded application` with the provider's `external_host`
+  as `host=` on every outpost refresh.
 - **That outpost's `providers` list is replaced, not appended** — the same trap as
   the group's `users:` list. The whole forwardAuth tier therefore has to live in
   **one** blueprint file, unlike the Native OIDC tier which has one file per app.
@@ -724,8 +748,12 @@ user ID. Treat it as immutable.
 
 ## 13. Not built yet
 
-- **forwardAuth tier** — `fleet.bnei.dev`, e2e previews, Alertmanager, pgweb,
-  Proxmox. Design and task list in infra-bootstrap issue
+- **forwardAuth tier, the rest of it** — Alertmanager, pgweb, Proxmox. The
+  provider, the middleware and the group binding exist and gate the e2e preview
+  hosts and `wedding.bnei.dev/admin` today; `fleet.bnei.dev` went the other way
+  (native OIDC in core, ADR-0041). Adding a host is one `middlewares:` entry —
+  the provider is domain-level, so it needs no blueprint change. Design and task
+  list in infra-bootstrap issue
   [#183](https://github.com/MohammadBnei/infra-bootstrap/issues/183) and agent-fleet
   issue [#209](https://github.com/MohammadBnei/agent-fleet/issues/209). Retiring the
   shared `basic-admin-auth` credential (an `apr1`/MD5 hash that is in
