@@ -71,7 +71,28 @@ spec:
                 # at the browser level, so an agent-authored dev server on a
                 # same-site sibling cannot shadow the console's session cookie.
                 cookie_domain: bnei.dev
-                external_host: https://fleet.bnei.dev
+                # In forward_domain mode this is the AUTH domain — the host that
+                # serves the embedded outpost's own `/outpost.goauthentik.io/*`
+                # endpoints — NOT the app being protected. authentik builds the
+                # OAuth `redirect_uri` from it verbatim.
+                #
+                # It was https://fleet.bnei.dev until 2026-08-21, and every
+                # guarded page broke *after* a successful login: the callback
+                # went to https://fleet.bnei.dev/outpost.goauthentik.io/callback,
+                # which is agent-fleet core (ADR-0041 — native OIDC, no outpost
+                # anywhere in that request path), so the code was never
+                # exchanged and the `redirect` carried in the state JWT never
+                # fired. The redirect *to* authentik worked throughout, which is
+                # why it read as an app crash rather than a provider misconfig.
+                #
+                # authentik.bnei.dev is the only host here that serves those
+                # endpoints; verified with
+                # `curl https://authentik.bnei.dev/outpost.goauthentik.io/ping`
+                # -> 204. Protected hosts need no `/outpost.goauthentik.io/`
+                # route of their own — that is the forward_single recipe, and it
+                # is unbuildable for previews anyway, since the provisioner's
+                # Role grants no middleware verbs.
+                external_host: https://authentik.bnei.dev
                 authorization_flow: !Find [authentik_flows.flow, [slug, default-provider-authorization-implicit-consent]]
                 invalidation_flow: !Find [authentik_flows.flow, [slug, default-provider-invalidation-flow]]
                 # Defence in depth only — all three are in-cluster today and
