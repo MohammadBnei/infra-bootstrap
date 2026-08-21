@@ -68,14 +68,16 @@ blueprints:
   # application — see that file's header for why an application with no binding
   # is authenticated but not authorized.
   - authentik-blueprint-previews-policy
+  # The whole forwardAuth tier is one blueprint, deliberately — the embedded
+  # outpost's provider list is replaced rather than appended to, so splitting it
+  # per app makes each file silently unbind the last. It is a ConfigMap and not
+  # a Secret because a proxy provider generates its own OAuth credentials; see
+  # that file's header for why the InfisicalSecret it used to be was pure cost.
+  - authentik-blueprint-forwardauth
   secrets:
   - authentik-blueprint-grafana
   - authentik-blueprint-argocd
   - authentik-blueprint-fleet
-  # The whole forwardAuth tier is one blueprint, deliberately — the embedded
-  # outpost's provider list is replaced rather than appended to, so splitting it
-  # per app makes each file silently unbind the last.
-  - authentik-blueprint-forwardauth
 
 server:
   replicas: 1
