@@ -1,6 +1,6 @@
 # ADR-0040: Cluster-internal hardening baseline
 
-**Status:** Proposed
+**Status:** Accepted (Decisions 1–4, 7 and 9 built; 5, 6 and 8 are not — see the implementation note)
 **Date:** 2026-08-18
 **Related:** [ADR-0006](0006-reject-infisical-as-ssh-tls-ca.md) (its Consequences name Cilium
 encryption as the sanctioned answer to plaintext pod traffic),
@@ -196,3 +196,52 @@ of a cluster built for function first. This ADR turns the defaults on.
 - **Do nothing internally and rely on the perimeter.** Rejected: a perimeter with
   nothing behind it means the first compromised application pod reaches Postgres,
   Proxmox and the registry, and nothing records that it happened.
+
+## Implementation note — what was actually built (2026-08-24)
+
+Appended, not merged into the sections above, per `DECISION.md` §5.
+
+Decisions 1–4 were executed on **2026-08-18** as the two kubespray runs in
+[`docs/runbook-cluster-hardening-adr-0040.md`](../runbook-cluster-hardening-adr-0040.md)
+(Decision 10's "three runs" became two — `--tags control-plane` cannot separate
+the two apiserver flags, so they went together). Decision 7 shipped earlier, in
+PR #157. Decision 9 shipped in this change. Decisions 5, 6 and 8 have no
+implementation at all and are the remaining work.
+
+| Decision | State |
+|---|---|
+| 1 — `kube_encrypt_secret_data` | **Built.** `inventory/ukubi/group_vars/k8s_cluster/k8s-cluster.yml`. Verified live: etcd holds a `k8s:enc:secretbox:v1` envelope |
+| 2 — API audit log + the Alloy file-tail source | **Built.** Same file, plus `gitops/platform/values/alloy/values.yaml`. Verified live: audit streams in Loki. The Alloy half needed a correction — tail the log at its **host** path, not the path in the apiserver's flag (PR #170) |
+| 3 — Cilium WireGuard | **Built.** `inventory/ukubi/group_vars/k8s_cluster/k8s-net-cilium.yml`, both variables. Verified live: `cilium_wg0` with 4 peers |
+| 4 — Hubble flow metrics | **Built**, `[dns, drop, tcp, flow, icmp]`, `http` still excluded |
+| 5 — default-deny NetworkPolicy per namespace | **Not built.** The only NetworkPolicy in the tree is still `gitops/platform/thot/networkpolicy.yaml`, which this ADR already says is not a template for it |
+| 6 — PSA labels via `managedNamespaceMetadata` | **Not built.** No occurrences in `gitops/` |
+| 7 — `securityContext` passthrough in `common-app-chart` | **Built** (PR #157), `gitops/platform/common-app-chart/values.yaml` |
+| 8 — ArgoCD `AppProject` | **Not built.** Every Application and ApplicationSet is still `project: default` |
+| 9 — cert-expiry alert | **Built.** In `gitops/platform/values/traefik/values.yaml`, via the chart's own `metrics.prometheus.prometheusRule.rules` passthrough — see below |
+| 10 — separate kubespray runs with `upgrade_cluster_setup` | **Followed**, as two runs rather than three |
+
+### Decision 9 cost more than the ADR assumed
+
+The ADR calls the alert "cheap", which was true of the rule and false of the
+prerequisite: **Traefik was exporting no metrics to Prometheus at all.** The
+chart enables the prometheus endpoint by default but leaves
+`metrics.prometheus.service` and `.serviceMonitor` off, so the `/metrics`
+endpoint existed on :9100 and no scrape target ever pointed at it. Writing the
+rule alone would have produced an alert over a metric nobody collected — a
+control that reports healthy because it can never fire.
+
+Two further details worth keeping:
+
+- The rule lives in the Traefik chart's `metrics.prometheus.prometheusRule.rules`
+  passthrough rather than as a Grafana-managed rule. That keeps the alert next to
+  the thing it watches and routes it through the Alertmanager receivers that
+  already exist. It also means the alert body is written in a **values file**,
+  which Helm does not template — so `{{ $labels.cn }}` passes through intact,
+  unlike the Grafana `alerting:` block, which `tpl` re-processes and which has to
+  escape its braces.
+- Prometheus needed `ruleSelectorNilUsesHelmValues: false`
+  (`gitops/platform/values/prometheus/values.yaml`) to adopt a rule authored by
+  another chart. Without it the `PrometheusRule` is created, syncs green in
+  ArgoCD, and evaluates nothing — the same shape of silent no-op as Decision 4's
+  `cilium_enable_hubble_metrics`.

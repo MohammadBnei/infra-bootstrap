@@ -152,6 +152,30 @@ updated.
   personal accounts have none); the box and its buildah image cache are.
   Current build repos: `editable-blog`, `agent-fleet`.
   See [ADR-0034](docs/adr/0034-in-cluster-oci-registry-zot-garage-backed.md).
+- **Identity is authentik, and nothing is created by clicking.** Single
+  sign-on for everything the cluster fronts, deployed as a platform app at
+  `authentik.bnei.dev` on Pigsty Postgres. Every provider, application, group
+  and policy is a **blueprint in git** — an `InfisicalSecret` whose template is
+  the blueprint when it carries an OAuth2 client secret, a plain `ConfigMap`
+  when it does not. Four tiers; Native OIDC (ArgoCD, Grafana, agent-fleet
+  `core`) and forwardAuth (e2e previews, `wedding.bnei.dev/admin`) are live, the
+  WebAuthn critical tier is not. **One group, `platform-admins`**, read by both
+  ArgoCD and Grafana, deliberately not authentik's own `authentik Admins`.
+  **The local admins on ArgoCD and Grafana stay** — ArgoCD is what deploys
+  authentik, so routing its only login through authentik would make an
+  authentik outage recoverable by raw `kubectl` alone. mTLS is structurally
+  unavailable (Cloudflare terminates TLS), which is why the critical tier is
+  passkeys. `/authentik-oidc` is the procedure. See
+  [ADR-0039](docs/adr/0039-authentik-identity-layer.md) and
+  [ADR-0041](docs/adr/0041-fleet-native-oidc-not-forwardauth.md).
+- **Certificate renewal is one token, so it gets an alarm.** Since ADR-0038
+  every host in both zones renews through a single `CF_DNS_API_TOKEN`; its
+  revocation or expiry stops renewal everywhere with no error anyone sees, on a
+  90-day fuse. The `TraefikCertExpiringSoon` rule on
+  `traefik_tls_certs_not_after < 21d`
+  (`gitops/platform/values/traefik/values.yaml`) is the only control that
+  catches it — treat it as load-bearing, not as monitoring garnish. See
+  [ADR-0040](docs/adr/0040-cluster-internal-hardening-baseline.md) Decision 9.
 
 ## 3. Do not propose (quick reference — see linked ADR for full reasoning)
 

@@ -1,6 +1,6 @@
 # ADR-0041: `fleet.bnei.dev` moves to the Native OIDC tier
 
-**Status:** Proposed
+**Status:** Accepted (implemented 2026-08-21; Decision 3 reversed the same day it was written — see the amendment at the end)
 **Date:** 2026-08-19
 **Amends:** [ADR-0039](0039-authentik-identity-layer.md) Decision 3 — which assigns
 `fleet` and the e2e previews to the forwardAuth tier. The previews stay there;
