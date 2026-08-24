@@ -683,6 +683,49 @@ and is dropped in favor of Garage.
 
 ## 8. Identity & Access
 
+### authentik (the identity layer)
+
+Single sign-on for everything the cluster fronts, deployed as a **platform** app
+(upstream chart, sync wave 5, `authentik.bnei.dev`) and backed by the Pigsty
+Postgres cluster. Decided in
+[ADR-0039](docs/adr/0039-authentik-identity-layer.md), amended for `fleet` by
+[ADR-0041](docs/adr/0041-fleet-native-oidc-not-forwardauth.md). Operational
+reference: [`docs/runbook-authentik-identity.md`](docs/runbook-authentik-identity.md).
+
+Four access tiers:
+
+| Tier | Mechanism | Status |
+|---|---|---|
+| Public | none | — |
+| Native OIDC | the app is an OIDC relying party | **Live.** ArgoCD, Grafana, and agent-fleet `core` |
+| forwardAuth | Traefik `Middleware/authentik-forwardauth` in front of the route | **Live.** e2e preview hosts, `wedding.bnei.dev/admin`. Alertmanager, pgweb and Proxmox still to move |
+| Critical | adds a WebAuthn passkey policy | Not built |
+
+Three properties that are load-bearing rather than incidental:
+
+- **Nothing is created by clicking.** Every provider, application, group and
+  policy is a blueprint in git. A blueprint carrying an OAuth2 client secret is
+  an `InfisicalSecret` whose *template is the blueprint*; one carrying no
+  credential is a plain `ConfigMap`. `/authentik-oidc` is the procedure.
+- **One group, `platform-admins`**, read by both ArgoCD (`role:admin` over a
+  `role:readonly` default) and Grafana (`role_attribute_path`, defaulting to
+  `Viewer`). Deliberately not authentik's built-in `authentik Admins` — that
+  would make "can administer the IdP" and "can administer the cluster" the same
+  claim. Both expressions fail closed.
+- **Local admins are kept** on ArgoCD and Grafana. ArgoCD is what deploys
+  authentik; if its only login path ran through authentik, an authentik failure
+  would be recoverable through nothing but raw `kubectl`. This is what makes the
+  whole layer revertible.
+
+`fleet.bnei.dev` is the one host that federates *natively* rather than through
+the middleware, because a Traefik middleware cannot gate a worker pod calling
+`agent-fleet-core.agent-fleet.svc:8080` on the pod network — the request never
+passes through Traefik at all. `core` must not trust `X-authentik-*` headers.
+
+**mTLS is structurally unavailable** as a "special device access" mechanism:
+Cloudflare terminates TLS at the edge, so a client certificate can never reach
+Traefik. Passkeys are the answer instead.
+
 ### Proxmox
 
 API tokens per host (exists for proxmox; new token needed for server1
@@ -737,8 +780,10 @@ per-session certs would have exhausted issuance domain-wide.
 > against [ADR-0006](docs/adr/0006-reject-infisical-as-ssh-tls-ca.md)
 > (Infisical rejected as a CA) — it isn't necessarily the same proposal
 > (a non-Infisical internal CA wasn't explicitly ruled out), but it was
-> never resolved. Treat as an open question, not a locked decision,
-> until a fresh ADR settles it.
+> never resolved. [ADR-0040](docs/adr/0040-cluster-internal-hardening-baseline.md)
+> closed one half of it — pod-to-pod confidentiality is Cilium's transparent
+> WireGuard, not a CA — but explicitly left the rest open. Treat as an open
+> question, not a locked decision, until a fresh ADR settles it.
 
 ---
 
@@ -747,7 +792,13 @@ per-session certs would have exhausted issuance domain-wide.
 - Prometheus + Grafana in K8s (existing).
 - pg_exporter on Postgres (via Pigsty).
 - node_exporter on every host (Pi 4, ex-laptop, PVE hosts).
-- Hubble for Cilium L3/L4 observability.
+- Hubble for Cilium L3/L4 observability, exporting flow metrics
+  `[dns, drop, tcp, flow, icmp]` to Prometheus. `http` is deliberately
+  excluded — L7 means Hubble parses application payloads, a different
+  privacy and performance posture that needs its own decision
+  ([ADR-0040](docs/adr/0040-cluster-internal-hardening-baseline.md) Decision 4).
+  Note `cilium_enable_hubble_metrics: true` alone is a no-op; the list is
+  what turns it on.
 - Loki + Grafana Alloy for centralized logging (implemented — Loki
   SingleBinary mode with filesystem storage, Alloy DaemonSet shipping
   container logs from every node; Alloy chosen over Promtail since it's

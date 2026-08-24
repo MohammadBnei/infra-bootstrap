@@ -117,10 +117,13 @@
   valuesPath: [k8s/core.yaml]
   targetRevision: main
   # core also serves the agent-fleet web dashboard (ConnectRPC + static
-  # SPA) — see agent-fleet's docs/adr/0014/0015. k8s/core.yaml's own
-  # ingress.middlewares (basic-admin-auth) pairs with this hostname since
-  # the ApplicationSet template's Helm `parameters` override for
-  # ingress.hostname always wins over a values-file setting of the same key.
+  # SPA) — see agent-fleet's docs/adr/0014/0015. Auth is inside core itself
+  # (native OIDC against authentik, ADR-0041) — not a Traefik middleware,
+  # because a middleware cannot gate a worker pod calling core on the pod
+  # network. The basic-admin-auth middleware this comment used to describe
+  # was removed by ADR-0041's amendment. Note the ApplicationSet template's
+  # Helm `parameters` override for ingress.hostname always wins over a
+  # values-file setting of the same key.
   hostname: fleet.bnei.dev
 
 - name: wedding-2026

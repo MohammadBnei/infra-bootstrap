@@ -76,6 +76,65 @@ logs:
     enabled: true
     format: json
 
+# ADR-0040 Decision 9. Nothing scraped Traefik before this: the chart enables
+# the prometheus metrics endpoint by default (entrypoint `metrics`, :9100) but
+# leaves both `service` and `serviceMonitor` off, so the endpoint existed and
+# no target ever pointed at it.
+#
+# The alert below is the ONLY control on the fuse ADR-0038 lit: every host in
+# both zones now renews through one CF_DNS_API_TOKEN, and a revoked or expired
+# token stops renewal everywhere *silently*. Nothing else notices until
+# certificates start expiring, up to 90 days later.
+metrics:
+  prometheus:
+    # A dedicated metrics Service for the ServiceMonitor to select.
+    # ports.metrics.expose.default stays false — this is cluster-internal, the
+    # LoadBalancer Service does not gain a :9100.
+    service:
+      enabled: true
+    serviceMonitor:
+      enabled: true
+      interval: 60s
+    # Rules here are passed through verbatim by the chart's prometheusrules.yaml
+    # template. A values file is not Go-templated, so `{{ $labels.x }}` below
+    # reaches the PrometheusRule intact — unlike the Grafana `alerting:` block
+    # in grafana/values.yaml, which Helm's `tpl` re-processes and which
+    # therefore has to escape its braces.
+    #
+    # Prometheus only adopts this because prometheus/values.yaml sets
+    # ruleSelectorNilUsesHelmValues: false — without it the CR is created and
+    # silently ignored, which looks identical to working.
+    prometheusRule:
+      enabled: true
+      rules:
+        # traefik_tls_certs_not_after is a gauge whose value is the expiry as a
+        # unix timestamp, one series per certificate in the TLS store (labels
+        # cn / sans / serial). That store holds both the *.bnei.dev origin
+        # wildcard set as the default cert above and everything the ACME
+        # resolvers obtain, so one rule covers the lot.
+        #
+        # 21 days: two full renewal attempts (lego retries from 30 days out)
+        # have to have failed before this fires, so it is not noise, and it
+        # still leaves three weeks to fix a token.
+        - alert: TraefikCertExpiringSoon
+          expr: "(traefik_tls_certs_not_after - time()) < 21 * 24 * 3600"
+          # A scrape gap or a Traefik restart mid-reload must not page.
+          for: 1h
+          labels:
+            # Reaches Discord AND wakes thot — prometheus/values.yaml routes
+            # severity =~ critical|warning to both. Deliberate: a cluster-wide
+            # cert outage is worth an investigation, and thot dedups by alert
+            # fingerprint so a 21-day firing window is one wake-up, not 126.
+            severity: warning
+          annotations:
+            summary: "TLS certificate for {{ $labels.cn }} expires in under 21 days"
+            description: >-
+              Traefik has not renewed {{ $labels.cn }} (serial {{ $labels.serial }}).
+              Check CF_DNS_API_TOKEN first — ADR-0038 put every host in both
+              zones behind that one token, so its revocation or expiry looks
+              exactly like this. Then check the `le` / `le-dns` resolver logs
+              in {namespace="traefik"} for lego errors.
+
 # Chart's default podSecurityContext (runAsUser/runAsGroup: 65532) has no
 # fsGroup, so the acme.json PVC mounts root:root/0755 — Traefik can't
 # create the file at all ("permission denied"), which permanently disables
@@ -318,7 +377,8 @@ certificatesResolvers:
   # two files and nothing else. Kept rather than collapsed because merging them
   # is a second cert migration, not because the rationale still holds. A revoked
   # or expired CF_DNS_API_TOKEN now stops renewal for every host in both zones,
-  # which is why ADR-0040 adds an expiry alert on traefik_tls_certs_not_after.
+  # which is what the traefik_tls_certs_not_after alert in the metrics: block
+  # above exists to catch (ADR-0040 Decision 9).
   #
   # `le` still took three chained bugs to get working originally
   # (docs/bootstrap-test-notes.md, 2026-07-28); changing the challenge type does
