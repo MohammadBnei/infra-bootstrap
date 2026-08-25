@@ -3284,3 +3284,123 @@ config it produced is silently correct until exactly that moment.
 
 The related trap: `startup` already existed on those VMs, so "boot ordering" read
 as handled. Half a setting is a worse signal than none.
+
+## 2026-08-25 — INCIDENT: server1 isolated for 23h40m by a USB uplink that came back and a bridge that did not notice
+
+`server1` (`.200`) was unreachable from the LAN. A manual reboot at 20:05 fixed
+it. Uptime before the reboot was 27 days, so nothing had been touched.
+
+### Timeline
+
+| When | What |
+|---|---|
+| Aug 24 20:24:39 | `r8152-cfgselector 2-9: USB disconnect, device number 2` + `Tx status -108` (ESHUTDOWN) |
+| Aug 24 20:24:39 | `vmbr0: port 1(nic0) entered disabled state`, then `nic0 (unregistering)` — the netdev is destroyed, taking the bridge's only uplink port with it |
+| Aug 24 20:24:40 | corosync: links to host 1 *and* host 3 down, token timeout |
+| Aug 24 20:24:41 | Device re-enumerates as number 3, `r8152 2-9:1.0 nic0: renamed from eth0` — **nothing re-enslaves it to `vmbr0`** |
+| Aug 24 20:24:45 | `This node is within the non-primary component and will NOT provide any services` |
+| Aug 24 20:25 → Aug 25 20:01 | `pvescheduler ... no quorum!` once a minute. Zero sshd connections in the window |
+| Aug 25 20:05 | Manual reboot. `networking.service` re-ran `ifup vmbr0`, which re-enslaved `nic0` |
+
+`vmbr0` held its IP the entire time and kept its `veth*`/`tap*` ports, so guests
+could still talk to each other. Nothing could reach the LAN.
+
+### Root cause
+
+`server1`'s only uplink is a USB Realtek RTL8153 dongle (`nic0`, driver `r8152`,
+`usb-0000:00:14.0-9`), and it is the sole `bridge-ports` member of `vmbr0`.
+
+The USB drop was a two-second event. What made it a 24-hour outage is that
+**nothing on a stock PVE host re-attaches a hotplugged interface to its bridge**:
+
+- `/etc/udev/rules.d/60-bridge-network-interface.rules` is a **symlink to
+  `/dev/null`**, created by the Proxmox installer (18:53 on install day). It
+  masks `bridge-utils`' hotplug helper `/usr/lib/udev/bridge-network-interface`,
+  which is exactly the thing that would have run `brctl addif vmbr0 nic0`.
+- `/etc/default/bridge-utils` additionally ships `BRIDGE_HOTPLUG=no`, so the
+  helper would exit at the top even if the rule were live.
+- ifupdown2 enslaves bridge ports only at `ifup` time and ships **no** hotplug
+  udev rule of its own (`dpkg -L ifupdown2` has systemd units, no udev rules).
+
+None of this is a misconfiguration. PVE masks the bridge-utils helper on purpose
+because ifupdown2 owns bridge management, and that is correct for a PCIe NIC,
+which never re-enumerates. It is exactly wrong for a USB uplink.
+
+### The first diagnosis was right about the trigger and wrong about the fix
+
+The initial recommendation was "move the uplink to the onboard Intel I219-LM
+(`nic1`, `e1000e`), it is sitting there unused." That was backwards: the dongle
+exists *because* the onboard NIC was hanging (`e1000e` Tx unit hang) roughly
+every two days, and the dongle was the deliberate fix for it.
+
+The evidence for that history is not in this box's journal — it only goes back to
+2026-07-28, the PVE reinstall, and contains zero `Hardware Unit Hang` entries.
+The e1000e failures predate the reinstall and belong to the previous OS.
+
+**Lesson: a strange-looking configuration on a long-lived box is usually the
+scar tissue of a fix, not an oversight.** "There is an unused onboard NIC right
+there" was a conclusion drawn from current state alone, with no attempt to ask
+why the state was that way. The journal could not have answered it. The operator
+could, and was not asked.
+
+Comparing the two options on the numbers rather than on which looks tidier: the
+dongle dropped once in 27 days, the onboard NIC every ~2 days. The dongle wins
+on MTBF; its only real disadvantage was that its failure mode was unrecoverable
+without a reboot. That is the part worth fixing, and it is one file.
+
+### What was tested rather than assumed
+
+On a throwaway dummy interface and bridge, with `vmbr0` verified intact after
+each run:
+
+| Candidate | Result |
+|---|---|
+| `allow-hotplug nic0` + ifupdown2's shipped `ifup@.service` | **Fails.** `ifup --allow=hotplug` on a `manual` stanza brings the link up but does not re-enslave it |
+| `ip link set <if> master <br>` | Works |
+| udev rule matching `ENV{INTERFACE}=="nic0"` on a real `add` event | **Fires** — confirmed with a marker file and a live `udevadm trigger` |
+| Same rule against `tap205i0`, `veth102i0`, `nic1` | No false matches |
+
+The `allow-hotplug` route is the one that looks most idiomatic and is the one
+that does not work. Worth knowing before reaching for it again.
+
+### Fix
+
+`/etc/udev/rules.d/99-nic0-rejoin-vmbr0.rules`, installed on `.200`:
+
+```
+ACTION=="add", SUBSYSTEM=="net", ENV{INTERFACE}=="nic0", RUN+="/usr/sbin/ip link set nic0 master vmbr0", RUN+="/usr/sbin/ip link set nic0 up"
+```
+
+This turns a dongle drop into a ~2s blip, well inside corosync's recovery
+window. Undo is `rm` the file plus `udevadm control --reload`.
+
+Not yet verified end-to-end by actually detaching `nic0` — that costs a
+deliberate ~10s outage and a brief quorum loss. The rule's *matching* is proven
+against a real `add` event; only the `RUN` command is unproven in situ, and it
+works standalone.
+
+### Fleet check — one other node has the same time bomb
+
+| Node | `nic0` | Exposed? |
+|---|---|---|
+| `server1` `.200` | `r8152`, `usb-0000:00:14.0-9` | **Yes** — hit on 2026-08-24, rule installed |
+| `ex-laptop` `.161` | `r8152`, `usb-0000:00:14.0-3` | **Yes** — same config, same `/dev/null` mask, simply not hit yet |
+| `proxmox`/`bnei` `.165` | `r8169`, `pci-0000:09:00.0` | No — PCIe, does not re-enumerate |
+
+`ex-laptop` needs the identical rule. Note its interface is also called `nic0`,
+so the rule is byte-identical.
+
+### Two things that will bite later
+
+**PVE 9 renamed the interfaces.** The onboard I219-LM on `server1` is `nic1`,
+not `eno1` (MAC `c8:d9:d2:2c:9f:2b`). Any `e1000e` workaround carried over from
+the old OS — e.g. `post-up /sbin/ethtool -K eno1 tso off gso off gro off` — will
+silently never apply under the new naming. Offloads on `nic1` are currently all
+`on`.
+
+**A cluster node vanished for 24 hours and nothing said so.** There is no
+`additionalScrapeConfigs` or static target in
+`gitops/platform/values/prometheus/values.yaml`, and no blackbox/PVE exporter in
+`gitops/apps/registry.yaml`. The PVE hosts themselves are not monitored at all —
+only what runs on top of them is. The detection path for this incident was a
+human noticing.
