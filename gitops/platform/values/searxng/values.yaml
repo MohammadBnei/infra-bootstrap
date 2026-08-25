@@ -152,13 +152,14 @@ extraManifests:
   #
   # Two things this does NOT do, stated plainly so the next reader doesn't
   # over-trust it:
-  #   - The `except:` is not what blocks the node IPs (.201-.206), nor what
-  #     blocks pod-to-pod. CIDR rules select neither node nor Cilium-managed
-  #     endpoint identities (policy-cidr-match-mode is unset, its default).
-  #     Both are denied because nothing here grants `remote-node` or
-  #     `toEndpoints` — same outcome, but not by the line that looks like it
-  #     is doing the work. Service VIPs ARE plain `world` though, which is why
-  #     the except list below is all of RFC1918 rather than just the LAN.
+  #   - The `except:` is not what blocks the node IPs (.201-.206), nor
+  #     pod-to-pod, nor the cluster Service VIPs. Nodes are identity 7
+  #     (remote-node), pods carry their own endpoint identities, and
+  #     ClusterIPs resolve to identity 1 (reserved:host) — none of which a
+  #     CIDR rule selects. All three are denied because nothing grants them,
+  #     not by the line that looks like it is doing the work. The except list
+  #     earns its place on the LAN hosts specifically. All verified live, see
+  #     the ipcache table further down.
   #   - It is not a seal. proxmox.bnei.dev and s3.bnei.dev are publicly
   #     reachable, and this pod keeps unrestricted internet egress, so it can
   #     still reach .200 and .199 by going out and back through the front door.
@@ -188,14 +189,17 @@ extraManifests:
                   protocol: UDP
                 - port: "53"
                   protocol: TCP
-        # Belt and braces, deliberately redundant. cilium#18644 records the
-        # nodelocaldns link-local address flip-flopping between `host` and a
-        # CIDR identity depending on whether nodelocaldns or the agent started
-        # first. The rule above covers the `host` reading; this one covers the
-        # CIDR reading. Exactly one is load-bearing at any moment and we cannot
-        # tell which, so keep both — DNS has no fallback here
-        # (enable_nodelocaldns_secondary is false), which is what makes an
-        # unproven assumption unacceptable rather than merely untidy.
+        # Belt and braces. VERIFIED 2026-08-25 against the live cluster: the
+        # rule ABOVE is the one carrying DNS — `cilium-dbg bpf ipcache get
+        # 169.254.25.10` returns identity=1, reserved:host. So this rule is
+        # currently a no-op, and the earlier note that we "cannot tell which is
+        # load-bearing" is now resolved: it is the toEntities rule.
+        #
+        # Kept anyway. cilium#18644 has that address flip-flopping to a CIDR
+        # identity depending on whether nodelocaldns or the agent started
+        # first, and DNS has no fallback here (enable_nodelocaldns_secondary is
+        # false). A no-op today is cheap; re-deriving this during a DNS outage
+        # is not.
         - toCIDR:
             - 169.254.25.10/32
           toPorts:
@@ -207,22 +211,31 @@ extraManifests:
         # Everything else searxng does is the public internet: it is a
         # metasearch engine.
         #
-        # The except list is all of RFC1918, not just the LAN. Cluster Service
-        # VIPs live in 10.233.0.0/18, and with cilium_kube_proxy_replacement
-        # false, ClusterIP DNAT happens in the host netns *after* Cilium's
-        # egress hook on the pod veth — so policy sees the pre-DNAT VIP, which
-        # has no Cilium endpoint identity and is plain `world`. Without
-        # 10.0.0.0/8 here, a popped searxng — or just `image_proxy: true`
-        # fetching an attacker-supplied URL — reaches the kube-apiserver at
-        # 10.233.0.1:443 with the default ServiceAccount token this chart
-        # mounts, plus Zot's, ArgoCD's and infisical-backend's ClusterIPs.
+        # The except list is all of RFC1918, not just the LAN. VERIFIED live
+        # 2026-08-25 with `cilium-dbg bpf ipcache get`, because the mechanism
+        # is not the one an earlier draft of this comment claimed:
         #
-        # For the same pre-DNAT reason, a namespace that DOES need in-cluster
-        # egress cannot get it from a `toEndpoints` rule — policy never sees the
-        # backend endpoint's identity, only the VIP. That case needs
-        # `toServices`, or the ClusterIP written into a `toCIDR`. Getting this
-        # right matters more than this one namespace does: it is what the rest
-        # of the ADR-0040 Decision 5 rollout gets copied from.
+        #   192.168.1.232 / .200  -> identity 16777219  cidr:192.168.0.0/16
+        #   192.168.1.206 (node)  -> identity 7         remote-node
+        #   a public IP           -> identity 2         reserved:world
+        #   169.254.25.10         -> identity 1         reserved:host
+        #   10.233.x  (ClusterIP) -> identity 1         reserved:host
+        #
+        # So the except list DOES block the LAN, by minting cidr: identities
+        # that no rule then grants. But it is NOT what blocks the Service VIPs:
+        # ClusterIPs resolve to reserved:host, and the host rule above is
+        # port-53-only, so every other ClusterIP port is denied by that instead.
+        # The 10.0.0.0/8 entry is belt-and-braces there, not the control.
+        #
+        # Consequence for the rollout, and this is the part worth copying: a
+        # namespace that DOES need in-cluster egress will NOT get it from a
+        # `toEndpoints` rule. Under cilium_kube_proxy_replacement: false the
+        # verdict for ClusterIP traffic is taken against reserved:host, never
+        # against the backend pod's identity, so a toEndpoints allow can never
+        # match. `toServices` is the documented answer but is UNVERIFIED here —
+        # test it on the first namespace that needs it rather than trusting
+        # this comment. Allowing reserved:host on the port also works and is
+        # blunt: it opens the node on that port too.
         #
         # 169.254.0.0/16 is deliberately NOT excepted — that would strand the
         # DNS rule above on the unproven half of cilium#18644. Bare metal, so

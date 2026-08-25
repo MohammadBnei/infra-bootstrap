@@ -3510,3 +3510,81 @@ cluster or LAN failure remains undetectable from inside. The complete answer is
 an external dead-man's switch (the `Watchdog` alert already exists and is
 currently routed to `null` precisely for that purpose), which needs a decision
 about what external endpoint to trust and is not made here.
+
+## 2026-08-25 — the first egress NetworkPolicy: three plausible mechanisms, none of them the real one
+
+First policy of the ADR-0040 Decision 5 pilot (`searxng`, PR #199). It works —
+LAN blocked, DNS alive, internet fine — but **every explanation written for it
+before it ran was wrong**, including two written after an adversarial review.
+The policy shipping correct while its rationale was wrong is the finding worth
+keeping, because the rationale is what the other ~19 namespaces get copied from.
+
+Ground truth, from `cilium-dbg bpf ipcache get` on the node running the pod
+(`cilium-w72z8`, Cilium 1.19.3, `cilium_kube_proxy_replacement: false`):
+
+| Destination | Identity | |
+|---|---|---|
+| `192.168.1.232` (Pigsty VIP), `.200` (Proxmox) | `16777219` | `cidr:192.168.0.0/16` |
+| `192.168.1.206` (a node) | `7` | `reserved:remote-node` |
+| a public IP | `2` | `reserved:world` |
+| `169.254.25.10` (nodelocaldns) | `1` | `reserved:host` |
+| `10.233.22.247`, `10.233.0.1` (ClusterIPs) | `1` | **`reserved:host`** |
+
+And the endpoint's actual egress policy map (`cilium-dbg bpf policy get 2543`)
+is three lines: `host` on 53/TCP, `host` on 53/UDP, `world` on ANY.
+
+### What that overturns
+
+**1. "An `ipBlock`/`toCIDR` rule can carry DNS."** No. `169.254.25.10` is
+identity 1, `reserved:host`, and CIDR selectors never match host. The
+`toEntities: [host]` rule is the only thing keeping DNS alive; the deliberately
+redundant `toCIDR: 169.254.25.10/32` rule kept alongside it is a confirmed
+no-op. This one was caught *before* shipping by an adversarial pass and is the
+reason the policy is a `CiliumNetworkPolicy` — plain `NetworkPolicy` cannot
+express it, and with `enable_nodelocaldns_secondary: false` the failure would
+have been namespace-wide DNS death with no fallback.
+
+**2. "ClusterIPs are `world`, so `except: 10.0.0.0/8` is what blocks them."**
+No. ClusterIPs are identity 1, `reserved:host` — the same identity as the node.
+They are blocked because the host rule is port-53-only, so every other ClusterIP
+port falls through to no-match. The `10.0.0.0/8` except never participates. The
+LAN hosts *are* blocked by the except list, via minted `cidr:` identities that
+no rule grants — so the except earns its place, just not where the comment said.
+
+**3. "A namespace needing in-cluster egress adds a `toEndpoints` rule."** This
+was the review's correction to the original comment, and it is also wrong — it
+assumed policy sees the pre-DNAT VIP as `world`. It sees `reserved:host`. A
+`toEndpoints` allow names the backend pod's identity (`63384` for
+`platform-infisical-backend`), which is never the identity the verdict is taken
+against for ClusterIP traffic, so it can never match. Verified: a probe from
+searxng to `10.233.22.247:8080` drops with `policy-verdict:none`.
+
+`toServices` is the documented answer and is **untested here** — do not write it
+into a policy on faith. Allowing `reserved:host` on the specific port does work
+and is blunt: identity 1 covers the node too, so it opens that port on the node
+as well.
+
+### Why every hop misled
+
+`hubble observe` reports drops against the **post-DNAT** address with a
+friendly name — `192.168.1.206:6443 (kube-apiserver)`,
+`infisical/platform-infisical-backend-...:8080 (ID:63384)` — which reads as
+proof that policy evaluated the backend identity. It is not; it is Hubble
+resolving the conntrack entry for display. And `policy-verdict:none` is emitted
+identically whether an `except` removed the destination or no rule ever covered
+it, so the drop log cannot distinguish the two hypotheses either. **The ipcache
+and the endpoint policy map are the only things that answer the question.** For
+any future policy: `cilium-dbg bpf ipcache get <ip>` and
+`cilium-dbg bpf policy get <endpoint-id>`, not the flow log.
+
+### Verified working
+
+`searxng` pod untouched (24h uptime — Cilium applies policy to running
+endpoints, no restart), `POLICY (egress) ENFORCEMENT: Enabled`, ingress
+`Disabled` as intended. From inside the pod: DNS resolves in 0.0s, HTTPS to the
+internet connects, and `.232:5432` / `.234:5000` / `.200:8006` / `10.233.0.1:443`
+all time out with `Policy denied DROPPED`.
+
+Not yet re-checked after a `cilium-agent` restart — cilium#18644 has that
+link-local identity flipping on start order, so "it resolves now" is not
+durable evidence.
