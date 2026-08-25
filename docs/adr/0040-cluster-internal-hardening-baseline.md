@@ -214,12 +214,55 @@ implementation at all and are the remaining work.
 | 2 — API audit log + the Alloy file-tail source | **Built.** Same file, plus `gitops/platform/values/alloy/values.yaml`. Verified live: audit streams in Loki. The Alloy half needed a correction — tail the log at its **host** path, not the path in the apiserver's flag (PR #170) |
 | 3 — Cilium WireGuard | **Built.** `inventory/ukubi/group_vars/k8s_cluster/k8s-net-cilium.yml`, both variables. Verified live: `cilium_wg0` with 4 peers |
 | 4 — Hubble flow metrics | **Built**, `[dns, drop, tcp, flow, icmp]`, `http` still excluded |
-| 5 — default-deny NetworkPolicy per namespace | **Not built.** The only NetworkPolicy in the tree is still `gitops/platform/thot/networkpolicy.yaml`, which this ADR already says is not a template for it |
+| 5 — default-deny NetworkPolicy per namespace | **Not built, and the mechanism it names is wrong for this cluster** — see below. A narrower egress-only pilot is in flight on `searxng` (PR #199) |
 | 6 — PSA labels via `managedNamespaceMetadata` | **Not built.** No occurrences in `gitops/` |
 | 7 — `securityContext` passthrough in `common-app-chart` | **Built** (PR #157), `gitops/platform/common-app-chart/values.yaml` |
 | 8 — ArgoCD `AppProject` | **Not built.** Every Application and ApplicationSet is still `project: default` |
 | 9 — cert-expiry alert | **Built.** In `gitops/platform/values/traefik/values.yaml`, via the chart's own `metrics.prometheus.prometheusRule.rules` passthrough — see below |
 | 10 — separate kubespray runs with `upgrade_cluster_setup` | **Followed**, as two runs rather than three |
+
+### Decision 5 needs a different mechanism than it specifies
+
+Decision 5 says "default-deny **NetworkPolicy** per namespace". A pilot on one
+namespace (`searxng`, PR #199) found that plain `NetworkPolicy` **cannot express
+the carve-out this cluster needs**, and that writing it anyway takes the
+namespace offline.
+
+`nodelocaldns` runs hostNetwork on the link-local `169.254.25.10`, and every
+pod's resolver is that address rather than a Service IP. Since Cilium 1.17 —
+this cluster runs **1.19.3** — link-local addresses carry the `host` identity,
+and Cilium's [L3 policy
+docs](https://docs.cilium.io/en/stable/security/policy/layer3/) state that "CIDR
+rules do not apply to traffic where both sides of the connection are either
+managed by Cilium or use an IP belonging to a node in the cluster (including
+host networking pods)". So the obvious `ipBlock: 169.254.25.10/32` DNS carve-out
+matches nothing, egress goes default-deny as soon as any rule exists, and DNS
+dies for the whole namespace — with no fallback, since
+`enable_nodelocaldns_secondary: false`. `toEntities: [host]` is the only way to
+say it, and that is a `CiliumNetworkPolicy` field.
+
+Two corrections to the decision's framing follow from the same property:
+
+- **An `except:` on a CIDR rule does not block the node IPs.** CIDR rules do not
+  select node identities at all; `policy-cidr-match-mode` is unset, which is its
+  default. Node traffic is blocked by the *absence* of a `remote-node` rule.
+  Same outcome, different mechanism — and the difference bites whoever later
+  adds `remote-node` back for a kubelet scrape.
+- **The carve-out list in Decision 5 is incomplete.** It names authentik →
+  `192.168.1.232:5432`. The full inventory is larger and includes several flows
+  that look internal but are not: ArgoCD, Grafana and agent-fleet `core` all
+  reach authentik over `*.bnei.dev`, which leaves the cluster and returns
+  through Cloudflare (both origin-lock allowlists carry the pod CIDR
+  `10.233.64.0/18` precisely because of this). Longhorn's cross-node
+  instance-manager replica sync on `:10000-10250` is nowhere in the ADR and is
+  the one flow whose failure is data risk rather than downtime.
+
+The pilot also narrows the ambition. Decision 5's own rationale is that "the
+first compromised application pod reaches Postgres, Proxmox and the registry" —
+an **egress** problem against the LAN management plane, which is a handful of
+rules rather than a per-namespace ingress regime maintained forever. The pilot
+implements that narrower shape. Whether the full default-deny is still wanted
+afterwards is a question to reopen with a week of Hubble data, not now.
 
 ### Decision 9 cost more than the ADR assumed
 
