@@ -3398,9 +3398,115 @@ the old OS — e.g. `post-up /sbin/ethtool -K eno1 tso off gso off gro off` — 
 silently never apply under the new naming. Offloads on `nic1` are currently all
 `on`.
 
-**A cluster node vanished for 24 hours and nothing said so.** There is no
-`additionalScrapeConfigs` or static target in
-`gitops/platform/values/prometheus/values.yaml`, and no blackbox/PVE exporter in
-`gitops/apps/registry.yaml`. The PVE hosts themselves are not monitored at all —
-only what runs on top of them is. The detection path for this incident was a
-human noticing.
+**A cluster node vanished for 24 hours and nothing said so.** The PVE hosts are
+not probed at all — only what runs on top of them is. That is real, but it is
+the smaller half of why this was silent; see the follow-up section below.
+
+## 2026-08-25 — why the 24h outage was silent: the monitoring stack was inside the blast radius
+
+Follow-up to the incident above. The obvious answer — "nothing watches the PVE
+hosts" — is true and was fixed, but it is not why zero alerts were delivered.
+
+### The rules were there and would have fired
+
+146 alert rules are loaded, including `TargetDown`. When server1 went away,
+node-exporter on both of its guests (`k8s-cp-02`, `k8s-worker-02`) stopped
+answering, which is exactly what `TargetDown` exists to catch. Nothing was
+missing.
+
+### Prometheus was on the host that died, and a StatefulSet does not move
+
+`prometheus-platform-prometheus-kube-p-prometheus-0` runs on `k8s-worker-02`,
+a VM **on server1**. It went dark with the host at 20:24 and stayed dark for
+the full 23h40m, evaluating nothing.
+
+It did not reschedule, and that is by design, not a bug: a StatefulSet pod on
+an unreachable node is not recreated elsewhere, because the controller cannot
+prove the old pod is gone and the at-most-one guarantee forbids running a
+second one. It sits `Terminating` until the node returns.
+
+The contrast is visible in the pod start times:
+
+| Pod | Kind | Node | Behaviour |
+|---|---|---|---|
+| `platform-prometheus-kube-p-operator` | Deployment | k8s-worker-01 | Rescheduled off, restarted 2026-08-24 20:30 — six minutes into the outage |
+| `platform-prometheus-kube-state-metrics` | Deployment | k8s-worker-01 | Same |
+| `prometheus-...-prometheus-0` | **StatefulSet** | k8s-worker-02 | Stuck for 24h |
+| `platform-loki-0` | **StatefulSet** | k8s-worker-02 | Stuck for 24h |
+
+Alertmanager was alive the whole time on `k8s-cp-01` (`.165`) and received
+nothing. **Alertmanager cannot alert on absence** — no input is
+indistinguishable from a healthy, quiet cluster.
+
+Note `platform-loki-0` shares the blind spot exactly, so a Loki-based rule is
+no escape: the log pipeline died on the same host for the same reason.
+
+### The lesson
+
+**A monitor that runs on the thing it monitors cannot report that thing's
+death.** Adding a PVE probe alone would have been theatre: on a repeat of this
+exact incident, the prober's results would have gone to a Prometheus that was
+itself gone. Any "why didn't it alert" investigation has to ask where the
+evaluator was running, not just whether the rule existed.
+
+### Fix — two halves, deliberately in different systems
+
+1. **`blackbox-exporter`** (`gitops/platform/values/blackbox-exporter/`,
+   registered in `platform.applicationset.yaml` at wave 5) — `tcp_connect`
+   probes of `pveproxy:8006` on all three PVE hosts, alert `PVEHostUnreachable`
+   after 3m, plus `PVEHostProbeStale` because `probe_success == 0` cannot fire
+   if the series stops existing at all. TCP rather than ICMP: an ICMP prober
+   needs `NET_RAW`, a TCP dial needs no capability.
+
+2. **`monitoring-blind`** (a Grafana native rule in
+   `values/grafana/values.yaml`) — the dead-man's switch for half 1. Evaluated
+   by **Grafana**, which is a Deployment and therefore does reschedule off a
+   dead node. `execErrState`/`noDataState: Alerting`, `for: 10m`: if Grafana
+   cannot get an answer out of Prometheus, that is the alert.
+
+Deliberately the opposite of PR #197, which set per-app `logAlerts` to
+`execErrState: OK` so a broken query would not masquerade as a flapping app.
+Here the query failing *is* the signal being watched for.
+
+### A trap found on the way: `ds-prometheus` is not the cluster's Prometheus
+
+A provisioned Grafana alert addresses its datasource by **uid**, never by name.
+The platform Prometheus had no explicit uid — Grafana auto-generated a random
+one — so no provisioned rule could reference it at all.
+
+And the obvious-looking uid is already taken: `ds-prometheus` is **Pigsty's
+VictoriaMetrics**, which has to keep that uid so Pigsty's vendored dashboard
+JSON works verbatim. A rule written against `ds-prometheus` expecting cluster
+metrics silently queries a Postgres metrics store on another host, and fails as
+*empty results* rather than an error.
+
+Fixed by giving the platform Prometheus an explicit, deliberately distinct
+`uid: ds-platform-prometheus`.
+
+### Verified before merge, not assumed
+
+`helm template` only catches templating errors, so both halves were rendered
+and then run:
+
+- `helm template` of both charts: clean. The blackbox chart does **not** run
+  `tpl` over `prometheusRule`, so `{{ $labels.instance }}` survives verbatim —
+  no backtick escaping needed there, unlike the Grafana `alerting:` block.
+- The generated ServiceMonitor relabels give each series `instance`
+  (`192.168.1.200:8006`) and a human-readable `target` (`pve-server1`) —
+  confirmed from the render, not guessed, before writing the annotations.
+- The rendered provisioning was mounted into a real `grafana/grafana:12.3.1`
+  container. Datasources came back as `ds-platform-prometheus` = "Prometheus"
+  (default) and `ds-prometheus` = "Pigsty (VictoriaMetrics)", confirming the
+  uid split. The `monitoring-blind` rule was accepted and reached
+  `"state":"Alerting (Error)"` because Prometheus was unreachable from that
+  container — which is precisely the incident condition, so the smoke test
+  demonstrated the mechanism end to end by accident.
+
+### Residual gap
+
+If the host running **Grafana** dies, Grafana reschedules (Deployment) and
+recovers — but there is still no watcher outside the cluster entirely. A total
+cluster or LAN failure remains undetectable from inside. The complete answer is
+an external dead-man's switch (the `Watchdog` alert already exists and is
+currently routed to `null` precisely for that purpose), which needs a decision
+about what external endpoint to trust and is not made here.

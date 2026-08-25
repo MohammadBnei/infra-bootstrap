@@ -44,6 +44,18 @@ datasources:
       # ingressroute.yaml — always check the real Service name.
       url: http://platform-prometheus-kube-p-prometheus.monitoring.svc.cluster.local:9090
       isDefault: true
+      # Fixed uid, added 2026-08-25. Until then this datasource had NO uid and
+      # Grafana auto-generated a random one, which meant no provisioned alert
+      # rule could reference the platform Prometheus at all — a provisioned
+      # rule addresses its datasource by uid, never by name.
+      #
+      # Deliberately NOT `ds-prometheus`: that uid is already taken, 20 lines
+      # below, by Pigsty's VictoriaMetrics (it has to be, so Pigsty's vendored
+      # dashboard JSON works verbatim). Anyone writing a rule against
+      # "ds-prometheus" expecting cluster metrics gets Postgres metrics from a
+      # different host instead, and it fails as empty results rather than an
+      # error. Hence the explicit, distinct name.
+      uid: ds-platform-prometheus
 
     # Pigsty's own metrics backend (pg01, postgres-1.bnei.lan) — actually
     # VictoriaMetrics (v2.24.0), not classic Prometheus, but it implements
@@ -440,6 +452,103 @@ alerting:
                         # sustained over the 5m window — starting point, not
                         # tuned per-app; refine once real log volume is visible.
                         params: [0.5]
+
+      # The dead-man's switch for the monitoring stack itself.
+      #
+      # Added 2026-08-25 after server1 (.200) was network-isolated for 23h40m
+      # with zero alerts delivered. The reason was not a missing rule —
+      # `TargetDown` was loaded and would have fired. The reason is that
+      # Prometheus runs on k8s-worker-02, a VM ON server1, and Prometheus is a
+      # StatefulSet: a StatefulSet pod on an unreachable node is NOT
+      # rescheduled (the at-most-one guarantee means it stays Terminating
+      # until the node returns). So Prometheus went down with the host and
+      # stayed down for the full 24h, evaluating nothing. Alertmanager was
+      # alive the whole time on k8s-cp-01 and simply received nothing —
+      # Alertmanager cannot alert on absence.
+      #
+      # This rule is evaluated by GRAFANA, not Prometheus. Grafana is a
+      # Deployment, so it does reschedule off a dead node, which is exactly
+      # the property Prometheus lacks. Anything that blinds Prometheus —
+      # its host dying, its PVC failing to attach, the pod wedged — trips
+      # this within `for:`.
+      #
+      # Note it cannot live in Loki either: platform-loki-0 is also a
+      # StatefulSet and was also on k8s-worker-02, so it shared the blind
+      # spot precisely.
+      - orgId: 1
+        name: gitops-platform-alerts
+        folder: GitOps Alerts
+        interval: 1m
+        rules:
+          - uid: monitoring-blind
+            title: Prometheus not answering — the cluster is unmonitored
+            condition: C
+            # Long enough to ride out a normal Prometheus restart or an
+            # ArgoCD sync of the prometheus app (both well under 2m
+            # observed); short enough that a dead host is known the same
+            # hour rather than the next day.
+            for: 10m
+            # Both Alerting on purpose, and note this is the opposite of the
+            # per-app logAlerts default (PR #197 set those to execErrState:
+            # OK so a broken query wouldn't masquerade as a flapping app).
+            # Here a query that errors or returns nothing IS the signal:
+            # "Grafana cannot get an answer out of Prometheus" is precisely
+            # the condition being alerted on.
+            noDataState: Alerting
+            execErrState: Alerting
+            labels:
+              severity: critical
+            annotations:
+              # No {{ $labels.x }} anywhere in this rule, deliberately. The
+              # chart runs the whole `alerting:` block through Helm's `tpl`
+              # (see the escaping comment on the rule above), and there are
+              # no useful labels on a scalar count() anyway — so a static
+              # string sidesteps the trap entirely.
+              summary: "Grafana cannot query Prometheus — alerting is blind, no metric alert can fire"
+              description: >-
+                No answer from the platform Prometheus for 10m. Every
+                Prometheus-based alert, including PVEHostUnreachable, is
+                silent until this clears. Most likely the node hosting
+                prometheus-platform-prometheus-kube-p-prometheus-0 is gone;
+                a StatefulSet pod will not reschedule off an unreachable
+                node on its own. Check `kubectl get nodes` and which PVE
+                host is down.
+            data:
+              - refId: A
+                datasourceUid: ds-platform-prometheus
+                relativeTimeRange:
+                  from: 300
+                  to: 0
+                model:
+                  editorMode: code
+                  expr: 'count(up == 1)'
+                  instant: true
+                  range: false
+                  intervalMs: 60000
+                  maxDataPoints: 43200
+                  refId: A
+              # Reduce before threshold even though `instant: true` already
+              # yields one point — same defensive step the rule above needed
+              # after "has duplicate results with labels {}" bit us live.
+              - refId: B
+                datasourceUid: __expr__
+                model:
+                  type: reduce
+                  expression: A
+                  reducer: last
+              - refId: C
+                datasourceUid: __expr__
+                model:
+                  type: threshold
+                  expression: B
+                  conditions:
+                    - evaluator:
+                        type: lt
+                        # Fewer than one target up cluster-wide is not a
+                        # degraded cluster, it's a Prometheus that is not
+                        # answering. The real trigger is usually
+                        # execErrState/noDataState above, not this compare.
+                        params: [1]
 
 # Dashboards as code: the chart's own file-provisioning (no sidecar
 # container, no extra RBAC needed) — for a platform-wide dashboard, add a
