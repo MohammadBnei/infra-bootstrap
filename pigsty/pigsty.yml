@@ -273,8 +273,13 @@ all:
             s3_endpoint: s3.bnei.dev
             s3_region: garage
             s3_bucket: pg-backup
-            s3_key: "{{ lookup('env', 'PGBACKREST_S3_ACCESS_KEY') }}"
-            s3_key_secret: "{{ lookup('env', 'PGBACKREST_S3_SECRET') }}"
+            # `or undef(...)` is not decoration. A bare lookup on a missing
+            # env var returns an EMPTY STRING and ansible reports SUCCESS —
+            # verified, not assumed — so an unwrapped run would quietly write
+            # a repo config with no credentials and look like it worked. undef()
+            # turns that into a loud failure at template time instead.
+            s3_key: "{{ lookup('env', 'PGBACKREST_S3_ACCESS_KEY') or undef('PGBACKREST_S3_ACCESS_KEY is empty - the run must be Infisical-wrapped') }}"
+            s3_key_secret: "{{ lookup('env', 'PGBACKREST_S3_SECRET') or undef('PGBACKREST_S3_SECRET is empty - the run must be Infisical-wrapped') }}"
             s3_uri_style: path          # Garage requires path style, not host
             path: /pgbackrest
             bundle: y                   # object storage hates many small files
