@@ -84,7 +84,14 @@ resource "proxmox_virtual_environment_vm" "k8s_node" {
   # Proxmox's patience does. Harmless for nodes without self-drain
   # configured — this only affects how long a graceful shutdown/reboot is
   # allowed to take, not normal operation.
+  #
+  # order=2 puts these behind nfs.tf's nfs-storage (order=1) on server1: the
+  # cross-host entries there reference shared-templates for their cloud-init
+  # vendor snippet, and PVE starts unordered guests in VMID order, i.e.
+  # before the NFS server that backs it. Harmless on the other two hosts —
+  # start order is per-node.
   startup {
+    order      = 2
     down_delay = 300
   }
 

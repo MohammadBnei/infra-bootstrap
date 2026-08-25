@@ -73,6 +73,20 @@ resource "proxmox_virtual_environment_vm" "nfs_storage" {
   started   = true
   tags      = ["storage", "nfs"]
 
+  # This VM *serves* the shared-templates NFS pool, and server1's cross-host
+  # k8s guests (k8s-cp-02/k8s-worker-02) reference that pool for their
+  # cloud-init vendor snippet (ADR-0026, cloud-init.tf's
+  # k8s_vm_vendor_data_shared). `qm start` activates every storage named in a
+  # VM config, cicustom:vendor= included, so without an explicit order PVE
+  # boots them in VMID order (203, 204, ... 302) and both die with
+  # "TASK ERROR: storage 'shared-templates' is not online". order=1 puts this
+  # ahead of every unordered guest on the host; up_delay covers boot + nfsd
+  # + pvestatd noticing the export is back before the next guest starts.
+  startup {
+    order    = 1
+    up_delay = 90
+  }
+
   cpu {
     cores = 1
   }

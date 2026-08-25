@@ -120,5 +120,20 @@ clone-then-migrate fallback.
   general K8s VM disk storage — widening that scope (e.g. for real live
   migration of already-running VMs) is a bigger step with its own
   tradeoffs, deferred until actually needed.
+- **Fourth fix, found by a real reboot (2026-08-25), not foreseen here at
+  all:** this ADR put the NFS server *inside* the fleet it serves —
+  `nfs-storage` (VMID 302) is a guest on server1, and so are the two
+  cross-host K8s VMs that reference `k8s_vm_vendor_data_shared` on it. PVE
+  starts guests without a `startup` order in ascending VMID order, so a
+  server1 reboot started `k8s-worker-02` (203) and `k8s-cp-02` (204) before
+  302 and both failed with `storage 'shared-templates' is not online` —
+  `qm start` activates every storage a VM config names, `cicustom:vendor=`
+  included, even though the snippet only matters on first boot. Fixed with
+  explicit PVE start order (`startup { order = 1, up_delay = 90 }` on
+  `nfs_storage`, `order = 2` on `k8s_node`), which plans as a pure in-place
+  update — `startup` is not ForceNew. Start order is per-node, so
+  `k8s-cp-03`/`pg-etcd-witness` on ex-laptop keep the same exposure under a
+  whole-cluster power cycle; recovery there is a manual `qm start`. See
+  `docs/bootstrap-test-notes.md` 2026-08-25.
 - Ceph stays off the table (ADR-0002, this ADR) — no change to that
   position.

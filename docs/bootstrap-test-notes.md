@@ -3199,3 +3199,88 @@ What stands unchanged: it is still true that a pod resolving a `*.bnei.dev` name
 resolves it publicly and leaves the cluster, so edge controls do sit in that
 path. It is worth knowing and it is worth fixing at the root. It just was not
 this.
+
+---
+
+## 2026-08-25 — server1 reboot kills both its K8s nodes: an NFS server ordered after its own consumers
+
+Reported symptom: rebooting `server1` leaves `k8s-cp-02` and `k8s-worker-02`
+down, each with
+
+```
+TASK ERROR: storage 'shared-templates' is not online
+```
+
+`shared-templates` is the NFS pool from [ADR-0026](adr/0026-nfs-shared-pve-storage-cross-host-clone.md),
+exported by the `nfs-storage` VM — **VMID 302, which lives on server1 itself.**
+
+### The dependency is the cloud-init snippet, not a disk
+
+Every disk on both VMs is on `local-lvm`. The only reference to the NFS pool is
+one line of guest config:
+
+```
+VM 203 (k8s-worker-02): cicustom: vendor=shared-templates:snippets/k8s-vm-vendor-data.yaml
+VM 204 (k8s-cp-02):     cicustom: vendor=shared-templates:snippets/k8s-vm-vendor-data.yaml
+```
+
+That is ADR-0026's `k8s_vm_vendor_data_shared` (`terraform/cloud-init.tf`), which
+cross-host `k8s_nodes` entries have to reference because each PVE node's `local`
+storage is separate. `qm start` activates **every** storage named in a VM config,
+`cicustom:vendor=` included — even though the snippet itself only ever matters on
+first boot. So the guest cannot start until the guest that serves its storage is
+running.
+
+### Why it only surfaced now
+
+Nothing on server1 declared a start order:
+
+```
+VM 203: onboot: 1  startup: down=300     VM 204: onboot: 1  startup: down=300
+VM 205: onboot: 1  (pg01)                VM 302: onboot: 1  (nfs-storage, no startup line)
+CT 102: onboot: 1                        CT 103: onboot: 1
+```
+
+PVE starts guests *with* a `startup` order first, then everything else in
+ascending VMID order — so server1 boots `102, 103, 203, 204, 205, 302`. The two
+K8s VMs start five guests ahead of the NFS server they depend on. `startup:
+down=300` looks like ordering but isn't: it's the ACPI shutdown timeout added for
+`self-drain-configure.yml` (2026-07-30 entry above), with no `order=` component.
+
+Nobody noticed because server1 had not been cold-booted since `nfs-storage` was
+built. Until then the storage happened to be online whenever anything asked.
+
+### Fix
+
+PVE's own start order, in Terraform:
+
+- `terraform/nfs.tf` — `startup { order = 1, up_delay = 90 }` on `nfs_storage`.
+  `order=1` puts it ahead of every unordered guest on the host; `up_delay` holds
+  the next start until the VM has booted, `nfs-kernel-server` is up, and pvestatd
+  has re-activated the export.
+- `terraform/k8s-vms.tf` — `order = 2` alongside the existing `down_delay = 300`.
+
+`terraform plan` gate: **0 to add, 6 to change, 0 to destroy**, all
+`update in-place` — `startup` is not ForceNew, unlike `vendor_data_file_id` and
+`clone.node_name`, both of which bit this repo during ADR-0026 itself.
+
+### Known limitation, deliberately not fixed
+
+`k8s-cp-03` (206) and `pg-etcd-witness` (303) on `ex-laptop` carry the same
+`cicustom` reference, and PVE start order is per-node — it cannot wait on a guest
+hosted elsewhere. A single-host reboot of `ex-laptop` is fine (server1 is up, the
+export is online); only a **whole-cluster power cycle** can hit it. Recovery is
+`qm start <vmid>` once `nfs-storage` is back. A cross-node systemd dependency is
+not worth building for that.
+
+### Lesson
+
+**A storage server that lives inside the fleet it serves is a boot-order
+dependency, and PVE will not infer it.** ADR-0026 put `nfs-storage` on server1
+for capacity reasons and reasoned carefully about clone paths, ForceNew traps and
+snippet resolution — every one of them a *provisioning*-time concern. Nothing in
+that design considered what happens when the host is switched off and on, and the
+config it produced is silently correct until exactly that moment.
+
+The related trap: `startup` already existed on those VMs, so "boot ordering" read
+as handled. Half a setting is a worse signal than none.
