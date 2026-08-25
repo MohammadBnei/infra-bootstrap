@@ -1,6 +1,7 @@
 # ADR-0042: pgBackRest repo moves to Garage S3, and replicas gain a `restore_command`
 
-**Status:** Proposed
+**Status:** Proposed — config committed 2026-08-26, **not yet rolled out**. See
+[`docs/runbook-pgbackrest-s3-migration.md`](../runbook-pgbackrest-s3-migration.md).
 **Date:** 2026-08-25
 **Related:** [ADR-0029](0029-postgres-automatic-failover-etcd-quorum.md) (automatic
 failover is accepted behaviour — this ADR is about what happens *after* one),
@@ -130,3 +131,39 @@ the operator's action, not an unattended one. Order matters:
 4. Prove it: stop a replica, let the leader recycle past it, restart it, and
    confirm it catches up from the archive with no `reinit`. Until that test
    passes, this ADR is unproven, not implemented.
+
+## Preparation done (2026-08-26)
+
+The `pigsty.yml` half of Decisions 1 and 2 is committed; only the run remains.
+Four things were verified first so the rollout does not discover them:
+
+- **The LAN endpoint cannot be used.** pgBackRest 2.58's S3 driver has no scheme
+  option and always speaks TLS, while Garage serves plain HTTP on `:3900`.
+  `garage.bnei.lan` additionally does not resolve from the pg nodes. So the repo
+  points at `s3.bnei.dev`, which is grey at Cloudflare (ADR-0038) and therefore
+  does not traverse the edge. Confirmed from `.207`: both `192.168.1.199:3900`
+  and `s3.bnei.dev:443` answer `403`, i.e. the request reaches Garage.
+- **The origin lock is not in the way.** The `garage-s3` IngressRoute carries no
+  middlewares at all, and the shared origin-lock allowlist admits
+  `192.168.1.0/24` regardless.
+- **The credentials work.** `PGBACKREST_S3_*` — provisioned 2026-07-26 and never
+  used — authenticate against the `pg-backup` bucket with a signed request:
+  HTTP 200, `KeyCount 0`.
+- **Secrets stay out of git.** The keys resolve through
+  `lookup('env', ...)`, so the run must be Infisical-wrapped. `pigsty.yml` is
+  tracked and `docs/secrets.md` already records the plaintext passwords in it as
+  a known `DECISION.md` §3 violation; this decision does not add to that.
+
+Two traps in Pigsty's own `pgbackrest` tag, both documented in the runbook
+because neither announces itself:
+
+- `stanza-create` and the initial backup are both `ignore_errors: true`, so a
+  green PLAY RECAP proves nothing about either.
+- The initial backup is guarded by `/etc/pgbackrest/initial.done`, which already
+  exists from bootstrap — so the run will **skip** the first backup against the
+  new, empty repo. It has to be taken by hand, or the cluster ends up on S3 with
+  no backup at all while appearing migrated.
+
+Related, and worth fixing separately: `pigsty.yml` still declares `.205` as
+`pg_role: primary` while Patroni has `.207` leading. The `stanza-create` task
+keys on that inventory value, not the live role.
