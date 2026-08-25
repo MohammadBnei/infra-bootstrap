@@ -129,3 +129,67 @@ extraManifests:
       limiter.toml: |
         [botdetection.ip_limit]
         link_token = true
+  # ADR-0040 Decision 5, pilot scope. NOT the per-namespace default-deny that
+  # decision describes — this is egress-only and it blocks exactly one thing:
+  # the LAN management plane (Pigsty .232, Proxmox .200/.165/.161, Zot .234,
+  # Garage .199, NFS .198, Pi-hole .55). searxng goes first because it needs
+  # zero LAN hosts (`limiter: false` above means no Redis, and its settings
+  # arrive via a mounted Secret the *operator* fetches, not the pod) while
+  # being the likeliest thing here to get popped — `image_proxy: true` fetches
+  # attacker-influenced URLs by design.
+  #
+  # A CiliumNetworkPolicy rather than a plain NetworkPolicy, and that is not a
+  # style choice. nodelocaldns lives at the link-local 169.254.25.10 in host
+  # networking; since Cilium 1.17 (this cluster runs 1.19.3) link-local
+  # addresses carry the `host` identity, and Cilium's docs are explicit that
+  # "CIDR rules do not apply to traffic where both sides of the connection are
+  # either managed by Cilium or use an IP belonging to a node in the cluster
+  # (including host networking pods)". So an `ipBlock: 169.254.25.10/32` rule
+  # matches nothing, egress is default-deny the moment any rule exists, and DNS
+  # dies for the whole namespace — with no fallback, since
+  # enable_nodelocaldns_secondary is false. `toEntities: [host]` is the only
+  # way to express it, and plain NetworkPolicy has no equivalent.
+  #
+  # Two things this does NOT do, stated plainly so the next reader doesn't
+  # over-trust it:
+  #   - The `except:` is not what blocks the node IPs (.201-.206). CIDR rules
+  #     don't select node identities at all (policy-cidr-match-mode is unset,
+  #     its default). Nodes are blocked because nothing here grants
+  #     `remote-node` — same outcome, different mechanism.
+  #   - It is not a seal. proxmox.bnei.dev and s3.bnei.dev are publicly
+  #     reachable, and this pod keeps unrestricted internet egress, so it can
+  #     still reach .200 and .199 by going out and back through the front door.
+  #     Their own auth is the control there. This is defence in depth.
+  #
+  # Verify with Hubble, and re-check after a cilium-agent restart —
+  # cilium#18644 records that link-local address flip-flopping between `host`
+  # and a CIDR identity depending on whether nodelocaldns or the agent started
+  # first, so "it resolves right now" is not evidence:
+  #   hubble observe --namespace searxng --verdict DROPPED
+  - |
+    apiVersion: cilium.io/v2
+    kind: CiliumNetworkPolicy
+    metadata:
+      name: searxng-lan-egress-lock
+      namespace: {{ .Release.Namespace }}
+    spec:
+      endpointSelector: {}
+      # Egress only — ingress stays unenforced, so Traefik reaching :8080 and
+      # the kubelet's liveness probe are both untouched.
+      egress:
+        - toEntities:
+            - host
+          toPorts:
+            - ports:
+                - port: "53"
+                  protocol: UDP
+                - port: "53"
+                  protocol: TCP
+        # Everything else searxng does is the public internet: it is a
+        # metasearch engine. No in-cluster egress rule because it makes none —
+        # a namespace that does needs a toEndpoints rule added here, since
+        # toCIDRSet does not reach Cilium-managed endpoints.
+        - toCIDRSet:
+            - cidr: 0.0.0.0/0
+              except:
+                - 192.168.1.0/24
