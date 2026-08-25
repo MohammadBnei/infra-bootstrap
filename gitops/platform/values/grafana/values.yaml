@@ -33,6 +33,31 @@ admin:
 datasources:
   datasources.yaml:
     apiVersion: 1
+    # Grafana refuses to start if a provisioned datasource that already exists
+    # is given a DIFFERENT uid than the one in its database — it looks the
+    # datasource up by the new uid, misses, and fails the whole provisioning
+    # module: "Datasource provisioning error: data source not found", exit 1,
+    # CrashLoopBackOff. Not a warning, a total Grafana outage.
+    #
+    # That is exactly what PR #202 did on 2026-08-25 by adding
+    # `uid: ds-platform-prometheus` to a Prometheus datasource that had been
+    # running since cluster genesis with an auto-generated uid. It was tested
+    # against a FRESH grafana/grafana:12.3.1 container, where no row existed
+    # and the uid was simply inserted — the upgrade path was never exercised.
+    # Grafana's PVC is 29 days old, so the cluster only ever had the upgrade
+    # path. Reproduced locally on 12.3.1 by booting once without the uid and
+    # again with it against the same volume: identical error, verbatim.
+    #
+    # deleteDatasources runs before datasources on every boot, so the stale row
+    # is dropped and immediately recreated with the intended uid. Verified
+    # idempotent: second and third boots provision cleanly with zero errors.
+    #
+    # Keep this entry. Removing it once the cluster is healthy re-arms exactly
+    # the same trap for the next person who changes a uid, and it costs one
+    # delete+insert per pod start.
+    deleteDatasources:
+    - name: Prometheus
+      orgId: 1
     datasources:
     - name: Prometheus
       type: prometheus
