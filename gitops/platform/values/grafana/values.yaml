@@ -505,6 +505,74 @@ alerting:
         folder: GitOps Alerts
         interval: 1m
         rules:
+          # Added 2026-08-25 after pg-proxmox-1 sat as a non-streaming replica
+          # for over a day and nothing said a word. The cluster ran on a single
+          # node the whole time; it was found by a human noticing an unrelated
+          # app was down. That is the gap this closes.
+          #
+          # `or vector(0)` is load-bearing, not defensive habit. count() over an
+          # empty vector returns NO data, not 0 — and with noDataState: Alerting
+          # below, the healthy case (zero non-streaming replicas) would have
+          # fired permanently. Verified against the live VictoriaMetrics: the
+          # bare count() returns empty on a healthy cluster, `or vector(0)`
+          # returns 0.
+          - uid: postgres-replica-not-streaming
+            title: Postgres replica not streaming — no HA
+            condition: C
+            # A reinit or a planned restart takes a replica out of streaming
+            # briefly; 10m rides that out. The failure this targets lasts days.
+            for: 10m
+            # Same reasoning as monitoring-blind directly below: this rule's
+            # datasource is Pigsty's own VictoriaMetrics, which runs on
+            # postgres-1 (.205). If .205 is the node that died, the query
+            # errors — and that is itself the alert, not a reason to stay quiet.
+            noDataState: Alerting
+            execErrState: Alerting
+            labels:
+              severity: critical
+            annotations:
+              # No {{ $labels.x }} — the whole alerting block goes through
+              # Helm's tpl, and count() carries no useful labels anyway. Same
+              # call as monitoring-blind.
+              summary: "A Postgres replica is not streaming — the cluster has no working standby"
+              description: >-
+                patroni_replica is 1 while patroni_postgres_streaming is 0 for
+                at least 10m. Postgres roles replicate but pgbouncer's
+                userlist.txt does not, so expect app auth failures on :6432
+                after any failover as well. Check `patronictl list pg-proxmox`,
+                then pg_stat_replication on the leader — the Patroni role
+                string alone is not proof of streaming. If the replica wants a
+                WAL segment the leader has recycled it cannot self-heal:
+                see ADR-0042.
+            data:
+              - refId: A
+                datasourceUid: ds-prometheus
+                relativeTimeRange:
+                  from: 300
+                  to: 0
+                model:
+                  editorMode: code
+                  expr: 'count(patroni_replica == 1 and on(instance) patroni_postgres_streaming == 0) or vector(0)'
+                  instant: true
+                  range: false
+                  intervalMs: 60000
+                  maxDataPoints: 43200
+                  refId: A
+              - refId: B
+                datasourceUid: __expr__
+                model:
+                  type: reduce
+                  expression: A
+                  reducer: last
+              - refId: C
+                datasourceUid: __expr__
+                model:
+                  type: threshold
+                  expression: B
+                  conditions:
+                    - evaluator:
+                        type: gt
+                        params: [0]
           - uid: monitoring-blind
             title: Prometheus not answering — the cluster is unmonitored
             condition: C
