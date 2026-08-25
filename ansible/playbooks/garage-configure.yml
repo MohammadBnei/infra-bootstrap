@@ -85,7 +85,12 @@
             ExposeHeader: ["ETag"]
             MaxAgeSeconds: 3000
       - name: "ente-photos" # Ente's primary photo/video object store, reached both internally and via s3.bnei.dev (ADR-0030)
-        key_name: "ente-photos-key"
+        # Rotated 2026-08-25: the original ente-photos-key was disclosed in
+        # plaintext (a redaction that only masked fields named *pass* while
+        # dumping the surrounding museum.yaml block). The old key is deleted
+        # from Garage manually — this playbook only ever creates and grants.
+        # Bumping key_name is how a rotation is expressed here.
+        key_name: "ente-photos-key-2"
         infisical_prefix: "ENTE_S3"
         # Ente's web client uploads directly browser -> S3 via a presigned
         # URL (the whole point of its S3-native design) — a real cross-origin
