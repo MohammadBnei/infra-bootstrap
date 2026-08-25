@@ -152,10 +152,13 @@ extraManifests:
   #
   # Two things this does NOT do, stated plainly so the next reader doesn't
   # over-trust it:
-  #   - The `except:` is not what blocks the node IPs (.201-.206). CIDR rules
-  #     don't select node identities at all (policy-cidr-match-mode is unset,
-  #     its default). Nodes are blocked because nothing here grants
-  #     `remote-node` — same outcome, different mechanism.
+  #   - The `except:` is not what blocks the node IPs (.201-.206), nor what
+  #     blocks pod-to-pod. CIDR rules select neither node nor Cilium-managed
+  #     endpoint identities (policy-cidr-match-mode is unset, its default).
+  #     Both are denied because nothing here grants `remote-node` or
+  #     `toEndpoints` — same outcome, but not by the line that looks like it
+  #     is doing the work. Service VIPs ARE plain `world` though, which is why
+  #     the except list below is all of RFC1918 rather than just the LAN.
   #   - It is not a seal. proxmox.bnei.dev and s3.bnei.dev are publicly
   #     reachable, and this pod keeps unrestricted internet egress, so it can
   #     still reach .200 and .199 by going out and back through the front door.
@@ -185,11 +188,48 @@ extraManifests:
                   protocol: UDP
                 - port: "53"
                   protocol: TCP
+        # Belt and braces, deliberately redundant. cilium#18644 records the
+        # nodelocaldns link-local address flip-flopping between `host` and a
+        # CIDR identity depending on whether nodelocaldns or the agent started
+        # first. The rule above covers the `host` reading; this one covers the
+        # CIDR reading. Exactly one is load-bearing at any moment and we cannot
+        # tell which, so keep both — DNS has no fallback here
+        # (enable_nodelocaldns_secondary is false), which is what makes an
+        # unproven assumption unacceptable rather than merely untidy.
+        - toCIDR:
+            - 169.254.25.10/32
+          toPorts:
+            - ports:
+                - port: "53"
+                  protocol: UDP
+                - port: "53"
+                  protocol: TCP
         # Everything else searxng does is the public internet: it is a
-        # metasearch engine. No in-cluster egress rule because it makes none —
-        # a namespace that does needs a toEndpoints rule added here, since
-        # toCIDRSet does not reach Cilium-managed endpoints.
+        # metasearch engine.
+        #
+        # The except list is all of RFC1918, not just the LAN. Cluster Service
+        # VIPs live in 10.233.0.0/18, and with cilium_kube_proxy_replacement
+        # false, ClusterIP DNAT happens in the host netns *after* Cilium's
+        # egress hook on the pod veth — so policy sees the pre-DNAT VIP, which
+        # has no Cilium endpoint identity and is plain `world`. Without
+        # 10.0.0.0/8 here, a popped searxng — or just `image_proxy: true`
+        # fetching an attacker-supplied URL — reaches the kube-apiserver at
+        # 10.233.0.1:443 with the default ServiceAccount token this chart
+        # mounts, plus Zot's, ArgoCD's and infisical-backend's ClusterIPs.
+        #
+        # For the same pre-DNAT reason, a namespace that DOES need in-cluster
+        # egress cannot get it from a `toEndpoints` rule — policy never sees the
+        # backend endpoint's identity, only the VIP. That case needs
+        # `toServices`, or the ClusterIP written into a `toCIDR`. Getting this
+        # right matters more than this one namespace does: it is what the rest
+        # of the ADR-0040 Decision 5 rollout gets copied from.
+        #
+        # 169.254.0.0/16 is deliberately NOT excepted — that would strand the
+        # DNS rule above on the unproven half of cilium#18644. Bare metal, so
+        # there is no cloud metadata endpoint to protect against anyway.
         - toCIDRSet:
             - cidr: 0.0.0.0/0
               except:
-                - 192.168.1.0/24
+                - 10.0.0.0/8
+                - 172.16.0.0/12
+                - 192.168.0.0/16
