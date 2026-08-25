@@ -122,6 +122,20 @@ spec:
         chartName: alloy
         valuesPath: gitops/platform/values/alloy/values.yaml
 
+      # wave 5 — the only thing in this cluster that watches the hypervisors
+      # rather than their guests. Added 2026-08-25 after server1 (.200) lost
+      # its uplink for 23h40m and nothing alerted: the cluster could see two
+      # nodes go away but had no signal for "the host under them died". Probes
+      # pveproxy:8006 on all three PVE hosts over TCP. See the values file for
+      # why it is TCP and not ICMP, and for the blind spot it does NOT cover.
+      - name: blackbox-exporter
+        namespace: monitoring
+        syncWave: "5"
+        chartRepoURL: https://prometheus-community.github.io/helm-charts
+        chartRevision: "11.17.2" # confirmed against `helm search repo prometheus-community/prometheus-blackbox-exporter --versions` 2026-08-25 (app v0.28.0)
+        chartName: prometheus-blackbox-exporter
+        valuesPath: gitops/platform/values/blackbox-exporter/values.yaml
+
       # authentik — identity provider (ADR-0039). Wave 5: it needs the
       # infisical-operator (wave 1) to have materialised authentik-config
       # before the pods start, since the chart reads ALL configuration from
