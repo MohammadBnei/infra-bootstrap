@@ -95,6 +95,13 @@ metrics:
     serviceMonitor:
       enabled: true
       interval: 60s
+    # Both the serviceMonitor and prometheusRule templates `fail` the whole
+    # chart render if monitoring.coreos.com/v1 is absent. Traefik is sync-wave
+    # 2; the Prometheus CRDs arrive with platform-prometheus at wave 5. Without
+    # this, a greenfield rebuild puts Traefik in ComparisonError and NO ingress
+    # deploys at all until wave 5 happens to land. Verified: `helm template`
+    # exits 1 without --api-versions monitoring.coreos.com/v1, 0 with it.
+    disableAPICheck: true
     # Rules here are passed through verbatim by the chart's prometheusrules.yaml
     # template. A values file is not Go-templated, so `{{ $labels.x }}` below
     # reaches the PrometheusRule intact — unlike the Grafana `alerting:` block
@@ -113,9 +120,11 @@ metrics:
         # wildcard set as the default cert above and everything the ACME
         # resolvers obtain, so one rule covers the lot.
         #
-        # 21 days: two full renewal attempts (lego retries from 30 days out)
-        # have to have failed before this fires, so it is not noise, and it
-        # still leaves three weeks to fix a token.
+        # 21 days: Traefik starts renewing 90-day certificates 30 days out, so
+        # renewal has already been failing for over a week by the time this
+        # fires — not noise — and three weeks still remain to fix a token.
+        # (Deliberately no attempt count here: Traefik documents the 30-day
+        # threshold but not its check interval, so any number would be a guess.)
         - alert: TraefikCertExpiringSoon
           expr: "(traefik_tls_certs_not_after - time()) < 21 * 24 * 3600"
           # A scrape gap or a Traefik restart mid-reload must not page.
@@ -134,6 +143,26 @@ metrics:
               zones behind that one token, so its revocation or expiry looks
               exactly like this. Then check the `le` / `le-dns` resolver logs
               in {namespace="traefik"} for lego errors.
+        # The dead-man's switch, and the reason this PR exists at all. The rule
+        # above is a comparison over a vector: an EMPTY vector fires nothing.
+        # Traefik down, metrics.prometheus.service flipped off, or the chart's
+        # metrics-label helper drifting on a version bump all silently disarm
+        # it — which is exactly the "control that reports healthy because it can
+        # never fire" state this whole change was written to get out of. Guard
+        # the guard.
+        - alert: TraefikCertMetricsMissing
+          expr: "absent(traefik_tls_certs_not_after)"
+          for: 1h
+          labels:
+            severity: warning
+          annotations:
+            summary: "Traefik is not reporting certificate expiry — TraefikCertExpiringSoon is disarmed"
+            description: >-
+              No traefik_tls_certs_not_after series is being scraped, so the
+              cert-expiry alert cannot fire regardless of how close renewal is
+              to failing. Check that the platform-traefik scrape target is up
+              and that metrics.prometheus.service is still enabled in
+              gitops/platform/values/traefik/values.yaml.
 
 # Chart's default podSecurityContext (runAsUser/runAsGroup: 65532) has no
 # fsGroup, so the acme.json PVC mounts root:root/0755 — Traefik can't
