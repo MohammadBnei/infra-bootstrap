@@ -156,6 +156,12 @@ prometheus:
     # is a CR that exists, syncs green in ArgoCD, and evaluates nothing. Traefik's
     # chart authors the cert-expiry rule (ADR-0040 Decision 9) with its own labels,
     # so without this it would be created and ignored.
+    #
+    # Know what this widens: from here on, ANY chart's rules are adopted, not
+    # just Traefik's. Enabling a `prometheusRule:` key in some other values file
+    # now routes that chart's whole default rule set to Discord and thot. That
+    # is still gated by a PR, but it is no longer gated by a label — read the
+    # rules a chart ships before flipping its switch.
     ruleSelectorNilUsesHelmValues: false
     storageSpec:
       volumeClaimTemplate:
