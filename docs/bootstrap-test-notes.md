@@ -3588,3 +3588,79 @@ all time out with `Policy denied DROPPED`.
 Not yet re-checked after a `cilium-agent` restart — cilium#18644 has that
 link-local identity flipping on start order, so "it resolves now" is not
 durable evidence.
+
+## 2026-08-25 — a replica that could not catch up, and the backup repo that explains why
+
+Second occurrence of the shape the 2026-08-15 entry predicted, in the opposite
+direction. `pg-proxmox-1` (`.205`) sat as a replica in `state=starting`,
+`lag=unknown`, `tl=None`, while `.207` led on timeline 31. The cluster had been
+running on one node, and it was found only because an unrelated app was down.
+
+```
+FATAL: could not receive data from WAL stream: ERROR: requested WAL segment
+       0000001F0000003200000078 has already been removed
+LOG:   waiting for WAL to become available at 32/78000018
+```
+
+Recovered with `patronictl reinit pg-proxmox pg-proxmox-1 --force` (~8.6 GB,
+disk was not a constraint: 21 G free). Unlike 2026-08-15, **no slot drop was
+needed** — `pg_proxmox_1` came back `active=t`, `wal_status=reserved` on its
+own. Verified properly rather than by role string: `pg_stat_replication` on the
+leader showed `192.168.1.205 | streaming | async`, `pg_stat_wal_receiver` on the
+replica showed `streaming` from `.207`, and sent/replay LSN matched at
+`33/B407AA90`.
+
+### Three wrong theories, in order
+
+**1. "The password diverged from `pigsty.yml`."** ente was failing with
+`SASL authentication failed` on `:6432`. Compared the Infisical value against
+the one declared in `pigsty.yml` — **byte-identical**. Postgres on `:5432`
+authenticated fine with it the whole time.
+
+**2. "The error text tells us it is a credential problem."** It tells us
+nothing. pgbouncer returns exactly `FATAL: SASL authentication failed` for a
+correct password, a wrong password, **and a user that does not exist**. Proven
+by trying all three against `.207`. Never infer the cause from that string.
+
+The actual cause: **`userlist.txt` is a per-node file and is not replicated,
+while Postgres roles are.** `dbuser_ente` had `pgbouncer: true` and had worked
+for 23 days — while the VIP pointed at `.205`. It broke the moment the VIP moved
+to `.207`, whose userlist never had it. Fixed with
+`./pgsql-user.yml -l pg-proxmox -e username=dbuser_ente --tags pgbouncer`, which
+touches only pgbouncer. **Run it after the broken node is healthy** — the
+`pgb-user` task is `ignore_errors: true`, so against a node whose Postgres is
+down it fails soft and silently leaves that node still missing the entry.
+
+**3. "Add a `restore_command` so the replica self-heals from the archive."**
+The segment *is* in the archive — `.207`'s archive. This was the real find:
+
+`repo1-path=/pg/backup` is a **node-local directory**. Each node keeps its own
+pgBackRest repo, and they had diverged:
+
+| Node | archive range |
+|---|---|
+| `.207` | `0000001B00000018000000C4` → `0000001F00000033000000AF` (tl 31) |
+| `.205` | `0000001E0000003000000085` → `0000001E0000003200000077` (tl **30**) |
+
+So a `restore_command` on `.205` would have queried a repo holding no
+timeline-31 WAL. It would have looked configured and fixed nothing.
+
+Three consequences of that one fact: backups do not survive the node; the
+archive splits at every failover; and no replica can ever self-heal, which is
+why a manual `reinit` is the only remedy. A Garage bucket and key for a shared
+repo were provisioned 2026-07-26 and have never been used —
+`garage-configure.yml` even says *"once pigsty's `pgbackrest_repo` config is
+written"*, and it never was. See ADR-0042.
+
+### The alert that should have caught it
+
+`patroni_replica == 1 and on(instance) patroni_postgres_streaming == 0`, from
+Pigsty's own VictoriaMetrics. One trap when writing it: **`count()` over an
+empty vector returns no data, not 0.** With `noDataState: Alerting` the healthy
+case (zero non-streaming replicas) would have fired permanently. Confirmed live
+— the bare `count()` returns empty on a healthy cluster. `or vector(0)` is what
+makes it correct, and it is not optional.
+
+Note also that this rule's datasource is Pigsty's VictoriaMetrics on `.205`
+itself. That is the same blind spot as #202's: if `.205` is what died, the query
+errors. `execErrState: Alerting` turns that into the signal rather than silence.
