@@ -25,7 +25,18 @@ data:
             condition: C
             for: {{ .for | default "5m" }}
             noDataState: OK
-            execErrState: Alerting
+            # Alerting here means a Loki query failure — datasource down/
+            # unreachable, nothing to do with the app — fires this rule as if
+            # the app itself failed. Confirmed live 2026-08-24: k8s-worker-02
+            # went NotReady (network partition), platform-loki-0 got stuck
+            # Terminating on it with nowhere to reschedule, and every
+            # logAlerts rule querying ds-loki (wedding-2026's "provider
+            # failing" among them) fired on the query error alone — zero
+            # matching log lines, zero evidence of a real app problem. OK
+            # means a Loki outage goes quiet here instead of masquerading as
+            # an app failure; the node/datasource outage itself has its own
+            # signal (KubeNodeNotReady et al), so nothing goes unmonitored.
+            execErrState: OK
             labels:
               severity: {{ .severity | default "warning" }}
               app: {{ $.Release.Name }}
