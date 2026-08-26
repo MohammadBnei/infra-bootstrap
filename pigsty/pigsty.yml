@@ -238,6 +238,68 @@ all:
         pg_crontab:     # https://pigsty.io/docs/pgsql/admin/crontab
           - '00 01 * * * /pg/bin/pg-backup full'
 
+        # ADR-0042. Until 2026-08-26 this cluster used pigsty's `local` default,
+        # which means repo1-path=/pg/backup — a directory on each node, not a
+        # shared repository. Two consequences that only showed up during an
+        # incident: backups did not survive the node holding them, and the two
+        # repos diverged at every failover (.207 held timeline 31 while .205
+        # held only 30). A replica that fell behind therefore could never fetch
+        # the WAL it was missing, because the archive it could reach was the
+        # wrong one — so every ungraceful failover needed a manual
+        # `patronictl reinit`. That is the fragility this removes.
+        #
+        # s3.bnei.dev rather than the LAN endpoint, for one hard reason:
+        # pgBackRest 2.58's S3 driver has no scheme option and always speaks
+        # TLS, while Garage serves plain HTTP on :3900. `garage.bnei.lan` also
+        # does not resolve from these nodes. Verified from .207: :3900 by IP and
+        # s3.bnei.dev:443 both answer 403 (Garage's own auth error, i.e. the
+        # request arrived), and the garage-s3 IngressRoute carries no
+        # middlewares — so the origin lock is not in the way. s3 is deliberately
+        # grey at Cloudflare (ADR-0038), so this does not traverse the edge.
+        #
+        # Credentials are NOT written here. pigsty.yml is tracked in git and
+        # docs/secrets.md already records the plaintext passwords in it as a
+        # known DECISION.md §3 violation; this does not add to it. The run must
+        # be Infisical-wrapped so these lookups resolve — an unwrapped run
+        # renders them EMPTY and silently writes a broken repo config.
+        pgbackrest_method: garage
+        pgbackrest_repo:
+          local:                        # kept, deliberately: the pre-migration
+            path: /pg/backup            # backups stay on disk until the first
+            retention_full_type: count  # S3 full backup is verified. Do not
+            retention_full: 2           # delete /pg/backup before then.
+          garage:
+            type: s3
+            s3_endpoint: s3.bnei.dev
+            s3_region: garage
+            s3_bucket: pg-backup
+            # `or undef(...)` is not decoration. A bare lookup on a missing
+            # env var returns an EMPTY STRING and ansible reports SUCCESS —
+            # verified, not assumed — so an unwrapped run would quietly write
+            # a repo config with no credentials and look like it worked. undef()
+            # turns that into a loud failure at template time instead.
+            s3_key: "{{ lookup('env', 'PGBACKREST_S3_ACCESS_KEY') or undef('PGBACKREST_S3_ACCESS_KEY is empty - the run must be Infisical-wrapped') }}"
+            s3_key_secret: "{{ lookup('env', 'PGBACKREST_S3_SECRET') or undef('PGBACKREST_S3_SECRET is empty - the run must be Infisical-wrapped') }}"
+            s3_uri_style: path          # Garage requires path style, not host
+            path: /pgbackrest
+            bundle: y                   # object storage hates many small files
+            bundle_limit: 20MiB
+            bundle_size: 128MiB
+            retention_full_type: count  # parity with the local repo it replaces
+            retention_full: 2
+        # Encryption is deliberately NOT enabled here. The existing repos report
+        # `cipher: none`, so turning it on now is a separate decision with a
+        # separate key that, if lost, makes every backup unreadable.
+
+        # ADR-0042 Decision 2. Without this a replica can only ever stream: if
+        # the leader has recycled the WAL it wants, it retries forever and needs
+        # a human. With a SHARED repo (above) it fetches the segment from the
+        # archive instead and catches up on its own. This line is meaningless —
+        # worse, actively misleading — while the repo is node-local, which is
+        # why the two land together.
+        pg_parameters:
+          restore_command: 'pgbackrest --stanza=pg-proxmox archive-get %f %p'
+
         # define (OPTIONAL) L2 VIP that bind to primary
         pg_vip_enabled: true
         pg_vip_address: 192.168.1.232/24
