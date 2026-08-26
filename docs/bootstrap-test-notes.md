@@ -3664,3 +3664,68 @@ makes it correct, and it is not optional.
 Note also that this rule's datasource is Pigsty's VictoriaMetrics on `.205`
 itself. That is the same blind spot as #202's: if `.205` is what died, the query
 errors. `execErrState: Alerting` turns that into the signal rather than silence.
+
+## 2026-08-26 — the pgBackRest S3 migration, and why `pg_parameters` is not enough
+
+ADR-0042 rolled out. `pgsql.yml -l pg-proxmox --tags pgbackrest,pg_param,pg_reload`,
+Infisical-wrapped. `pg_param`/`pg_reload` are needed alongside `pgbackrest`
+because that tag writes the repo config but not `restore_command`.
+
+It worked: `.205` now reads the backup `.207` took (`20260826-065830F`) out of
+the same repository, which was structurally impossible while each node had its
+own `/pg/backup`. First full backup 8.4 GB → 4.1 GB, 14,969 files, 78s. Garage:
+4.5 GB / 71 objects.
+
+### Both predicted traps fired
+
+`stanza-create` and the initial backup **ran on `.205` and were skipped on
+`.207`**. They gate on the *inventory* `pg_role`, and `pigsty.yml` still declares
+`.205` primary while Patroni has `.207` leading. Add `/etc/pgbackrest/initial.done`
+already existing from bootstrap, and the run produced **a stanza with no backup
+at all, with a green PLAY RECAP**. Both tasks are `ignore_errors: true`, so
+nothing complained. The first backup had to be taken by hand on the live primary.
+
+### The trap nobody predicted: `pg_parameters` loses to Patroni on a standby
+
+After the run, `restore_command` was set on `.207` and **absent on `.205`** — the
+replica, i.e. the only node that ever uses it. Checked directly: Ansible resolved
+`pg_parameters` **identically on both hosts**, and `postgresql.auto.conf` was
+rewritten on both (mtime updated), yet the replica's file contained nothing but
+Pigsty's header. Most likely Patroni rewrites `postgresql.auto.conf` on a standby
+— where it manages recovery parameters — after Pigsty writes it.
+
+**Do not use `pg_parameters` for anything a replica must honour.** The correct
+home is Patroni's DCS config:
+
+```bash
+patronictl -c /etc/patroni/patroni.yml edit-config pg-proxmox \
+  -p "restore_command=pgbackrest --stanza=pg-proxmox archive-get %f %p" --force
+```
+
+It applies to every member, survives restart/failover/`reinit`, and is not
+clobbered by a Pigsty run — the `dcs:` block in `oltp.yml` only applies at
+bootstrap. Both nodes reported the setting immediately afterwards.
+
+### The cheap proof, instead of the expensive one
+
+The real test is starving a replica past `max_slot_wal_keep_size` (18 GB) and
+watching it recover — expensive, and not run yet. A decisive and safe substitute
+for the *mechanism* is to invoke the fetch directly on the replica:
+
+```bash
+sudo -u postgres pgbackrest --stanza=pg-proxmox archive-get \
+  0000001F0000003400000031 /tmp/wal_probe
+# INFO: found 0000001F0000003400000031 in the archive asynchronously
+# -rw-r----- 1 postgres postgres 16777216 /tmp/wal_probe
+```
+
+That proves credentials, connectivity, path style and command syntax in three
+seconds. It does **not** prove PostgreSQL invokes it correctly under the real
+failure condition — that is still outstanding.
+
+### Also worth knowing
+
+`/pg/backup` is a **symlink** to `/data/backups/pg-proxmox-18/backup`, so
+`du -sh /pg/backup` reports `0` and looks like the backups are gone. They are
+not: 8.6-8.7 GB per node, deliberately left in place so rollback stays a
+one-line config flip.
