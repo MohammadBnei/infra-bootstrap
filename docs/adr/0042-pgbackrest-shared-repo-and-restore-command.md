@@ -1,7 +1,7 @@
 # ADR-0042: pgBackRest repo moves to Garage S3, and replicas gain a `restore_command`
 
-**Status:** Proposed — config committed 2026-08-26, **not yet rolled out**. See
-[`docs/runbook-pgbackrest-s3-migration.md`](../runbook-pgbackrest-s3-migration.md).
+**Status:** Accepted — rolled out 2026-08-26. Decisions 1 and 2 are live and
+verified; Decision 4's full starve test is still outstanding (see below).
 **Date:** 2026-08-25
 **Related:** [ADR-0029](0029-postgres-automatic-failover-etcd-quorum.md) (automatic
 failover is accepted behaviour — this ADR is about what happens *after* one),
@@ -167,3 +167,71 @@ because neither announces itself:
 Related, and worth fixing separately: `pigsty.yml` still declares `.205` as
 `pg_role: primary` while Patroni has `.207` leading. The `stanza-create` task
 keys on that inventory value, not the live role.
+
+## Rollout note — what actually happened (2026-08-26)
+
+Run: `pgsql.yml -l pg-proxmox --tags pgbackrest,pg_param,pg_reload`, Infisical-wrapped.
+`pg_param`/`pg_reload` were included because `--tags pgbackrest` alone writes the
+repo config but not `restore_command`.
+
+**Result: the repo is shared and proven so.** `.205`, the replica, now reads the
+exact backup `.207` took (`20260826-065830F`) out of the same repository — the
+property that was structurally impossible before. Garage holds 4.5 GB / 71
+objects. First full backup: 8.4 GB → 4.1 GB compressed, 14,969 files, 78s.
+
+Both predicted traps fired exactly as written:
+
+- **`stanza-create` and the initial backup ran on `.205`, and were skipped on
+  `.207`.** The tasks gate on the *inventory* `pg_role`, which still says `.205`
+  is primary while Patroni has `.207` leading. Combined with
+  `/etc/pgbackrest/initial.done` already existing, the run produced a stanza with
+  **no backup at all** and a green PLAY RECAP. The first full backup had to be
+  taken by hand on the live primary. Anyone repeating this without the runbook
+  would have walked away believing they had backups.
+
+### One trap the runbook did not predict
+
+**`pg_parameters` is not reliable for cluster-wide settings on a Patroni
+cluster.** After the run, `restore_command` was present on `.207` and **absent on
+`.205`** — the replica, which is the only node that ever needs it. Ansible
+resolved `pg_parameters` identically on both hosts (checked directly), and
+`postgresql.auto.conf` was rewritten on both, yet the replica's contained only
+Pigsty's header. The likely cause is Patroni rewriting `postgresql.auto.conf` on
+a standby, where it manages recovery parameters, after Pigsty writes it.
+
+The fix, and the correct home for this setting, is Patroni's DCS config:
+
+```bash
+patronictl -c /etc/patroni/patroni.yml edit-config pg-proxmox \
+  -p "restore_command=pgbackrest --stanza=pg-proxmox archive-get %f %p" --force
+```
+
+That applies to every member, survives restarts, failovers and `reinit`, and is
+not clobbered by a Pigsty run — the `dcs:` block in the `oltp.yml` template only
+takes effect at bootstrap. `pg_parameters` stays in `pigsty.yml` as the
+rebuild-from-scratch path; the DCS entry is what governs the running cluster.
+After the edit, both nodes report the setting.
+
+### Verified
+
+| Check | Result |
+|---|---|
+| `repo1-type` both nodes | `s3`, bucket `pg-backup`, path style |
+| WAL archiving | `pg_stat_archiver`: 448 archived, **0 failed**; push confirmed in the log |
+| First full backup | `20260826-065830F`, stanza `status: ok` |
+| Repo genuinely shared | `.205` reads `.207`'s backup |
+| `restore_command` | present on **both** nodes after the DCS edit |
+| **Replica can fetch WAL from the archive** | `pgbackrest archive-get` on `.205` retrieved a 16 MB segment: *"found ... in the archive"* |
+| Cluster | `streaming`, lag 0, tl 31 throughout |
+
+### Still outstanding
+
+The **full starve test** (Decision 4 / runbook step 4) has not been run: stop the
+replica, push the primary past the 18 GB `max_slot_wal_keep_size`, restart, and
+observe it catch up with no `reinit`. The mechanism is proven — the replica
+demonstrably fetches WAL from the shared archive — but the end-to-end recovery
+path has not been exercised under the real failure condition.
+
+The pre-migration local repos at `/pg/backup` (a symlink to
+`/data/backups/pg-proxmox-18/backup`, 8.6-8.7 GB per node) are **deliberately
+untouched**, which keeps rollback a one-line config flip.
