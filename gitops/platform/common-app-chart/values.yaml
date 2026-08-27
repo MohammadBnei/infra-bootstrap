@@ -270,6 +270,16 @@ nodeSelector: {}
 tolerations: []
 affinity: {}
 
+# Container runtime to select, when the default runc is not the one you
+# want. Empty for every app in this cluster except GPU workloads, which set
+# `nvidia` — containerd registers that runtime as a NON-default on
+# k8s-worker-01 precisely so GPU access has to be asked for. Making it the
+# node default would hand the whole GPU to any pod using an nvidia/cuda:*
+# base image (they ship NVIDIA_VISIBLE_DEVICES=all) without it ever
+# requesting nvidia.com/gpu — accidental GPU multi-tenancy, which ADR-0011
+# forbids. See gitops/bootstrap/nvidia-runtimeclass.yaml and ADR-0043.
+runtimeClassName: ""
+
 # Raw volume/volumeMount specs, toYaml'd as-is into the pod spec and the
 # app container — escape hatch for anything the schema above doesn't cover
 # (e.g. mounting a ConfigMap as files). Define the backing object itself

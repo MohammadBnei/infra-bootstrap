@@ -1,0 +1,53 @@
+# RuntimeClass selecting the NVIDIA container runtime on k8s-worker-01.
+# ADR-0043 Decision 3.
+#
+# This object is the whole reason GPU access on this cluster is opt-in
+# rather than ambient.
+#
+# containerd registers `nvidia` as an ADDITIONAL runtime
+# (inventory/ukubi/host_vars/k8s-worker-01.yml), never as the node default.
+# The tempting shortcut — `containerd_default_runtime: nvidia` — would have
+# been a silent security regression: nvidia/cuda:* base images ship
+# ENV NVIDIA_VISIBLE_DEVICES=all, and nvidia-container-toolkit defaults
+# accept-nvidia-visible-devices-envvar-when-unprivileged to true. As the
+# node default, ANY pod scheduled onto k8s-worker-01 built on an NVIDIA base
+# image would receive the entire GPU without ever requesting
+# `nvidia.com/gpu` — invisible to the scheduler's resource accounting. That
+# is GPU multi-tenancy by accident, rejected by ADR-0011 and listed as
+# forbidden at DECISION.md:212.
+#
+# The mitigation for that hazard would have lived in
+# /etc/nvidia-container-runtime/config.toml — a file kubespray does not own
+# and `nvidia-ctk` does, i.e. exactly the "kubespray rewrites it on the next
+# cluster.yml run" trap the host_vars approach exists to avoid. A
+# RuntimeClass sidesteps the class of problem entirely: a pod that does not
+# ask for this runtime does not get it.
+#
+# VERIFY THIS, DO NOT ASSUME IT. The negative test is part of the contract:
+#
+#   kubectl run gpuleak --rm -it --restart=Never \
+#     --image=nvidia/cuda:12.6.3-base-ubuntu22.04 \
+#     --overrides='{"spec":{"nodeSelector":{"kubernetes.io/hostname":"k8s-worker-01"}}}' \
+#     --command -- nvidia-smi
+#
+# That pod has no runtimeClassName and no nvidia.com/gpu limit. It MUST
+# fail. If it prints the GPU table, ADR-0011 has been reopened silently and
+# the containerd configuration is wrong.
+#
+# Lives in gitops/bootstrap/ because a RuntimeClass is cluster-scoped and
+# has no chart to hang off — same flat self-syncing directory as
+# node-drainer-rbac.yaml (ADR-0021).
+apiVersion: node.k8s.io/v1
+kind: RuntimeClass
+metadata:
+  name: nvidia
+handler: nvidia
+scheduling:
+  # Belt to the device plugin's braces: even if a pod asks for this
+  # RuntimeClass, it can only land where the handler actually exists.
+  # k8s-worker-01 is the only node whose containerd knows `nvidia`; without
+  # this, a pod requesting the class on any other node fails at container
+  # creation with an opaque containerd error instead of staying Pending
+  # with a readable scheduling message.
+  nodeSelector:
+    kubernetes.io/hostname: k8s-worker-01

@@ -17,3 +17,35 @@
 # is why this lives in host_vars — see its header.
 node_labels:
   agent-fleet.dev/session-node: "true"
+
+# NVIDIA container runtime, registered as an ADDITIONAL runtime — never the
+# node default. ADR-0043 Decision 2 and 3.
+#
+# Why declared here rather than by `nvidia-ctk runtime configure`: that
+# command edits /etc/containerd/config.toml, which kubespray owns and
+# rewrites on the next cluster.yml run. The GPU would stop working at the
+# next unrelated cluster operation, months later, with nobody having
+# touched it.
+#
+# Why NOT `containerd_default_runtime: nvidia`: nvidia/cuda:* base images
+# ship ENV NVIDIA_VISIBLE_DEVICES=all, and nvidia-container-toolkit
+# defaults accept-nvidia-visible-devices-envvar-when-unprivileged to true.
+# As the node default, ANY pod landing here on an NVIDIA base image would
+# get the whole GPU injected without requesting nvidia.com/gpu — invisible
+# to scheduler accounting, i.e. the GPU multi-tenancy ADR-0011 rejected.
+# Pods select this runtime explicitly via the `nvidia` RuntimeClass.
+#
+# SystemdCgroup is explicit because config.toml.j2 renders runtime.options
+# verbatim and injects nothing; kubespray's own containerd_runc_runtime
+# sets it from containerd_use_systemd_cgroup. Omitting it gives this
+# runtime cgroupfs while kubelet uses systemd.
+#
+# NOTE the variable is `containerd_default_runtime`, not
+# `containerd_default_runtime_name` — the latter is silently ignored. We
+# set neither; this is a deliberate non-default.
+containerd_additional_runtimes:
+  - name: nvidia
+    type: "io.containerd.runc.v2"
+    options:
+      BinaryName: /usr/bin/nvidia-container-runtime
+      SystemdCgroup: true

@@ -1,0 +1,191 @@
+#!/usr/bin/env ansible-playbook
+---
+# Installs the NVIDIA driver + container toolkit on k8s-worker-01, the one
+# node with a GPU (RTX 2070 SUPER, PCI 0b:00, passed through from .165).
+# ADR-0043 Decision 1.
+#
+# WHY THIS PLAYBOOK EXISTS
+# ARCHITECTURE.md:151-156 has claimed since the cluster was designed that
+# this node runs "NVIDIA driver + container toolkit inside the VM; NVIDIA
+# Device Plugin via Helm". None of it was ever true: there is no GPU task
+# anywhere in ansible/, nvidia_accelerator_enabled is false in
+# inventory/ukubi/group_vars/k8s_cluster/k8s-cluster.yml:53-54, and there is
+# no device plugin in gitops/. The hypervisor half (vfio-pci bind, PVE
+# resource mapping, terraform hostpci) is real and done; the Kubernetes half
+# did not exist. See ADR-0043's Context.
+#
+# WHAT THIS PLAYBOOK DELIBERATELY DOES NOT DO
+# It does not run `nvidia-ctk runtime configure`. That command edits
+# /etc/containerd/config.toml, which kubespray owns and rewrites on the next
+# cluster.yml run — the GPU would silently stop working at the next
+# unrelated cluster operation. The containerd side is declared in
+# inventory/ukubi/host_vars/k8s-worker-01.yml instead, as a NON-default
+# runtime selected per-pod via the `nvidia` RuntimeClass. ADR-0043
+# Decisions 2 and 3, and the ADR-0011 hazard they exist to avoid.
+#
+# PREREQUISITE, CHECKED BY THIS PLAYBOOK
+# The repo cannot prove the GPU is actually attached to this VM:
+# terraform/*.tfstate is gitignored and docs/infrastructure-actual.md
+# contradicts itself (:135-138 says "not yet attached", :185/:220/:244 say
+# it is). So task 1 asserts the device is on the PCI bus and fails loudly
+# rather than installing a driver for hardware that is not there.
+#
+# REBOOT
+# The driver needs one. It is safe unattended because
+# self-drain-configure.yml already installed drain-self.service /
+# uncordon-self.service on this node — it cordons and evicts itself on
+# graceful shutdown and uncordons on rejoin.
+#
+# Safe to re-run — apt is idempotent and the reboot is gated on the driver
+# actually being unusable.
+
+- name: Configure the GPU node's NVIDIA driver and container toolkit
+  hosts: k8s-worker-01
+  become: true
+
+  vars:
+    # 10de:1e84 = TU104 [GeForce RTX 2070 SUPER]. ADR-0043 Decision 6.
+    gpu_pci_id: "10de:1e84"
+    # Any CUDA 12.x consumer needs >= 525.60.13. Pin deliberately rather
+    # than tracking `-server` latest, so a driver bump is a reviewed change
+    # and not a surprise on a re-run.
+    nvidia_driver_package: nvidia-driver-570-server
+
+  tasks:
+    - name: Read the PCI device list
+      # `command` + a filter rather than `shell` with a pipe to grep: no
+      # shell, no pipefail footgun, and the assertion below reads better.
+      ansible.builtin.command: lspci -nn
+      register: gpu_lspci
+      changed_when: false
+
+    - name: Assert the GPU is actually present on the PCI bus
+      # Fails loudly if the terraform hostpci apply never landed. The repo
+      # cannot settle this on its own — terraform/*.tfstate is gitignored and
+      # docs/infrastructure-actual.md:135-138 contradicts :185/:220/:244 on
+      # whether the card is attached. Installing a driver for absent hardware
+      # would "succeed" and leave a node that looks configured and schedules
+      # nothing. ADR-0043 Decision 6.
+      ansible.builtin.assert:
+        that: gpu_lspci.stdout is search(gpu_pci_id)
+        fail_msg: >-
+          No PCI device matching {{ gpu_pci_id }} (RTX 2070 SUPER) on this
+          node. The terraform hostpci passthrough has not been applied —
+          that is separate work against .165, not a driver problem. Do not
+          continue.
+        success_msg: "GPU {{ gpu_pci_id }} present on the PCI bus."
+
+    - name: Install prerequisites for the NVIDIA apt repositories
+      ansible.builtin.apt:
+        name:
+          - ca-certificates
+          - curl
+          - gnupg
+        state: present
+        update_cache: true
+
+    - name: Ensure the apt keyrings directory exists
+      ansible.builtin.file:
+        path: /etc/apt/keyrings
+        state: directory
+        mode: "0755"
+        owner: root
+        group: root
+
+    - name: Add the NVIDIA container toolkit GPG key
+      ansible.builtin.get_url:
+        url: https://nvidia.github.io/libnvidia-container/gpgkey
+        dest: /etc/apt/keyrings/nvidia-container-toolkit.asc
+        mode: "0644"
+        owner: root
+        group: root
+
+    - name: Add the NVIDIA container toolkit apt repository
+      # deb822 rather than the one-line format: ansible.builtin.apt_repository
+      # is deprecated and removed in ansible-core 2.25, and this repo pins
+      # 2.21.2 in .github/workflows/lint.yml.
+      #
+      # Architecture is hardcoded amd64 rather than $(ARCH): the one-line
+      # format expands that placeholder, deb822 does not, and every K8s node
+      # here is an x86_64 QEMU VM (ARCHITECTURE.md §2).
+      ansible.builtin.deb822_repository:
+        name: nvidia-container-toolkit
+        types: [deb]
+        uris: https://nvidia.github.io/libnvidia-container/stable/deb/amd64
+        suites: ["/"]
+        signed_by: /etc/apt/keyrings/nvidia-container-toolkit.asc
+        architectures: [amd64]
+        state: present
+        enabled: true
+      register: nvidia_repo
+
+    - name: Refresh apt cache after adding the repository
+      ansible.builtin.apt:
+        update_cache: true
+      when: nvidia_repo.changed # noqa: no-handler
+
+    - name: Install the NVIDIA driver and container toolkit
+      # The driver comes from Ubuntu's own restricted pocket, not NVIDIA's
+      # CUDA repo — fewer moving parts, and the -server variant is the
+      # headless one. Confirm availability with `apt-cache madison` if this
+      # ever fails; the package name is a pinned guess until a real run.
+      ansible.builtin.apt:
+        name:
+          - "{{ nvidia_driver_package }}"
+          - nvidia-container-toolkit
+        state: present
+        update_cache: true
+      register: nvidia_install
+
+    - name: Enable nvidia-persistenced
+      # Without persistence mode the driver unloads whenever no process
+      # holds the device, so every cold inference pays a full driver
+      # re-initialisation. ADR-0043 Decision 1.
+      ansible.builtin.systemd_service:
+        name: nvidia-persistenced
+        enabled: true
+        state: started
+      # The unit only exists once the driver package has landed; on the very
+      # first run that is after a reboot.
+      failed_when: false
+      register: persistenced
+
+    - name: Check whether the driver is loaded and usable
+      ansible.builtin.command: nvidia-smi --query-gpu=name,driver_version --format=csv,noheader
+      register: nvidia_smi
+      changed_when: false
+      failed_when: false
+
+    - name: Reboot if the driver is installed but not yet usable
+      # Gated on nvidia-smi actually failing rather than on the apt task
+      # reporting changed, so a re-run of this playbook does not reboot a
+      # working node.
+      ansible.builtin.reboot:
+        reboot_timeout: 900
+        msg: "Reboot for NVIDIA driver activation (ansible, ADR-0043)"
+      when: nvidia_smi.rc != 0
+
+    - name: Re-check the driver after reboot
+      ansible.builtin.command: nvidia-smi --query-gpu=name,memory.total,driver_version --format=csv,noheader
+      register: nvidia_smi_final
+      changed_when: false
+
+    - name: Report the working GPU
+      ansible.builtin.debug:
+        msg: "GPU ready: {{ nvidia_smi_final.stdout }}"
+
+    - name: Ensure nvidia-persistenced is enabled now the driver exists
+      ansible.builtin.systemd_service:
+        name: nvidia-persistenced
+        enabled: true
+        state: started
+
+    - name: Confirm the nvidia container runtime binary is present
+      # containerd is pointed at this path by
+      # inventory/ukubi/host_vars/k8s-worker-01.yml. If the binary is
+      # missing, every pod using the `nvidia` RuntimeClass fails to start
+      # with an unhelpful containerd error, so check it here instead.
+      ansible.builtin.stat:
+        path: /usr/bin/nvidia-container-runtime
+      register: nvidia_runtime_bin
+      failed_when: not nvidia_runtime_bin.stat.exists

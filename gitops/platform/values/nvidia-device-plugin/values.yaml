@@ -1,0 +1,58 @@
+# nvidia-device-plugin — advertises `nvidia.com/gpu` on the one node that
+# has one. ADR-0043 Decision 4.
+#
+# Why this exists: ARCHITECTURE.md:151-156 claimed since the cluster was
+# designed that a device plugin was installed "via Helm". It never was.
+# There was no device plugin, gpu-operator, RuntimeClass or `nvidia.com/gpu`
+# request anywhere in gitops/, and kubespray's nvidia_accelerator_enabled is
+# false (inventory/ukubi/group_vars/k8s_cluster/k8s-cluster.yml:53-54). The
+# hypervisor half of the passthrough was real; the Kubernetes half was not,
+# so no pod could request a GPU at all.
+#
+# One GPU, one node, and GPU multi-tenancy is rejected (ADR-0011). So this
+# is a DaemonSet that runs on exactly one node and advertises exactly one
+# device. No MIG, no time-slicing, no sharing config — adding any of those
+# would reopen a decision that is closed.
+
+# Pin to the GPU node by hostname rather than by a node-feature-discovery
+# label. NFD exists to find GPUs across a fleet; installing it to label a
+# single known node is machinery for a problem this cluster does not have.
+# If a second GPU node ever appears, replace this with a plain
+# `nvidia.com/gpu.present` label applied via host_vars node_labels — still
+# no NFD.
+nodeSelector:
+  kubernetes.io/hostname: k8s-worker-01
+
+# The plugin's own pod needs the nvidia runtime to see the driver.
+#
+# This is the load-bearing half of ADR-0043 Decision 3: containerd registers
+# `nvidia` as an ADDITIONAL runtime, never the node default. Making it the
+# default would mean any pod landing on k8s-worker-01 with an nvidia/cuda:*
+# base image (which ship ENV NVIDIA_VISIBLE_DEVICES=all) gets the whole GPU
+# injected without requesting nvidia.com/gpu — invisible to the scheduler,
+# i.e. accidental GPU multi-tenancy, which ADR-0011 forbids.
+#
+# Defined in gitops/bootstrap/nvidia-runtimeclass.yaml.
+runtimeClassName: nvidia
+
+# No tolerations. k8s-worker-01 is deliberately NOT tainted — it sits at 94%
+# requested CPU (ADR-0037, still Proposed) and tainting it would strand
+# 6 vCPU / 15GB onto a cluster that does not have room for it. Since
+# `nvidia.com/gpu` is a countable resource, exactly one pod holds the GPU
+# whether or not the node is tainted, so the taint would buy nothing here.
+# ADR-0043 Decision 5.
+tolerations: []
+
+# Fail visibly rather than quietly. The default strategy silently reports
+# zero GPUs when the driver or runtime is missing, which looks identical to
+# "no GPU on this node" — the exact failure mode that let the drift in
+# ADR-0043's Context go unnoticed for months.
+deviceListStrategy: envvar
+
+resources:
+  requests:
+    cpu: 50m
+    memory: 64Mi
+  limits:
+    cpu: 200m
+    memory: 128Mi
