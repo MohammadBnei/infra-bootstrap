@@ -12,7 +12,7 @@ Custom playbooks for things kubespray and pigsty don't cover:
 | `playbooks/register-repos.yml` | Create the manual K8s Secrets ArgoCD needs before it can bootstrap the rest of the cluster (drafted — see below) |
 | `playbooks/pve-postinstall.yml` | Configure a fresh PVE host (repos, NTP, ZFS pool, corosync join, SSH keys) — drafted, see below |
 | `playbooks/vm-provision.yml` | Create QEMU VMs and LXC containers from a host_vars-driven spec |
-| `playbooks/k8s-node-prereqs.yml` | Standalone K8s-node prereq setup (kernel modules, cgroup, containerd) |
+| `playbooks/k8s-node-prereqs.yml` | K8s-node prereqs kubespray does *not* cover — currently just `nfs-common`, required for Longhorn RWX volumes |
 | `playbooks/garage-configure.yml` | Install/configure Garage on the bare LXC terraform/garage.tf creates — drafted, see below |
 | `playbooks/nfs-configure.yml` | Format + export NFS on the bare VM terraform/nfs.tf creates — two exports since ADR-0036, see below |
 | `playbooks/k9s-dashboard-configure.yml` | Install kubectl/k9s + write a cluster-admin kubeconfig on the bare k9s-dashboard LXC terraform/k9s-dashboard.tf creates — drafted, see below |
@@ -40,7 +40,7 @@ Custom playbooks for things kubespray and pigsty don't cover:
 - [x] `build-runner-configure.yml` drafted and run (2026-08-13) — image build LXC, ADR-0034
   - [ ] multi-instance rewrite (`build_runner_repos`) + `agent-fleet` instance — **not yet run**, needs the `ACCESS_TOKEN` PAT widened to `agent-fleet` first
 - [ ] `vm-provision.yml` drafted
-- [ ] `k8s-node-prereqs.yml` drafted (may not be needed if kubespray covers it)
+- [x] `k8s-node-prereqs.yml` drafted and run (2026-07-30) — installs `nfs-common`. kubespray's preinstall role already covers kernel modules/cgroup/containerd; third-party CSI dependencies fall outside its scope, which is the gap this fills. Hit for real provisioning agent-fleet's first RWX PVC
 
 ## `playbooks/register-repos.yml`
 

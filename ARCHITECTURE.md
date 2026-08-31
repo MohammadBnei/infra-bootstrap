@@ -150,10 +150,19 @@ install on this Pi 4 held no data).
 
 ### GPU passthrough
 
-RTX 2070 SUPER at PCI `0b:00.0`, all 4 functions passed with
-`multifunction=on` (GPU + Audio + USB + USB-C). NVIDIA driver + container
-toolkit inside the VM; NVIDIA Device Plugin via Helm; GPU workloads
-scheduled via taints/tolerations.
+RTX 2070 SUPER at PCI `0b:00.0` on the hypervisor, presented to the guest
+at `01:00.0-3`, all 4 functions passed with `multifunction=on` (GPU + Audio +
+USB + USB-C). NVIDIA driver + container toolkit inside the VM; NVIDIA Device
+Plugin as a GitOps platform app.
+
+GPU workloads are scheduled by **`runtimeClassName: nvidia` plus an
+`nvidia.com/gpu` resource request** — *not* taints/tolerations. The node is
+deliberately untainted: `nvidia.com/gpu` is a countable resource, so exactly
+one pod holds the GPU either way, and a taint would only strand the node's CPU
+and RAM. The `nvidia` containerd runtime is registered as a **non-default**;
+making it the node default would inject the whole GPU into any pod built on an
+`nvidia/cuda:*` base image without it requesting one, which is the accidental
+multi-tenancy ADR-0011 rejects. See ADR-0043.
 
 ### Self-drain on `k8s-cp-01`/`k8s-worker-01`
 
