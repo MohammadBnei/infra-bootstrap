@@ -4138,6 +4138,37 @@ plan's refresh drops the missing resource **in memory only**, so repeated plans
 kept reporting `create` without ever writing that conclusion to disk. The
 resource is still in `terraform.tfstate` with its stale `node_name`.
 
+### The third one, which was the worst, and which I nearly missed twice
+
+Once hermesagent and k9s_dashboard were reconciled the plan read
+`0 to add, 10 to change, 0 to destroy` — which looks finished. Reading the
+per-resource diff rather than the counts turned up one more:
+
+```
+# proxmox_virtual_environment_vm.pg01 will be updated in-place
+  ~ disk   { ~ discard  = "ignore" -> "on" }
+  ~ memory { ~ dedicated = 4096 -> 2048 }        # <-- not ours
+```
+
+**Applying would have halved the production Postgres primary's RAM.** Live
+`pg01` is 4096; `imported.tf` said 2048; `memory` is not in that resource's
+`ignore_changes`. Someone bumped it by hand and the config never followed —
+the same class as the 52.5G disk-size scar already documented in that file,
+and the same class as the two above. `pg02` is genuinely 2048 on both sides
+and was correctly not flagged; it is left alone.
+
+Config reconciled UP to 4096, never the other way. When live and config
+disagree about a production resource, the safe direction is to make the config
+describe reality, then decide separately whether reality is right.
+
+It was nearly missed twice. The first pass filtered non-`discard` attribute
+changes and piped through `head -20`; the pg01 line fell past the cut and the
+truncation was not noticed. The second pass only inspected the resource whose
+count had changed. **`head` on a plan diff is how you ship the thing you were
+checking for.** The final check prints every changed attribute of every
+resource with no truncation at all, and that is the only version worth
+trusting.
+
 ### Consequence for applying
 
 **`terraform apply` unqualified is not safe on this state.** The discard change

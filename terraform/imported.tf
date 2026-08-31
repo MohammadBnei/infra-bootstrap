@@ -94,7 +94,14 @@ resource "proxmox_virtual_environment_vm" "pg01" {
   }
 
   memory {
-    dedicated = 2048
+    # 4096, not 2048, because that is what is live — someone bumped this VM's
+    # RAM by hand and the config never followed. `memory` is NOT in the
+    # ignore_changes below, so with 2048 here terraform plans
+    # `dedicated 4096 -> 2048`: an apply would HALVE the production Postgres
+    # primary's memory as a side effect of an unrelated change. Found
+    # 2026-08-31 in the discard=on plan; pg02 is genuinely 2048 live and is
+    # left alone.
+    dedicated = 4096
   }
 
   disk {
