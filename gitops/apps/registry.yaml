@@ -138,6 +138,25 @@
   # the app's own helm/values.yaml, not here.
   hostname: wedding.bnei.dev
 
+- name: ukubi-stt
+  namespace: ukubi-stt
+  syncWave: "10"
+  repoURL: https://github.com/MohammadBnei/ukubi-stt.git
+  valuesPath: [helm/values.yaml]
+  targetRevision: main
+  # INERT for this app, and recorded so it is not mistaken for the live
+  # source of truth: the app sets `ingress.enabled: false`, so the chart's
+  # own IngressRoute never renders and this parameter goes nowhere. The real
+  # route is hand-written in the app's extraManifests, because only a
+  # hand-written one can carry `scheme: h2c` for a gRPC backend (ADR-0044
+  # Decision 6). The value is kept accurate anyway — the ApplicationSet
+  # template passes it unconditionally, and a blank here would read as "no
+  # hostname" rather than "hostname lives elsewhere".
+  #
+  # stt.bnei.dev is GREY (DNS-only), overriding the proxied *.bnei.dev
+  # wildcard — same mechanism as fleet/s3/*.ente. See docs/dns/bnei.dev.zone.
+  hostname: stt.bnei.dev
+
 # searxng and pgweb are NOT here: they're public-image tools with no
 # app-specific code, so they're driven as platform apps instead — see
 # gitops/bootstrap/platform-common-apps.applicationset.yaml and

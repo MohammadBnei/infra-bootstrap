@@ -38,8 +38,14 @@ bnei.dev.                     300  IN  A      82.65.231.50
 ;;   fleet — ConnectRPC streaming; Cloudflare Free 524s at 100s idle origin
 ;;   s3    — Garage SigV4 signs the encoded path; CF normalizes URI paths
 ;;   ente  — two labels deep, so Universal SSL has no cert to present
+;;   stt   — native gRPC. Cloudflare Free proxies gRPC only behind a ZONE-WIDE
+;;           toggle, which would apply to every other proxied host here, and
+;;           Phase E's streaming would meet fleet's 100s ceiling anyway. Note
+;;           this is the one grey host whose route is hand-written rather than
+;;           chart-rendered — it needs `scheme: h2c`. ADR-0044 Decision 6.
 fleet.bnei.dev.               300  IN  A      82.65.231.50
 s3.bnei.dev.                  300  IN  A      82.65.231.50
+stt.bnei.dev.                 300  IN  A      82.65.231.50
 *.ente.bnei.dev.              300  IN  A      82.65.231.50
 
 ;; *.e2e.bnei.dev was DELETED at the 2026-08-18 cutover. Note this did NOT stop
