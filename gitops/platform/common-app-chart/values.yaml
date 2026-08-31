@@ -233,6 +233,23 @@ infisical:
     secretName: universal-auth-credentials
     secretNamespace: infisical
 
+# Init containers, rendered verbatim into the pod spec. Each entry is a normal
+# container object (name/image/command/env/volumeMounts/...).
+#
+# The block is passed through `tpl`, so `{{ .Values.* }}` works inside it. That
+# matters more than it looks: the common case is an init container running the
+# app's OWN image (fetching a model, running a migration), and hardcoding the
+# tag there means it silently drifts from `image.tag` on every bump. Write
+# `image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"` instead.
+#
+# Note these do NOT inherit the main container's `envFrom`/`infisical` secret or
+# `volumeMounts` — declare what each one needs. Inheriting would quietly hand a
+# fetch script the app's credentials.
+#
+# First user: ukubi-stt, whose ~2.4GB of model weights live on a node-local PVC
+# rather than in the image (ADR-0045) and are fetched here when absent.
+initContainers: []
+
 persistence:
   enabled: false
   size: 1Gi

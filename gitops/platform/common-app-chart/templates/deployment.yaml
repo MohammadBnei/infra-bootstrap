@@ -41,6 +41,17 @@ spec:
       securityContext:
         {{- toYaml . | nindent 8 }}
       {{- end }}
+      {{- /*
+        `tpl` rather than a bare `toYaml`, so an init container can reference
+        .Values.image.tag instead of hardcoding a tag that then drifts on every
+        image bump — which is the whole point when the init container IS the
+        app image (ADR-0045's model fetch). A Go-template comment, not a YAML
+        one, so it does not land in every rendered manifest and ArgoCD diff.
+      */}}
+      {{- with .Values.initContainers }}
+      initContainers:
+        {{- tpl (toYaml .) $ | nindent 6 }}
+      {{- end }}
       containers:
       - name: {{ .Release.Name }}
         image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
