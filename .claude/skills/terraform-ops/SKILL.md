@@ -115,11 +115,12 @@ to run it now in this session.
   `terraform plan -target=local_file.kubespray_inventory` first — hit
   this twice already (2026-07-28, 2026-07-30), it's a repeatable footgun
   of the `-target`-for-safety pattern, not a one-off.
-- `k8s-worker-gpu`'s `hostpci` block uses a PCI Resource `mapping`, not a
+- `k8s-worker-01`'s `hostpci` block uses a PCI Resource `mapping`, not a
   raw PCI `id` — `id` requires root-password auth and breaks under the
   token-based provider config here. If asked about GPU passthrough errors,
   check whether the `gpu_mapping_name` mapping actually exists on `.165`
-  first.
+  first. (There is no separate `k8s-worker-gpu` VM — ADR-0016 retired that
+  idea; the passthrough lives on `k8s-worker-01` itself.)
 - Some LXC operations (privileged-container feature flags, `arch`) are
   hard-restricted to `root@pam` regardless of API token permissions — a
   documented bpg provider limitation, not a role misconfiguration. See

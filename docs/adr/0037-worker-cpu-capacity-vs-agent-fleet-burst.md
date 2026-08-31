@@ -65,6 +65,51 @@ this repo alone:
 No change made to `terraform/`, `inventory/`, or worker sizing as part of
 this investigation — both options need an explicit greenlight.
 
+## Re-measured 2026-08-31 — the numbers moved, the problem did not
+
+The 2026-08-18 figures above are a snapshot of a *fluctuating* quantity and
+should not be quoted as standing facts. ADR-0043 cited the "94% requested CPU"
+line as a reason not to taint `k8s-worker-01`; that figure no longer holds, so
+it is corrected here rather than left to propagate further.
+
+Live read, all five nodes, 2026-08-31:
+
+| | 2026-08-18 | 2026-08-31 |
+|---|---|---|
+| Allocatable, cluster-wide | 15000m | 15000m (1400m x 3 cp, 5400m x 2 worker) |
+| Total pod CPU requests | 10948m | **8298m** |
+| Single-node-failure threshold | 9600m | 9600m |
+| Overcommit (requests - threshold) | **+1348m** | **-1302m — not overcommitted** |
+| `k8s-worker-01` requested | 94% | **57%** (3111m) |
+| agent-fleet session pods running | 3 | **0** |
+
+**The alert is quiet only because no sessions are running.** That is the same
+mechanism this ADR already describes, observed from the other end — it is not
+evidence the problem resolved itself. The structural picture is slightly worse:
+
+- Baseline (everything except agent-fleet session pods) grew **7948m ->
+  8298m** — roughly 350m of new platform load since August, including the
+  NVIDIA device plugin (50m, ADR-0043).
+- Each session still requests **1 full CPU**.
+- Headroom before `KubeCPUOvercommit` fires: **~1.3 sessions**, down from
+  ~1.65.
+
+### Interaction with ADR-0043's GPU work
+
+The GPU-backed workload ADR-0043 was enabling for is planned at
+`requests.cpu: 500m` on `k8s-worker-01`. That takes the baseline to ~8798m and
+the headroom to **~0.8 sessions** — i.e. a single agent-fleet session would
+trip the alert.
+
+This is worth stating plainly rather than burying: the alert means "the cluster
+cannot survive losing one node", and if `k8s-worker-01` is the node that dies,
+a GPU workload pinned to it is unschedulable anyway. So the STT service does
+not make the *failure* worse, only the *signal* noisier — but it does consume
+most of the remaining margin, and lever 1 becomes correspondingly more
+attractive than it was in August.
+
+The decision below is still open. Nothing here settles it.
+
 ## Consequences
 
 Pending. Until one of the two levers above is pulled, `KubeCPUOvercommit`

@@ -48,9 +48,9 @@ runtimeClassName: nvidia
 # No tolerations. k8s-worker-01 is deliberately NOT tainted: `nvidia.com/gpu`
 # is a countable resource, so exactly one pod holds the GPU whether or not the
 # node is tainted — the taint would buy nothing and would strand the node's CPU
-# and RAM from everything else. (ADR-0037's "94% requested CPU" is stale; the
-# node measured 56% requested / 122% limits on 2026-08-31. The decision does
-# not rest on that number either way.) ADR-0043 Decision 5.
+# and RAM from everything else. (ADR-0037's "94% requested CPU" is stale — see
+# that ADR's "Re-measured 2026-08-31" section for current figures. The decision
+# does not rest on that number either way.) ADR-0043 Decision 5.
 tolerations: []
 
 # How the plugin passes the device list to the runtime: an env var

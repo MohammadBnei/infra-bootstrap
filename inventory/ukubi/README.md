@@ -7,7 +7,7 @@ This is the inventory kubespray reads to build `ukubi-cluster`.
 | Node | IP | VMID | vCPU | RAM | Role |
 |---|---|---|---|---|---|
 | `k8s-cp-01` | 192.168.1.201 | 201 | 2 | 4GB | control plane + etcd + worker |
-| `k8s-worker-01` | 192.168.1.202 | 202 | 4 | 8GB | worker + RTX 2070 SUPER PT (GPU passthrough on this VM directly, no separate GPU worker) |
+| `k8s-worker-01` | 192.168.1.202 | 202 | 6 | 15GB | worker + RTX 2070 SUPER PT (GPU passthrough on this VM directly, no separate GPU worker) |
 
 **OS:** Ubuntu 24.04 cloud-init, user `core`, SSH key `~/.ssh/id_k8s_vms`.
 
@@ -45,6 +45,6 @@ ansible-playbook -i ../inventory/ukubi/hosts.yaml cluster.yml --become --diff
 - MetalLB: L2, pool `192.168.1.233-250`, Traefik VIP reserved at `.233` (`.230`-`.232` excluded from the pool — `.232` is Pigsty's HA floating VIP)
 - Hubble: enabled with TLS
 - ArgoCD: installed via `helm + kubectl apply -f gitops/bootstrap/` after kubespray (not a kubespray addon)
-- cert-manager: NOT installed — Traefik built-in ACME (HTTP-01) is the cert engine
-- GPU: `k8s-worker-01` gets `hostpci` passthrough directly (no separate GPU-only worker) — `nvidia_accelerator_enabled: true` and `nvidia_gpu_nodes` are set on it as part of the initial `cluster.yml` run
+- cert-manager: NOT installed — Traefik built-in ACME is the cert engine, **DNS-01 via Cloudflare** (resolver `le`) since ADR-0038. It was TLS-ALPN-01 until 2026-08-18 and had to change before any record could be proxied
+- GPU: `k8s-worker-01` gets `hostpci` passthrough directly (no separate GPU-only worker). `nvidia_accelerator_enabled` is deliberately **`false`** and `nvidia_gpu_nodes` is unset — kubespray's GPU path is not used. Instead the `nvidia` containerd runtime is declared as a non-default in `host_vars/k8s-worker-01.yml` (`containerd_additional_runtimes`), the driver and toolkit come from `ansible/playbooks/gpu-node-configure.yml`, and the device plugin is a GitOps platform app. See ADR-0043
 - Future workers on `.200`/`.161` (once they join the PVE cluster — see `docs/adr/0020-pve-corosync-cluster.md`) are added the same way: `scale.yml`, worker-only, no control-plane/etcd role. Treat `.161`'s worker as lower-trust capacity until ADR-0013's sleep-risk mitigation is confirmed in production — best-effort workloads only, no critical-path scheduling, via node labels/taints once it's added.

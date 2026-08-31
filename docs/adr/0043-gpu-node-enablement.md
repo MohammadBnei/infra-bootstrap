@@ -1,6 +1,11 @@
 # ADR-0043: GPU node enablement — driver, container runtime, device plugin
 
-**Status:** Proposed
+**Status:** Accepted — rolled out 2026-08-31. All six decisions are live and
+verified on `k8s-worker-01`: driver 580.173.02, the `nvidia` runtime registered
+as a non-default with `SystemdCgroup = true`, the device plugin advertising
+`nvidia.com/gpu: 1`, and Decision 3's negative test failing as required. The
+`.165` reboot re-test is still outstanding — take it on the next gaming reboot.
+**Date:** 2026-08-27
 
 ## Context
 
@@ -51,11 +56,12 @@ Two further complications found while scoping the fix:
    `10de:1ad9`), with no driver bound. **The apply landed**, the 2026-07-14
    paragraph was the stale half, and it has since been corrected in place.
 2. **`k8s-worker-01` was believed to be the tightest node in the cluster** —
-   ADR-0037 records 94% of allocatable CPU requested. **That figure no longer
-   holds.** Measured on 2026-08-31 the node reports `cpu 3061m (56%)`
-   requested against `6600m (122%)` limits. The node is committed but not
-   full. ADR-0037 is still Proposed and now also needs re-measuring; this
-   ADR does not do that.
+   ADR-0037 records 94% of allocatable CPU requested. **That figure did not
+   survive verification** — the node was at 56% when this ADR was written and
+   57% once the device plugin landed. It is a fluctuating quantity, not a
+   standing fact, so this ADR deliberately quotes no number: see ADR-0037's
+   "Re-measured 2026-08-31" section, which is the authority. The node is
+   committed but not full. ADR-0037 itself is still Proposed.
 
 ## Decision
 
@@ -176,9 +182,9 @@ that registry is for user apps under GitOps Pattern C (ADR-0004).
 GPU whether or not the node is tainted. A `NoSchedule` taint's only effect
 would be keeping non-GPU pods off the node's CPU and RAM.
 
-That is the whole argument, and it does not depend on how full the node is.
-ADR-0037's 94%-requested-CPU figure is stale — the node measured 56%
-requested (122% limits) on 2026-08-31 — but the conclusion is unchanged:
+That is the whole argument, and it does not depend on how full the node is —
+which is just as well, because ADR-0037's 94% figure turned out to be stale
+(see its "Re-measured 2026-08-31" section). The conclusion is unchanged:
 tainting would strand real capacity and push that load onto
 `k8s-worker-02`, buying nothing a countable resource does not already give.
 
@@ -282,10 +288,11 @@ nothing.
   Decision 1's NVIDIA apt repository is genuinely required rather than
   belt-and-braces.
 - **This adds a pod to a node that is committed but not full**, while
-  ADR-0037 is still open. ADR-0037's 94% figure did not survive
-  verification (56% requested / 122% limits on 2026-08-31), so that ADR
-  needs re-measuring on its own terms; the two still interact and it
-  should be settled rather than left to drift further.
+  ADR-0037 is still open. ADR-0037's 94% figure did not survive verification
+  and has since been re-measured in that ADR, which also records what the
+  planned GPU workload does to the cluster's session headroom. The two
+  decisions still interact and ADR-0037 should be settled rather than left to
+  drift further.
 - GPU workloads inherit `k8s-worker-01`'s availability, which is
   deliberately poor — `.165` is rebooted for gaming. That is accepted for
   GPU work by design, and is why Decision 1 leans on the existing

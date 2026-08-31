@@ -40,7 +40,7 @@ then here. When in doubt, open those files.
 | `kubespray/` | Submodule, pinned v2.31.0 |
 | `inventory/ukubi/` | Active kubespray inventory |
 | `inventory/mycluster/` | Legacy, flagged for deletion (MISSION §14) — don't extend it |
-| `ansible/` | `register-repos.yml`/`pve-postinstall.yml`/`garage-configure.yml` done and run; `vm-provision.yml`/`k8s-node-prereqs.yml` still pending — see `ansible/README.md` status table |
+| `ansible/` | `register-repos.yml`/`pve-postinstall.yml`/`garage-configure.yml`/`k8s-node-prereqs.yml`/`gpu-node-configure.yml` done and run; only `vm-provision.yml` still pending — see `ansible/README.md` status table |
 | `pigsty/` | Vendored Pigsty deployment (own docs/CLAUDE.md) |
 | `gitops/` | ArgoCD source of truth — see `gitops/README.md` |
 | `k8s-cluster/` | Submodule, separate repo, the GitOps *runtime target* (not managed from here) |
@@ -123,12 +123,14 @@ rejected, linked from `DECISION.md` §3.
 This repo is mid-bootstrap, not finished:
 
 - `ansible/playbooks/register-repos.yml`, `pve-postinstall.yml`,
-  `garage-configure.yml`, `pihole-configure.yml` and
-  `build-runner-configure.yml` are done, committed, and have been run for real
+  `garage-configure.yml`, `pihole-configure.yml`,
+  `build-runner-configure.yml`, `k8s-node-prereqs.yml` and
+  `gpu-node-configure.yml` are done, committed, and have been run for real
   (server1/ex-laptop reinstalled to PVE and joined the corosync cluster,
-  see ADR-0020/ADR-0024); `vm-provision.yml`/`k8s-node-prereqs.yml` and
-  their runbooks are still TODO — check `ansible/README.md` /
-  `docs/README.md` for the current checklist rather than assuming.
+  see ADR-0020/ADR-0024; the GPU node enabled 2026-08-31, see ADR-0043);
+  `vm-provision.yml` and its runbook are still TODO — check
+  `ansible/README.md` / `docs/README.md` for the current checklist rather
+  than assuming.
 - `inventory/mycluster/` is legacy and should eventually be deleted.
 - `DECISION.md`'s own §4 "known drift" list can itself go stale — don't
   trust it blindly — run the `mission-drift` skill before relying on
