@@ -23,6 +23,16 @@
 nodeSelector:
   kubernetes.io/hostname: k8s-worker-01
 
+# The nodeSelector above is NOT sufficient on its own. This chart ships a
+# default nodeAffinity requiring one of three NFD-style labels, so with no NFD
+# in the cluster the DaemonSet computed DESIRED=0 and never scheduled. The node
+# carries `nvidia.com/gpu.present: "true"` via
+# inventory/ukubi/host_vars/k8s-worker-01.yml's node_labels to satisfy it — the
+# escape hatch the chart itself documents. Deliberately not overridden here:
+# `affinity: {}` would not work anyway (Helm merges maps; only `affinity: null`
+# clears a values-file default), and keeping the guard means a future GPU node
+# still has to opt in.
+
 # The plugin's own pod needs the nvidia runtime to see the driver.
 #
 # This is the load-bearing half of ADR-0043 Decision 3: containerd registers

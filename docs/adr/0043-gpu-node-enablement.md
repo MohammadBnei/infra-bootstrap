@@ -214,6 +214,21 @@ nothing.
   now names a VM that ADR-0016 retired. Worth a correction so a future
   reader does not go looking for it. `.claude/skills/terraform-ops/SKILL.md:118-121`
   has the same stale name.
+- **The device plugin needs a node label the hostname nodeSelector does not
+  provide.** Chart 0.17.1 ships a default `nodeAffinity` requiring one of
+  `feature.node.kubernetes.io/pci-10de.present`,
+  `feature.node.kubernetes.io/cpu-model.vendor_id=NVIDIA`, or
+  `nvidia.com/gpu.present`. With no NFD in the cluster none existed, so the
+  DaemonSet computed `DESIRED=0` — pinning by hostname in `nodeSelector` does
+  not override the chart's own affinity. Found on 2026-08-31 after the merge,
+  when the Application went Synced/Healthy with zero pods: **a Healthy ArgoCD
+  Application is not evidence that a DaemonSet scheduled anything.** Fixed by
+  adding `nvidia.com/gpu.present: "true"` to this node's `node_labels`, which
+  is the escape hatch the chart documents and the label Decision 4 already
+  named. Applying it needs `--tags node-label` alongside `container-engine`.
+  Note `affinity: {}` in a values file would *not* have worked as an
+  alternative — Helm merges maps, so only `affinity: null` clears a chart
+  default.
 - **A negative test becomes part of the verification contract.** Decision 3
   is only worth anything if it is checked: a pod on `k8s-worker-01` with no
   `runtimeClassName` and no `nvidia.com/gpu` limit must **fail** to see the
@@ -242,10 +257,15 @@ nothing.
   `ansible/scripts/check-containerd-runtime-options.py` in CI, because
   nothing else catches it — the YAML is valid, ansible-lint is happy, and
   the damage only appears mid-`cluster.yml`.
-- **The driver version is pinned and confirmed.** `nvidia-driver-570-server`
-  is available on Ubuntu 24.04 as `570.211.01-0ubuntu1.24.04.1` from
-  `noble-updates/restricted` (checked on the node, 2026-08-31), comfortably
-  above the ≥ 525.60.13 that any CUDA 12.x consumer needs. Separately
+- **The driver pin is `nvidia-driver-580-server`, and the 570 one was a
+  fiction.** On noble `nvidia-driver-570-server` is a transitional shim whose
+  entire dependency list is `nvidia-driver-580-server`; installing it pulls
+  the 580 branch, and the first real run (2026-08-31) came up on
+  **580.173.02**, not the 570.211.01 the playbook claimed to pin. A
+  metapackage named for a branch is not evidence it installs that branch —
+  check `apt-cache depends`, not just `apt-cache madison`. Both are in
+  `noble-updates/restricted`, and either way it is far above the ≥ 525.60.13
+  any CUDA 12.x consumer needs. Separately
   confirmed: `nvidia-container-toolkit` is in **no** Ubuntu pocket, so
   Decision 1's NVIDIA apt repository is genuinely required rather than
   belt-and-braces.

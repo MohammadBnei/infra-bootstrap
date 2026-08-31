@@ -62,10 +62,15 @@
     # than tracking `-server` latest, so a driver bump is a reviewed change
     # and not a surprise on a re-run.
     #
-    # Availability confirmed on the node 2026-08-31:
-    # 570.211.01-0ubuntu1.24.04.1 in noble-updates/restricted (and
-    # noble-security). The `-server` variant is the headless one.
-    nvidia_driver_package: nvidia-driver-570-server
+    # It is 580, not 570, because on noble `nvidia-driver-570-server` is a
+    # pure transitional shim — `apt-cache depends` shows a single
+    # `Depends: nvidia-driver-580-server`. Installing it pulls the 580 branch
+    # and 580.173.02 is what actually loads, so the 570 "pin" pinned nothing.
+    # Naming the branch that really lands is what makes a future bump a
+    # reviewed change rather than a surprise. Found on the first real run,
+    # 2026-08-31; 580.173.02-0ubuntu0.24.04.1 is in noble-updates/restricted
+    # and noble-security. The `-server` variant is the headless one.
+    nvidia_driver_package: nvidia-driver-580-server
 
   tasks:
     - name: Read the PCI device list
@@ -146,7 +151,9 @@
       # CUDA repo — fewer moving parts, and the -server variant is the
       # headless one. nvidia-container-toolkit is NOT in any Ubuntu pocket
       # (checked 2026-08-31), which is what the repository added above is
-      # for. Re-confirm with `apt-cache madison` if a future bump fails.
+      # for. Re-confirm with `apt-cache madison` if a future bump fails, and
+      # with `apt-cache depends` that the metapackage is not a shim for a
+      # newer branch — nvidia-driver-570-server is exactly that.
       ansible.builtin.apt:
         name:
           - "{{ nvidia_driver_package }}"
