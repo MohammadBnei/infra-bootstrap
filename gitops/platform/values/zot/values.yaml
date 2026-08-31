@@ -153,6 +153,38 @@ extraVolumeMounts:
     mountPath: /var/lib/registry
 
 # -----------------------------------------------------------------------
+# readTimeout / writeTimeout: 30m, overriding zot's 60s defaults
+#
+# zot does NOT document these and the getter is misleading —
+# pkg/api/config/config.go's GetHTTPReadTimeout() returns 0 (no timeout) when
+# unset, but pkg/cli/server/root.go fills the field in first:
+#
+#   const defaultReadTimeout = 60 * time.Second
+#   if config.HTTP.ReadTimeout == nil { ... = &readTimeout }
+#
+# ReadTimeout in Go covers reading the ENTIRE request including the body, so it
+# is a hard ceiling on how long a single blob upload may take — regardless of
+# progress. A 60s ceiling is invisible until an image has a layer big enough to
+# exceed it.
+#
+# ukubi-stt is that image: 5580MB across 11 layers, with 2468MB, 2042MB and
+# 828MB layers. buildah pushes all layers CONCURRENTLY and the aggregate is
+# ~56MB/s, so a big layer gets ~1/11th of it and needs minutes. Measured, twice,
+# on two different network paths (via the MetalLB VIP and direct to the pod IP,
+# bypassing IPVS): killed at 60.098s and 60.100s having sent exactly 541MiB at
+# a throttled 9MB/s. A single unthrottled 2468MB layer took 57.6s and squeaked
+# through, which is why smaller images never revealed this.
+#
+# writeTimeout matters symmetrically and is the latent half: it bounds how long
+# zot may take to WRITE a response, i.e. serve a pull. No node has hit it yet
+# because pulls run at LAN speed, but the same 60s applied to a multi-GB layer
+# on a slow or contended link would break image pulls cluster-wide.
+#
+# 30m rather than 0 (no timeout) deliberately: 0 removes the slowloris
+# protection these timeouts exist for. 30m is far beyond any legitimate push
+# here while still bounding a stuck connection.
+#
+# -----------------------------------------------------------------------
 # Retention / GC (the storage.gc + storage.retention block below)
 #
 # ADR-0034 deferred a retention *policy* while keeping the bucket bound.
@@ -292,6 +324,8 @@ extraManifests:
           "http": {
             "address": "0.0.0.0",
             "port": "5000",
+            "readTimeout": "30m",
+            "writeTimeout": "30m",
             "auth": {
               "htpasswd": {
                 "path": "/etc/zot/htpasswd"
