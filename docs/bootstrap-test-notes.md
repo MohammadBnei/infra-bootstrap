@@ -4191,3 +4191,106 @@ the resource-action list and the counts, every time.
 | `ex-laptop` (.161) | 141G | 67.2% |
 
 server1 was the acute one. Nothing monitors any of them.
+
+## 2026-08-31 — the registry could not accept a push, and the cause was a 100Mb link
+
+Gate 0's image build finally compiled and then could not push. buildah retried
+and gave up:
+
+```
+Failed, retrying in 2s ... (2/3). Error: writing blob:
+  Patch "http://registry.bnei.lan:5000/v2/ukubi-stt/blobs/uploads/03d0324e-...":
+  write tcp 192.168.1.111:42156->192.168.1.234:5000: write: connection reset by peer
+```
+
+### Two wrong guesses, and how they died
+
+**"zot is OOMing on a 2.3GB blob."** It has a 1Gi memory limit and the weights
+layer is 2.3GB, which is a tidy story. It was wrong: `restartCount: 0`,
+`lastState: {}`, and `kubectl top` showed **330Mi of 1Gi**. zot never died. Its
+logs show the upload `POST` returning 202 and then no `PATCH` line at all — the
+connection dies mid-request with nothing server-side to log.
+
+**"There is a 2GiB cliff."** `encoder-model.onnx.data` is 2323MB, just over
+2GiB, and "reset with no server error" is exactly how a 32-bit size or offset
+limit fails. Also wrong, and the test that killed it is the useful part:
+
+```
+1500MB blob -> reset
+ 200MB blob -> curl: (56) Connection reset by peer
+               sent = 132 MiB, time = 60.2s
+```
+
+A 200MB blob failing ends the size theory outright. **Reset at 60.2s is a
+timeout, and 132 MiB in 60s is ~2.2 MB/s** — on a LAN. The blob size was never
+the variable; throughput was. Had the 2GiB story not been tested it would have
+led to splitting the Dockerfile into smaller layers, which fixes nothing.
+
+### The actual cause
+
+Longhorn was rebuilding replicas after all five VMs were restarted, which
+looked like sufficient explanation — 3 of 6 volumes degraded, 2 rebuilding.
+But the hosts were **not** busy: load 1–3, **iowait 0.8–1.9%**. Idle disks do
+not explain 2.2 MB/s, so something else had to be the constraint.
+
+```
+bnei       nic0  1000Mb/s  r8169
+server1    nic0   100Mb/s  r8152   <-
+ex-laptop  nic0  1000Mb/s  r8152
+```
+
+`server1` was running at a tenth of the others. Full `ethtool` output named the
+culprit precisely:
+
+```
+Supported link modes:            10 / 100 / 1000baseT   <- adapter can do gigabit
+Advertised link modes:           10 / 100baseT only     <- adapter was not offering it
+Link partner advertised:         10 / 100 / 1000baseT   <- the switch WAS offering it
+Speed: 100Mb/s
+```
+
+**Not the cable and not the switch port** — the switch was advertising gigabit
+and being declined. The adapter's advertised set had been clamped, and `dmesg`
+shows why: a `carrier off` / `carrier on` bounce after the reboot. Nothing in
+`/etc/network/interfaces`, no `.link` file, no udev rule and no ethtool service
+sets it, so it was pure runtime state.
+
+Worth noting the USB bus was a red herring in both directions: server1's
+adapter sits on **USB 3 (5000M)** and negotiated 100Mb, while ex-laptop's sits
+on **USB 2 (480M)** and negotiated 1000Mb. Changing the USB port would have
+achieved nothing.
+
+**Read the whole of `ethtool`'s output.** An early look truncated with
+`head -12` showed only `Supported link modes: 10baseT/Half 10baseT/Full` — the
+first line of a three-line list — and produced a confident, wrong claim that
+the adapter could not do gigabit. The same class of error as reading a
+`terraform plan` through `head`.
+
+### The fix
+
+```bash
+ethtool -s nic0 autoneg on advertise 0x03f     # 10/100/1000, autoneg left ON
+```
+
+Ran with a dead-man switch, because losing this link isolates `k8s-worker-02`
+(which runs zot), `k8s-cp-02`, `pg01` and the build-runner, and recovery would
+need physical access: a background job scheduled the revert to the previous
+`0x00f` **before** the change was applied, and was cancelled only after the link
+was confirmed up. It came back at **1000Mb/s** immediately.
+
+Advertising the full set with autoneg on, rather than forcing `speed 1000`, so
+a genuinely bad cable still negotiates down instead of losing link entirely.
+
+Effect was immediate and confirms the diagnosis: the Longhorn rebuild that had
+crawled to 74% hit **99% within minutes**.
+
+Persisted as a systemd oneshot in `pve-postinstall.yml` — a oneshot rather than
+`post-up` in `/etc/network/interfaces`, because PVE's own UI writes that file
+and this has no business fighting it for ownership.
+
+### Left open
+
+The **60s ceiling on registry uploads** is real and independent of the link
+speed. It did not matter once throughput was fixed, but a large layer on a slow
+path will always die at 60s. Nothing has been changed for it and nothing
+measures it.

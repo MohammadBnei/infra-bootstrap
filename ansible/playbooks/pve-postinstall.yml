@@ -197,6 +197,94 @@
         - "'already defined' not in (pvesm_add.stderr | default(''))"
       when: zfs_pool_device | length > 0
 
+- name: Keep the USB NIC advertising gigabit (see docs/bootstrap-test-notes.md 2026-08-31)
+  # server1 was found running at 100Mb/s while its switch port offered gigabit:
+  #
+  #   Supported:               10 / 100 / 1000baseT   <- adapter can do it
+  #   Advertised:              10 / 100baseT only     <- adapter was not offering it
+  #   Link partner advertised: 10 / 100 / 1000baseT   <- switch was offering it
+  #
+  # Not a cable and not a switch port — the adapter's advertised set had been
+  # clamped, almost certainly by the `carrier off`/`carrier on` bounce in dmesg
+  # after a reboot. Nothing in /etc/network/interfaces or udev sets it, so it is
+  # runtime state that a plain `ethtool -s` restores and a reboot loses again.
+  #
+  # It cost more than it looks: zot and half the k8s nodes live behind that link,
+  # so registry pushes crawled at ~2.2MB/s and died on a 60s timeout, and a
+  # Longhorn rebuild sat at 74% for ages. Restoring gigabit took it to 99% in
+  # minutes.
+  #
+  # A systemd oneshot rather than `post-up` in /etc/network/interfaces: PVE's own
+  # UI writes that file, and this has no business fighting it over ownership.
+  hosts: pve_new
+  become: true
+  # Tagged so this can be applied on its own. This playbook also creates ZFS
+  # pools and joins corosync; an untagged run to fix a NIC would be wildly
+  # disproportionate to the change.
+  tags: nic-speed
+  tasks:
+    - name: Detect the bridge uplink driver
+      ansible.builtin.command: ethtool -i nic0
+      register: nic0_driver
+      changed_when: false
+      failed_when: false
+
+    - name: Install the gigabit-advertise unit
+      # 0x03f = 10baseT H/F + 100baseT H/F + 1000baseT H/F. Advertising the full
+      # set and leaving autoneg on, rather than forcing `speed 1000`, so a
+      # genuinely degraded cable still negotiates down instead of losing link.
+      ansible.builtin.copy:
+        dest: /etc/systemd/system/nic0-advertise-gigabit.service
+        mode: "0644"
+        owner: root
+        group: root
+        content: |
+          # Managed by ansible/playbooks/pve-postinstall.yml.
+          [Unit]
+          Description=Re-advertise 10/100/1000 on nic0 (USB NIC loses it on carrier bounce)
+          After=network-online.target
+          Wants=network-online.target
+
+          [Service]
+          Type=oneshot
+          RemainAfterExit=yes
+          ExecStart=/sbin/ethtool -s nic0 autoneg on advertise 0x03f
+
+          [Install]
+          WantedBy=multi-user.target
+      when: nic0_driver.rc == 0
+      register: nic0_unit
+
+    - name: Enable it
+      ansible.builtin.systemd_service:
+        name: nic0-advertise-gigabit.service
+        enabled: true
+        state: started
+        daemon_reload: true
+      # not ansible_check_mode: in --check the copy above is simulated, so the
+      # unit does not exist on disk and systemd cannot enable it — the task
+      # would fail every dry run and train people to skip dry runs.
+      when: nic0_driver.rc == 0 and not ansible_check_mode
+
+    - name: Report the negotiated speed
+      ansible.builtin.shell: |
+        set -o pipefail
+        ethtool nic0 | awk '/Speed:/{print $2}'
+      args:
+        executable: /bin/bash
+      register: nic0_speed
+      changed_when: false
+      failed_when: false
+
+    - name: Warn if the link is still not gigabit
+      # Deliberately a warning, not a failure: a real cable fault should not
+      # block the rest of a host build, but it must not pass silently either.
+      ansible.builtin.debug:
+        msg: >-
+          nic0 negotiated {{ nic0_speed.stdout | trim }} — expected 1000Mb/s.
+          Check the cable and switch port; see docs/bootstrap-test-notes.md.
+      when: nic0_driver.rc == 0 and (nic0_speed.stdout | trim) != "1000Mb/s"
+
 - name: Join the corosync PVE cluster (ADR-0020) — run one host at a time via --limit
   hosts: pve_new
   gather_facts: false
