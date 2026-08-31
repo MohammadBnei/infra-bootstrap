@@ -1,0 +1,4343 @@
+{
+  "version": 4,
+  "terraform_version": "1.15.8",
+  "serial": 131,
+  "lineage": "a24f1bd9-73dd-ab77-2f22-0f5f695ef883",
+  "outputs": {
+    "garage_storage_ct_id": {
+      "value": 301,
+      "type": "number"
+    },
+    "garage_storage_ip": {
+      "value": "192.168.1.199",
+      "type": "string"
+    },
+    "k8s_node_ips": {
+      "value": {
+        "k8s-cp-01": "192.168.1.201",
+        "k8s-worker-01": "192.168.1.202",
+        "k8s-worker-02": "192.168.1.203"
+      },
+      "type": [
+        "object",
+        {
+          "k8s-cp-01": "string",
+          "k8s-worker-01": "string",
+          "k8s-worker-02": "string"
+        }
+      ]
+    },
+    "k9s_dashboard_ct_id": {
+      "value": 102,
+      "type": "number"
+    },
+    "k9s_dashboard_ip": {
+      "value": "192.168.1.110",
+      "type": "string"
+    }
+  },
+  "resources": [
+    {
+      "mode": "managed",
+      "type": "local_file",
+      "name": "kubespray_inventory",
+      "provider": "provider[\"registry.terraform.io/hashicorp/local\"]",
+      "instances": [
+        {
+          "schema_version": 0,
+          "attributes": {
+            "content": "# Terraform-generated — DO NOT EDIT BY HAND.\n# Regenerated from terraform/variables.tf's `k8s_nodes` on every\n# `terraform apply` (see terraform/hosts-inventory.tf). Manual edits here\n# are overwritten on next apply. To change topology, edit `k8s_nodes` in\n# terraform/variables.tf.\nall:\n  hosts:\n    k8s-cp-01:\n      ansible_host: 192.168.1.201\n      ansible_user: core\n      ansible_ssh_private_key_file: ~/.ssh/id_k8s_vms\n      ansible_become: true\n      ansible_become_method: sudo\n      ip: 192.168.1.201\n      access_ip: 192.168.1.201\n    k8s-cp-02:\n      ansible_host: 192.168.1.204\n      ansible_user: core\n      ansible_ssh_private_key_file: ~/.ssh/id_k8s_vms\n      ansible_become: true\n      ansible_become_method: sudo\n      ip: 192.168.1.204\n      access_ip: 192.168.1.204\n    k8s-cp-03:\n      ansible_host: 192.168.1.206\n      ansible_user: core\n      ansible_ssh_private_key_file: ~/.ssh/id_k8s_vms\n      ansible_become: true\n      ansible_become_method: sudo\n      ip: 192.168.1.206\n      access_ip: 192.168.1.206\n    k8s-worker-01:\n      ansible_host: 192.168.1.202\n      ansible_user: core\n      ansible_ssh_private_key_file: ~/.ssh/id_k8s_vms\n      ansible_become: true\n      ansible_become_method: sudo\n      ip: 192.168.1.202\n      access_ip: 192.168.1.202\n    k8s-worker-02:\n      ansible_host: 192.168.1.203\n      ansible_user: core\n      ansible_ssh_private_key_file: ~/.ssh/id_k8s_vms\n      ansible_become: true\n      ansible_become_method: sudo\n      ip: 192.168.1.203\n      access_ip: 192.168.1.203\n  children:\n    kube_control_plane:\n      hosts:\n        k8s-cp-01:\n        k8s-cp-02:\n        k8s-cp-03:\n    kube_node:\n      hosts:\n        k8s-cp-01:\n        k8s-cp-02:\n        k8s-cp-03:\n        k8s-worker-01:\n        k8s-worker-02:\n    etcd:\n      hosts:\n        k8s-cp-01:\n        k8s-cp-02:\n        k8s-cp-03:\n    k8s_cluster:\n      children:\n        kube_control_plane:\n        kube_node:\n",
+            "content_base64": null,
+            "content_base64sha256": "cZUL+t40rwLMa5Fu8gVB4envi34YaTZGm2hfIbPv8Ew=",
+            "content_base64sha512": "M+ZzfEqHHepwPQLAMFaaLS30LzW3BSA+Zy3klyXQ5JnZGQFeEnO+YVkNgB2wra+PHmkJIyJ6yqKHAM0u4ptqyw==",
+            "content_md5": "2d2cfb56422ea8b7a092c5f36cdb3e0e",
+            "content_sha1": "686731150834a920b0a56dfcf187d7b0fec0a15a",
+            "content_sha256": "71950bfade34af02cc6b916ef20541e1e9ef8b7e186936469b685f21b3eff04c",
+            "content_sha512": "33e6737c4a871dea703d02c030569a2d2df42f35b705203e672de49725d0e499d919015e1273be61590d801db0adaf8f1e690923227acaa28700cd2ee29b6acb",
+            "directory_permission": "0777",
+            "file_permission": "0777",
+            "filename": "./../inventory/ukubi/hosts.yaml",
+            "id": "686731150834a920b0a56dfcf187d7b0fec0a15a",
+            "sensitive_content": null,
+            "source": null
+          },
+          "sensitive_attributes": [
+            [
+              {
+                "type": "get_attr",
+                "value": "sensitive_content"
+              }
+            ]
+          ],
+          "identity_schema_version": 0
+        }
+      ]
+    },
+    {
+      "mode": "managed",
+      "type": "proxmox_download_file",
+      "name": "garage_lxc_template",
+      "provider": "provider[\"registry.terraform.io/bpg/proxmox\"]",
+      "instances": [
+        {
+          "schema_version": 0,
+          "attributes": {
+            "checksum": null,
+            "checksum_algorithm": null,
+            "content_type": "vztmpl",
+            "datastore_id": "local",
+            "decompression_algorithm": null,
+            "file_name": "debian-13-standard_13.6-1_amd64.tar.zst",
+            "id": "local:vztmpl/debian-13-standard_13.6-1_amd64.tar.zst",
+            "node_name": "bnei",
+            "overwrite": false,
+            "overwrite_unmanaged": false,
+            "size": 129954319,
+            "upload_timeout": 600,
+            "url": "http://download.proxmox.com/images/system/debian-13-standard_13.6-1_amd64.tar.zst",
+            "verify": true
+          },
+          "sensitive_attributes": [],
+          "identity_schema_version": 0,
+          "private": "eyJvcmlnaW5hbF9zdGF0ZV9zaXplIjoiTVRJNU9UVTBNekU1In0="
+        }
+      ]
+    },
+    {
+      "mode": "managed",
+      "type": "proxmox_download_file",
+      "name": "k9s_dashboard_lxc_template",
+      "provider": "provider[\"registry.terraform.io/bpg/proxmox\"]",
+      "instances": [
+        {
+          "schema_version": 0,
+          "attributes": {
+            "checksum": null,
+            "checksum_algorithm": null,
+            "content_type": "vztmpl",
+            "datastore_id": "local",
+            "decompression_algorithm": null,
+            "file_name": "debian-13-standard_13.6-1_amd64.tar.zst",
+            "id": "local:vztmpl/debian-13-standard_13.6-1_amd64.tar.zst",
+            "node_name": "server1",
+            "overwrite": false,
+            "overwrite_unmanaged": false,
+            "size": 129954319,
+            "upload_timeout": 600,
+            "url": "http://download.proxmox.com/images/system/debian-13-standard_13.6-1_amd64.tar.zst",
+            "verify": true
+          },
+          "sensitive_attributes": [],
+          "identity_schema_version": 0,
+          "private": "eyJvcmlnaW5hbF9zdGF0ZV9zaXplIjoiTVRJNU9UVTBNekU1In0="
+        }
+      ]
+    },
+    {
+      "mode": "managed",
+      "type": "proxmox_download_file",
+      "name": "nfs_vm_cloudimg",
+      "provider": "provider[\"registry.terraform.io/bpg/proxmox\"]",
+      "instances": [
+        {
+          "schema_version": 0,
+          "attributes": {
+            "checksum": null,
+            "checksum_algorithm": null,
+            "content_type": "import",
+            "datastore_id": "local",
+            "decompression_algorithm": null,
+            "file_name": "noble-server-cloudimg-amd64-nfs.qcow2",
+            "id": "local:import/noble-server-cloudimg-amd64-nfs.qcow2",
+            "node_name": "server1",
+            "overwrite": false,
+            "overwrite_unmanaged": false,
+            "size": 624105472,
+            "upload_timeout": 600,
+            "url": "https://cloud-images.ubuntu.com/noble/current/noble-server-cloudimg-amd64.img",
+            "verify": true
+          },
+          "sensitive_attributes": [],
+          "identity_schema_version": 0,
+          "private": "eyJvcmlnaW5hbF9zdGF0ZV9zaXplIjoiTmpJME1UQTFORGN5In0="
+        }
+      ]
+    },
+    {
+      "mode": "managed",
+      "type": "proxmox_download_file",
+      "name": "ubuntu_2404_cloudimg",
+      "provider": "provider[\"registry.terraform.io/bpg/proxmox\"]",
+      "instances": [
+        {
+          "schema_version": 0,
+          "attributes": {
+            "checksum": null,
+            "checksum_algorithm": null,
+            "content_type": "import",
+            "datastore_id": "local",
+            "decompression_algorithm": null,
+            "file_name": "noble-server-cloudimg-amd64.qcow2",
+            "id": "local:import/noble-server-cloudimg-amd64.qcow2",
+            "node_name": "bnei",
+            "overwrite": false,
+            "overwrite_unmanaged": false,
+            "size": 620852736,
+            "upload_timeout": 600,
+            "url": "https://cloud-images.ubuntu.com/noble/current/noble-server-cloudimg-amd64.img",
+            "verify": true
+          },
+          "sensitive_attributes": [],
+          "identity_schema_version": 0,
+          "private": "eyJvcmlnaW5hbF9zdGF0ZV9zaXplIjoiTmpJd09EVXlOek0yIn0="
+        }
+      ]
+    },
+    {
+      "mode": "managed",
+      "type": "proxmox_virtual_environment_container",
+      "name": "build_runner",
+      "provider": "provider[\"registry.terraform.io/bpg/proxmox\"]",
+      "instances": [
+        {
+          "schema_version": 0,
+          "attributes": {
+            "clone": [],
+            "console": [],
+            "cpu": [
+              {
+                "architecture": "amd64",
+                "cores": 4,
+                "limit": 0,
+                "units": 0
+              }
+            ],
+            "description": "",
+            "device_passthrough": [],
+            "disk": [
+              {
+                "acl": false,
+                "datastore_id": "local-lvm",
+                "mount_options": null,
+                "path_in_datastore": "local-lvm:vm-103-disk-0",
+                "quota": false,
+                "replicate": false,
+                "size": 40
+              }
+            ],
+            "environment_variables": null,
+            "features": [
+              {
+                "fuse": false,
+                "keyctl": false,
+                "mknod": false,
+                "mount": null,
+                "nesting": true
+              }
+            ],
+            "hook_script_file_id": "",
+            "id": "103",
+            "idmap": [],
+            "initialization": [
+              {
+                "dns": [
+                  {
+                    "domain": "",
+                    "server": "",
+                    "servers": [
+                      "192.168.1.55"
+                    ]
+                  }
+                ],
+                "entrypoint": "",
+                "hostname": "build-runner",
+                "ip_config": [
+                  {
+                    "ipv4": [
+                      {
+                        "address": "192.168.1.111/24",
+                        "gateway": "192.168.1.254"
+                      }
+                    ],
+                    "ipv6": []
+                  }
+                ],
+                "user_account": [
+                  {
+                    "keys": [
+                      "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAICYPFbdauqestrh3sQnwEicwKsoK8OCJxlnMADVP6asM build-runner@ukubi (ADR-0034)"
+                    ],
+                    "password": ""
+                  }
+                ]
+              }
+            ],
+            "ipv4": {
+              "eth0": "192.168.1.111"
+            },
+            "ipv6": {
+              "eth0": "fe80::be24:11ff:febe:194b"
+            },
+            "memory": [
+              {
+                "dedicated": 4096,
+                "swap": 0
+              }
+            ],
+            "mount_point": [],
+            "network_interface": [
+              {
+                "bridge": "vmbr0",
+                "enabled": true,
+                "firewall": false,
+                "host_managed": false,
+                "mac_address": "BC:24:11:BE:19:4B",
+                "mtu": 0,
+                "name": "eth0",
+                "rate_limit": 0,
+                "vlan_id": 0
+              }
+            ],
+            "node_name": "server1",
+            "operating_system": [
+              {
+                "template_file_id": "local:vztmpl/debian-13-standard_13.6-1_amd64.tar.zst",
+                "type": "debian"
+              }
+            ],
+            "pool_id": null,
+            "protection": false,
+            "start_on_boot": true,
+            "started": true,
+            "startup": [],
+            "tags": [
+              "build",
+              "ci",
+              "runner"
+            ],
+            "template": false,
+            "timeout_clone": 1800,
+            "timeout_create": 1800,
+            "timeout_delete": 60,
+            "timeout_start": 300,
+            "timeout_update": 1800,
+            "unprivileged": true,
+            "vm_id": 103,
+            "wait_for_ip": []
+          },
+          "sensitive_attributes": [
+            [
+              {
+                "type": "get_attr",
+                "value": "initialization"
+              },
+              {
+                "type": "index",
+                "value": {
+                  "value": 0,
+                  "type": "number"
+                }
+              },
+              {
+                "type": "get_attr",
+                "value": "user_account"
+              },
+              {
+                "type": "index",
+                "value": {
+                  "value": 0,
+                  "type": "number"
+                }
+              },
+              {
+                "type": "get_attr",
+                "value": "password"
+              }
+            ]
+          ],
+          "identity_schema_version": 0,
+          "private": "bnVsbA==",
+          "dependencies": [
+            "proxmox_download_file.k9s_dashboard_lxc_template"
+          ]
+        }
+      ]
+    },
+    {
+      "mode": "managed",
+      "type": "proxmox_virtual_environment_container",
+      "name": "garage_storage",
+      "provider": "provider[\"registry.terraform.io/bpg/proxmox\"]",
+      "instances": [
+        {
+          "schema_version": 0,
+          "attributes": {
+            "clone": [],
+            "console": [],
+            "cpu": [
+              {
+                "architecture": "amd64",
+                "cores": 2,
+                "limit": 0,
+                "units": 0
+              }
+            ],
+            "description": "",
+            "device_passthrough": [],
+            "disk": [
+              {
+                "acl": false,
+                "datastore_id": "local-lvm",
+                "mount_options": [],
+                "path_in_datastore": "local-lvm:vm-301-disk-0",
+                "quota": false,
+                "replicate": false,
+                "size": 200
+              }
+            ],
+            "environment_variables": {},
+            "features": [],
+            "hook_script_file_id": "",
+            "id": "301",
+            "idmap": [],
+            "initialization": [
+              {
+                "dns": [],
+                "entrypoint": "",
+                "hostname": "garage-storage",
+                "ip_config": [
+                  {
+                    "ipv4": [
+                      {
+                        "address": "192.168.1.199/24",
+                        "gateway": "192.168.1.254"
+                      }
+                    ],
+                    "ipv6": []
+                  }
+                ],
+                "user_account": [
+                  {
+                    "keys": [
+                      "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOOEUmWGjhBAdIh+5ot11QCbtdHH5RJyPR6xYlT4gwJ/ garage-storage@infra-bootstrap"
+                    ],
+                    "password": ""
+                  }
+                ]
+              }
+            ],
+            "ipv4": {
+              "eth0": "192.168.1.199"
+            },
+            "ipv6": {
+              "eth0": "2a01:e0a:1cf:a8f0:be24:11ff:fe84:4d9f"
+            },
+            "memory": [
+              {
+                "dedicated": 2048,
+                "swap": 0
+              }
+            ],
+            "mount_point": [],
+            "network_interface": [
+              {
+                "bridge": "vmbr0",
+                "enabled": true,
+                "firewall": false,
+                "host_managed": false,
+                "mac_address": "BC:24:11:84:4D:9F",
+                "mtu": 0,
+                "name": "eth0",
+                "rate_limit": 0,
+                "vlan_id": 0
+              }
+            ],
+            "node_name": "bnei",
+            "operating_system": [
+              {
+                "template_file_id": "local:vztmpl/debian-13-standard_13.6-1_amd64.tar.zst",
+                "type": "debian"
+              }
+            ],
+            "pool_id": null,
+            "protection": false,
+            "start_on_boot": true,
+            "started": true,
+            "startup": [],
+            "tags": [
+              "garage",
+              "s3",
+              "storage"
+            ],
+            "template": false,
+            "timeout_clone": 1800,
+            "timeout_create": 1800,
+            "timeout_delete": 60,
+            "timeout_start": 300,
+            "timeout_update": 1800,
+            "unprivileged": true,
+            "vm_id": 301,
+            "wait_for_ip": []
+          },
+          "sensitive_attributes": [
+            [
+              {
+                "type": "get_attr",
+                "value": "initialization"
+              },
+              {
+                "type": "index",
+                "value": {
+                  "value": 0,
+                  "type": "number"
+                }
+              },
+              {
+                "type": "get_attr",
+                "value": "user_account"
+              },
+              {
+                "type": "index",
+                "value": {
+                  "value": 0,
+                  "type": "number"
+                }
+              },
+              {
+                "type": "get_attr",
+                "value": "password"
+              }
+            ]
+          ],
+          "identity_schema_version": 0,
+          "private": "bnVsbA==",
+          "dependencies": [
+            "proxmox_download_file.garage_lxc_template"
+          ]
+        }
+      ]
+    },
+    {
+      "mode": "managed",
+      "type": "proxmox_virtual_environment_container",
+      "name": "hermesagent",
+      "provider": "provider[\"registry.terraform.io/bpg/proxmox\"]",
+      "instances": [
+        {
+          "schema_version": 0,
+          "attributes": {
+            "clone": [],
+            "console": [
+              {
+                "enabled": true,
+                "tty_count": 2,
+                "type": "tty"
+              }
+            ],
+            "cpu": [
+              {
+                "architecture": "amd64",
+                "cores": 2,
+                "limit": 0,
+                "units": 0
+              }
+            ],
+            "description": "\u003cdiv align='center'\u003e\n  \u003ca href='https://community-scripts.org' target='_blank' rel='noopener noreferrer'\u003e\n    \u003cimg src='https://raw.githubusercontent.com/community-scripts/ProxmoxVE/main/misc/images/logo-81x112.png' alt='Logo' style='width:81px;height:112px;'/\u003e\n  \u003c/a\u003e\n\n  \u003ch2 style='font-size: 24px; margin: 20px 0;'\u003eHermes Agent LXC\u003c/h2\u003e\n\n  \u003cp style='margin: 16px 0;'\u003e\n    \u003ca href='https://community-scripts.org/donate' target='_blank' rel='noopener noreferrer'\u003e\n      \u003cimg src='https://img.shields.io/badge/❤️-Sponsoring%20%26%20Donations-FF5E5B' alt='Sponsoring and donations' /\u003e\n    \u003c/a\u003e\n  \u003c/p\u003e\n\n  \u003cp style='margin: 12px 0;'\u003e\n    \u003ca href='https://community-scripts.org/scripts/hermesagent' target='_blank' rel='noopener noreferrer'\u003e\n      \u003cimg src='https://img.shields.io/badge/📦-Open%20Script%20Page-00617f' alt='Open script page' /\u003e\n    \u003c/a\u003e\n  \u003c/p\u003e\n\n  \u003cspan style='margin: 0 10px;'\u003e\n    \u003ci class=\"fa fa-github fa-fw\" style=\"color: #f5f5f5;\"\u003e\u003c/i\u003e\n    \u003ca href='https://github.com/community-scripts/ProxmoxVE' target='_blank' rel='noopener noreferrer' style='text-decoration: none; color: #00617f;'\u003eGitHub\u003c/a\u003e\n  \u003c/span\u003e\n  \u003cspan style='margin: 0 10px;'\u003e\n    \u003ci class=\"fa fa-comments fa-fw\" style=\"color: #f5f5f5;\"\u003e\u003c/i\u003e\n    \u003ca href='https://github.com/community-scripts/ProxmoxVE/discussions' target='_blank' rel='noopener noreferrer' style='text-decoration: none; color: #00617f;'\u003eDiscussions\u003c/a\u003e\n  \u003c/span\u003e\n  \u003cspan style='margin: 0 10px;'\u003e\n    \u003ci class=\"fa fa-exclamation-circle fa-fw\" style=\"color: #f5f5f5;\"\u003e\u003c/i\u003e\n    \u003ca href='https://github.com/community-scripts/ProxmoxVE/issues' target='_blank' rel='noopener noreferrer' style='text-decoration: none; color: #00617f;'\u003eIssues\u003c/a\u003e\n  \u003c/span\u003e\n\u003c/div\u003e\n",
+            "device_passthrough": [],
+            "disk": [
+              {
+                "acl": false,
+                "datastore_id": "local-lvm",
+                "mount_options": [],
+                "path_in_datastore": "local-lvm:vm-101-disk-0",
+                "quota": false,
+                "replicate": false,
+                "size": 20
+              }
+            ],
+            "environment_variables": {},
+            "features": [
+              {
+                "fuse": false,
+                "keyctl": true,
+                "mknod": false,
+                "mount": [],
+                "nesting": true
+              }
+            ],
+            "hook_script_file_id": "",
+            "id": "101",
+            "idmap": [],
+            "initialization": [
+              {
+                "dns": [],
+                "entrypoint": "",
+                "hostname": "hermesagent",
+                "ip_config": [
+                  {
+                    "ipv4": [
+                      {
+                        "address": "dhcp",
+                        "gateway": ""
+                      }
+                    ],
+                    "ipv6": []
+                  }
+                ],
+                "user_account": []
+              }
+            ],
+            "ipv4": {
+              "eth0": "192.168.1.71"
+            },
+            "ipv6": {
+              "eth0": "2a01:e0a:1cf:a8f0:be24:11ff:fefe:a0aa"
+            },
+            "memory": [
+              {
+                "dedicated": 4096,
+                "swap": 512
+              }
+            ],
+            "mount_point": [],
+            "network_interface": [
+              {
+                "bridge": "vmbr0",
+                "enabled": true,
+                "firewall": false,
+                "host_managed": false,
+                "mac_address": "BC:24:11:FE:A0:AA",
+                "mtu": 0,
+                "name": "eth0",
+                "rate_limit": 0,
+                "vlan_id": 0
+              }
+            ],
+            "node_name": "bnei",
+            "operating_system": [
+              {
+                "template_file_id": "",
+                "type": "debian"
+              }
+            ],
+            "pool_id": null,
+            "protection": false,
+            "start_on_boot": true,
+            "started": true,
+            "startup": [],
+            "tags": [
+              "agent",
+              "ai",
+              "automation",
+              "community-script"
+            ],
+            "template": false,
+            "timeout_clone": 1800,
+            "timeout_create": 1800,
+            "timeout_delete": 60,
+            "timeout_start": 300,
+            "timeout_update": 1800,
+            "unprivileged": true,
+            "vm_id": 101,
+            "wait_for_ip": []
+          },
+          "sensitive_attributes": [],
+          "identity_schema_version": 0,
+          "private": "bnVsbA=="
+        }
+      ]
+    },
+    {
+      "mode": "managed",
+      "type": "proxmox_virtual_environment_container",
+      "name": "k9s_dashboard",
+      "provider": "provider[\"registry.terraform.io/bpg/proxmox\"]",
+      "instances": [
+        {
+          "schema_version": 0,
+          "attributes": {
+            "clone": [],
+            "console": [],
+            "cpu": [
+              {
+                "architecture": "amd64",
+                "cores": 1,
+                "limit": 0,
+                "units": 0
+              }
+            ],
+            "description": "",
+            "device_passthrough": [],
+            "disk": [
+              {
+                "acl": false,
+                "datastore_id": "local-lvm",
+                "mount_options": [],
+                "path_in_datastore": "local-lvm:vm-102-disk-0",
+                "quota": false,
+                "replicate": false,
+                "size": 8
+              }
+            ],
+            "environment_variables": {},
+            "features": [],
+            "hook_script_file_id": "",
+            "id": "102",
+            "idmap": [],
+            "initialization": [
+              {
+                "dns": [],
+                "entrypoint": "",
+                "hostname": "k9s-dashboard",
+                "ip_config": [
+                  {
+                    "ipv4": [
+                      {
+                        "address": "192.168.1.110/24",
+                        "gateway": "192.168.1.254"
+                      }
+                    ],
+                    "ipv6": []
+                  }
+                ],
+                "user_account": [
+                  {
+                    "keys": [
+                      "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIC0qmDsrSZtsJDxlJIPrmqCkLKlSqXe5YIUq1oiCdR1p k9s-dashboard"
+                    ],
+                    "password": ""
+                  }
+                ]
+              }
+            ],
+            "ipv4": {
+              "eth0": "192.168.1.110"
+            },
+            "ipv6": {
+              "eth0": "2a01:e0a:1cf:a8f0:be24:11ff:fec8:7724"
+            },
+            "memory": [
+              {
+                "dedicated": 1024,
+                "swap": 0
+              }
+            ],
+            "mount_point": [],
+            "network_interface": [
+              {
+                "bridge": "vmbr0",
+                "enabled": true,
+                "firewall": false,
+                "host_managed": false,
+                "mac_address": "BC:24:11:C8:77:24",
+                "mtu": 0,
+                "name": "eth0",
+                "rate_limit": 0,
+                "vlan_id": 0
+              }
+            ],
+            "node_name": "server1",
+            "operating_system": [
+              {
+                "template_file_id": "local:vztmpl/debian-13-standard_13.6-1_amd64.tar.zst",
+                "type": "debian"
+              }
+            ],
+            "pool_id": null,
+            "protection": false,
+            "start_on_boot": true,
+            "started": true,
+            "startup": [],
+            "tags": [
+              "dashboard",
+              "k9s",
+              "ops"
+            ],
+            "template": false,
+            "timeout_clone": 1800,
+            "timeout_create": 1800,
+            "timeout_delete": 60,
+            "timeout_start": 300,
+            "timeout_update": 1800,
+            "unprivileged": true,
+            "vm_id": 102,
+            "wait_for_ip": []
+          },
+          "sensitive_attributes": [
+            [
+              {
+                "type": "get_attr",
+                "value": "initialization"
+              },
+              {
+                "type": "index",
+                "value": {
+                  "value": 0,
+                  "type": "number"
+                }
+              },
+              {
+                "type": "get_attr",
+                "value": "user_account"
+              },
+              {
+                "type": "index",
+                "value": {
+                  "value": 0,
+                  "type": "number"
+                }
+              },
+              {
+                "type": "get_attr",
+                "value": "password"
+              }
+            ]
+          ],
+          "identity_schema_version": 0,
+          "private": "bnVsbA==",
+          "dependencies": [
+            "proxmox_download_file.k9s_dashboard_lxc_template"
+          ]
+        }
+      ]
+    },
+    {
+      "mode": "managed",
+      "type": "proxmox_virtual_environment_file",
+      "name": "k8s_vm_vendor_data",
+      "provider": "provider[\"registry.terraform.io/bpg/proxmox\"]",
+      "instances": [
+        {
+          "schema_version": 0,
+          "attributes": {
+            "content_type": "snippets",
+            "datastore_id": "local",
+            "file_mode": null,
+            "file_modification_date": null,
+            "file_name": "k8s-vm-vendor-data.yaml",
+            "file_size": null,
+            "file_tag": null,
+            "id": "local:snippets/k8s-vm-vendor-data.yaml",
+            "node_name": "bnei",
+            "overwrite": true,
+            "source_file": [],
+            "source_raw": [
+              {
+                "data": "#cloud-config\npackages:\n  - qemu-guest-agent\nruncmd:\n  - systemctl enable --now qemu-guest-agent\nbootcmd:\n  - |\n    if [ -b /dev/sdb ]; then\n      blkid /dev/sdb | grep -q TYPE= || mkfs.ext4 -L longhorn /dev/sdb\n      mkdir -p /var/lib/longhorn\n      grep -q \"/var/lib/longhorn\" /etc/fstab || \\\n        echo \"LABEL=longhorn /var/lib/longhorn ext4 defaults 0 2\" \u003e\u003e /etc/fstab\n      mount -a\n    fi\n",
+                "file_name": "k8s-vm-vendor-data.yaml",
+                "resize": 0
+              }
+            ],
+            "timeout_upload": 1800,
+            "upload_mode": "stream"
+          },
+          "sensitive_attributes": [],
+          "identity_schema_version": 0,
+          "private": "bnVsbA=="
+        }
+      ]
+    },
+    {
+      "mode": "managed",
+      "type": "proxmox_virtual_environment_file",
+      "name": "k8s_vm_vendor_data_shared",
+      "provider": "provider[\"registry.terraform.io/bpg/proxmox\"]",
+      "instances": [
+        {
+          "schema_version": 0,
+          "attributes": {
+            "content_type": "snippets",
+            "datastore_id": "shared-templates",
+            "file_mode": null,
+            "file_modification_date": null,
+            "file_name": "k8s-vm-vendor-data.yaml",
+            "file_size": null,
+            "file_tag": null,
+            "id": "shared-templates:snippets/k8s-vm-vendor-data.yaml",
+            "node_name": "bnei",
+            "overwrite": true,
+            "source_file": [],
+            "source_raw": [
+              {
+                "data": "#cloud-config\npackages:\n  - qemu-guest-agent\nruncmd:\n  - systemctl enable --now qemu-guest-agent\nbootcmd:\n  - |\n    if [ -b /dev/sdb ]; then\n      blkid /dev/sdb | grep -q TYPE= || mkfs.ext4 -L longhorn /dev/sdb\n      mkdir -p /var/lib/longhorn\n      grep -q \"/var/lib/longhorn\" /etc/fstab || \\\n        echo \"LABEL=longhorn /var/lib/longhorn ext4 defaults 0 2\" \u003e\u003e /etc/fstab\n      mount -a\n    fi\n",
+                "file_name": "k8s-vm-vendor-data.yaml",
+                "resize": 0
+              }
+            ],
+            "timeout_upload": 1800,
+            "upload_mode": "stream"
+          },
+          "sensitive_attributes": [],
+          "identity_schema_version": 0,
+          "private": "bnVsbA=="
+        }
+      ]
+    },
+    {
+      "mode": "managed",
+      "type": "proxmox_virtual_environment_file",
+      "name": "nfs_vm_vendor_data",
+      "provider": "provider[\"registry.terraform.io/bpg/proxmox\"]",
+      "instances": [
+        {
+          "schema_version": 0,
+          "attributes": {
+            "content_type": "snippets",
+            "datastore_id": "local",
+            "file_mode": null,
+            "file_modification_date": null,
+            "file_name": "nfs-vm-vendor-data.yaml",
+            "file_size": null,
+            "file_tag": null,
+            "id": "local:snippets/nfs-vm-vendor-data.yaml",
+            "node_name": "server1",
+            "overwrite": true,
+            "source_file": [],
+            "source_raw": [
+              {
+                "data": "#cloud-config\npackages:\n  - qemu-guest-agent\nruncmd:\n  - systemctl enable --now qemu-guest-agent\n",
+                "file_name": "nfs-vm-vendor-data.yaml",
+                "resize": 0
+              }
+            ],
+            "timeout_upload": 1800,
+            "upload_mode": "stream"
+          },
+          "sensitive_attributes": [],
+          "identity_schema_version": 0,
+          "private": "bnVsbA=="
+        }
+      ]
+    },
+    {
+      "mode": "managed",
+      "type": "proxmox_virtual_environment_vm",
+      "name": "k8s_node",
+      "provider": "provider[\"registry.terraform.io/bpg/proxmox\"]",
+      "instances": [
+        {
+          "index_key": "k8s-cp-01",
+          "schema_version": 0,
+          "attributes": {
+            "acpi": true,
+            "agent": [
+              {
+                "enabled": true,
+                "timeout": "15m",
+                "trim": false,
+                "type": "virtio",
+                "wait_for_ip": []
+              }
+            ],
+            "amd_sev": [],
+            "audio_device": [],
+            "bios": "seabios",
+            "boot_order": [
+              "scsi0",
+              "net0"
+            ],
+            "cdrom": [],
+            "clone": [
+              {
+                "datastore_id": "",
+                "full": true,
+                "node_name": "",
+                "retries": 1,
+                "vm_id": 9001
+              }
+            ],
+            "cpu": [
+              {
+                "affinity": "",
+                "architecture": "",
+                "cores": 2,
+                "flags": [],
+                "hotplugged": 0,
+                "limit": 0,
+                "numa": false,
+                "sockets": 1,
+                "type": "host",
+                "units": 0
+              }
+            ],
+            "delete_unreferenced_disks_on_destroy": true,
+            "description": null,
+            "disk": [
+              {
+                "aio": "io_uring",
+                "backup": true,
+                "cache": "none",
+                "datastore_id": "local-lvm",
+                "discard": "ignore",
+                "file_format": "raw",
+                "file_id": "",
+                "import_from": "",
+                "interface": "scsi0",
+                "iothread": false,
+                "path_in_datastore": "vm-201-disk-0",
+                "queues": 0,
+                "replicate": true,
+                "serial": "",
+                "size": 40,
+                "speed": [],
+                "ssd": false
+              },
+              {
+                "aio": "io_uring",
+                "backup": true,
+                "cache": "none",
+                "datastore_id": "local-lvm",
+                "discard": "ignore",
+                "file_format": "raw",
+                "file_id": "",
+                "import_from": "",
+                "interface": "scsi1",
+                "iothread": false,
+                "path_in_datastore": "vm-201-disk-1",
+                "queues": 0,
+                "replicate": true,
+                "serial": "",
+                "size": 100,
+                "speed": [],
+                "ssd": false
+              }
+            ],
+            "efi_disk": [],
+            "hook_script_file_id": null,
+            "hostpci": [],
+            "hotplug": null,
+            "id": "201",
+            "initialization": [
+              {
+                "datastore_id": "local-lvm",
+                "dns": [
+                  {
+                    "domain": "localdomain",
+                    "servers": []
+                  }
+                ],
+                "file_format": "",
+                "interface": "ide2",
+                "ip_config": [
+                  {
+                    "ipv4": [
+                      {
+                        "address": "192.168.1.201/24",
+                        "gateway": "192.168.1.254"
+                      }
+                    ],
+                    "ipv6": []
+                  }
+                ],
+                "meta_data_file_id": "",
+                "network_data_file_id": "",
+                "type": "",
+                "upgrade": true,
+                "user_account": [
+                  {
+                    "keys": [
+                      "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIF/EfvypSmiuEAWxLDpF9OUlPnbPBi6KeO6Euc+GyyIE k8s-vms@bnei.dev"
+                    ],
+                    "password": "",
+                    "username": "core"
+                  }
+                ],
+                "user_data_file_id": "",
+                "vendor_data_file_id": "local:snippets/k8s-vm-vendor-data.yaml"
+              }
+            ],
+            "ipv4_addresses": [
+              [
+                "127.0.0.1"
+              ],
+              [
+                "192.168.1.201",
+                "192.168.1.180"
+              ],
+              [
+                "169.254.25.10"
+              ],
+              [
+                "10.233.0.3",
+                "10.233.52.42",
+                "10.233.22.247",
+                "10.233.33.75",
+                "10.233.10.108",
+                "10.233.30.111",
+                "10.233.44.11",
+                "10.233.58.247",
+                "10.233.58.143",
+                "10.233.37.115",
+                "10.233.49.122",
+                "10.233.11.215",
+                "10.233.8.82",
+                "10.233.5.143",
+                "10.233.18.217",
+                "10.233.56.36",
+                "10.233.35.206",
+                "10.233.36.210",
+                "10.233.57.81",
+                "10.233.22.40",
+                "10.233.0.1",
+                "10.233.44.74",
+                "10.233.5.141",
+                "10.233.46.248",
+                "10.233.23.65",
+                "10.233.54.61",
+                "10.233.37.80",
+                "10.233.11.75",
+                "10.233.57.95",
+                "10.233.58.175",
+                "10.233.8.66",
+                "192.168.1.233",
+                "10.233.8.80",
+                "10.233.59.188",
+                "10.233.47.40",
+                "192.168.1.234",
+                "10.233.49.25",
+                "10.233.19.255",
+                "10.233.6.16",
+                "10.233.7.221",
+                "10.233.28.193",
+                "10.233.24.185",
+                "10.233.63.53",
+                "10.233.50.177",
+                "10.233.30.1",
+                "10.233.33.186",
+                "10.233.21.252",
+                "10.233.50.49",
+                "10.233.39.235",
+                "10.233.49.133"
+              ],
+              [],
+              [
+                "10.233.64.178"
+              ],
+              [],
+              [],
+              [],
+              [],
+              [],
+              [],
+              [],
+              [],
+              [],
+              [],
+              [],
+              [],
+              [],
+              [],
+              [],
+              []
+            ],
+            "ipv6_addresses": [
+              [
+                "::1"
+              ],
+              [
+                "2a01:e0a:1cf:a8f0:be24:11ff:fe68:4796",
+                "fe80::be24:11ff:fe68:4796"
+              ],
+              [],
+              [],
+              [
+                "fe80::d1:77ff:feeb:1a0c"
+              ],
+              [
+                "fe80::24bf:95ff:fee9:78d4"
+              ],
+              [
+                "fe80::e047:6cff:fe11:dbbc"
+              ],
+              [
+                "fe80::780c:6eff:fe79:6199"
+              ],
+              [
+                "fe80::1821:41ff:feab:a3f3"
+              ],
+              [
+                "fe80::68c3:9ff:fee5:c033"
+              ],
+              [
+                "fe80::c76:2fff:fe82:a544"
+              ],
+              [
+                "fe80::a04f:dff:fe06:b391"
+              ],
+              [],
+              [
+                "fe80::c4a6:cfff:fe2c:af49"
+              ],
+              [
+                "fe80::b0a1:eeff:fe16:2a5b"
+              ],
+              [
+                "fe80::879:a5ff:fe8a:c2ee"
+              ],
+              [
+                "fe80::8888:acff:febc:bb9c"
+              ],
+              [
+                "fe80::cce9:edff:fe20:5f18"
+              ],
+              [
+                "fe80::1c42:e9ff:fea1:e396"
+              ],
+              [
+                "fe80::200d:f8ff:fe48:9e57"
+              ],
+              [
+                "fe80::b43f:32ff:fe97:e2cb"
+              ],
+              [
+                "fe80::686f:bbff:fec7:39f9"
+              ]
+            ],
+            "keyboard_layout": "en-us",
+            "kvm_arguments": null,
+            "mac_addresses": [
+              "00:00:00:00:00:00",
+              "BC:24:11:68:47:96",
+              "5E:C1:A0:79:1F:AF",
+              "D6:1C:70:00:0B:F2",
+              "02:D1:77:EB:1A:0C",
+              "26:BF:95:E9:78:D4",
+              "E2:47:6C:11:DB:BC",
+              "7A:0C:6E:79:61:99",
+              "1A:21:41:AB:A3:F3",
+              "6A:C3:09:E5:C0:33",
+              "0E:76:2F:82:A5:44",
+              "A2:4F:0D:06:B3:91",
+              "00:00:00:00:00:00",
+              "C6:A6:CF:2C:AF:49",
+              "B2:A1:EE:16:2A:5B",
+              "0A:79:A5:8A:C2:EE",
+              "8A:88:AC:BC:BB:9C",
+              "CE:E9:ED:20:5F:18",
+              "1E:42:E9:A1:E3:96",
+              "22:0D:F8:48:9E:57",
+              "B6:3F:32:97:E2:CB",
+              "6A:6F:BB:C7:39:F9"
+            ],
+            "machine": "q35",
+            "memory": [
+              {
+                "dedicated": 4096,
+                "floating": 0,
+                "hugepages": "",
+                "keep_hugepages": false,
+                "shared": 0
+              }
+            ],
+            "migrate": false,
+            "name": "k8s-cp-01",
+            "network_device": [
+              {
+                "bridge": "vmbr0",
+                "disconnected": false,
+                "enabled": true,
+                "firewall": false,
+                "mac_address": "BC:24:11:68:47:96",
+                "model": "virtio",
+                "mtu": 0,
+                "queues": 0,
+                "rate_limit": 0,
+                "trunks": "",
+                "vlan_id": 0
+              }
+            ],
+            "network_interface_names": [
+              "lo",
+              "eth0",
+              "nodelocaldns",
+              "kube-ipvs0",
+              "cilium_net",
+              "cilium_host",
+              "cilium_vxlan",
+              "lxc1956c2c555da",
+              "lxc8c35176ea988",
+              "lxc013b331e26fe",
+              "lxc51f22a7ccd12",
+              "lxc3e9909c6ba31",
+              "cilium_wg0",
+              "lxc_health",
+              "lxc96b2577bc0c3",
+              "lxc6fa0d8947e01",
+              "lxceb9aeffae3dd",
+              "lxc8e83bf7f862e",
+              "lxc4812b1a3cb1f",
+              "lxcd6b4d8d533cb",
+              "lxce60532b29f15",
+              "lxc7b70c9e12c9f"
+            ],
+            "node_name": "bnei",
+            "numa": [],
+            "on_boot": true,
+            "operating_system": [
+              {
+                "type": "l26"
+              }
+            ],
+            "pool_id": "",
+            "protection": false,
+            "purge_on_destroy": true,
+            "reboot": false,
+            "reboot_after_update": true,
+            "rng": [],
+            "scsi_hardware": "virtio-scsi-pci",
+            "serial_device": [],
+            "smbios": [],
+            "started": true,
+            "startup": [
+              {
+                "down_delay": 300,
+                "order": 2,
+                "up_delay": -1
+              }
+            ],
+            "stop_on_destroy": false,
+            "tablet_device": true,
+            "tags": null,
+            "template": false,
+            "timeout_clone": 1800,
+            "timeout_create": 1800,
+            "timeout_migrate": 1800,
+            "timeout_move_disk": 1800,
+            "timeout_reboot": 1800,
+            "timeout_shutdown_vm": 1800,
+            "timeout_start_vm": 1800,
+            "timeout_stop_vm": 300,
+            "tpm_state": [],
+            "usb": [],
+            "vga": [],
+            "virtiofs": [],
+            "vm_id": 201,
+            "watchdog": []
+          },
+          "sensitive_attributes": [
+            [
+              {
+                "type": "get_attr",
+                "value": "initialization"
+              },
+              {
+                "type": "index",
+                "value": {
+                  "value": 0,
+                  "type": "number"
+                }
+              },
+              {
+                "type": "get_attr",
+                "value": "user_account"
+              },
+              {
+                "type": "index",
+                "value": {
+                  "value": 0,
+                  "type": "number"
+                }
+              },
+              {
+                "type": "get_attr",
+                "value": "password"
+              }
+            ]
+          ],
+          "identity_schema_version": 0,
+          "private": "bnVsbA==",
+          "dependencies": [
+            "proxmox_download_file.ubuntu_2404_cloudimg",
+            "proxmox_virtual_environment_file.k8s_vm_vendor_data",
+            "proxmox_virtual_environment_file.k8s_vm_vendor_data_shared",
+            "proxmox_virtual_environment_vm.ubuntu_2404_template"
+          ]
+        },
+        {
+          "index_key": "k8s-cp-02",
+          "schema_version": 0,
+          "attributes": {
+            "acpi": true,
+            "agent": [
+              {
+                "enabled": true,
+                "timeout": "15m",
+                "trim": false,
+                "type": "virtio",
+                "wait_for_ip": []
+              }
+            ],
+            "amd_sev": [],
+            "audio_device": [],
+            "bios": "seabios",
+            "boot_order": [
+              "scsi0",
+              "net0"
+            ],
+            "cdrom": [],
+            "clone": [
+              {
+                "datastore_id": "",
+                "full": true,
+                "node_name": "bnei",
+                "retries": 1,
+                "vm_id": 9001
+              }
+            ],
+            "cpu": [
+              {
+                "affinity": "",
+                "architecture": "",
+                "cores": 2,
+                "flags": [],
+                "hotplugged": 0,
+                "limit": 0,
+                "numa": false,
+                "sockets": 1,
+                "type": "host",
+                "units": 0
+              }
+            ],
+            "delete_unreferenced_disks_on_destroy": true,
+            "description": null,
+            "disk": [
+              {
+                "aio": "io_uring",
+                "backup": true,
+                "cache": "none",
+                "datastore_id": "local-lvm",
+                "discard": "ignore",
+                "file_format": "raw",
+                "file_id": "",
+                "import_from": "",
+                "interface": "scsi0",
+                "iothread": false,
+                "path_in_datastore": "vm-204-disk-0",
+                "queues": 0,
+                "replicate": true,
+                "serial": "",
+                "size": 40,
+                "speed": [],
+                "ssd": false
+              },
+              {
+                "aio": "io_uring",
+                "backup": true,
+                "cache": "none",
+                "datastore_id": "local-lvm",
+                "discard": "ignore",
+                "file_format": "raw",
+                "file_id": "",
+                "import_from": "",
+                "interface": "scsi1",
+                "iothread": false,
+                "path_in_datastore": "vm-204-disk-1",
+                "queues": 0,
+                "replicate": true,
+                "serial": "",
+                "size": 40,
+                "speed": [],
+                "ssd": false
+              }
+            ],
+            "efi_disk": [],
+            "hook_script_file_id": null,
+            "hostpci": [],
+            "hotplug": null,
+            "id": "204",
+            "initialization": [
+              {
+                "datastore_id": "local-lvm",
+                "dns": [
+                  {
+                    "domain": "localdomain",
+                    "servers": []
+                  }
+                ],
+                "file_format": "",
+                "interface": "ide2",
+                "ip_config": [
+                  {
+                    "ipv4": [
+                      {
+                        "address": "192.168.1.204/24",
+                        "gateway": "192.168.1.254"
+                      }
+                    ],
+                    "ipv6": []
+                  }
+                ],
+                "meta_data_file_id": "",
+                "network_data_file_id": "",
+                "type": "",
+                "upgrade": true,
+                "user_account": [
+                  {
+                    "keys": [
+                      "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIF/EfvypSmiuEAWxLDpF9OUlPnbPBi6KeO6Euc+GyyIE k8s-vms@bnei.dev"
+                    ],
+                    "password": "",
+                    "username": "core"
+                  }
+                ],
+                "user_data_file_id": "",
+                "vendor_data_file_id": "shared-templates:snippets/k8s-vm-vendor-data.yaml"
+              }
+            ],
+            "ipv4_addresses": [
+              [
+                "127.0.0.1"
+              ],
+              [
+                "192.168.1.204"
+              ],
+              [
+                "169.254.25.10"
+              ],
+              [
+                "10.233.28.193",
+                "10.233.22.40",
+                "10.233.10.108",
+                "10.233.46.248",
+                "10.233.21.252",
+                "10.233.58.175",
+                "10.233.8.66",
+                "192.168.1.233",
+                "10.233.33.75",
+                "10.233.8.82",
+                "10.233.44.11",
+                "10.233.5.141",
+                "10.233.24.185",
+                "10.233.30.111",
+                "10.233.6.16",
+                "10.233.57.95",
+                "10.233.0.3",
+                "10.233.52.42",
+                "10.233.57.81",
+                "10.233.50.177",
+                "10.233.44.74",
+                "10.233.0.1",
+                "10.233.11.75",
+                "10.233.19.255",
+                "10.233.33.186",
+                "10.233.56.36",
+                "10.233.49.122",
+                "10.233.37.80",
+                "10.233.63.53",
+                "10.233.8.80",
+                "10.233.22.247",
+                "10.233.39.235",
+                "10.233.11.215",
+                "10.233.58.247",
+                "10.233.7.221",
+                "10.233.50.49",
+                "10.233.18.217",
+                "10.233.37.115",
+                "10.233.47.40",
+                "192.168.1.234",
+                "10.233.49.25",
+                "10.233.35.206",
+                "10.233.58.143",
+                "10.233.54.61",
+                "10.233.30.1",
+                "10.233.23.65",
+                "10.233.5.143",
+                "10.233.36.210",
+                "10.233.59.188",
+                "10.233.49.133"
+              ],
+              [],
+              [],
+              [
+                "10.233.67.132"
+              ],
+              [],
+              [],
+              [],
+              [],
+              [],
+              [],
+              []
+            ],
+            "ipv6_addresses": [
+              [
+                "::1"
+              ],
+              [
+                "2a01:e0a:1cf:a8f0:be24:11ff:fe30:5057",
+                "fe80::be24:11ff:fe30:5057"
+              ],
+              [],
+              [],
+              [],
+              [
+                "fe80::d0e0:9ff:feb3:ee1c"
+              ],
+              [
+                "fe80::9ca0:39ff:fe89:a951"
+              ],
+              [
+                "fe80::5cc7:67ff:fe0d:4f50"
+              ],
+              [
+                "fe80::d85e:f5ff:fe92:dcbd"
+              ],
+              [
+                "fe80::6828:f7ff:fee2:7112"
+              ],
+              [
+                "fe80::708f:d5ff:fe0f:cb67"
+              ],
+              [
+                "fe80::b430:cbff:fe59:b60e"
+              ],
+              [
+                "fe80::e42c:91ff:fec8:55c2"
+              ],
+              [
+                "fe80::b47d:22ff:fe67:a609"
+              ]
+            ],
+            "keyboard_layout": "en-us",
+            "kvm_arguments": null,
+            "mac_addresses": [
+              "00:00:00:00:00:00",
+              "BC:24:11:30:50:57",
+              "16:7A:44:AE:D5:BC",
+              "6E:9A:03:4E:C3:CB",
+              "00:00:00:00:00:00",
+              "D2:E0:09:B3:EE:1C",
+              "9E:A0:39:89:A9:51",
+              "5E:C7:67:0D:4F:50",
+              "DA:5E:F5:92:DC:BD",
+              "6A:28:F7:E2:71:12",
+              "72:8F:D5:0F:CB:67",
+              "B6:30:CB:59:B6:0E",
+              "E6:2C:91:C8:55:C2",
+              "B6:7D:22:67:A6:09"
+            ],
+            "machine": "q35",
+            "memory": [
+              {
+                "dedicated": 4096,
+                "floating": 0,
+                "hugepages": "",
+                "keep_hugepages": false,
+                "shared": 0
+              }
+            ],
+            "migrate": false,
+            "name": "k8s-cp-02",
+            "network_device": [
+              {
+                "bridge": "vmbr0",
+                "disconnected": false,
+                "enabled": true,
+                "firewall": false,
+                "mac_address": "BC:24:11:30:50:57",
+                "model": "virtio",
+                "mtu": 0,
+                "queues": 0,
+                "rate_limit": 0,
+                "trunks": "",
+                "vlan_id": 0
+              }
+            ],
+            "network_interface_names": [
+              "lo",
+              "eth0",
+              "nodelocaldns",
+              "kube-ipvs0",
+              "cilium_wg0",
+              "cilium_net",
+              "cilium_host",
+              "cilium_vxlan",
+              "lxc_health",
+              "lxc02a336ccaca6",
+              "lxc484a497a42ce",
+              "lxcab443cdff658",
+              "lxcc7489f7096d4",
+              "lxcfd2467f41f67"
+            ],
+            "node_name": "server1",
+            "numa": [],
+            "on_boot": true,
+            "operating_system": [
+              {
+                "type": "l26"
+              }
+            ],
+            "pool_id": "",
+            "protection": false,
+            "purge_on_destroy": true,
+            "reboot": false,
+            "reboot_after_update": true,
+            "rng": [],
+            "scsi_hardware": "virtio-scsi-pci",
+            "serial_device": [],
+            "smbios": [],
+            "started": true,
+            "startup": [
+              {
+                "down_delay": 300,
+                "order": 2,
+                "up_delay": -1
+              }
+            ],
+            "stop_on_destroy": false,
+            "tablet_device": true,
+            "tags": null,
+            "template": false,
+            "timeout_clone": 1800,
+            "timeout_create": 1800,
+            "timeout_migrate": 1800,
+            "timeout_move_disk": 1800,
+            "timeout_reboot": 1800,
+            "timeout_shutdown_vm": 1800,
+            "timeout_start_vm": 1800,
+            "timeout_stop_vm": 300,
+            "tpm_state": [],
+            "usb": [],
+            "vga": [],
+            "virtiofs": [],
+            "vm_id": 204,
+            "watchdog": []
+          },
+          "sensitive_attributes": [
+            [
+              {
+                "type": "get_attr",
+                "value": "initialization"
+              },
+              {
+                "type": "index",
+                "value": {
+                  "value": 0,
+                  "type": "number"
+                }
+              },
+              {
+                "type": "get_attr",
+                "value": "user_account"
+              },
+              {
+                "type": "index",
+                "value": {
+                  "value": 0,
+                  "type": "number"
+                }
+              },
+              {
+                "type": "get_attr",
+                "value": "password"
+              }
+            ]
+          ],
+          "identity_schema_version": 0,
+          "private": "bnVsbA==",
+          "dependencies": [
+            "proxmox_download_file.ubuntu_2404_cloudimg",
+            "proxmox_virtual_environment_file.k8s_vm_vendor_data",
+            "proxmox_virtual_environment_file.k8s_vm_vendor_data_shared",
+            "proxmox_virtual_environment_vm.ubuntu_2404_template"
+          ]
+        },
+        {
+          "index_key": "k8s-cp-03",
+          "schema_version": 0,
+          "attributes": {
+            "acpi": true,
+            "agent": [
+              {
+                "enabled": true,
+                "timeout": "15m",
+                "trim": false,
+                "type": "virtio",
+                "wait_for_ip": []
+              }
+            ],
+            "amd_sev": [],
+            "audio_device": [],
+            "bios": "seabios",
+            "boot_order": [
+              "scsi0",
+              "net0"
+            ],
+            "cdrom": [],
+            "clone": [
+              {
+                "datastore_id": "",
+                "full": true,
+                "node_name": "bnei",
+                "retries": 1,
+                "vm_id": 9001
+              }
+            ],
+            "cpu": [
+              {
+                "affinity": "",
+                "architecture": "",
+                "cores": 2,
+                "flags": [],
+                "hotplugged": 0,
+                "limit": 0,
+                "numa": false,
+                "sockets": 1,
+                "type": "host",
+                "units": 0
+              }
+            ],
+            "delete_unreferenced_disks_on_destroy": true,
+            "description": null,
+            "disk": [
+              {
+                "aio": "io_uring",
+                "backup": true,
+                "cache": "none",
+                "datastore_id": "local-lvm",
+                "discard": "ignore",
+                "file_format": "raw",
+                "file_id": "",
+                "import_from": "",
+                "interface": "scsi0",
+                "iothread": false,
+                "path_in_datastore": "vm-206-disk-1",
+                "queues": 0,
+                "replicate": true,
+                "serial": "",
+                "size": 40,
+                "speed": [],
+                "ssd": false
+              },
+              {
+                "aio": "io_uring",
+                "backup": true,
+                "cache": "none",
+                "datastore_id": "local-lvm",
+                "discard": "ignore",
+                "file_format": "raw",
+                "file_id": "",
+                "import_from": "",
+                "interface": "scsi1",
+                "iothread": false,
+                "path_in_datastore": "vm-206-disk-0",
+                "queues": 0,
+                "replicate": true,
+                "serial": "",
+                "size": 40,
+                "speed": [],
+                "ssd": false
+              }
+            ],
+            "efi_disk": [],
+            "hook_script_file_id": null,
+            "hostpci": [],
+            "hotplug": null,
+            "id": "206",
+            "initialization": [
+              {
+                "datastore_id": "local-lvm",
+                "dns": [
+                  {
+                    "domain": "localdomain",
+                    "servers": []
+                  }
+                ],
+                "file_format": "",
+                "interface": "ide2",
+                "ip_config": [
+                  {
+                    "ipv4": [
+                      {
+                        "address": "192.168.1.206/24",
+                        "gateway": "192.168.1.254"
+                      }
+                    ],
+                    "ipv6": []
+                  }
+                ],
+                "meta_data_file_id": "",
+                "network_data_file_id": "",
+                "type": "",
+                "upgrade": true,
+                "user_account": [
+                  {
+                    "keys": [
+                      "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIF/EfvypSmiuEAWxLDpF9OUlPnbPBi6KeO6Euc+GyyIE k8s-vms@bnei.dev"
+                    ],
+                    "password": "",
+                    "username": "core"
+                  }
+                ],
+                "user_data_file_id": "",
+                "vendor_data_file_id": "shared-templates:snippets/k8s-vm-vendor-data.yaml"
+              }
+            ],
+            "ipv4_addresses": [
+              [
+                "127.0.0.1"
+              ],
+              [
+                "192.168.1.206"
+              ],
+              [
+                "10.233.19.255",
+                "10.233.49.25",
+                "10.233.50.177",
+                "10.233.11.75",
+                "10.233.59.188",
+                "10.233.8.66",
+                "192.168.1.233",
+                "10.233.52.42",
+                "10.233.37.115",
+                "10.233.44.11",
+                "10.233.22.40",
+                "10.233.10.108",
+                "10.233.46.248",
+                "10.233.57.81",
+                "10.233.0.3",
+                "10.233.36.210",
+                "10.233.30.1",
+                "10.233.28.193",
+                "10.233.54.61",
+                "10.233.23.65",
+                "10.233.0.1",
+                "10.233.6.16",
+                "10.233.22.247",
+                "10.233.57.95",
+                "10.233.8.80",
+                "10.233.24.185",
+                "10.233.58.175",
+                "10.233.5.143",
+                "10.233.58.143",
+                "10.233.18.217",
+                "10.233.11.215",
+                "10.233.37.80",
+                "10.233.30.111",
+                "10.233.35.206",
+                "10.233.7.221",
+                "10.233.44.74",
+                "10.233.58.247",
+                "10.233.56.36",
+                "10.233.5.141",
+                "10.233.8.82",
+                "10.233.63.53",
+                "10.233.49.122",
+                "10.233.33.75",
+                "10.233.47.40",
+                "192.168.1.234",
+                "10.233.33.186",
+                "10.233.21.252",
+                "10.233.50.49",
+                "10.233.39.235",
+                "10.233.49.133"
+              ],
+              [],
+              [
+                "10.233.68.151"
+              ],
+              [],
+              [],
+              [],
+              [],
+              [],
+              [],
+              [
+                "169.254.25.10"
+              ],
+              [],
+              [],
+              [],
+              [],
+              [],
+              [],
+              []
+            ],
+            "ipv6_addresses": [
+              [
+                "::1"
+              ],
+              [
+                "2a01:e0a:1cf:a8f0:be24:11ff:fe38:c3af",
+                "fe80::be24:11ff:fe38:c3af"
+              ],
+              [],
+              [
+                "fe80::ec43:fbff:fe38:80b7"
+              ],
+              [
+                "fe80::d875:ddff:fe50:f88f"
+              ],
+              [
+                "fe80::c42e:65ff:fe72:5727"
+              ],
+              [
+                "fe80::e3:77ff:fe81:6b21"
+              ],
+              [
+                "fe80::509c:cfff:fec5:f007"
+              ],
+              [
+                "fe80::9000:c5ff:fea8:2ddb"
+              ],
+              [
+                "fe80::2cc9:d5ff:fe09:7fa0"
+              ],
+              [
+                "fe80::54d1:b6ff:fefd:3ff"
+              ],
+              [],
+              [
+                "fe80::34c3:a1ff:fe4d:6cdb"
+              ],
+              [
+                "fe80::44c4:f9ff:fe85:c15b"
+              ],
+              [
+                "fe80::e4c6:f2ff:fe85:2e1d"
+              ],
+              [
+                "fe80::18f2:6cff:feec:6a0e"
+              ],
+              [
+                "fe80::bc3e:d0ff:fe59:b074"
+              ],
+              [],
+              [
+                "fe80::28c0:ecff:fe4d:6577"
+              ]
+            ],
+            "keyboard_layout": "en-us",
+            "kvm_arguments": null,
+            "mac_addresses": [
+              "00:00:00:00:00:00",
+              "BC:24:11:38:C3:AF",
+              "CE:95:58:F3:BC:2F",
+              "EE:43:FB:38:80:B7",
+              "DA:75:DD:50:F8:8F",
+              "C6:2E:65:72:57:27",
+              "02:E3:77:81:6B:21",
+              "52:9C:CF:C5:F0:07",
+              "92:00:C5:A8:2D:DB",
+              "2E:C9:D5:09:7F:A0",
+              "56:D1:B6:FD:03:FF",
+              "EA:05:F1:0E:BB:5F",
+              "36:C3:A1:4D:6C:DB",
+              "46:C4:F9:85:C1:5B",
+              "E6:C6:F2:85:2E:1D",
+              "1A:F2:6C:EC:6A:0E",
+              "BE:3E:D0:59:B0:74",
+              "00:00:00:00:00:00",
+              "2A:C0:EC:4D:65:77"
+            ],
+            "machine": "q35",
+            "memory": [
+              {
+                "dedicated": 4096,
+                "floating": 0,
+                "hugepages": "",
+                "keep_hugepages": false,
+                "shared": 0
+              }
+            ],
+            "migrate": false,
+            "name": "k8s-cp-03",
+            "network_device": [
+              {
+                "bridge": "vmbr0",
+                "disconnected": false,
+                "enabled": true,
+                "firewall": false,
+                "mac_address": "BC:24:11:38:C3:AF",
+                "model": "virtio",
+                "mtu": 0,
+                "queues": 0,
+                "rate_limit": 0,
+                "trunks": "",
+                "vlan_id": 0
+              }
+            ],
+            "network_interface_names": [
+              "lo",
+              "eth0",
+              "kube-ipvs0",
+              "cilium_net",
+              "cilium_host",
+              "cilium_vxlan",
+              "lxc502044fcd2b3",
+              "lxc62ea3de94c89",
+              "lxc6364901f02d6",
+              "lxc296cee3cf50c",
+              "lxc0087c0ecd887",
+              "nodelocaldns",
+              "lxcf54d11fdd945",
+              "lxc28c91732a6eb",
+              "lxc681800e80d23",
+              "lxc231f47d9fa8f",
+              "lxca9fd6918b1a2",
+              "cilium_wg0",
+              "lxc_health"
+            ],
+            "node_name": "ex-laptop",
+            "numa": [],
+            "on_boot": true,
+            "operating_system": [
+              {
+                "type": "l26"
+              }
+            ],
+            "pool_id": "",
+            "protection": false,
+            "purge_on_destroy": true,
+            "reboot": false,
+            "reboot_after_update": true,
+            "rng": [],
+            "scsi_hardware": "virtio-scsi-pci",
+            "serial_device": [],
+            "smbios": [],
+            "started": true,
+            "startup": [
+              {
+                "down_delay": 300,
+                "order": 2,
+                "up_delay": -1
+              }
+            ],
+            "stop_on_destroy": false,
+            "tablet_device": true,
+            "tags": null,
+            "template": false,
+            "timeout_clone": 1800,
+            "timeout_create": 1800,
+            "timeout_migrate": 1800,
+            "timeout_move_disk": 1800,
+            "timeout_reboot": 1800,
+            "timeout_shutdown_vm": 1800,
+            "timeout_start_vm": 1800,
+            "timeout_stop_vm": 300,
+            "tpm_state": [],
+            "usb": [],
+            "vga": [],
+            "virtiofs": [],
+            "vm_id": 206,
+            "watchdog": []
+          },
+          "sensitive_attributes": [
+            [
+              {
+                "type": "get_attr",
+                "value": "initialization"
+              },
+              {
+                "type": "index",
+                "value": {
+                  "value": 0,
+                  "type": "number"
+                }
+              },
+              {
+                "type": "get_attr",
+                "value": "user_account"
+              },
+              {
+                "type": "index",
+                "value": {
+                  "value": 0,
+                  "type": "number"
+                }
+              },
+              {
+                "type": "get_attr",
+                "value": "password"
+              }
+            ]
+          ],
+          "identity_schema_version": 0,
+          "private": "bnVsbA==",
+          "dependencies": [
+            "proxmox_download_file.ubuntu_2404_cloudimg",
+            "proxmox_virtual_environment_file.k8s_vm_vendor_data",
+            "proxmox_virtual_environment_file.k8s_vm_vendor_data_shared",
+            "proxmox_virtual_environment_vm.ubuntu_2404_template"
+          ]
+        },
+        {
+          "index_key": "k8s-worker-01",
+          "schema_version": 0,
+          "attributes": {
+            "acpi": true,
+            "agent": [
+              {
+                "enabled": true,
+                "timeout": "15m",
+                "trim": false,
+                "type": "virtio",
+                "wait_for_ip": []
+              }
+            ],
+            "amd_sev": [],
+            "audio_device": [],
+            "bios": "seabios",
+            "boot_order": [
+              "scsi0",
+              "net0"
+            ],
+            "cdrom": [],
+            "clone": [
+              {
+                "datastore_id": "",
+                "full": true,
+                "node_name": "",
+                "retries": 1,
+                "vm_id": 9001
+              }
+            ],
+            "cpu": [
+              {
+                "affinity": "",
+                "architecture": "",
+                "cores": 6,
+                "flags": [],
+                "hotplugged": 0,
+                "limit": 0,
+                "numa": false,
+                "sockets": 1,
+                "type": "host",
+                "units": 0
+              }
+            ],
+            "delete_unreferenced_disks_on_destroy": true,
+            "description": null,
+            "disk": [
+              {
+                "aio": "io_uring",
+                "backup": true,
+                "cache": "none",
+                "datastore_id": "local-lvm",
+                "discard": "ignore",
+                "file_format": "raw",
+                "file_id": "",
+                "import_from": "",
+                "interface": "scsi0",
+                "iothread": false,
+                "path_in_datastore": "vm-202-disk-0",
+                "queues": 0,
+                "replicate": true,
+                "serial": "",
+                "size": 100,
+                "speed": [],
+                "ssd": false
+              },
+              {
+                "aio": "io_uring",
+                "backup": true,
+                "cache": "none",
+                "datastore_id": "local-lvm",
+                "discard": "ignore",
+                "file_format": "raw",
+                "file_id": "",
+                "import_from": "",
+                "interface": "scsi1",
+                "iothread": false,
+                "path_in_datastore": "vm-202-disk-1",
+                "queues": 0,
+                "replicate": true,
+                "serial": "",
+                "size": 100,
+                "speed": [],
+                "ssd": false
+              }
+            ],
+            "efi_disk": [],
+            "hook_script_file_id": null,
+            "hostpci": [
+              {
+                "device": "hostpci0",
+                "id": "",
+                "mapping": "gpu",
+                "mdev": "",
+                "pcie": true,
+                "rom_file": "",
+                "rombar": false,
+                "xvga": false
+              }
+            ],
+            "hotplug": null,
+            "id": "202",
+            "initialization": [
+              {
+                "datastore_id": "local-lvm",
+                "dns": [
+                  {
+                    "domain": "localdomain",
+                    "servers": []
+                  }
+                ],
+                "file_format": "",
+                "interface": "ide2",
+                "ip_config": [
+                  {
+                    "ipv4": [
+                      {
+                        "address": "192.168.1.202/24",
+                        "gateway": "192.168.1.254"
+                      }
+                    ],
+                    "ipv6": []
+                  }
+                ],
+                "meta_data_file_id": "",
+                "network_data_file_id": "",
+                "type": "",
+                "upgrade": true,
+                "user_account": [
+                  {
+                    "keys": [
+                      "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIF/EfvypSmiuEAWxLDpF9OUlPnbPBi6KeO6Euc+GyyIE k8s-vms@bnei.dev"
+                    ],
+                    "password": "",
+                    "username": "core"
+                  }
+                ],
+                "user_data_file_id": "",
+                "vendor_data_file_id": "local:snippets/k8s-vm-vendor-data.yaml"
+              }
+            ],
+            "ipv4_addresses": [
+              [
+                "127.0.0.1"
+              ],
+              [
+                "192.168.1.202"
+              ],
+              [
+                "169.254.25.10"
+              ],
+              [
+                "10.233.50.177",
+                "10.233.58.247",
+                "10.233.56.36",
+                "10.233.49.122",
+                "10.233.11.75",
+                "10.233.5.143",
+                "10.233.44.74",
+                "10.233.0.1",
+                "10.233.19.255",
+                "10.233.0.3",
+                "10.233.8.82",
+                "10.233.23.65",
+                "10.233.8.80",
+                "10.233.33.75",
+                "10.233.30.111",
+                "10.233.36.210",
+                "10.233.57.95",
+                "10.233.58.175",
+                "10.233.8.66",
+                "192.168.1.233",
+                "10.233.11.215",
+                "10.233.6.16",
+                "10.233.57.81",
+                "10.233.44.11",
+                "10.233.22.40",
+                "10.233.5.141",
+                "10.233.47.40",
+                "192.168.1.234",
+                "10.233.10.108",
+                "10.233.28.193",
+                "10.233.30.1",
+                "10.233.22.247",
+                "10.233.49.25",
+                "10.233.37.115",
+                "10.233.37.80",
+                "10.233.63.53",
+                "10.233.24.185",
+                "10.233.54.61",
+                "10.233.35.206",
+                "10.233.52.42",
+                "10.233.7.221",
+                "10.233.58.143",
+                "10.233.59.188",
+                "10.233.18.217",
+                "10.233.46.248",
+                "10.233.33.186",
+                "10.233.21.252",
+                "10.233.50.49",
+                "10.233.39.235",
+                "10.233.49.133"
+              ],
+              [],
+              [
+                "10.233.65.100"
+              ],
+              [],
+              [],
+              [],
+              [],
+              [],
+              [],
+              [],
+              [],
+              [],
+              [],
+              [],
+              [],
+              [],
+              [],
+              [],
+              [],
+              [],
+              [],
+              [],
+              [],
+              [],
+              [],
+              [],
+              [],
+              [],
+              [],
+              [],
+              [],
+              [],
+              [],
+              [],
+              [],
+              [],
+              [],
+              [],
+              [],
+              [],
+              [],
+              [],
+              [],
+              [],
+              [],
+              [],
+              [],
+              [],
+              [],
+              []
+            ],
+            "ipv6_addresses": [
+              [
+                "::1"
+              ],
+              [
+                "2a01:e0a:1cf:a8f0:be24:11ff:fe7c:c581",
+                "fe80::be24:11ff:fe7c:c581"
+              ],
+              [],
+              [],
+              [
+                "fe80::3046:6aff:fe02:f7e7"
+              ],
+              [
+                "fe80::248e:f1ff:fe7a:ee2c"
+              ],
+              [
+                "fe80::28c6:b1ff:fec2:5ae8"
+              ],
+              [
+                "fe80::e0c3:e3ff:fe8d:7315"
+              ],
+              [
+                "fe80::6c87:b5ff:fe53:8b5d"
+              ],
+              [
+                "fe80::60ea:55ff:fe0f:d241"
+              ],
+              [
+                "fe80::2882:a6ff:fe8c:a5e1"
+              ],
+              [
+                "fe80::b0b3:6bff:fe2d:9b3d"
+              ],
+              [
+                "fe80::4820:26ff:febb:27f0"
+              ],
+              [
+                "fe80::78f8:14ff:fe19:1184"
+              ],
+              [
+                "fe80::f408:13ff:feca:9a48"
+              ],
+              [
+                "fe80::6039:ebff:fe97:3c84"
+              ],
+              [
+                "fe80::9cf3:2dff:feeb:7539"
+              ],
+              [
+                "fe80::2479:daff:fe72:af24"
+              ],
+              [
+                "fe80::ac6b:5ff:fe1b:a492"
+              ],
+              [
+                "fe80::a8c0:29ff:fe3f:1aae"
+              ],
+              [
+                "fe80::38c3:24ff:fe8a:1032"
+              ],
+              [
+                "fe80::4cf4:12ff:fe31:8f1d"
+              ],
+              [
+                "fe80::48d9:6fff:fe24:4757"
+              ],
+              [
+                "fe80::6886:2fff:feb6:e7de"
+              ],
+              [
+                "fe80::6069:dcff:fe22:c8ad"
+              ],
+              [
+                "fe80::7478:c6ff:fe22:bc4a"
+              ],
+              [
+                "fe80::ec64:3fff:fe4b:4e08"
+              ],
+              [
+                "fe80::8c0f:bff:fe8a:5af4"
+              ],
+              [
+                "fe80::b471:eeff:fe00:90f2"
+              ],
+              [
+                "fe80::44f1:c8ff:fecb:6cde"
+              ],
+              [
+                "fe80::f4ae:5bff:fe94:8f2d"
+              ],
+              [
+                "fe80::c46f:ccff:feba:7425"
+              ],
+              [
+                "fe80::dcc4:45ff:fee5:25ea"
+              ],
+              [
+                "fe80::b0d4:73ff:fe69:cfc2"
+              ],
+              [
+                "fe80::ccad:14ff:feb7:d664"
+              ],
+              [
+                "fe80::c0fe:83ff:fed4:d4d"
+              ],
+              [
+                "fe80::4c61:46ff:fe8d:9f8"
+              ],
+              [
+                "fe80::e45c:46ff:fee0:b9a2"
+              ],
+              [
+                "fe80::84a6:b8ff:fe0f:a9ae"
+              ],
+              [
+                "fe80::d463:22ff:fe5a:ed24"
+              ],
+              [
+                "fe80::7880:91ff:fe51:5b05"
+              ],
+              [
+                "fe80::4040:ebff:fe0a:55f3"
+              ],
+              [
+                "fe80::7c21:ceff:fe7f:7d5c"
+              ],
+              [],
+              [
+                "fe80::ace2:a4ff:fefc:a17b"
+              ],
+              [
+                "fe80::dca5:86ff:fe3a:d213"
+              ],
+              [
+                "fe80::a47f:74ff:feda:a130"
+              ],
+              [
+                "fe80::482b:81ff:fe21:2f96"
+              ],
+              [
+                "fe80::f4bd:b6ff:fe25:7ffb"
+              ],
+              [
+                "fe80::580b:83ff:fea4:303e"
+              ],
+              [
+                "fe80::4c2e:45ff:fe77:3f04"
+              ],
+              [
+                "fe80::7843:66ff:fe18:794c"
+              ],
+              [
+                "fe80::65:fcff:fe16:2e53"
+              ]
+            ],
+            "keyboard_layout": "en-us",
+            "kvm_arguments": null,
+            "mac_addresses": [
+              "00:00:00:00:00:00",
+              "BC:24:11:7C:C5:81",
+              "42:99:A2:5E:45:AE",
+              "E6:79:AA:15:35:76",
+              "32:46:6A:02:F7:E7",
+              "26:8E:F1:7A:EE:2C",
+              "2A:C6:B1:C2:5A:E8",
+              "E2:C3:E3:8D:73:15",
+              "6E:87:B5:53:8B:5D",
+              "62:EA:55:0F:D2:41",
+              "2A:82:A6:8C:A5:E1",
+              "B2:B3:6B:2D:9B:3D",
+              "4A:20:26:BB:27:F0",
+              "7A:F8:14:19:11:84",
+              "F6:08:13:CA:9A:48",
+              "62:39:EB:97:3C:84",
+              "9E:F3:2D:EB:75:39",
+              "26:79:DA:72:AF:24",
+              "AE:6B:05:1B:A4:92",
+              "AA:C0:29:3F:1A:AE",
+              "3A:C3:24:8A:10:32",
+              "4E:F4:12:31:8F:1D",
+              "4A:D9:6F:24:47:57",
+              "6A:86:2F:B6:E7:DE",
+              "62:69:DC:22:C8:AD",
+              "76:78:C6:22:BC:4A",
+              "EE:64:3F:4B:4E:08",
+              "8E:0F:0B:8A:5A:F4",
+              "B6:71:EE:00:90:F2",
+              "46:F1:C8:CB:6C:DE",
+              "F6:AE:5B:94:8F:2D",
+              "C6:6F:CC:BA:74:25",
+              "DE:C4:45:E5:25:EA",
+              "B2:D4:73:69:CF:C2",
+              "CE:AD:14:B7:D6:64",
+              "C2:FE:83:D4:0D:4D",
+              "4E:61:46:8D:09:F8",
+              "E6:5C:46:E0:B9:A2",
+              "86:A6:B8:0F:A9:AE",
+              "D6:63:22:5A:ED:24",
+              "7A:80:91:51:5B:05",
+              "42:40:EB:0A:55:F3",
+              "7E:21:CE:7F:7D:5C",
+              "00:00:00:00:00:00",
+              "AE:E2:A4:FC:A1:7B",
+              "DE:A5:86:3A:D2:13",
+              "A6:7F:74:DA:A1:30",
+              "4A:2B:81:21:2F:96",
+              "F6:BD:B6:25:7F:FB",
+              "5A:0B:83:A4:30:3E",
+              "4E:2E:45:77:3F:04",
+              "7A:43:66:18:79:4C",
+              "02:65:FC:16:2E:53"
+            ],
+            "machine": "q35",
+            "memory": [
+              {
+                "dedicated": 15360,
+                "floating": 0,
+                "hugepages": "",
+                "keep_hugepages": false,
+                "shared": 0
+              }
+            ],
+            "migrate": false,
+            "name": "k8s-worker-01",
+            "network_device": [
+              {
+                "bridge": "vmbr0",
+                "disconnected": false,
+                "enabled": true,
+                "firewall": false,
+                "mac_address": "BC:24:11:7C:C5:81",
+                "model": "virtio",
+                "mtu": 0,
+                "queues": 0,
+                "rate_limit": 0,
+                "trunks": "",
+                "vlan_id": 0
+              }
+            ],
+            "network_interface_names": [
+              "lo",
+              "eth0",
+              "nodelocaldns",
+              "kube-ipvs0",
+              "cilium_net",
+              "cilium_host",
+              "cilium_vxlan",
+              "lxc16cc32aed9d5",
+              "lxc10b79916e874",
+              "lxc632d1c194839",
+              "lxcdd8a8c38f0aa",
+              "lxc41f1b332c331",
+              "lxc7919b3467ef0",
+              "lxcc0a5fb35cc61",
+              "lxcca1003674a37",
+              "lxc6268eb355552",
+              "lxc57617ae0c6a2",
+              "lxc95de74522bf0",
+              "lxc84ca74f6cb84",
+              "lxcfbce6ec5743f",
+              "lxcba07032cc591",
+              "lxcc36f668c5f1e",
+              "lxc066dcc6cef3e",
+              "lxccb0c6bcf25fa",
+              "lxc62bfff1ca86d",
+              "lxc474cb747ca27",
+              "lxc08018e2a214b",
+              "lxc759ef9eea833",
+              "lxc9591978fed42",
+              "lxc9e4775757cae",
+              "lxcbeb12daafca4",
+              "lxcc2db6e74e6ae",
+              "lxc73bb94efb3f1",
+              "lxc7bbd4471f224",
+              "lxccd9f5b6eb486",
+              "lxcf221f5a0e3a8",
+              "lxc5a5737894ce5",
+              "lxcf385430c6b9e",
+              "lxc78784e38870c",
+              "lxcc6b8c62a2881",
+              "lxc4f76c4fe00ac",
+              "lxc769b12b3decb",
+              "lxcad134a14d140",
+              "cilium_wg0",
+              "lxc_health",
+              "lxcbc2854678cb3",
+              "lxc05656f672145",
+              "lxc4b1b7061f7ab",
+              "lxc47f4b588292d",
+              "lxc70ddd6fe8e36",
+              "lxc7b3cde7dee46",
+              "lxc626cb4dc7d88",
+              "lxceb7d906ac4d3"
+            ],
+            "node_name": "bnei",
+            "numa": [],
+            "on_boot": true,
+            "operating_system": [
+              {
+                "type": "l26"
+              }
+            ],
+            "pool_id": "",
+            "protection": false,
+            "purge_on_destroy": true,
+            "reboot": false,
+            "reboot_after_update": true,
+            "rng": [],
+            "scsi_hardware": "virtio-scsi-pci",
+            "serial_device": [],
+            "smbios": [],
+            "started": true,
+            "startup": [
+              {
+                "down_delay": 300,
+                "order": 2,
+                "up_delay": -1
+              }
+            ],
+            "stop_on_destroy": false,
+            "tablet_device": true,
+            "tags": null,
+            "template": false,
+            "timeout_clone": 1800,
+            "timeout_create": 1800,
+            "timeout_migrate": 1800,
+            "timeout_move_disk": 1800,
+            "timeout_reboot": 1800,
+            "timeout_shutdown_vm": 1800,
+            "timeout_start_vm": 1800,
+            "timeout_stop_vm": 300,
+            "tpm_state": [],
+            "usb": [],
+            "vga": [],
+            "virtiofs": [],
+            "vm_id": 202,
+            "watchdog": []
+          },
+          "sensitive_attributes": [
+            [
+              {
+                "type": "get_attr",
+                "value": "initialization"
+              },
+              {
+                "type": "index",
+                "value": {
+                  "value": 0,
+                  "type": "number"
+                }
+              },
+              {
+                "type": "get_attr",
+                "value": "user_account"
+              },
+              {
+                "type": "index",
+                "value": {
+                  "value": 0,
+                  "type": "number"
+                }
+              },
+              {
+                "type": "get_attr",
+                "value": "password"
+              }
+            ]
+          ],
+          "identity_schema_version": 0,
+          "private": "bnVsbA==",
+          "dependencies": [
+            "proxmox_download_file.ubuntu_2404_cloudimg",
+            "proxmox_virtual_environment_file.k8s_vm_vendor_data",
+            "proxmox_virtual_environment_file.k8s_vm_vendor_data_shared",
+            "proxmox_virtual_environment_vm.ubuntu_2404_template"
+          ]
+        },
+        {
+          "index_key": "k8s-worker-02",
+          "schema_version": 0,
+          "attributes": {
+            "acpi": true,
+            "agent": [
+              {
+                "enabled": true,
+                "timeout": "15m",
+                "trim": false,
+                "type": "virtio",
+                "wait_for_ip": []
+              }
+            ],
+            "amd_sev": [],
+            "audio_device": [],
+            "bios": "seabios",
+            "boot_order": [
+              "scsi0",
+              "net0"
+            ],
+            "cdrom": [],
+            "clone": [
+              {
+                "datastore_id": "",
+                "full": true,
+                "node_name": "bnei",
+                "retries": 1,
+                "vm_id": 9001
+              }
+            ],
+            "cpu": [
+              {
+                "affinity": "",
+                "architecture": "",
+                "cores": 6,
+                "flags": [],
+                "hotplugged": 0,
+                "limit": 0,
+                "numa": false,
+                "sockets": 1,
+                "type": "host",
+                "units": 0
+              }
+            ],
+            "delete_unreferenced_disks_on_destroy": true,
+            "description": null,
+            "disk": [
+              {
+                "aio": "io_uring",
+                "backup": true,
+                "cache": "none",
+                "datastore_id": "local-lvm",
+                "discard": "ignore",
+                "file_format": "raw",
+                "file_id": "",
+                "import_from": "",
+                "interface": "scsi0",
+                "iothread": false,
+                "path_in_datastore": "vm-203-disk-0",
+                "queues": 0,
+                "replicate": true,
+                "serial": "",
+                "size": 60,
+                "speed": [],
+                "ssd": false
+              },
+              {
+                "aio": "io_uring",
+                "backup": true,
+                "cache": "none",
+                "datastore_id": "local-lvm",
+                "discard": "ignore",
+                "file_format": "raw",
+                "file_id": "",
+                "import_from": "",
+                "interface": "scsi1",
+                "iothread": false,
+                "path_in_datastore": "vm-203-disk-1",
+                "queues": 0,
+                "replicate": true,
+                "serial": "",
+                "size": 100,
+                "speed": [],
+                "ssd": false
+              }
+            ],
+            "efi_disk": [],
+            "hook_script_file_id": null,
+            "hostpci": [],
+            "hotplug": null,
+            "id": "203",
+            "initialization": [
+              {
+                "datastore_id": "local-lvm",
+                "dns": [
+                  {
+                    "domain": "localdomain",
+                    "servers": []
+                  }
+                ],
+                "file_format": "",
+                "interface": "ide2",
+                "ip_config": [
+                  {
+                    "ipv4": [
+                      {
+                        "address": "192.168.1.203/24",
+                        "gateway": "192.168.1.254"
+                      }
+                    ],
+                    "ipv6": []
+                  }
+                ],
+                "meta_data_file_id": "",
+                "network_data_file_id": "",
+                "type": "",
+                "upgrade": true,
+                "user_account": [
+                  {
+                    "keys": [
+                      "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIF/EfvypSmiuEAWxLDpF9OUlPnbPBi6KeO6Euc+GyyIE k8s-vms@bnei.dev"
+                    ],
+                    "password": "",
+                    "username": "core"
+                  }
+                ],
+                "user_data_file_id": "",
+                "vendor_data_file_id": "shared-templates:snippets/k8s-vm-vendor-data.yaml"
+              }
+            ],
+            "ipv4_addresses": [
+              [
+                "127.0.0.1"
+              ],
+              [
+                "192.168.1.203"
+              ],
+              [
+                "169.254.25.10"
+              ],
+              [
+                "10.233.56.36",
+                "10.233.46.248",
+                "10.233.59.188",
+                "10.233.8.82",
+                "10.233.63.53",
+                "10.233.22.247",
+                "10.233.11.75",
+                "10.233.44.11",
+                "10.233.6.16",
+                "10.233.8.80",
+                "10.233.57.95",
+                "10.233.37.80",
+                "10.233.52.42",
+                "10.233.23.65",
+                "10.233.21.252",
+                "10.233.5.143",
+                "10.233.49.122",
+                "10.233.33.75",
+                "10.233.19.255",
+                "10.233.5.141",
+                "10.233.10.108",
+                "10.233.47.40",
+                "192.168.1.234",
+                "10.233.37.115",
+                "10.233.49.25",
+                "10.233.30.111",
+                "10.233.22.40",
+                "10.233.50.177",
+                "10.233.11.215",
+                "10.233.57.81",
+                "10.233.8.66",
+                "192.168.1.233",
+                "10.233.58.175",
+                "10.233.50.49",
+                "10.233.30.1",
+                "10.233.33.186",
+                "10.233.28.193",
+                "10.233.0.3",
+                "10.233.0.1",
+                "10.233.7.221",
+                "10.233.39.235",
+                "10.233.58.143",
+                "10.233.35.206",
+                "10.233.54.61",
+                "10.233.58.247",
+                "10.233.24.185",
+                "10.233.36.210",
+                "10.233.44.74",
+                "10.233.18.217",
+                "10.233.49.133"
+              ],
+              [],
+              [],
+              [
+                "10.233.66.200"
+              ],
+              [],
+              [],
+              [],
+              [],
+              [],
+              [],
+              [],
+              [],
+              [],
+              [],
+              [],
+              []
+            ],
+            "ipv6_addresses": [
+              [
+                "::1"
+              ],
+              [
+                "2a01:e0a:1cf:a8f0:be24:11ff:fe85:d9f1",
+                "fe80::be24:11ff:fe85:d9f1"
+              ],
+              [],
+              [],
+              [],
+              [
+                "fe80::44e9:b3ff:fe19:1dd5"
+              ],
+              [
+                "fe80::c0af:3bff:fe2f:2b9d"
+              ],
+              [
+                "fe80::943c:f4ff:fedc:af5a"
+              ],
+              [
+                "fe80::2045:2eff:fe5b:aed1"
+              ],
+              [
+                "fe80::48c5:4ff:fe75:e533"
+              ],
+              [
+                "fe80::d481:5cff:febd:e291"
+              ],
+              [
+                "fe80::7c3f:5cff:fe8b:1db5"
+              ],
+              [
+                "fe80::609b:21ff:fecc:82db"
+              ],
+              [
+                "fe80::78a7:aff:fefa:24ff"
+              ],
+              [
+                "fe80::d08b:11ff:fe1f:ec0e"
+              ],
+              [
+                "fe80::e0a4:5dff:fef6:fd0d"
+              ],
+              [
+                "fe80::ccfc:d6ff:fe0c:561a"
+              ],
+              [
+                "fe80::b864:35ff:fe2a:7282"
+              ],
+              [
+                "fe80::88e8:4dff:feed:457f"
+              ]
+            ],
+            "keyboard_layout": "en-us",
+            "kvm_arguments": null,
+            "mac_addresses": [
+              "00:00:00:00:00:00",
+              "BC:24:11:85:D9:F1",
+              "B6:9F:C8:6E:57:D6",
+              "C2:9F:0E:D2:41:7F",
+              "00:00:00:00:00:00",
+              "46:E9:B3:19:1D:D5",
+              "C2:AF:3B:2F:2B:9D",
+              "96:3C:F4:DC:AF:5A",
+              "22:45:2E:5B:AE:D1",
+              "4A:C5:04:75:E5:33",
+              "D6:81:5C:BD:E2:91",
+              "7E:3F:5C:8B:1D:B5",
+              "62:9B:21:CC:82:DB",
+              "7A:A7:0A:FA:24:FF",
+              "D2:8B:11:1F:EC:0E",
+              "E2:A4:5D:F6:FD:0D",
+              "CE:FC:D6:0C:56:1A",
+              "BA:64:35:2A:72:82",
+              "8A:E8:4D:ED:45:7F"
+            ],
+            "machine": "q35",
+            "memory": [
+              {
+                "dedicated": 16384,
+                "floating": 0,
+                "hugepages": "",
+                "keep_hugepages": false,
+                "shared": 0
+              }
+            ],
+            "migrate": false,
+            "name": "k8s-worker-02",
+            "network_device": [
+              {
+                "bridge": "vmbr0",
+                "disconnected": false,
+                "enabled": true,
+                "firewall": false,
+                "mac_address": "BC:24:11:85:D9:F1",
+                "model": "virtio",
+                "mtu": 0,
+                "queues": 0,
+                "rate_limit": 0,
+                "trunks": "",
+                "vlan_id": 0
+              }
+            ],
+            "network_interface_names": [
+              "lo",
+              "eth0",
+              "nodelocaldns",
+              "kube-ipvs0",
+              "cilium_wg0",
+              "cilium_net",
+              "cilium_host",
+              "lxc_health",
+              "cilium_vxlan",
+              "lxcc066be3b8976",
+              "lxc0fdcafd69fc2",
+              "lxcaa5703afb579",
+              "lxc93d23d2686bb",
+              "lxc6fb2fded2d31",
+              "lxc85d3dfb3431a",
+              "lxce78e84bbd571",
+              "lxc8eecb4e5933b",
+              "lxc09dfbc8d564a",
+              "lxca1fc554d7764"
+            ],
+            "node_name": "server1",
+            "numa": [],
+            "on_boot": true,
+            "operating_system": [
+              {
+                "type": "l26"
+              }
+            ],
+            "pool_id": "",
+            "protection": false,
+            "purge_on_destroy": true,
+            "reboot": false,
+            "reboot_after_update": true,
+            "rng": [],
+            "scsi_hardware": "virtio-scsi-pci",
+            "serial_device": [],
+            "smbios": [],
+            "started": true,
+            "startup": [
+              {
+                "down_delay": 300,
+                "order": 2,
+                "up_delay": -1
+              }
+            ],
+            "stop_on_destroy": false,
+            "tablet_device": true,
+            "tags": null,
+            "template": false,
+            "timeout_clone": 1800,
+            "timeout_create": 1800,
+            "timeout_migrate": 1800,
+            "timeout_move_disk": 1800,
+            "timeout_reboot": 1800,
+            "timeout_shutdown_vm": 1800,
+            "timeout_start_vm": 1800,
+            "timeout_stop_vm": 300,
+            "tpm_state": [],
+            "usb": [],
+            "vga": [],
+            "virtiofs": [],
+            "vm_id": 203,
+            "watchdog": []
+          },
+          "sensitive_attributes": [
+            [
+              {
+                "type": "get_attr",
+                "value": "initialization"
+              },
+              {
+                "type": "index",
+                "value": {
+                  "value": 0,
+                  "type": "number"
+                }
+              },
+              {
+                "type": "get_attr",
+                "value": "user_account"
+              },
+              {
+                "type": "index",
+                "value": {
+                  "value": 0,
+                  "type": "number"
+                }
+              },
+              {
+                "type": "get_attr",
+                "value": "password"
+              }
+            ]
+          ],
+          "identity_schema_version": 0,
+          "private": "bnVsbA==",
+          "dependencies": [
+            "proxmox_download_file.ubuntu_2404_cloudimg",
+            "proxmox_virtual_environment_file.k8s_vm_vendor_data",
+            "proxmox_virtual_environment_file.k8s_vm_vendor_data_shared",
+            "proxmox_virtual_environment_vm.ubuntu_2404_template"
+          ]
+        }
+      ]
+    },
+    {
+      "mode": "managed",
+      "type": "proxmox_virtual_environment_vm",
+      "name": "nfs_storage",
+      "provider": "provider[\"registry.terraform.io/bpg/proxmox\"]",
+      "instances": [
+        {
+          "schema_version": 0,
+          "attributes": {
+            "acpi": true,
+            "agent": [
+              {
+                "enabled": true,
+                "timeout": "15m",
+                "trim": false,
+                "type": "virtio",
+                "wait_for_ip": []
+              }
+            ],
+            "amd_sev": [],
+            "audio_device": [],
+            "bios": "seabios",
+            "boot_order": [
+              "scsi0",
+              "net0"
+            ],
+            "cdrom": [],
+            "clone": [],
+            "cpu": [
+              {
+                "affinity": "",
+                "architecture": "",
+                "cores": 1,
+                "flags": [],
+                "hotplugged": 0,
+                "limit": 0,
+                "numa": false,
+                "sockets": 1,
+                "type": "qemu64",
+                "units": 0
+              }
+            ],
+            "delete_unreferenced_disks_on_destroy": true,
+            "description": "",
+            "disk": [
+              {
+                "aio": "io_uring",
+                "backup": true,
+                "cache": "none",
+                "datastore_id": "local-lvm",
+                "discard": "ignore",
+                "file_format": "raw",
+                "file_id": "",
+                "import_from": "local:import/noble-server-cloudimg-amd64-nfs.qcow2",
+                "interface": "scsi0",
+                "iothread": false,
+                "path_in_datastore": "vm-302-disk-0",
+                "queues": 0,
+                "replicate": true,
+                "serial": "",
+                "size": 20,
+                "speed": [],
+                "ssd": false
+              },
+              {
+                "aio": "io_uring",
+                "backup": true,
+                "cache": "none",
+                "datastore_id": "local-lvm",
+                "discard": "ignore",
+                "file_format": "raw",
+                "file_id": "",
+                "import_from": "",
+                "interface": "scsi1",
+                "iothread": false,
+                "path_in_datastore": "vm-302-disk-1",
+                "queues": 0,
+                "replicate": true,
+                "serial": "",
+                "size": 100,
+                "speed": [],
+                "ssd": false
+              },
+              {
+                "aio": "io_uring",
+                "backup": true,
+                "cache": "none",
+                "datastore_id": "local-lvm",
+                "discard": "ignore",
+                "file_format": "raw",
+                "file_id": "",
+                "import_from": "",
+                "interface": "scsi2",
+                "iothread": false,
+                "path_in_datastore": "vm-302-disk-2",
+                "queues": 0,
+                "replicate": true,
+                "serial": "",
+                "size": 50,
+                "speed": [],
+                "ssd": false
+              }
+            ],
+            "efi_disk": [],
+            "hook_script_file_id": "",
+            "hostpci": [],
+            "hotplug": null,
+            "id": "302",
+            "initialization": [
+              {
+                "datastore_id": "local-lvm",
+                "dns": [
+                  {
+                    "domain": "localdomain",
+                    "servers": [
+                      "192.168.1.55"
+                    ]
+                  }
+                ],
+                "file_format": "",
+                "interface": "ide2",
+                "ip_config": [
+                  {
+                    "ipv4": [
+                      {
+                        "address": "192.168.1.198/24",
+                        "gateway": "192.168.1.254"
+                      }
+                    ],
+                    "ipv6": []
+                  }
+                ],
+                "meta_data_file_id": "",
+                "network_data_file_id": "",
+                "type": "",
+                "upgrade": true,
+                "user_account": [
+                  {
+                    "keys": [
+                      "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIE4el5HI/uwK5D7DmUfaw1KkpNYPYVpHycnhuOF4x65C nfs-storage@infra-bootstrap"
+                    ],
+                    "password": "",
+                    "username": "core"
+                  }
+                ],
+                "user_data_file_id": "",
+                "vendor_data_file_id": "local:snippets/nfs-vm-vendor-data.yaml"
+              }
+            ],
+            "ipv4_addresses": [
+              [
+                "127.0.0.1"
+              ],
+              [
+                "192.168.1.198"
+              ]
+            ],
+            "ipv6_addresses": [
+              [
+                "::1"
+              ],
+              [
+                "2a01:e0a:1cf:a8f0:be24:11ff:feb8:3c16",
+                "fe80::be24:11ff:feb8:3c16"
+              ]
+            ],
+            "keyboard_layout": "en-us",
+            "kvm_arguments": "",
+            "mac_addresses": [
+              "00:00:00:00:00:00",
+              "BC:24:11:B8:3C:16"
+            ],
+            "machine": "",
+            "memory": [
+              {
+                "dedicated": 1024,
+                "floating": 0,
+                "hugepages": "",
+                "keep_hugepages": false,
+                "shared": 0
+              }
+            ],
+            "migrate": false,
+            "name": "nfs-storage",
+            "network_device": [
+              {
+                "bridge": "vmbr0",
+                "disconnected": false,
+                "enabled": true,
+                "firewall": false,
+                "mac_address": "BC:24:11:B8:3C:16",
+                "model": "virtio",
+                "mtu": 0,
+                "queues": 0,
+                "rate_limit": 0,
+                "trunks": "",
+                "vlan_id": 0
+              }
+            ],
+            "network_interface_names": [
+              "lo",
+              "eth0"
+            ],
+            "node_name": "server1",
+            "numa": [],
+            "on_boot": true,
+            "operating_system": [
+              {
+                "type": "l26"
+              }
+            ],
+            "pool_id": "",
+            "protection": false,
+            "purge_on_destroy": true,
+            "reboot": false,
+            "reboot_after_update": true,
+            "rng": [],
+            "scsi_hardware": "virtio-scsi-pci",
+            "serial_device": [],
+            "smbios": [],
+            "started": true,
+            "startup": [
+              {
+                "down_delay": -1,
+                "order": 1,
+                "up_delay": 90
+              }
+            ],
+            "stop_on_destroy": false,
+            "tablet_device": true,
+            "tags": [
+              "nfs",
+              "storage"
+            ],
+            "template": false,
+            "timeout_clone": 1800,
+            "timeout_create": 1800,
+            "timeout_migrate": 1800,
+            "timeout_move_disk": 1800,
+            "timeout_reboot": 1800,
+            "timeout_shutdown_vm": 1800,
+            "timeout_start_vm": 1800,
+            "timeout_stop_vm": 300,
+            "tpm_state": [],
+            "usb": [],
+            "vga": [],
+            "virtiofs": [],
+            "vm_id": 302,
+            "watchdog": []
+          },
+          "sensitive_attributes": [
+            [
+              {
+                "type": "get_attr",
+                "value": "initialization"
+              },
+              {
+                "type": "index",
+                "value": {
+                  "value": 0,
+                  "type": "number"
+                }
+              },
+              {
+                "type": "get_attr",
+                "value": "user_account"
+              },
+              {
+                "type": "index",
+                "value": {
+                  "value": 0,
+                  "type": "number"
+                }
+              },
+              {
+                "type": "get_attr",
+                "value": "password"
+              }
+            ]
+          ],
+          "identity_schema_version": 0,
+          "private": "bnVsbA==",
+          "dependencies": [
+            "proxmox_download_file.nfs_vm_cloudimg",
+            "proxmox_virtual_environment_file.nfs_vm_vendor_data"
+          ]
+        }
+      ]
+    },
+    {
+      "mode": "managed",
+      "type": "proxmox_virtual_environment_vm",
+      "name": "pg01",
+      "provider": "provider[\"registry.terraform.io/bpg/proxmox\"]",
+      "instances": [
+        {
+          "schema_version": 0,
+          "attributes": {
+            "acpi": true,
+            "agent": [],
+            "amd_sev": [],
+            "audio_device": [],
+            "bios": "seabios",
+            "boot_order": [],
+            "cdrom": [],
+            "clone": [],
+            "cpu": [
+              {
+                "affinity": "",
+                "architecture": "",
+                "cores": 2,
+                "flags": [],
+                "hotplugged": 0,
+                "limit": 0,
+                "numa": false,
+                "sockets": 1,
+                "type": "qemu64",
+                "units": 0
+              }
+            ],
+            "delete_unreferenced_disks_on_destroy": true,
+            "description": "",
+            "disk": [
+              {
+                "aio": "io_uring",
+                "backup": true,
+                "cache": "none",
+                "datastore_id": "local-lvm",
+                "discard": "ignore",
+                "file_format": "raw",
+                "file_id": "",
+                "import_from": "",
+                "interface": "scsi0",
+                "iothread": false,
+                "path_in_datastore": "vm-205-disk-0",
+                "queues": 0,
+                "replicate": true,
+                "serial": "",
+                "size": 53,
+                "speed": [],
+                "ssd": false
+              }
+            ],
+            "efi_disk": [],
+            "hook_script_file_id": "",
+            "hostpci": [],
+            "hotplug": null,
+            "id": "205",
+            "initialization": [
+              {
+                "datastore_id": "local-lvm",
+                "dns": [],
+                "file_format": "",
+                "interface": "ide2",
+                "ip_config": [
+                  {
+                    "ipv4": [
+                      {
+                        "address": "192.168.1.205/24",
+                        "gateway": "192.168.1.254"
+                      }
+                    ],
+                    "ipv6": [
+                      {
+                        "address": "dhcp",
+                        "gateway": ""
+                      }
+                    ]
+                  }
+                ],
+                "meta_data_file_id": "",
+                "network_data_file_id": "",
+                "type": "",
+                "upgrade": true,
+                "user_account": [
+                  {
+                    "keys": [
+                      "ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAACAQCymdmTAQRj+9UTDCW4fj/zYYf0dX0FULRG+zCPypvzqwdg8I+Jz0qV/cZEGfyaJMZbbaW2pCoJP340g0SAsYNgV/MEoKCC/reIrKIaSB4710bVl7P5y+dU9cyonkm8UPzgDEkcb9Vk23d50QrInNFO1ZzqsrNCIL3kViTD5yKjsRwrfahyu/jTCKVq8L6RhFVNTungfAChRPUDp1RmPaFy2wzV/Kh7hm3OtU+LL/D9Ft2S05ebobQpm34NGrx3Ac+dNPSoIH3vPdTjPyaCiWuJ0DlxmboLTRIyTatop9dwi/5bENAzxMeWGgoJAIbQvX5A8wQhrqN6T4GcQV26AuY4zYTNyzqD2bsnDhtpZ+QcfzmMZuB/j5IV2NidwRkUgOMYFkI7J+wDnbobNhpAuFNK0z39++GbvHp0HaFyPFy2E2+hb7098bbqZfbCD2OgwOY2oXZOv/LLg7DHelksMSfMhAw3HEAzJ1h/wnrtdqdX/oFqtDjyyuZjygvA7DNQjkgHiV7tCM2ZUh/AMPc60rff1imgJOuS9JJXYDFAaesYZqcvMaAeTY2UyQQWz4gLHtbHQ6Y2Oaq8fXetA0mivKUYitgfwQDbz6Wh81bQEjXg1j56fuIKi6IzOSILRv0NxgF7508K5CUEpjhg3EWQrl4ZAaZIFM31z7OSJXniJWntqQ== mohammadamine.banaei@pm.me"
+                    ],
+                    "password": "**********",
+                    "username": "vagrant"
+                  }
+                ],
+                "user_data_file_id": "",
+                "vendor_data_file_id": ""
+              }
+            ],
+            "ipv4_addresses": [],
+            "ipv6_addresses": [],
+            "keyboard_layout": "en-us",
+            "kvm_arguments": "",
+            "mac_addresses": [
+              "BC:24:11:E8:DA:D9"
+            ],
+            "machine": "q35",
+            "memory": [
+              {
+                "dedicated": 2048,
+                "floating": 0,
+                "hugepages": "",
+                "keep_hugepages": false,
+                "shared": 0
+              }
+            ],
+            "migrate": false,
+            "name": "pg01",
+            "network_device": [
+              {
+                "bridge": "vmbr0",
+                "disconnected": false,
+                "enabled": true,
+                "firewall": false,
+                "mac_address": "BC:24:11:E8:DA:D9",
+                "model": "virtio",
+                "mtu": 0,
+                "queues": 0,
+                "rate_limit": 0,
+                "trunks": "",
+                "vlan_id": 0
+              }
+            ],
+            "network_interface_names": [],
+            "node_name": "bnei",
+            "numa": [],
+            "on_boot": true,
+            "operating_system": [
+              {
+                "type": ""
+              }
+            ],
+            "pool_id": "",
+            "protection": false,
+            "purge_on_destroy": true,
+            "reboot": false,
+            "reboot_after_update": true,
+            "rng": [],
+            "scsi_hardware": "virtio-scsi-pci",
+            "serial_device": [],
+            "smbios": [],
+            "started": true,
+            "startup": [],
+            "stop_on_destroy": false,
+            "tablet_device": true,
+            "tags": [],
+            "template": false,
+            "timeout_clone": 1800,
+            "timeout_create": 1800,
+            "timeout_migrate": 1800,
+            "timeout_move_disk": 1800,
+            "timeout_reboot": 1800,
+            "timeout_shutdown_vm": 1800,
+            "timeout_start_vm": 1800,
+            "timeout_stop_vm": 300,
+            "tpm_state": [],
+            "usb": [],
+            "vga": [],
+            "virtiofs": [],
+            "vm_id": 205,
+            "watchdog": []
+          },
+          "sensitive_attributes": [
+            [
+              {
+                "type": "get_attr",
+                "value": "initialization"
+              },
+              {
+                "type": "index",
+                "value": {
+                  "value": 0,
+                  "type": "number"
+                }
+              },
+              {
+                "type": "get_attr",
+                "value": "user_account"
+              },
+              {
+                "type": "index",
+                "value": {
+                  "value": 0,
+                  "type": "number"
+                }
+              },
+              {
+                "type": "get_attr",
+                "value": "password"
+              }
+            ]
+          ],
+          "identity_schema_version": 0,
+          "private": "bnVsbA=="
+        }
+      ]
+    },
+    {
+      "mode": "managed",
+      "type": "proxmox_virtual_environment_vm",
+      "name": "pg02",
+      "provider": "provider[\"registry.terraform.io/bpg/proxmox\"]",
+      "instances": [
+        {
+          "schema_version": 0,
+          "attributes": {
+            "acpi": true,
+            "agent": [],
+            "amd_sev": [],
+            "audio_device": [],
+            "bios": "seabios",
+            "boot_order": [],
+            "cdrom": [],
+            "clone": [],
+            "cpu": [
+              {
+                "affinity": "",
+                "architecture": "",
+                "cores": 2,
+                "flags": [],
+                "hotplugged": 0,
+                "limit": 0,
+                "numa": false,
+                "sockets": 1,
+                "type": "qemu64",
+                "units": 0
+              }
+            ],
+            "delete_unreferenced_disks_on_destroy": true,
+            "description": "",
+            "disk": [
+              {
+                "aio": "io_uring",
+                "backup": true,
+                "cache": "none",
+                "datastore_id": "local-lvm",
+                "discard": "ignore",
+                "file_format": "raw",
+                "file_id": "",
+                "import_from": "",
+                "interface": "scsi0",
+                "iothread": false,
+                "path_in_datastore": "vm-207-disk-0",
+                "queues": 0,
+                "replicate": true,
+                "serial": "",
+                "size": 53,
+                "speed": [],
+                "ssd": false
+              }
+            ],
+            "efi_disk": [],
+            "hook_script_file_id": "",
+            "hostpci": [],
+            "hotplug": null,
+            "id": "207",
+            "initialization": [
+              {
+                "datastore_id": "local-lvm",
+                "dns": [],
+                "file_format": "",
+                "interface": "ide2",
+                "ip_config": [
+                  {
+                    "ipv4": [
+                      {
+                        "address": "192.168.1.207/24",
+                        "gateway": "192.168.1.254"
+                      }
+                    ],
+                    "ipv6": [
+                      {
+                        "address": "dhcp",
+                        "gateway": ""
+                      }
+                    ]
+                  }
+                ],
+                "meta_data_file_id": "",
+                "network_data_file_id": "",
+                "type": "",
+                "upgrade": true,
+                "user_account": [
+                  {
+                    "keys": [
+                      "ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAACAQCymdmTAQRj+9UTDCW4fj/zYYf0dX0FULRG+zCPypvzqwdg8I+Jz0qV/cZEGfyaJMZbbaW2pCoJP340g0SAsYNgV/MEoKCC/reIrKIaSB4710bVl7P5y+dU9cyonkm8UPzgDEkcb9Vk23d50QrInNFO1ZzqsrNCIL3kViTD5yKjsRwrfahyu/jTCKVq8L6RhFVNTungfAChRPUDp1RmPaFy2wzV/Kh7hm3OtU+LL/D9Ft2S05ebobQpm34NGrx3Ac+dNPSoIH3vPdTjPyaCiWuJ0DlxmboLTRIyTatop9dwi/5bENAzxMeWGgoJAIbQvX5A8wQhrqN6T4GcQV26AuY4zYTNyzqD2bsnDhtpZ+QcfzmMZuB/j5IV2NidwRkUgOMYFkI7J+wDnbobNhpAuFNK0z39++GbvHp0HaFyPFy2E2+hb7098bbqZfbCD2OgwOY2oXZOv/LLg7DHelksMSfMhAw3HEAzJ1h/wnrtdqdX/oFqtDjyyuZjygvA7DNQjkgHiV7tCM2ZUh/AMPc60rff1imgJOuS9JJXYDFAaesYZqcvMaAeTY2UyQQWz4gLHtbHQ6Y2Oaq8fXetA0mivKUYitgfwQDbz6Wh81bQEjXg1j56fuIKi6IzOSILRv0NxgF7508K5CUEpjhg3EWQrl4ZAaZIFM31z7OSJXniJWntqQ== mohammadamine.banaei@pm.me"
+                    ],
+                    "password": "**********",
+                    "username": "vagrant"
+                  }
+                ],
+                "user_data_file_id": "",
+                "vendor_data_file_id": ""
+              }
+            ],
+            "ipv4_addresses": [],
+            "ipv6_addresses": [],
+            "keyboard_layout": "en-us",
+            "kvm_arguments": "",
+            "mac_addresses": [
+              "BC:24:11:30:4C:41"
+            ],
+            "machine": "q35",
+            "memory": [
+              {
+                "dedicated": 2048,
+                "floating": 0,
+                "hugepages": "",
+                "keep_hugepages": false,
+                "shared": 0
+              }
+            ],
+            "migrate": false,
+            "name": "pg02",
+            "network_device": [
+              {
+                "bridge": "vmbr0",
+                "disconnected": false,
+                "enabled": true,
+                "firewall": false,
+                "mac_address": "BC:24:11:30:4C:41",
+                "model": "virtio",
+                "mtu": 0,
+                "queues": 0,
+                "rate_limit": 0,
+                "trunks": "",
+                "vlan_id": 0
+              }
+            ],
+            "network_interface_names": [],
+            "node_name": "bnei",
+            "numa": [],
+            "on_boot": true,
+            "operating_system": [
+              {
+                "type": ""
+              }
+            ],
+            "pool_id": "",
+            "protection": false,
+            "purge_on_destroy": true,
+            "reboot": false,
+            "reboot_after_update": true,
+            "rng": [],
+            "scsi_hardware": "virtio-scsi-pci",
+            "serial_device": [],
+            "smbios": [],
+            "started": true,
+            "startup": [],
+            "stop_on_destroy": false,
+            "tablet_device": true,
+            "tags": [],
+            "template": false,
+            "timeout_clone": 1800,
+            "timeout_create": 1800,
+            "timeout_migrate": 1800,
+            "timeout_move_disk": 1800,
+            "timeout_reboot": 1800,
+            "timeout_shutdown_vm": 1800,
+            "timeout_start_vm": 1800,
+            "timeout_stop_vm": 300,
+            "tpm_state": [],
+            "usb": [],
+            "vga": [],
+            "virtiofs": [],
+            "vm_id": 207,
+            "watchdog": []
+          },
+          "sensitive_attributes": [
+            [
+              {
+                "type": "get_attr",
+                "value": "initialization"
+              },
+              {
+                "type": "index",
+                "value": {
+                  "value": 0,
+                  "type": "number"
+                }
+              },
+              {
+                "type": "get_attr",
+                "value": "user_account"
+              },
+              {
+                "type": "index",
+                "value": {
+                  "value": 0,
+                  "type": "number"
+                }
+              },
+              {
+                "type": "get_attr",
+                "value": "password"
+              }
+            ]
+          ],
+          "identity_schema_version": 0,
+          "private": "bnVsbA=="
+        }
+      ]
+    },
+    {
+      "mode": "managed",
+      "type": "proxmox_virtual_environment_vm",
+      "name": "pg_etcd_witness",
+      "provider": "provider[\"registry.terraform.io/bpg/proxmox\"]",
+      "instances": [
+        {
+          "schema_version": 0,
+          "attributes": {
+            "acpi": true,
+            "agent": [
+              {
+                "enabled": true,
+                "timeout": "15m",
+                "trim": false,
+                "type": "virtio",
+                "wait_for_ip": []
+              }
+            ],
+            "amd_sev": [],
+            "audio_device": [],
+            "bios": "seabios",
+            "boot_order": [
+              "scsi0",
+              "net0"
+            ],
+            "cdrom": [],
+            "clone": [
+              {
+                "datastore_id": "",
+                "full": true,
+                "node_name": "bnei",
+                "retries": 1,
+                "vm_id": 9001
+              }
+            ],
+            "cpu": [
+              {
+                "affinity": "",
+                "architecture": "",
+                "cores": 1,
+                "flags": null,
+                "hotplugged": 0,
+                "limit": 0,
+                "numa": false,
+                "sockets": 1,
+                "type": "qemu64",
+                "units": 0
+              }
+            ],
+            "delete_unreferenced_disks_on_destroy": true,
+            "description": null,
+            "disk": [
+              {
+                "aio": "io_uring",
+                "backup": true,
+                "cache": "none",
+                "datastore_id": "local-lvm",
+                "discard": "ignore",
+                "file_format": "raw",
+                "file_id": "",
+                "import_from": "",
+                "interface": "scsi0",
+                "iothread": false,
+                "path_in_datastore": "vm-303-disk-0",
+                "queues": 0,
+                "replicate": true,
+                "serial": "",
+                "size": 10,
+                "speed": [],
+                "ssd": false
+              }
+            ],
+            "efi_disk": [],
+            "hook_script_file_id": null,
+            "hostpci": [],
+            "hotplug": null,
+            "id": "303",
+            "initialization": [
+              {
+                "datastore_id": "local-lvm",
+                "dns": [
+                  {
+                    "domain": "localdomain",
+                    "servers": null
+                  }
+                ],
+                "file_format": "",
+                "interface": "ide2",
+                "ip_config": [
+                  {
+                    "ipv4": [
+                      {
+                        "address": "192.168.1.197/24",
+                        "gateway": "192.168.1.254"
+                      }
+                    ],
+                    "ipv6": []
+                  }
+                ],
+                "meta_data_file_id": "",
+                "network_data_file_id": "",
+                "type": "",
+                "upgrade": true,
+                "user_account": [
+                  {
+                    "keys": [
+                      "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIDpIX0IvKbOm3CFrl/Y+kQKgtPuTA4BFBhO6pBDx1ihX pg-etcd-witness"
+                    ],
+                    "password": "",
+                    "username": "core"
+                  }
+                ],
+                "user_data_file_id": "",
+                "vendor_data_file_id": "shared-templates:snippets/k8s-vm-vendor-data.yaml"
+              }
+            ],
+            "ipv4_addresses": [
+              [
+                "127.0.0.1"
+              ],
+              [
+                "192.168.1.197"
+              ]
+            ],
+            "ipv6_addresses": [
+              [
+                "::1"
+              ],
+              [
+                "2a01:e0a:1cf:a8f0:be24:11ff:fe06:3287",
+                "fe80::be24:11ff:fe06:3287"
+              ]
+            ],
+            "keyboard_layout": "en-us",
+            "kvm_arguments": null,
+            "mac_addresses": [
+              "00:00:00:00:00:00",
+              "BC:24:11:06:32:87"
+            ],
+            "machine": "q35",
+            "memory": [
+              {
+                "dedicated": 1024,
+                "floating": 0,
+                "hugepages": "",
+                "keep_hugepages": false,
+                "shared": 0
+              }
+            ],
+            "migrate": false,
+            "name": "pg-etcd-witness",
+            "network_device": [
+              {
+                "bridge": "vmbr0",
+                "disconnected": false,
+                "enabled": true,
+                "firewall": false,
+                "mac_address": "BC:24:11:06:32:87",
+                "model": "virtio",
+                "mtu": 0,
+                "queues": 0,
+                "rate_limit": 0,
+                "trunks": "",
+                "vlan_id": 0
+              }
+            ],
+            "network_interface_names": [
+              "lo",
+              "eth0"
+            ],
+            "node_name": "ex-laptop",
+            "numa": [],
+            "on_boot": true,
+            "operating_system": [
+              {
+                "type": "l26"
+              }
+            ],
+            "pool_id": "",
+            "protection": false,
+            "purge_on_destroy": true,
+            "reboot": false,
+            "reboot_after_update": true,
+            "rng": [],
+            "scsi_hardware": "virtio-scsi-pci",
+            "serial_device": [],
+            "smbios": [],
+            "started": true,
+            "startup": [],
+            "stop_on_destroy": false,
+            "tablet_device": true,
+            "tags": [
+              "etcd",
+              "postgres",
+              "witness"
+            ],
+            "template": false,
+            "timeout_clone": 1800,
+            "timeout_create": 1800,
+            "timeout_migrate": 1800,
+            "timeout_move_disk": 1800,
+            "timeout_reboot": 1800,
+            "timeout_shutdown_vm": 1800,
+            "timeout_start_vm": 1800,
+            "timeout_stop_vm": 300,
+            "tpm_state": [],
+            "usb": [],
+            "vga": [],
+            "virtiofs": [],
+            "vm_id": 303,
+            "watchdog": []
+          },
+          "sensitive_attributes": [
+            [
+              {
+                "type": "get_attr",
+                "value": "initialization"
+              },
+              {
+                "type": "index",
+                "value": {
+                  "value": 0,
+                  "type": "number"
+                }
+              },
+              {
+                "type": "get_attr",
+                "value": "user_account"
+              },
+              {
+                "type": "index",
+                "value": {
+                  "value": 0,
+                  "type": "number"
+                }
+              },
+              {
+                "type": "get_attr",
+                "value": "password"
+              }
+            ]
+          ],
+          "identity_schema_version": 0,
+          "private": "bnVsbA==",
+          "dependencies": [
+            "proxmox_download_file.ubuntu_2404_cloudimg",
+            "proxmox_virtual_environment_file.k8s_vm_vendor_data_shared",
+            "proxmox_virtual_environment_vm.ubuntu_2404_template"
+          ]
+        }
+      ]
+    },
+    {
+      "mode": "managed",
+      "type": "proxmox_virtual_environment_vm",
+      "name": "ubuntu_2404_template",
+      "provider": "provider[\"registry.terraform.io/bpg/proxmox\"]",
+      "instances": [
+        {
+          "schema_version": 0,
+          "attributes": {
+            "acpi": true,
+            "agent": [
+              {
+                "enabled": true,
+                "timeout": "15m",
+                "trim": false,
+                "type": "virtio",
+                "wait_for_ip": []
+              }
+            ],
+            "amd_sev": [],
+            "audio_device": [],
+            "bios": "seabios",
+            "boot_order": [
+              "scsi0",
+              "net0"
+            ],
+            "cdrom": [],
+            "clone": [],
+            "cpu": [
+              {
+                "affinity": "",
+                "architecture": "",
+                "cores": 1,
+                "flags": [],
+                "hotplugged": 0,
+                "limit": 0,
+                "numa": false,
+                "sockets": 1,
+                "type": "qemu64",
+                "units": 0
+              }
+            ],
+            "delete_unreferenced_disks_on_destroy": true,
+            "description": "",
+            "disk": [
+              {
+                "aio": "io_uring",
+                "backup": true,
+                "cache": "none",
+                "datastore_id": "shared-templates",
+                "discard": "ignore",
+                "file_format": "qcow2",
+                "file_id": "",
+                "import_from": "local:import/noble-server-cloudimg-amd64.qcow2",
+                "interface": "scsi0",
+                "iothread": false,
+                "path_in_datastore": "9001/base-9001-disk-0.qcow2",
+                "queues": 0,
+                "replicate": true,
+                "serial": "",
+                "size": 8,
+                "speed": [],
+                "ssd": false
+              }
+            ],
+            "efi_disk": [],
+            "hook_script_file_id": "",
+            "hostpci": [],
+            "hotplug": null,
+            "id": "9001",
+            "initialization": [
+              {
+                "datastore_id": "shared-templates",
+                "dns": [],
+                "file_format": "qcow2",
+                "interface": "ide2",
+                "ip_config": [],
+                "meta_data_file_id": "",
+                "network_data_file_id": "",
+                "type": "",
+                "upgrade": true,
+                "user_account": [],
+                "user_data_file_id": "",
+                "vendor_data_file_id": ""
+              }
+            ],
+            "ipv4_addresses": [],
+            "ipv6_addresses": [],
+            "keyboard_layout": "en-us",
+            "kvm_arguments": "",
+            "mac_addresses": [
+              "BC:24:11:20:A7:84"
+            ],
+            "machine": "",
+            "memory": [
+              {
+                "dedicated": 1024,
+                "floating": 0,
+                "hugepages": "",
+                "keep_hugepages": false,
+                "shared": 0
+              }
+            ],
+            "migrate": false,
+            "name": "ubuntu-24.04-ci-template",
+            "network_device": [
+              {
+                "bridge": "vmbr0",
+                "disconnected": false,
+                "enabled": true,
+                "firewall": false,
+                "mac_address": "BC:24:11:20:A7:84",
+                "model": "virtio",
+                "mtu": 0,
+                "queues": 0,
+                "rate_limit": 0,
+                "trunks": "",
+                "vlan_id": 0
+              }
+            ],
+            "network_interface_names": [],
+            "node_name": "bnei",
+            "numa": [],
+            "on_boot": true,
+            "operating_system": [
+              {
+                "type": "l26"
+              }
+            ],
+            "pool_id": "",
+            "protection": false,
+            "purge_on_destroy": true,
+            "reboot": false,
+            "reboot_after_update": true,
+            "rng": [],
+            "scsi_hardware": "virtio-scsi-pci",
+            "serial_device": [],
+            "smbios": [],
+            "started": null,
+            "startup": [],
+            "stop_on_destroy": false,
+            "tablet_device": true,
+            "tags": [],
+            "template": true,
+            "timeout_clone": 1800,
+            "timeout_create": 1800,
+            "timeout_migrate": 1800,
+            "timeout_move_disk": 1800,
+            "timeout_reboot": 1800,
+            "timeout_shutdown_vm": 1800,
+            "timeout_start_vm": 1800,
+            "timeout_stop_vm": 300,
+            "tpm_state": [],
+            "usb": [],
+            "vga": [],
+            "virtiofs": [],
+            "vm_id": 9001,
+            "watchdog": []
+          },
+          "sensitive_attributes": [],
+          "identity_schema_version": 0,
+          "private": "bnVsbA==",
+          "dependencies": [
+            "proxmox_download_file.ubuntu_2404_cloudimg"
+          ]
+        }
+      ]
+    }
+  ],
+  "check_results": null
+}

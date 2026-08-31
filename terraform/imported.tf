@@ -94,7 +94,14 @@ resource "proxmox_virtual_environment_vm" "pg01" {
   }
 
   memory {
-    dedicated = 2048
+    # 4096, not 2048, because that is what is live — someone bumped this VM's
+    # RAM by hand and the config never followed. `memory` is NOT in the
+    # ignore_changes below, so with 2048 here terraform plans
+    # `dedicated 4096 -> 2048`: an apply would HALVE the production Postgres
+    # primary's memory as a side effect of an unrelated change. Found
+    # 2026-08-31 in the discard=on plan; pg02 is genuinely 2048 live and is
+    # left alone.
+    dedicated = 4096
   }
 
   disk {
@@ -242,7 +249,17 @@ resource "proxmox_virtual_environment_vm" "pg02" {
 }
 
 resource "proxmox_virtual_environment_container" "hermesagent" {
-  node_name    = var.pve_node_name
+  # node_name hardcoded to "ex-laptop" rather than var.pve_node_name (= the
+  # `bnei`/.165 node), because that is where this container actually lives — it
+  # was migrated there deliberately and the config never followed. Same
+  # hardcoding pattern as k9s_dashboard and build_runner pinning "server1".
+  #
+  # This mattered: with node_name pointing at .165, `terraform plan` queried
+  # the wrong node, got a 404, concluded the container was gone, dropped it
+  # from state and planned to CREATE it — onto VMID 101, which is already taken
+  # by the live container on ex-laptop, and Proxmox VMIDs are cluster-unique.
+  # Found 2026-08-31 while adding discard=on; see docs/bootstrap-test-notes.md.
+  node_name    = "ex-laptop"
   vm_id        = 101
   unprivileged = var.hermesagent_unprivileged
   started      = true

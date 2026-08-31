@@ -4107,6 +4107,68 @@ may itself be ForceNew. Ask before touching it.
 would lose `.lan` resolution, which is how it reaches `registry.bnei.lan` and
 the `k8s-*.bnei.lan` names.
 
+### Both reconciled — and one of them needed more than a config edit
+
+`k9s_dashboard` was the easy half: its `initialization` block simply never
+declared the DNS that is live (`pct config 102`: `nameserver 192.168.1.55`,
+`searchdomain bnei.lan`). Adding a matching `dns {}` block made it zero-diff
+and it dropped out of the plan entirely.
+
+`hermesagent` was not. The container was migrated to `ex-laptop` deliberately
+(confirmed with the owner) and the config still said `var.pve_node_name`
+(= `bnei`). Pointing `node_name` at `"ex-laptop"` **did not fix it** — the plan
+still said `will be created`.
+
+The reason is worth remembering: **`terraform plan` refreshes a resource using
+the identifying attributes in STATE, not the ones in config.** State held
+`node_name = "bnei"`, so refresh kept querying `bnei`, kept getting a 404, and
+kept concluding the container was deleted. The config edit is necessary but not
+sufficient; relocating an existing resource across nodes needs a state
+operation:
+
+```bash
+terraform state rm proxmox_virtual_environment_container.hermesagent
+terraform import proxmox_virtual_environment_container.hermesagent ex-laptop/101
+```
+
+(bpg's container import ID is `<node_name>/<vm_id>`.)
+
+Worth noting the state file was never actually corrupted by any of this: a
+plan's refresh drops the missing resource **in memory only**, so repeated plans
+kept reporting `create` without ever writing that conclusion to disk. The
+resource is still in `terraform.tfstate` with its stale `node_name`.
+
+### The third one, which was the worst, and which I nearly missed twice
+
+Once hermesagent and k9s_dashboard were reconciled the plan read
+`0 to add, 10 to change, 0 to destroy` — which looks finished. Reading the
+per-resource diff rather than the counts turned up one more:
+
+```
+# proxmox_virtual_environment_vm.pg01 will be updated in-place
+  ~ disk   { ~ discard  = "ignore" -> "on" }
+  ~ memory { ~ dedicated = 4096 -> 2048 }        # <-- not ours
+```
+
+**Applying would have halved the production Postgres primary's RAM.** Live
+`pg01` is 4096; `imported.tf` said 2048; `memory` is not in that resource's
+`ignore_changes`. Someone bumped it by hand and the config never followed —
+the same class as the 52.5G disk-size scar already documented in that file,
+and the same class as the two above. `pg02` is genuinely 2048 on both sides
+and was correctly not flagged; it is left alone.
+
+Config reconciled UP to 4096, never the other way. When live and config
+disagree about a production resource, the safe direction is to make the config
+describe reality, then decide separately whether reality is right.
+
+It was nearly missed twice. The first pass filtered non-`discard` attribute
+changes and piped through `head -20`; the pg01 line fell past the cut and the
+truncation was not noticed. The second pass only inspected the resource whose
+count had changed. **`head` on a plan diff is how you ship the thing you were
+checking for.** The final check prints every changed attribute of every
+resource with no truncation at all, and that is the only version worth
+trusting.
+
 ### Consequence for applying
 
 **`terraform apply` unqualified is not safe on this state.** The discard change
