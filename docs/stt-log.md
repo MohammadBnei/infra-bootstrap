@@ -1,0 +1,255 @@
+# `ukubi-stt` — running log
+
+Working log for the GPU speech-to-text service (ADR-0044) and the GPU node it
+runs on (ADR-0043). **Append, do not rewrite.** Newest section last.
+
+Companions, and what belongs where:
+- `docs/adr/0043-*.md`, `docs/adr/0044-*.md` — the decisions and their rationale
+- `docs/bootstrap-test-notes.md` — infrastructure incidents in full detail
+- this file — the STT project's own thread: where we are, what we learned, what is next
+
+---
+
+## Where this stands (2026-08-31)
+
+**Gate 0 has run and FAILED. That is the current blocker and the only one.**
+
+```
+gpu.used before load : 1 MiB
+model loaded in      : 2.4s
+gpu.used after warmup: 1 MiB (delta 0 MiB)
+audio_seconds        : 3.00
+decode_seconds       : 0.24
+real-time factor     : 0.081
+transcript           : ""
+
+GATE FAILED: GPU memory grew by only 0 MiB (< 128 MiB)
+```
+
+**CUDA did not engage; ORT silently fell back to CPU.** The gate did its job —
+0.081 RTF is 12x faster than realtime and looks like a healthy GPU result. Without
+the memory-delta assertion this would have shipped as a working GPU service
+running entirely on CPU. That is ADR-0044 Decision 3 paying for itself on first
+contact.
+
+### What the numbers narrow it to
+
+- `gpu.used before load: 1 MiB` — `nvidia-smi` works **inside the container**, so
+  the RuntimeClass, device plugin and `nvidia.com/gpu` request are all correct.
+  The GPU is visible; ORT is choosing not to use it.
+- `model loaded in 2.4s` — far too fast for CUDA context creation plus cuDNN
+  algorithm selection on a 1.1GB model. That is a CPU session.
+
+So the fault is inside the ORT / parakeet-rs layer, **not** the Kubernetes
+plumbing. Everything in ADR-0043 is confirmed working.
+
+### Next step
+
+Re-run with ORT logging raised (`ORT_LOG_SEVERITY_LEVEL` / session log severity)
+so ORT reports *why* it declined CUDA, instead of guessing between:
+
+1. **ORT cannot find its CUDA provider at runtime** — the provider `.so`s are not
+   in the runtime image, or need `load-dynamic` / `ORT_DYLIB_PATH`. Most likely.
+   CI explicitly could not test this; it proved only that the code *builds*.
+2. **CUDA/cuDNN major mismatch** between what `ort 2.0.0-rc.13` links and the
+   `nvidia/cuda:12.6.3-cudnn-runtime-ubuntu24.04` base.
+3. `ExecutionProvider::Cuda` not reaching `from_pretrained` — least likely, the
+   code passes it explicitly and it compiles under that cfg.
+
+Note parakeet-rs registers CPU as ORT's fallback *behind* CUDA with
+`error_on_failure()` on the **CPU** provider, so a CUDA failure is silent by
+construction. That is why the assertion exists and why ORT's own logs are needed.
+
+---
+
+## Verified working (do not re-litigate)
+
+| | evidence |
+|---|---|
+| GPU passthrough | all 4 TU104 functions at guest `01:00.0-3` |
+| Driver | `580.173.02`, DKMS, persistence **Enabled** (survives reboot) |
+| Container toolkit | 1.20.0, `/usr/bin/nvidia-container-runtime` present |
+| containerd `nvidia` runtime | non-default, `SystemdCgroup = true` (bare bool) |
+| Device plugin | Running, node advertises `nvidia.com/gpu: 1` |
+| **Negative test (ADR-0011 guard)** | pod without RuntimeClass **cannot** see the GPU — `runc create failed: exec: "nvidia-smi": not found` |
+| Positive test | `nvidia/cuda` pod with RuntimeClass prints the full GPU table |
+| Image builds | `0.1.3` builds, pushes, and **pulls** on the GPU node |
+
+---
+
+## Merged 2026-08-31 (#210–#221)
+
+| PR | |
+|---|---|
+| #210 | ADR-0043 GPU enablement + the `SystemdCgroup` bool→string fix |
+| #211 | Device plugin never scheduled (chart affinity); driver pin was a shim |
+| #212 | `nvidia-persistenced` ran with persistence mode **off** |
+| #213 | ADR-0043 → Accepted; ADR-0037 re-measured; 6 drift corrections |
+| #214 | ADR-0044 proposed; thin-pool near-miss logged |
+| #215 | Fourth build-runner instance for `ukubi-stt` |
+| #216 | `discard=on` on all 10 VM disks |
+| #217 | `ukubi-stt` Infisical project + `STT_AUTH_TOKEN` documented |
+| #218 | 3 terraform drifts reconciled (hermesagent node, k9s DNS, **pg01 RAM**) |
+| #219 | zot retention: 2 tags for `ukubi-stt`, 3 elsewhere |
+| #220 | server1 NIC stuck at 100Mb → gigabit, persisted as IaC |
+| #221 | zot `readTimeout`/`writeTimeout` 60s → 30m |
+
+---
+
+## The build chain, and what each failure taught
+
+Six distinct failures, each further along than the last. Recorded because the
+*sequence* is the lesson: none of them was the "real" problem, and each was only
+visible once the previous was cleared.
+
+| tag | failed at | cause | fix |
+|---|---|---|---|
+| 0.1.0 | `cargo build` | no `libssl-dev` in the CUDA image | added |
+| 0.1.1 | linking | ORT prebuilt needs glibc 2.38+/libstdc++ 13+; 22.04 is 2.35/12 | `ubuntu24.04` |
+| 0.1.2 | runtime stage | PEP 668 blocks `pip3` on 24.04 (self-inflicted by the 24.04 move) | dropped Python, `curl` |
+| 0.1.3 | layer commit | build-runner disk full | removed the orphaned 22.04 base (8.15GB) |
+| 0.1.3 | **push** | 100Mb NIC, then Longhorn rebuild contention, then zot's 60s timeout | see below |
+| 0.1.3 | **pull** | containerd snapshotter debris from the aborted pulls | prune + restart containerd |
+
+### The push: zot's undocumented 60s read timeout
+
+The headline infra finding. `pkg/cli/server/root.go` (v2.1.20):
+
+```go
+const defaultReadTimeout = 60 * time.Second
+if config.HTTP.ReadTimeout == nil { ... }
+```
+
+zot injects a 60s HTTP read timeout when config omits one, and does not document
+it. Go's `ReadTimeout` covers the **entire request including the body**, so it
+hard-caps a blob upload regardless of progress.
+
+The getter actively misleads: `GetHTTPReadTimeout()` returns `0` when unset, so
+reading it suggests no timeout. The CLI populates the field *before* the server
+is constructed. **Checking the getter and not its writer cost hours.**
+
+Measured, on two network paths:
+
+```
+2400MB throttled to 9MB/s (its share under 11-way concurrency)
+  via MetalLB VIP:   killed at 60.098s, sent 541 MiB
+  direct to pod IP:  killed at 60.100s, sent 541 MiB   ← IPVS/MetalLB bypassed
+```
+
+Why only this image: 5580MB across 11 layers, including 2468/2042/828MB.
+buildah pushes **all layers concurrently** against ~56MB/s aggregate, so a big
+layer gets ~1/11th and needs minutes. A single *unthrottled* 2468MB layer takes
+**57.6s** and squeaks under — which is why it looked intermittent, and why no
+other image here ever reached the limit.
+
+`writeTimeout` was raised symmetrically: it bounds how long zot may take to
+**serve a pull**. Nothing had hit it because pulls run at LAN speed, but the same
+60s against a multi-GB layer on a contended link would break pulls cluster-wide.
+
+Set to 30m, not 0 — zero disables the slowloris protection these exist for.
+
+### The pull: containerd tripping over its own debris
+
+After the push finally succeeded the image would not pull:
+`failed to extract layer ... gzip: invalid checksum`, reproducible in ~40s.
+
+The data was innocent, proven four ways: digest matched the manifest, `gzip -t`
+passed, it decompressed all 2.41GB cleanly, and `tar -xzf` extracted it by hand
+on that very node with exit 0 and 29G free.
+
+The cause was **20GB of leftover overlayfs snapshots** from the dozen aborted
+pulls. `crictl rmi --prune` + `systemctl restart containerd` (8.2GB after) and
+the pull succeeded immediately.
+
+---
+
+## Wrong theories, and what killed each
+
+Kept deliberately — knowing what it *is not* is most of the value, and several of
+these were confidently argued before dying.
+
+| theory | killed by |
+|---|---|
+| zot OOM on a 2.3GB blob (1Gi limit) | 304Mi in use, 0 restarts, `lastState: {}` |
+| A 2GiB blob cliff (weights are 2323MB) | first by a 200MB blob failing identically; later properly by 1900MB **and** 2200MB round-tripping clean through both `PUT` and buildah's `PATCH→PUT` path |
+| build-runner memory / socket throttling | cgroup counters were **cumulative** and included my own failed test commands. At 8GB the build failed again with `max 0 oom 0 sock_throttled 0`. The 8GB bump was reverted |
+| Traefik's 60s `readTimeout` | `registry.bnei.lan` → `192.168.1.234` (zot LB); Traefik is `.233` and not in the path at all |
+| Longhorn rebuild contention | real, and it did slow things — but the failure reproduced on a fully healthy cluster |
+| Corrupt blob in the registry | I verified a **stale digest** (`cd73f539`) that had already been deleted; the live manifest referenced `8d8b16dd`, which verified clean |
+| Flaky USB NIC hardware | both carrier flaps that day were **self-inflicted** — my `ethtool` fix and the ansible playbook re-running it. 3 events in 5d20h uptime, `tx_errors: 12` of 458M packets |
+
+### My own measurement errors, recorded so they are not repeated
+
+- **`head` on a diff.** `head -20` on a `terraform plan` attribute list hid
+  `pg01 memory 4096 -> 2048` — an apply would have **halved the Postgres
+  primary's RAM**. `head -12` on `ethtool` showed one line of a three-line
+  `Supported link modes` list and produced a confident, wrong "this adapter
+  cannot do gigabit". Read the whole diff, every time.
+- **`curl --data-binary @file` buffers the entire body in RAM.** It OOM-killed my
+  own 2.4GB test inside a 4GB container with `swap: 0`, which I then briefly
+  mistook for evidence about the real push. `-T` streams.
+- **Timing from the wrong origin.** I measured push-failure elapsed from *push
+  start*; a per-request deadline runs from when *that blob's* PATCH began, and
+  each retry restarts it. That made a constant 60s deadline look random, and I
+  nearly abandoned the timeout theory because of it.
+- **Cumulative counters as point-in-time evidence.** cgroup `memory.events` is
+  cumulative since cgroup creation.
+
+---
+
+## Open items
+
+**Blocking Gate 0**
+- Why ORT declined CUDA. Next action: raise ORT log severity and re-run.
+
+**Design question, unresolved**
+- **Model in the image vs fetched at runtime.** Currently baked in: 2.4GB of
+  weights inside a 5.58GB image. Argument for runtime fetch: the giant layer is
+  what made every push a fight. Argument against: the push is a *one-time* cost
+  (blobs are content-addressed and skipped on later pushes), pulls come from
+  `registry.bnei.lan` at LAN speed, and `.165` reboots for gaming so an
+  `emptyDir` would re-download 2.4GB over WAN each restart — meaning a PVC plus
+  init container, not a simple change. **Note removing the model alone would not
+  have fixed the push**: the 2042MB CUDA layer still exceeded the old 60s budget.
+  Decide with real pull-time numbers once Gate 0 passes.
+
+**Infrastructure, not blocking**
+- **cp-01 at 105% and cp-02 at 103% of allocatable memory** (3.9GB nodes running
+  etcd + apiserver + Loki/Prometheus). This evicted the Longhorn instance-manager
+  and wedged a rebuild. **`ADR-0037:29` claims control planes are tainted — they
+  are not, they have no taints at all.** A naive taint would break Longhorn:
+  `longhorn-manager`, `longhorn-csi-plugin`, `engine-image` and `platform-alloy`
+  have **no tolerations**, and with 3 replicas + hard anti-affinity + only 2
+  workers, Longhorn is *forced* onto control-plane nodes. Options were narrowed to
+  targeted pinning, or a third worker. Nothing committed.
+- **zot's Deployment has no `checksum/config` annotation**, so ConfigMap changes
+  are inert until someone restarts the pod manually. Hit this applying #221.
+- **Nothing monitors the LVM thin pools.** server1 reached 94.96% unnoticed;
+  `blackbox-exporter` probes `pveproxy` but nothing watches `lvs data_percent`.
+- **`.165` reboot re-test** for ADR-0043 still outstanding (VM-level reboot passed;
+  a host reboot has not been tried).
+- **ADR-0037 remains undecided**, now with corrected numbers.
+- **pg02 is the Postgres primary** as of today (failover during the `discard`
+  reboots; pg01 rejoined as `replica streaming lag=0`).
+
+---
+
+## Operational gotchas worth remembering
+
+- **`qm reboot` is wrong for a self-draining node.** `drain-self.service` outran
+  its shutdown timeout on `k8s-cp-01`, leaving the VM **stopped rather than
+  rebooted**. Use `qm shutdown --timeout 600` then `qm start`.
+- **`pct resize` on LVM-thin costs nothing when you run it and everything when
+  you write into it.** server1's pool was at 94.96% with 527G provisioned against
+  348G; the resize would have looked fine and taken every filesystem read-only,
+  Postgres included. `pct fstrim` reclaimed 37.8GB instead — more than the resize
+  would have provided.
+- **`discard=on` only enables propagation.** The guest must still `fstrim`, and
+  qemu re-reads the flag on disk attach, so a running VM needs a restart. ~265GiB
+  reclaimed across the fleet this way.
+- **A Healthy ArgoCD Application is not evidence anything ran.** The device plugin
+  reported Synced/Healthy with `DESIRED=0` for hours.
+- **A chart's own `nodeAffinity` is ANDed with your `nodeSelector`**, not
+  overridden by it.
+- **`apt-cache madison` proves a version exists, not that the metapackage installs
+  it.** `nvidia-driver-570-server` is a shim for 580.
