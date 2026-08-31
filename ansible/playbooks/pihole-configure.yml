@@ -101,10 +101,21 @@
       # shadows a PUBLIC name rather than naming a private one.
       #
       # stt.bnei.dev resolves publicly to the WAN address (82.65.231.50), so a
-      # LAN client's traffic leaves through the Freebox and hairpins straight
-      # back in. Measured 2026-08-31: 54.4ms via the WAN address against 4.8ms
-      # to the MetalLB VIP — ~50ms of pure NAT round-trip on EVERY request, and
-      # a streaming STT session makes ~2 requests a second.
+      # client that resolves it publicly reaches the service the long way round
+      # instead of crossing the LAN. Measured 2026-08-31 from a workstation:
+      # 54.4ms via the WAN address against 4.8ms to the MetalLB VIP, on every
+      # request — and a streaming STT session makes ~2 requests a second.
+      #
+      # On that machine the ~50ms was the VPN, not the Freebox: `route -n get`
+      # put 192.168.1.233 on en0 and 82.65.231.50 on utun22, with the exit node
+      # in Switzerland. The first write-up of this called it hairpin NAT, which
+      # was wrong — worth stating because the fix is the same either way, and
+      # the reason it is the same is that BOTH failure modes come from resolving
+      # a LAN-reachable service to its public address.
+      #
+      # Note the corollary: a VPN'd client sends DNS to the VPN's resolvers, so
+      # it never asks the Pi and this record cannot help it. That one needs
+      # split-DNS on the VPN, or no VPN. This record is for everything else.
       #
       # Safe here specifically because stt is GREY (DNS-only, ADR-0044
       # Decision 6): there is no Cloudflare in the public path either, so
@@ -113,9 +124,11 @@
       # would take LAN clients off the WAF and rate limiting, and ADR-0038's
       # origin-lock middleware would see a LAN peer instead of a Cloudflare IP.
       #
-      # Caveat: this only helps clients that actually query the Pi. The Freebox
-      # hands out its own resolver alongside this one, so a client that picked
-      # the other will still hairpin.
+      # Caveat: this only helps clients that actually query the Pi. Anything
+      # using a different resolver — a VPN's, or a hardcoded 1.1.1.1 — gets the
+      # public answer and the slow path. Pointing LAN DHCP at 192.168.1.55 is
+      # what makes this record apply broadly, and that is a Freebox setting this
+      # playbook cannot reach (noted in the final debug task too).
       - "192.168.1.233 stt.bnei.dev" # Traefik VIP — see ADR-0044/0046
       - "192.168.1.180 k8s.bnei.lan" # kube-vip control-plane VIP, ADR-0016 — use this, not any individual node below, for anything that needs the API server
       - "192.168.1.201 k8s-cp-01.bnei.lan"
