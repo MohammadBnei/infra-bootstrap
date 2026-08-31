@@ -253,3 +253,88 @@ these were confidently argued before dying.
   overridden by it.
 - **`apt-cache madison` proves a version exists, not that the metapackage installs
   it.** `nvidia-driver-570-server` is a shim for 580.
+
+---
+
+## Gate 0 root-caused, 2026-09-01 — two bugs, both in the Dockerfile
+
+`ukubi-stt` [#1](https://github.com/MohammadBnei/ukubi-stt/pull/1). The
+"Where this stands" section above listed three candidates and ranked them.
+Candidate 1 was right, and it turned out to be *two* independent faults, either
+of which alone produces the identical silent CPU fallback.
+
+### Bug 1 — `libonnxruntime_providers_cuda.so` was never in the image
+
+ONNX Runtime is linked **statically** into the binary, but its CUDA execution
+provider is not part of that archive. It is a separate 79MB shared object that
+ORT `dlopen`s at first use, resolved against the *calling module's own path* —
+which for a static link is the directory of the executable. Read off the running
+pod:
+
+```
+$ ldd /usr/local/bin/ukubi-stt | grep -Ei 'onnx|cud'      # nothing
+$ find / -xdev -name 'libonnxruntime*'                     # nothing
+$ grep -ao 'libonnxruntime_providers_[a-z]*\.so' /usr/local/bin/ukubi-stt
+libonnxruntime_providers_cuda.so                           # the dlopen path is there
+```
+
+The build produced the file. The Dockerfile copied only the binary out of the
+builder stage.
+
+There is a trap behind the obvious fix: **ort-sys's `copy-dylibs` feature does
+not copy on Unix, it symlinks** — into `target/release/` from
+`~/.cache/ort.pyke.io/dfbin/`. A plain `COPY --from=build target/release/*.so`
+lands dangling symlinks in the runtime image and fails in exactly the same way as
+the file being absent. `cp -L` into a staging dir first, and name the files
+explicitly so an upstream rename is a build failure rather than a silent CPU
+fallback.
+
+### Bug 2 — CUDA 12 was never available, so the base image could not have been right
+
+`ort-sys` 2.0.0-rc.13 does not build ONNX Runtime. It downloads a prebuilt one
+chosen from a hardcoded table, `build/download/dist.tsv`. For
+`x86_64-unknown-linux-gnu` that table has exactly four rows: no-features,
+`webgpu`, `nvrtx`, and `cuda13,tensorrt,nvrtx`. **No CUDA 12 build exists for
+Linux.** Its own resolver states the consequence:
+
+```rust
+_ => { log::debug!("couldn't determine CUDA version, guessing 13");
+       "cuda13" } // "fallback" to the lowest version we ship (we only ship 13 for now)
+```
+
+The CUDA 12.6.3 builder matched none of the CUDA-13 sniffs
+(`NV_CUDA_CUDART_VERSION`, `CUDA_HOME`, `nvcc --version`), fell into that arm,
+and downloaded the CUDA **13** distribution regardless — into a CUDA 12 runtime.
+
+`DT_NEEDED`, read off the provider rather than assumed:
+
+```
+libcudart.so.13, libcublas.so.13, libcublasLt.so.13, libcurand.so.10, libcuda.so.1
+```
+
+plus `libcudnn.so.9` and `libcufft.so.12` **`dlopen`ed lazily by name**, which
+linkage alone would never have shown — and which is why the runtime image keeps
+the `-cudnn-` variant even though nothing links cuDNN.
+
+Driver `580.173.02` is a CUDA 13.0 driver (>= 580.65.06 required) and the
+provider's embedded arch list carries `sm_75`, so the Turing card is covered.
+`ORT_CUDA_VERSION=13` is now set in the builder so the resolution is read rather
+than guessed.
+
+### What made this expensive, and the fix for next time
+
+ORT names the provider it declined and the reason, at `debug` level, routed
+through `tracing`. **parakeet-rs installs no subscriber**, so every one of those
+events was dropped and the diagnosis had to come from reading `ort-sys`'s build
+script and pulling the distribution tarball apart by hand. The gate binary now
+installs a subscriber defaulting to `warn,ort=debug`.
+
+The generalisable lesson, since this is the second time a variant of it has cost
+a day: **a dependency that ships prebuilt binaries decides your base image, and
+it will not tell you.** Read the crate's build script and the `DT_NEEDED` of what
+it downloaded. `ADR-0044`'s own text said "read that from `ort`, do not assume" —
+the assumption got made anyway, in a Dockerfile comment that called CUDA 12.6 a
+"current best guess".
+
+Also corrected in passing: `ukubi-stt`'s README claimed the registry keeps the
+last 3 tags. It keeps **2** for this repo (#219) — the image is a ~5GB CUDA tree.
