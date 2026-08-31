@@ -38,16 +38,24 @@ pod can request a GPU today.**
 
 Two further complications found while scoping the fix:
 
-1. **The passthrough itself is unprovable from this repo.**
-   `terraform/*.tfstate` is gitignored (`.gitignore:36-37`) and no state
-   file is committed. `docs/infrastructure-actual.md:135-138` (2026-07-14)
-   says the `hostpci` block is "not yet merged/applied" and the GPU is "not
-   yet attached to any VM", while `:185`, `:220` and `:244` (2026-07-30)
-   describe `k8s-worker-01` as running with the passthrough. The repo
-   contradicts itself and cannot settle it.
-2. **`k8s-worker-01` is the tightest node in the cluster** — 94% of
-   allocatable CPU requested, per ADR-0037, which is itself still
-   Proposed. Any scheduling change here interacts with that.
+1. **The passthrough was unprovable from this repo — and has since been
+   verified on the node.** `terraform/*.tfstate` is gitignored
+   (`.gitignore:36-37`) and no state file is committed.
+   `docs/infrastructure-actual.md`'s GPU paragraph (written 2026-07-14) said
+   the `hostpci` block was "not yet merged/applied" and the GPU "not yet
+   attached to any VM", while `:185`, `:220` and `:244` (2026-07-30)
+   described `k8s-worker-01` as running with the passthrough. The repo
+   contradicted itself and could not settle it, so it was settled against the
+   node instead: on **2026-08-31** all four TU104 functions are present in
+   the guest at `01:00.0-3` (`10de:1e84`, `10de:10f8`, `10de:1ad8`,
+   `10de:1ad9`), with no driver bound. **The apply landed**, the 2026-07-14
+   paragraph was the stale half, and it has since been corrected in place.
+2. **`k8s-worker-01` was believed to be the tightest node in the cluster** —
+   ADR-0037 records 94% of allocatable CPU requested. **That figure no longer
+   holds.** Measured on 2026-08-31 the node reports `cpu 3061m (56%)`
+   requested against `6600m (122%)` limits. The node is committed but not
+   full. ADR-0037 is still Proposed and now also needs re-measuring; this
+   ADR does not do that.
 
 ## Decision
 
@@ -156,9 +164,11 @@ that registry is for user apps under GitOps Pattern C (ADR-0004).
 GPU whether or not the node is tainted. A `NoSchedule` taint's only effect
 would be keeping non-GPU pods off the node's CPU and RAM.
 
-ADR-0037 records `k8s-worker-01` at 94% requested CPU and is still
-undecided. Tainting it would strand 6 vCPU / 15GB and push that load onto
-`k8s-worker-02`, trading a capacity incident for tidiness.
+That is the whole argument, and it does not depend on how full the node is.
+ADR-0037's 94%-requested-CPU figure is stale — the node measured 56%
+requested (122% limits) on 2026-08-31 — but the conclusion is unchanged:
+tainting would strand real capacity and push that load onto
+`k8s-worker-02`, buying nothing a countable resource does not already give.
 
 Revisit only if a GPU workload is measurably starved by neighbours. If so,
 the scheme is `nvidia.com/gpu=present:NoSchedule` plus a matching
@@ -168,8 +178,8 @@ toleration through `common-app-chart`'s existing `tolerations` passthrough
 
 ### 6. Verify the passthrough before installing anything
 
-Because the repo cannot prove the GPU is attached (Context, point 1), the
-first step is a check, not an install:
+Because the repo could not prove the GPU is attached (Context, point 1),
+the first step is a check, not an install:
 
 ```bash
 ssh -i ~/.ssh/id_k8s_vms core@192.168.1.202 'lspci -nn | grep -i nvidia'
@@ -177,6 +187,12 @@ ssh -i ~/.ssh/id_k8s_vms core@192.168.1.202 'lspci -nn | grep -i nvidia'
 
 No device means the `hostpci` apply never landed, and that is separate
 work — a terraform apply against `.165`, not a driver install.
+
+**Run 2026-08-31: the device is present.** The check keeps its place as the
+playbook's first task regardless — it is still correct on a rebuilt or
+re-provisioned node, and installing a driver for absent hardware
+"succeeds" while leaving a node that looks configured and schedules
+nothing.
 
 ## Consequences
 
@@ -188,9 +204,11 @@ work — a terraform apply against `.165`, not a driver install.
   `k8s-worker-01`'s size (says 4 vCPU / 8GB; `terraform/variables.tf:226-227`
   and `ARCHITECTURE.md:148` say 6 vCPU / 15GB) and should be fixed in the
   same pass.
-- **`docs/infrastructure-actual.md` contradicts itself** on whether the GPU
-  is attached (`:135-138` vs `:185,:220,:244`) and needs reconciling once
-  Decision 6's check has produced a real answer.
+- **`docs/infrastructure-actual.md` contradicted itself** on whether the GPU
+  is attached — its 2026-07-14 GPU paragraph vs `:185,:220,:244`. Decision
+  6's check settled it on 2026-08-31 (the card is attached) and that
+  paragraph has been corrected accordingly. This is the one item on this drift list that the
+  verification pass could resolve; the rest still stand.
 - **The `nvidia_accelerator_enabled: false` line and its stale comment stay
   as they are**, but the comment ("re-enable when k8s-worker-gpu is added")
   now names a VM that ADR-0016 retired. Worth a correction so a future
@@ -201,19 +219,51 @@ work — a terraform apply against `.165`, not a driver install.
   `runtimeClassName` and no `nvidia.com/gpu` limit must **fail** to see the
   GPU. If it succeeds, ADR-0011 has been reopened silently and the runtime
   configuration is wrong.
-- **Kubespray must be re-run to apply Decision 2.** Whether
-  `--tags container-engine --limit k8s-worker-01` is sufficient, or whether
-  a full `cluster.yml` is required, is not yet established. A full run is
-  an ingress outage per ADR-0040's consequences, so this needs answering
-  before the run, not during it.
-- **The driver version is not yet pinned.** `nvidia-driver-570-server` is
-  the intended target but its availability on Ubuntu 24.04 has not been
-  confirmed; check `apt-cache madison` before writing it into the playbook.
-  Any CUDA 12.x consumer needs ≥ 525.60.13.
-- **This adds a pod to the cluster's tightest node** while ADR-0037 is
-  still open. The two decisions interact and ADR-0037 should be settled
-  rather than left to drift further.
+- **Kubespray must be re-run to apply Decision 2 — scoped, not full.**
+  `--tags container-engine --limit k8s-worker-01` is sufficient, established
+  2026-08-31: `kubespray/playbooks/cluster.yml:16` carries
+  `tags: "container-engine"` on the role, and `roles/kubespray_defaults/`
+  holds only `defaults/` and `vars/` with no tasks, so `--tags` cannot skip
+  it and its variables still load. That was the risk, and it is not one.
+  A full `cluster.yml` would be an ingress outage per ADR-0040 — the limited
+  run is not: **Traefik runs on `k8s-cp-01`**, and Prometheus, Grafana and
+  Loki on `k8s-worker-02`, so `--limit k8s-worker-01` touches neither
+  ingress nor monitoring. The cost is the `restart containerd` handler on a
+  node carrying 53 pods (see the self-drain note below).
+- **A quoted-string trap in `containerd_additional_runtimes`.** Option
+  values must be YAML *strings*, never bare booleans:
+  `config.toml.j2:59-65` quotes any value whose `| string` is not literally
+  `"true"`/`"false"`, and Jinja renders a Python bool as `"True"` — so
+  `SystemdCgroup: true` emits `SystemdCgroup = "True"`, a TOML string into a
+  Go bool field. The option is then dropped (this runtime silently gets
+  cgroupfs while kubelet uses systemd — the exact mismatch Decision 2 sets
+  it to avoid) or containerd rejects the config and does not start. Caught
+  before the first run, on 2026-08-31; guarded since by
+  `ansible/scripts/check-containerd-runtime-options.py` in CI, because
+  nothing else catches it — the YAML is valid, ansible-lint is happy, and
+  the damage only appears mid-`cluster.yml`.
+- **The driver version is pinned and confirmed.** `nvidia-driver-570-server`
+  is available on Ubuntu 24.04 as `570.211.01-0ubuntu1.24.04.1` from
+  `noble-updates/restricted` (checked on the node, 2026-08-31), comfortably
+  above the ≥ 525.60.13 that any CUDA 12.x consumer needs. Separately
+  confirmed: `nvidia-container-toolkit` is in **no** Ubuntu pocket, so
+  Decision 1's NVIDIA apt repository is genuinely required rather than
+  belt-and-braces.
+- **This adds a pod to a node that is committed but not full**, while
+  ADR-0037 is still open. ADR-0037's 94% figure did not survive
+  verification (56% requested / 122% limits on 2026-08-31), so that ADR
+  needs re-measuring on its own terms; the two still interact and it
+  should be settled rather than left to drift further.
 - GPU workloads inherit `k8s-worker-01`'s availability, which is
   deliberately poor — `.165` is rebooted for gaming. That is accepted for
   GPU work by design, and is why Decision 1 leans on the existing
   self-drain units rather than adding new lifecycle machinery.
+  `drain-self.service` and `uncordon-self.service` were confirmed `enabled`
+  on the node 2026-08-31.
+- **The reboot is not a small event.** `k8s-worker-01` was carrying 53 pods
+  on 2026-08-31 — the whole single-replica ArgoCD stack, authentik, the
+  infisical backend, a coredns replica, the longhorn CSI controllers, the
+  actions-runner and agent-fleet's provisioner. Self-drain handles the
+  eviction, and ingress and monitoring are unaffected (they live
+  elsewhere), but expect an ArgoCD UI gap while it moves. Worth knowing
+  before starting, not during.

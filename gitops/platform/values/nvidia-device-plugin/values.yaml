@@ -35,18 +35,22 @@ nodeSelector:
 # Defined in gitops/bootstrap/nvidia-runtimeclass.yaml.
 runtimeClassName: nvidia
 
-# No tolerations. k8s-worker-01 is deliberately NOT tainted — it sits at 94%
-# requested CPU (ADR-0037, still Proposed) and tainting it would strand
-# 6 vCPU / 15GB onto a cluster that does not have room for it. Since
-# `nvidia.com/gpu` is a countable resource, exactly one pod holds the GPU
-# whether or not the node is tainted, so the taint would buy nothing here.
-# ADR-0043 Decision 5.
+# No tolerations. k8s-worker-01 is deliberately NOT tainted: `nvidia.com/gpu`
+# is a countable resource, so exactly one pod holds the GPU whether or not the
+# node is tainted — the taint would buy nothing and would strand the node's CPU
+# and RAM from everything else. (ADR-0037's "94% requested CPU" is stale; the
+# node measured 56% requested / 122% limits on 2026-08-31. The decision does
+# not rest on that number either way.) ADR-0043 Decision 5.
 tolerations: []
 
-# Fail visibly rather than quietly. The default strategy silently reports
-# zero GPUs when the driver or runtime is missing, which looks identical to
-# "no GPU on this node" — the exact failure mode that let the drift in
-# ADR-0043's Context go unnoticed for months.
+# How the plugin passes the device list to the runtime: an env var
+# (NVIDIA_VISIBLE_DEVICES) rather than volume mounts. This is the conventional
+# pairing with nvidia-container-toolkit, which is what reads that variable.
+#
+# Note this is the same mechanism Decision 3 guards against — which is the
+# point: it is how a pod that legitimately requested `nvidia.com/gpu` gets one,
+# and exactly why the runtime must not be the node default, or every pod would
+# get it without asking.
 deviceListStrategy: envvar
 
 resources:

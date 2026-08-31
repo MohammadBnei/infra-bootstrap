@@ -3729,3 +3729,120 @@ failure condition — that is still outstanding.
 `du -sh /pg/backup` reports `0` and looks like the backups are gone. They are
 not: 8.6-8.7 GB per node, deliberately left in place so rollback stays a
 one-line config flip.
+
+## 2026-08-31 — the GPU was there all along, and a `true` that renders as `"True"`
+
+Verifying PR #210 (ADR-0043, GPU enablement) before it merged. Nothing had been
+run against real infrastructure; the PR carried three open questions and a
+pinned guess. All three closed, and the checks found a bug the PR would have
+shipped.
+
+### The GPU was attached the whole time — the docs were wrong, in both directions
+
+`docs/infrastructure-actual.md:135-138` said the passthrough was "not yet
+merged/applied" and the card "not yet attached to any VM", because
+`k8s-worker-01` "doesn't exist yet". Written 2026-07-14, never revisited after
+the node was built. Three sections further down, `:185`/`:220`/`:244` described
+the node running *with* the passthrough. The file contradicted itself and
+`terraform/*.tfstate` is gitignored, so the repo could not adjudicate.
+
+One command settled what a month of documentation could not:
+
+```bash
+ssh -i ~/.ssh/id_k8s_vms core@192.168.1.202 'lspci -nn | grep -i nvidia'
+# 01:00.0 VGA compatible controller  NVIDIA TU104 [GeForce RTX 2070 SUPER] [10de:1e84]
+# 01:00.1 Audio device               [10de:10f8]
+# 01:00.2 USB controller             [10de:1ad8]
+# 01:00.3 Serial bus controller      [10de:1ad9]
+```
+
+All four functions, no driver bound. **Lesson: when two parts of a doc disagree,
+neither is evidence.** Ask the machine. Note also the address differs by side —
+`0b:00` on the hypervisor, `01:00` in the guest — which is easy to mistake for a
+discrepancy when it is just PCI topology.
+
+### The bug: a YAML boolean that becomes a TOML string
+
+The PR declared the nvidia containerd runtime in `host_vars`:
+
+```yaml
+containerd_additional_runtimes:
+  - name: nvidia
+    options:
+      SystemdCgroup: true        # <-- YAML bool
+```
+
+kubespray's `roles/container-engine/containerd/templates/config.toml.j2:59-65`
+decides quoting like this:
+
+```jinja
+{% if value | string != "true" and value | string != "false" %}
+           {{ key }} = "{{ value }}"
+{% else %}
+           {{ key }} = {{ value }}
+{% endif %}
+```
+
+Jinja renders a Python `True` as `"True"` — capital T — matching neither
+literal. So the bool takes the *quoting* branch:
+
+```toml
+SystemdCgroup = "True"    # a TOML string, into a field containerd declares as a Go bool
+```
+
+Best case containerd drops the option and the nvidia runtime silently runs
+cgroupfs while kubelet runs systemd — precisely the mismatch the comment above
+that line said it existed to prevent. Worst case containerd rejects the config
+and does not start, on a node that was carrying 53 pods.
+
+This is why kubespray's own `containerd_runc_runtime` default writes
+`SystemdCgroup: "{{ containerd_use_systemd_cgroup | ternary('true', 'false') }}"`
+— a **string**, deliberately. That precedent was visible in
+`roles/container-engine/containerd/defaults/main.yml:13-20` the whole time and
+read as mere style.
+
+Fix is one character-class change: `SystemdCgroup: "true"`. Verified by
+rendering the real template with ansible's own interpreter rather than reasoning
+about it — worth doing, because "Jinja stringifies a bool as `true`" is a very
+plausible wrong belief.
+
+Guarded since by `ansible/scripts/check-containerd-runtime-options.py`, run in
+the `ansible` lint job. Nothing else catches this class of bug: the YAML is
+valid, yamllint passes, ansible-lint passes, and the damage only materialises
+mid-`cluster.yml`. `.github/workflows/lint.yml` also had to grow `inventory/**`
+in its `paths:` filter — it was watching `ansible/**` and `gitops/**` only, so
+an inventory-only change ran *no CI at all*.
+
+### ADR-0037's 94% does not hold
+
+ADR-0043 leaned on ADR-0037's "94% requested CPU" for its no-taint decision.
+Measured:
+
+```
+cpu     3061m (56%)      6600m (122%)     # requests, limits
+memory  3948086Ki (27%)  11108Mi (78%)
+```
+
+56%, not 94%. The no-taint conclusion survives — it rests on `nvidia.com/gpu`
+being a countable resource, which is independent of node pressure — but the
+supporting number was wrong. **A conclusion can be right for a reason that is
+false**, and an ADR citing a stale measurement as fact propagates it: this one
+had already been copied into the device-plugin values file.
+
+### Scoping the kubespray re-run
+
+Open question was whether `--tags container-engine --limit k8s-worker-01`
+suffices or a full `cluster.yml` is needed (the latter being an ingress outage
+per ADR-0040). It suffices: `playbooks/cluster.yml:16` tags the role, and
+`roles/kubespray_defaults/` has only `defaults/` and `vars/` — no tasks — so
+`--tags` cannot skip it while its variables still load. That was the actual
+risk.
+
+And the outage framing was wrong anyway: **Traefik runs on `k8s-cp-01`**, with
+Prometheus/Grafana/Loki on `k8s-worker-02`. A run limited to `k8s-worker-01`
+touches neither ingress nor monitoring. What it does touch is 53 pods —
+the whole single-replica ArgoCD stack, authentik, the infisical backend, a
+coredns replica, the longhorn CSI controllers — all of which reschedule on the
+containerd restart and reboot. `drain-self.service`/`uncordon-self.service` are
+`enabled` on the node and handle it, but "safe unattended" undersold the size of
+the event.

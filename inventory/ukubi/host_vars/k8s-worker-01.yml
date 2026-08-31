@@ -40,6 +40,19 @@ node_labels:
 # sets it from containerd_use_systemd_cgroup. Omitting it gives this
 # runtime cgroupfs while kubelet uses systemd.
 #
+# It is the STRING "true", not the YAML boolean true, and that is not a
+# style choice. config.toml.j2:59-65 decides whether to quote a value with
+# `{% if value | string != "true" and value | string != "false" %}`. Jinja
+# renders a Python bool as "True" — capital T — which matches neither
+# literal, so a YAML `true` takes the quoting branch and emits
+# `SystemdCgroup = "True"`: a TOML string into a field containerd declares
+# as a Go bool. Best case the option is dropped and this runtime silently
+# gets cgroupfs — exactly the mismatch the paragraph above exists to
+# prevent. Worst case containerd rejects the config and does not start.
+# This is why kubespray's own default writes
+# `ternary('true', 'false')` rather than a bool. Verified 2026-08-31 by
+# rendering the real template. Any future entry here has the same trap.
+#
 # NOTE the variable is `containerd_default_runtime`, not
 # `containerd_default_runtime_name` — the latter is silently ignored. We
 # set neither; this is a deliberate non-default.
@@ -48,4 +61,4 @@ containerd_additional_runtimes:
     type: "io.containerd.runc.v2"
     options:
       BinaryName: /usr/bin/nvidia-container-runtime
-      SystemdCgroup: true
+      SystemdCgroup: "true"
