@@ -4107,6 +4107,37 @@ may itself be ForceNew. Ask before touching it.
 would lose `.lan` resolution, which is how it reaches `registry.bnei.lan` and
 the `k8s-*.bnei.lan` names.
 
+### Both reconciled — and one of them needed more than a config edit
+
+`k9s_dashboard` was the easy half: its `initialization` block simply never
+declared the DNS that is live (`pct config 102`: `nameserver 192.168.1.55`,
+`searchdomain bnei.lan`). Adding a matching `dns {}` block made it zero-diff
+and it dropped out of the plan entirely.
+
+`hermesagent` was not. The container was migrated to `ex-laptop` deliberately
+(confirmed with the owner) and the config still said `var.pve_node_name`
+(= `bnei`). Pointing `node_name` at `"ex-laptop"` **did not fix it** — the plan
+still said `will be created`.
+
+The reason is worth remembering: **`terraform plan` refreshes a resource using
+the identifying attributes in STATE, not the ones in config.** State held
+`node_name = "bnei"`, so refresh kept querying `bnei`, kept getting a 404, and
+kept concluding the container was deleted. The config edit is necessary but not
+sufficient; relocating an existing resource across nodes needs a state
+operation:
+
+```bash
+terraform state rm proxmox_virtual_environment_container.hermesagent
+terraform import proxmox_virtual_environment_container.hermesagent ex-laptop/101
+```
+
+(bpg's container import ID is `<node_name>/<vm_id>`.)
+
+Worth noting the state file was never actually corrupted by any of this: a
+plan's refresh drops the missing resource **in memory only**, so repeated plans
+kept reporting `create` without ever writing that conclusion to disk. The
+resource is still in `terraform.tfstate` with its stale `node_name`.
+
 ### Consequence for applying
 
 **`terraform apply` unqualified is not safe on this state.** The discard change

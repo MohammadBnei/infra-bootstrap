@@ -63,6 +63,16 @@ resource "proxmox_virtual_environment_container" "k9s_dashboard" {
         gateway = var.gateway_ipv4
       }
     }
+
+    # Matches live (`pct config 102`: nameserver 192.168.1.55, searchdomain
+    # bnei.lan). Undeclared, terraform reads the live values as drift and
+    # REMOVES them on the next apply — which would take `.lan` resolution with
+    # them, and `.lan` is how this container reaches registry.bnei.lan and the
+    # k8s-*.bnei.lan names. Found 2026-08-31 in the discard=on plan.
+    dns {
+      domain  = "bnei.lan"
+      servers = ["192.168.1.55"] # Pi-hole
+    }
   }
 
   operating_system {
