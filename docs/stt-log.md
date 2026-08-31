@@ -592,3 +592,90 @@ downloaded when 0.5.0 rolled out.
 - **`Cargo.lock` is still not committed**, so builds are not reproducible.
 - Parakeet EOU 120M (160ms chunks, ~0.2s) remains the lower-latency option if
   0.6s ever proves too slow — at the cost of English-only and no punctuation.
+
+---
+
+## Streaming felt slower than the 4s chunks it replaced, 2026-08-31
+
+The operator's report, and it was correct. Two latency bugs plus a third found by
+reviewing the fix for the first two. `ukubi-stt` 0.5.2.
+
+### First, a measurement I got wrong
+
+I reported streaming RTT as **230-320ms**. That was an artefact of a Python test
+client opening a **fresh TLS connection per chunk**. Measured over one persistent
+HTTP/2 connection, which is what a browser actually uses:
+
+| | |
+|---|---|
+| RTT | **84-102ms** |
+| decode | 24-27ms |
+
+The network was never the problem. Worth remembering when timing anything that a
+browser will do over a reused connection — a naive client-per-request harness
+adds a full handshake to every sample and quietly triples the number.
+
+### Bug 1 — chunks were 768ms, and misaligned
+
+`flush()` sent the **whole** client buffer. The audio callback delivers a fixed
+block at a time, so the buffer crossed the 8960-sample threshold at 12288 and
+shipped **768ms** per request instead of 560ms.
+
+Worse, 12288 is not a multiple of the encoder's 8960: the server decoded one
+chunk and **held a 3328-sample remainder until the next request arrived**. Some
+audio waited an entire extra round for nothing.
+
+```
+before:  768ms fill + up to 560ms remainder-wait + 90ms RTT  ~= 1.4s, irregular
+after:   560ms fill + up to 128ms jitter        + 90ms RTT  ~= 650-780ms, smooth
+```
+
+`flushChunk()` now takes exactly one encoder chunk and keeps the remainder,
+drained in a loop. The callback block dropped 4096 -> 2048 frames to halve the
+jitter on the boundary. Verified by replaying the buffer arithmetic over 200
+callbacks: 45 chunks, all exactly 8960, no loss and no reorder.
+
+### Bug 2 — a cold pod put the first ~6 seconds behind
+
+The streaming model loaded on first use, so a cold pod made chunk 1 take ~5s. And
+because chunks arrive every 560ms while a 5s backlog drains at ~470ms per chunk,
+**the first several seconds of every session ran badly behind** before catching
+up. Measured: chunk 1 rtt 5543ms cold, 365ms warm.
+
+It now warms in a **background task** at startup. ADR-0046 Decision 2 made it
+lazy because "~6.8GB of an 8GB card" was an *estimate* and, under `Recreate`, a
+pod that cannot start is an outage of the working batch service. That is now
+measured at 6866-6880 MiB, so the unknown the hedge protected against is gone —
+and warming in the background rather than before `serve()` keeps the good half
+regardless: the listener is already up, so a failed load costs streaming a
+`FAILED_PRECONDITION` and costs batch nothing.
+
+### Bug 3 — found reviewing the fix, not running it
+
+`flushTail()` sends whatever is left when recording stops, which can be **zero
+samples**: the buffer lands exactly empty on **1 callback in 35** (measured), and
+on every Stop pressed before speaking. The server rejected empty audio *before*
+looking at `last`, so that close failed with `INVALID_ARGUMENT` — the recognizer
+leaked until the 120s idle sweep and **the tail was never flushed**. That is the
+bug fixed an hour earlier, arriving by a different path.
+
+`last` means "flush and release", so an empty one is now accepted; the existing
+silence padding turns it into exactly the flush that was wanted. Proven live:
+
+```
+one real chunk, then a bare close with zero audio
+  chunk -> OK text=''
+  close -> OK text=' The quick'      <- the tail, which used to be lost
+empty audio WITHOUT last  -> INVALID_ARGUMENT   (still rejected)
+offline empty audio       -> INVALID_ARGUMENT   (still rejected)
+```
+
+### What this cost, and the lesson
+
+Three latency bugs in code that compiled, passed clippy, passed its unit tests,
+and demonstrably worked. None were visible by reading — the client arithmetic
+looks right until you replay it, the cold-start cliff only exists on a fresh pod,
+and the bare close only happens 1 time in 35.
+
+**The operator noticing "it feels slower" was worth more than any of the tests.**
+Perceived latency is a property of the whole chain, and the chain had no test.
