@@ -3846,3 +3846,129 @@ coredns replica, the longhorn CSI controllers — all of which reschedule on the
 containerd restart and reboot. `drain-self.service`/`uncordon-self.service` are
 `enabled` on the node and handle it, but "safe unattended" undersold the size of
 the event.
+
+## 2026-08-31 — GPU enablement, run for real: three things that passed their own checks and still did not work
+
+ADR-0043 applied end-to-end on `k8s-worker-01`. It works — a pod with
+`runtimeClassName: nvidia` and an `nvidia.com/gpu` limit prints the RTX 2070
+SUPER, and one without either cannot see it. Getting there took three fixes
+after merge, and all three share a shape worth naming: **the check that was
+being made was passing, and it was the wrong check.**
+
+### 1. `SystemdCgroup = "True"` — caught before the run, not during it
+
+Covered in the entry above. Worth repeating only for the confirmation: after
+the scoped kubespray run, `/etc/containerd/config.toml` reads
+
+```toml
+[plugins."io.containerd.cri.v1.runtime".containerd.runtimes.nvidia.options]
+  BinaryName = "/usr/bin/nvidia-container-runtime"
+  SystemdCgroup = true          # bare bool. Was going to be "True".
+```
+
+with `default_runtime_name = "runc"` unchanged.
+
+### 2. A Healthy ArgoCD Application with zero pods
+
+After merging, `platform-nvidia-device-plugin` reported **Synced / Healthy**.
+It had `DESIRED=0`:
+
+```
+NAME                            DESIRED  CURRENT  READY  NODE SELECTOR
+platform-nvidia-device-plugin   0        0        0      kubernetes.io/hostname=k8s-worker-01
+```
+
+Chart 0.17.1 ships a **default `nodeAffinity`** requiring one of three
+NFD-style labels (`feature.node.kubernetes.io/pci-10de.present`,
+`…/cpu-model.vendor_id=NVIDIA`, `nvidia.com/gpu.present`). We run no NFD, so
+none existed. The values file pinned the pod by hostname in `nodeSelector` —
+**a nodeSelector does not override a chart's affinity, the two are ANDed.**
+
+Two lessons:
+
+- **Healthy means the manifests applied, not that anything ran.** A DaemonSet
+  with `DESIRED=0` is Healthy by definition. Never take an ArgoCD status as
+  evidence a workload exists; ask the DaemonSet.
+- When overriding a chart, read *its* defaults, not just your own values file.
+  The affinity was visible in `helm show values` the whole time.
+
+Fixed with `nvidia.com/gpu.present: "true"` in `host_vars` `node_labels` — the
+escape hatch the chart documents. Note `affinity: {}` would **not** have worked
+as an alternative: Helm merges maps, so an empty map leaves the chart default
+in place. Only `affinity: null` clears it. Verified by rendering 0.17.1 three
+ways — and the first attempt to verify it rendered with the wrong namespace and
+silently errored under `2>/dev/null`, producing a confident wrong answer. Check
+the exit code before believing a `grep -c` of a render.
+
+### 3. The driver pin pinned nothing
+
+The playbook pinned `nvidia-driver-570-server`, "confirmed" with
+`apt-cache madison` (which returned a real `570.211.01`). The run came up on
+**580.173.02**:
+
+```
+$ apt-cache depends nvidia-driver-570-server
+nvidia-driver-570-server
+  Depends: nvidia-driver-580-server
+```
+
+A transitional shim. **`madison` proves a version exists; it does not prove the
+metapackage installs it.** `apt-cache depends` does. Repinned to
+`nvidia-driver-580-server`.
+
+### 4. persistenced active, persistence mode off
+
+ADR-0043 called `nvidia-persistenced` "not optional polish". The service was
+`active`. Persistence mode was `Disabled` — Ubuntu's packaged unit runs the
+daemon with `--no-persistence-mode`. The benefit the ADR argued for was never
+delivered, and every check the playbook made was green, because the check was
+"is the service up".
+
+Fixed with a systemd drop-in (not a unit edit — the packaged file is replaced
+on driver upgrades) and, more importantly, an **assert on the observable
+property**:
+
+```yaml
+- name: Assert persistence mode is actually on
+  command: nvidia-smi --query-gpu=persistence_mode --format=csv,noheader
+  failed_when: persistence_mode.stdout | trim != "Enabled"
+```
+
+Related: the unit is `static` with no `[Install]` section, so the playbook's
+`enabled: true` was a silent no-op. It starts at boot anyway, pulled in by
+`sys-bus-pci-drivers-nvidia.device`.
+
+### What went better than feared
+
+The reboot never happened. The DKMS module loaded live, `nvidia-smi` worked
+immediately, and the playbook's `when: nvidia_smi.rc != 0` gate skipped the
+reboot — so the 53 pods on the node were never evicted. `uptime -s` still reads
+2026-08-15.
+
+The kubespray run was also cheaper than the ADR feared. The `Drain node` /
+`Stop kubelet` tasks under the `container-engine` tag are gated on *uninstalling*
+a container engine (`container_manager != "containerd"` and friends); with
+containerd already the manager, all three blocks skip. And kubespray v2.31.0's
+default `containerd_version` is `2.2.3` — exactly what was installed — so
+containerd was re-configured and restarted, not upgraded. `ok=88 changed=3`.
+
+### The negative test, which is the point
+
+```
+$ kubectl run gpuleak --image=nvidia/cuda:12.6.3-base-ubuntu22.04 \
+    --overrides='{"spec":{"nodeSelector":{"kubernetes.io/hostname":"k8s-worker-01"}}}' \
+    --command -- nvidia-smi
+
+Failed, exit 128:
+  runc create failed: unable to start container process:
+  exec: "nvidia-smi": executable file not found in $PATH
+```
+
+Image pulled fine, scheduled to the right node, and **`runc`** — not
+`nvidia-container-runtime` — tried to start it. No driver injected. ADR-0011's
+guarantee holds: an `nvidia/cuda:*` image on the GPU node with no
+`runtimeClassName` and no GPU limit gets nothing.
+
+The positive control, same image with `runtimeClassName: nvidia` and
+`nvidia.com/gpu: 1`, prints the full table (580.173.02, CUDA 13.0, 8192 MiB).
+Run both; the negative one alone can pass for boring reasons like a bad image.
