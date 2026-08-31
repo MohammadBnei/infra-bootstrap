@@ -72,6 +72,18 @@ repository, enables `nvidia-persistenced`, and reboots the node once.
 unloads whenever no process holds the device, so every cold inference pays
 a full driver re-initialisation.
 
+Starting the service is **not sufficient**, which the first real run showed
+(2026-08-31): Ubuntu's packaged unit invokes the daemon with
+`--no-persistence-mode`, so the service was `active` while
+`nvidia-smi --query-gpu=persistence_mode` still reported `Disabled`. The
+playbook ships a systemd drop-in clearing that flag — a drop-in rather than a
+unit edit, because the packaged file is replaced on every driver upgrade —
+and then *asserts* the mode is `Enabled` rather than inferring it from the
+service being up. Relatedly the unit is `static`, with no `[Install]`
+section, so `enabled: true` on it was a silent no-op; it starts at boot
+because `sys-bus-pci-drivers-nvidia.device` pulls it in once the driver
+binds.
+
 The reboot is safe unattended because `ansible/playbooks/self-drain-configure.yml`
 already installed `drain-self.service`/`uncordon-self.service` on this
 node — it cordons and evicts itself on graceful shutdown and uncordons on

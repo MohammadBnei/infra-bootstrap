@@ -162,13 +162,17 @@
         update_cache: true
       register: nvidia_install
 
-    - name: Enable nvidia-persistenced
+    - name: Start nvidia-persistenced
       # Without persistence mode the driver unloads whenever no process
       # holds the device, so every cold inference pays a full driver
       # re-initialisation. ADR-0043 Decision 1.
+      #
+      # `enabled` is deliberately NOT set: Ubuntu ships this unit as `static`
+      # with no [Install] section, so enabling it is a silent no-op. It starts
+      # at boot regardless, pulled in by sys-bus-pci-drivers-nvidia.device once
+      # the driver binds.
       ansible.builtin.systemd_service:
         name: nvidia-persistenced
-        enabled: true
         state: started
       # The unit only exists once the driver package has landed; on the very
       # first run that is after a reboot.
@@ -199,11 +203,51 @@
       ansible.builtin.debug:
         msg: "GPU ready: {{ nvidia_smi_final.stdout }}"
 
-    - name: Ensure nvidia-persistenced is enabled now the driver exists
+    - name: Ensure the nvidia-persistenced drop-in directory exists
+      ansible.builtin.file:
+        path: /etc/systemd/system/nvidia-persistenced.service.d
+        state: directory
+        mode: "0755"
+        owner: root
+        group: root
+
+    - name: Override nvidia-persistenced to actually enable persistence mode
+      # Ubuntu's packaged unit runs the daemon with --no-persistence-mode, so
+      # starting the service leaves `nvidia-smi --query-gpu=persistence_mode`
+      # reporting Disabled — the daemon is up and doing nothing. Found on the
+      # first real run, 2026-08-31: the service was active and persistence was
+      # still off, the opposite of what Decision 1 asked for.
+      #
+      # A drop-in rather than editing the unit, because the packaged file is
+      # replaced on every driver upgrade.
+      ansible.builtin.copy:
+        dest: /etc/systemd/system/nvidia-persistenced.service.d/10-persistence-mode.conf
+        mode: "0644"
+        owner: root
+        group: root
+        content: |
+          # Managed by ansible/playbooks/gpu-node-configure.yml (ADR-0043).
+          # Clears the packaged --no-persistence-mode. The empty ExecStart= is
+          # required, or systemd appends rather than replaces.
+          [Service]
+          ExecStart=
+          ExecStart=/usr/bin/nvidia-persistenced --user nvidia-persistenced --verbose
+      register: persistenced_dropin
+
+    - name: Restart nvidia-persistenced to pick up the drop-in
       ansible.builtin.systemd_service:
         name: nvidia-persistenced
-        enabled: true
-        state: started
+        state: restarted
+        daemon_reload: true
+      when: persistenced_dropin.changed # noqa: no-handler
+
+    - name: Assert persistence mode is actually on
+      # The whole point of Decision 1, checked rather than assumed — "service
+      # is active" was already true while persistence was off.
+      ansible.builtin.command: nvidia-smi --query-gpu=persistence_mode --format=csv,noheader
+      register: persistence_mode
+      changed_when: false
+      failed_when: persistence_mode.stdout | trim != "Enabled"
 
     - name: Confirm the nvidia container runtime binary is present
       # containerd is pointed at this path by
