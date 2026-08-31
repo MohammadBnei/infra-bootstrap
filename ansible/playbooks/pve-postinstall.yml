@@ -218,6 +218,10 @@
   # UI writes that file, and this has no business fighting it over ownership.
   hosts: pve_new
   become: true
+  # Tagged so this can be applied on its own. This playbook also creates ZFS
+  # pools and joins corosync; an untagged run to fix a NIC would be wildly
+  # disproportionate to the change.
+  tags: nic-speed
   tasks:
     - name: Detect the bridge uplink driver
       ansible.builtin.command: ethtool -i nic0
