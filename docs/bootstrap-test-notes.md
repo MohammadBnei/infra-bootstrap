@@ -4056,3 +4056,76 @@ not) and *does the guest have room* (it always did).
   `pveproxy` but nothing watches `lvs` data_percent. A pool crossing 90% is
   exactly the kind of slow-moving, total-outage condition the
   `monitoring-blind` rule exists for.
+
+## 2026-08-31 — `discard=on` in terraform, and two landmines the plan surfaced
+
+Following the thin-pool near-miss above, `discard=ignore` was fixed at the
+source: every terraform-managed **VM** disk now carries `discard = "on"`, so a
+guest's `fstrim` actually returns freed blocks to the LVM-thin pool instead of
+the pool ratcheting upward forever.
+
+Containers are not included and do not need to be — `bpg/proxmox`'s
+`proxmox_virtual_environment_container` disk block has only `datastore_id` and
+`size`, no discard. `pct fstrim <vmid>` on the host is the equivalent, and it is
+what reclaimed 37.8 GiB above.
+
+### The plan came back clean for the change itself
+
+```
+~ discard = "ignore" -> "on"
+Plan: 1 to add, 10 to change, 0 to destroy.
+```
+
+`~ update in-place` on all ten, **0 to destroy** — which is exactly the
+assertion `terraform/README.md:237-240` demands before any apply here. Adding
+`discard` is not ForceNew on `bpg/proxmox ~> 0.111`.
+
+Note this only enables *propagation*. It reclaims nothing by itself: the guest
+still has to run `fstrim -av`, and qemu re-reads the flag when the disk is
+attached, so **a running VM needs a restart** before it takes effect.
+
+### But "1 to add" was not the change
+
+The same plan revealed two pieces of pre-existing drift that a plain
+`terraform apply` would drag along:
+
+**1. `hermesagent` would be CREATED, and the VMID is already taken.**
+`imported.tf` puts that container on `var.pve_node_name` (= `bnei`/`.165`). It
+is not there — `pct config 101` on `.165` says the config does not exist. It is
+alive on **`ex-laptop` (.161)**. So the container was migrated between nodes at
+some point and the config was never updated. Terraform's refresh queried the
+configured node, got a 404, concluded the resource was gone, dropped it from
+state, and now plans to create it. Proxmox VMIDs are **cluster-unique**, so that
+apply would collide with the live container.
+
+Not fixed here: pointing `node_name` at `ex-laptop` is a one-word change, but
+whether the migration was deliberate is not recorded anywhere, and `node_name`
+may itself be ForceNew. Ask before touching it.
+
+**2. `k9s_dashboard` would have its `dns` block stripped** — `domain =
+"bnei.lan"` and server `192.168.1.55` (Pi-hole) both removed. That container
+would lose `.lan` resolution, which is how it reaches `registry.bnei.lan` and
+the `k8s-*.bnei.lan` names.
+
+### Consequence for applying
+
+**`terraform apply` unqualified is not safe on this state.** The discard change
+must be `-target`ed at the VM resources until the two drift items above are
+reconciled — accepting that `-target` is itself the pattern
+`terraform-ops/SKILL.md:112-117` flags as a repeatable footgun for leaving
+`inventory/ukubi/hosts.yaml` stale.
+
+The broader lesson is the cheap one: **a plan is not only a preview of your
+change, it is a diff of the whole world against your config.** Reading only the
+lines your edit touches is how unrelated drift gets applied by accident. Read
+the resource-action list and the counts, every time.
+
+### Pool status at the time
+
+| node | thin pool | used |
+|---|---|---|
+| `bnei` (.165) | 794G | 49.5% |
+| `server1` (.200) | 349G | 86.7% (was 94.96% before the fstrim) |
+| `ex-laptop` (.161) | 141G | 67.2% |
+
+server1 was the acute one. Nothing monitors any of them.

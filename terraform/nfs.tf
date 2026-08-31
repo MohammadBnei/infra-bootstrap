@@ -104,6 +104,7 @@ resource "proxmox_virtual_environment_vm" "nfs_storage" {
     interface    = "scsi0"
     size         = 20
     import_from  = proxmox_download_file.nfs_vm_cloudimg.id
+    discard      = "on" # see k8s-vms.tf's disk comment
   }
 
   # Raw, unformatted — ansible/playbooks/nfs-configure.yml formats + mounts
@@ -118,6 +119,7 @@ resource "proxmox_virtual_environment_vm" "nfs_storage" {
     datastore_id = var.nfs_storage_id
     interface    = "scsi1"
     size         = 100
+    discard      = "on" # see k8s-vms.tf's disk comment
   }
 
   # ADR-0036 — K8s PV storage, deliberately a SEPARATE disk from scsi1 above
@@ -131,6 +133,7 @@ resource "proxmox_virtual_environment_vm" "nfs_storage" {
     datastore_id = var.nfs_storage_id
     interface    = "scsi2"
     size         = var.nfs_k8s_disk_size_gb
+    discard      = "on" # see k8s-vms.tf's disk comment
   }
 
   initialization {
