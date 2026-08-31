@@ -12,7 +12,9 @@ proxied wildcard this hostname opts out of), [ADR-0039](0039-authentik-identity-
 is built and stored), [ADR-0037](0037-worker-cpu-capacity-vs-agent-fleet-burst.md)
 (the node capacity this consumes),
 [ADR-0045](0045-model-weights-out-of-the-image.md) (where this image's weights
-and CUDA libraries live, decided once the gate below had passed)
+and CUDA libraries live, decided once the gate below had passed),
+[ADR-0046](0046-streaming-recognition.md) (realtime streaming — the second model
+and the per-session concurrency shape Decision 4 predicted)
 
 ## Context
 
@@ -227,16 +229,28 @@ Three things about the Traefik side that are easy to get wrong:
   2026-08-31 re-measure. It does not make the underlying failure worse (if that
   node dies the GPU dies with it, so this pod is unschedulable in exactly the
   scenario the alert describes), but it makes ADR-0037's lever 1 more urgent.
-- **Traefik's timeouts are an open question, not a solved one.**
-  `gitops/platform/values/traefik/values.yaml` sets no `transport:` key, so v3
-  defaults apply: `readTimeout` 60s, `idleTimeout` 180s. If `readTimeout` is
-  connection-level for HTTP/2, a browser mic session doing chunked unary over
-  one reused connection exceeds it within a minute of speech — and **Phase 1
-  breaks, not just streaming**. This must be *tested* before it is concluded.
-  If it bites, the fix is scheduled maintenance: Traefik is `replicas: 1` with
-  `Recreate` on an RWO `acme.json` PVC behind MetalLB
-  `externalTrafficPolicy: Local`, so changing its values is a cluster-wide
-  ingress blackhole bounded by a Longhorn detach/attach.
+- **~~Traefik's timeouts are an open question~~ — MEASURED 2026-08-31, and the
+  answer is that nothing needs to change.** The concern was that if `readTimeout`
+  (v3 default 60s, and this repo sets no `transport:` key) were connection-level
+  for HTTP/2, a browser mic session over one reused connection would die inside a
+  minute of speech and **Phase 1 would break, not just streaming**.
+
+  Tested against the live service with one HTTP/2 connection and gRPC-Web POSTs:
+  requests at t=0/30/65/125s all succeeded on that single connection, and
+  **12 requests at 20s intervals across 220s all succeeded with no GOAWAY and no
+  error**. A 65s idle gap did close it.
+
+  So `readTimeout` is **per-request, not connection-level**, and the close is
+  **idle-based, not age-based** — a connection carrying traffic lives
+  indefinitely. Streaming sends a chunk every 560ms and is never idle. The idle
+  close is benign regardless: a browser transparently opens a new connection, at
+  the cost of a handshake rather than an error.
+
+  **No Traefik values change, and therefore no maintenance window** — which
+  matters because Traefik is `replicas: 1` with `Recreate` on an RWO
+  `acme.json` PVC behind MetalLB `externalTrafficPolicy: Local`, so any change
+  to it is a cluster-wide ingress blackhole bounded by a Longhorn
+  detach/attach. See [ADR-0046](0046-streaming-recognition.md).
 - **Persian and Arabic are deferred, and the deferral is already paid for.**
   Neither is in Parakeet's 25 languages. Whisper runs on the *same* `ort`
   runtime, so adding it later is a model file plus a config branch — same
