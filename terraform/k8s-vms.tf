@@ -114,15 +114,28 @@ resource "proxmox_virtual_environment_vm" "k8s_node" {
   }
 
   disk {
+    # discard=on so the guest's fstrim actually returns freed blocks to the
+    # LVM-thin pool. Without it the pool only ever ratchets upward: a guest
+    # deletes a file, its own df drops, and the thin allocation does not move.
+    # server1 reached 94.96% that way, with 527G provisioned against a 348G
+    # pool and pg01's volume at 100% — see docs/bootstrap-test-notes.md
+    # (2026-08-31). A thin pool that hits 100% takes every filesystem on it
+    # read-only at once.
+    #
+    # This only enables propagation. It reclaims nothing by itself: the guest
+    # must then run `fstrim -av`, and qemu re-reads the flag when the disk is
+    # attached, so a running VM needs a restart before it takes effect.
     datastore_id = coalesce(each.value.datastore_id, var.template_storage_id)
     interface    = "scsi0"
     size         = each.value.os_disk_size_gb
+    discard      = "on"
   }
 
   disk {
     datastore_id = coalesce(each.value.datastore_id, var.template_storage_id)
     interface    = "scsi1"
     size         = coalesce(each.value.longhorn_disk_size_gb, var.longhorn_disk_size_gb)
+    discard      = "on"
   }
 
   dynamic "hostpci" {

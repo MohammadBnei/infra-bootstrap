@@ -51,6 +51,7 @@ resource "proxmox_virtual_environment_vm" "pg_etcd_witness" {
     datastore_id = "local-lvm" # ADR-0028 — ex-laptop has no dedicated ZFS pool
     interface    = "scsi0"
     size         = 10
+    discard      = "on" # see k8s-vms.tf's disk comment
   }
 
   initialization {

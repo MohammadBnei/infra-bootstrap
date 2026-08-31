@@ -106,6 +106,10 @@ resource "proxmox_virtual_environment_vm" "pg01" {
     # = grows a production disk on apply, round down = shrink risk), so
     # this is ignore_changes'd below instead of guessed.
     size = 53
+    # see k8s-vms.tf's disk comment. Note prevent_destroy below is doing real
+    # work here: if this attribute ever became ForceNew, the apply errors
+    # instead of replacing a production Postgres VM.
+    discard = "on"
   }
 
   smbios {
@@ -191,7 +195,8 @@ resource "proxmox_virtual_environment_vm" "pg02" {
     interface    = "scsi0"
     # see pg01's comment above — same 52.5G-isn't-a-whole-number issue,
     # ignore_changes'd below.
-    size = 53
+    size    = 53
+    discard = "on" # see k8s-vms.tf's disk comment
   }
 
   smbios {
