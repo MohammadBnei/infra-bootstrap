@@ -17,6 +17,25 @@
 # is why this lives in host_vars — see its header.
 node_labels:
   agent-fleet.dev/session-node: "true"
+  # Satisfies the nvidia-device-plugin chart's OWN default nodeAffinity, which
+  # requires one of three NFD-style labels
+  # (feature.node.kubernetes.io/pci-10de.present,
+  # feature.node.kubernetes.io/cpu-model.vendor_id, or this one). We do not run
+  # NFD, so none of them existed and the DaemonSet computed DESIRED=0 — it would
+  # never have scheduled and `nvidia.com/gpu` would never have been advertised,
+  # even though values.yaml pins the pod to this node by hostname. The
+  # nodeSelector was added; the chart's affinity was left at its default.
+  #
+  # The chart documents this label as the deliberate escape hatch ("We allow a
+  # GPU deployment to be forced by setting the following label to true"), and
+  # ADR-0043 Decision 4 already named it as the mechanism to use if a second GPU
+  # node ever appears. Setting it here rather than overriding the chart keeps
+  # that guard intact for a future node.
+  #
+  # NOTE `affinity: {}` in values.yaml does NOT work as an override — Helm
+  # merges maps, so an empty map leaves the chart default in place. Only
+  # `affinity: null` clears it. Verified by rendering chart 0.17.1, 2026-08-31.
+  nvidia.com/gpu.present: "true"
 
 # NVIDIA container runtime, registered as an ADDITIONAL runtime — never the
 # node default. ADR-0043 Decision 2 and 3.

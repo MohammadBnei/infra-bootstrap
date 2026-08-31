@@ -214,6 +214,21 @@ nothing.
   now names a VM that ADR-0016 retired. Worth a correction so a future
   reader does not go looking for it. `.claude/skills/terraform-ops/SKILL.md:118-121`
   has the same stale name.
+- **The device plugin needs a node label the hostname nodeSelector does not
+  provide.** Chart 0.17.1 ships a default `nodeAffinity` requiring one of
+  `feature.node.kubernetes.io/pci-10de.present`,
+  `feature.node.kubernetes.io/cpu-model.vendor_id=NVIDIA`, or
+  `nvidia.com/gpu.present`. With no NFD in the cluster none existed, so the
+  DaemonSet computed `DESIRED=0` — pinning by hostname in `nodeSelector` does
+  not override the chart's own affinity. Found on 2026-08-31 after the merge,
+  when the Application went Synced/Healthy with zero pods: **a Healthy ArgoCD
+  Application is not evidence that a DaemonSet scheduled anything.** Fixed by
+  adding `nvidia.com/gpu.present: "true"` to this node's `node_labels`, which
+  is the escape hatch the chart documents and the label Decision 4 already
+  named. Applying it needs `--tags node-label` alongside `container-engine`.
+  Note `affinity: {}` in a values file would *not* have worked as an
+  alternative — Helm merges maps, so only `affinity: null` clears a chart
+  default.
 - **A negative test becomes part of the verification contract.** Decision 3
   is only worth anything if it is checked: a pod on `k8s-worker-01` with no
   `runtimeClassName` and no `nvidia.com/gpu` limit must **fail** to see the
