@@ -186,6 +186,22 @@ extraVolumeMounts:
 # registry takes. deleteUntagged is where most of the space actually comes
 # back — dangling manifests left by overwritten `latest` pushes.
 #
+# ukubi-stt keeps 2, not 3, and its policy is FIRST on purpose. zot applies
+# "the first policy it matches" — a repo-specific rule placed after the `**`
+# catch-all would never be reached, and the failure would be silent (the repo
+# would just quietly keep 3). Verified against zot's retention docs before
+# committing rather than assumed from the ordering looking natural.
+#
+# Why this repo: a GPU image is ~5GB against ~2.5GB for the largest existing
+# one — a CUDA runtime base plus 2.4GB of ONNX weights baked in.
+#
+# Be honest about the saving though: successive tags of an unchanged Dockerfile
+# SHARE the base and model blobs, so dropping one tag usually reclaims only the
+# ~30MB binary layer, not 5GB. It pays off when the base or the weights change,
+# which during Gate 0's iteration happened repeatedly (ubuntu22.04 -> 24.04,
+# pip -> curl) and left several multi-GB layer sets alive at once. That is the
+# case this guards, not steady-state.
+#
 # ARMED 2026-08-18 (`dryRun: false`). It shipped as a dry run because a GC'd
 # blob is gone and the image has to be rebuilt — the one genuinely one-way
 # door in this setup. Both preconditions were checked against a real dry-run
@@ -243,6 +259,15 @@ extraManifests:
               "dryRun": false,
               "delay": "24h",
               "policies": [
+                {
+                  "repositories": ["ukubi-stt"],
+                  "deleteUntagged": true,
+                  "deleteReferrers": true,
+                  "keepTags": [
+                    { "patterns": ["latest"] },
+                    { "mostRecentlyPushedCount": 2 }
+                  ]
+                },
                 {
                   "repositories": ["**"],
                   "deleteUntagged": true,

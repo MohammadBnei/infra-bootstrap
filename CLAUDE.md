@@ -87,7 +87,9 @@ then here. When in doubt, open those files.
   `ansible/playbooks/build-runner-configure.yml` and re-run — ADR-0034,
   `build-runner-ops` skill.
 - Registry retention: **last 3 tags per image plus `latest`**, with
-  `deleteUntagged`. `latest` is pinned explicitly because thot's executor
+  `deleteUntagged` — except **`ukubi-stt`, which keeps 2** (a ~5GB CUDA +
+  weights image; its policy must precede the `**` catch-all, since zot
+  applies the first match only). `latest` is pinned explicitly because thot's executor
   and agent-fleet's `catalog.go` both float on it. Deliberately **not**
   keyed on pull recency — zot's metaDB is an `emptyDir`, so pull stats
   reset on every restart. Armed (`dryRun: false`) 2026-08-18 after a real
