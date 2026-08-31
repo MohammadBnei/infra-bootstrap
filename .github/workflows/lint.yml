@@ -8,9 +8,9 @@ name: Lint
 on:
   push:
     branches: [main]
-    paths: ["ansible/**", "gitops/**", ".github/workflows/lint.yml"]
+    paths: ["ansible/**", "gitops/**", "inventory/**", ".github/workflows/lint.yml"]
   pull_request:
-    paths: ["ansible/**", "gitops/**", ".github/workflows/lint.yml"]
+    paths: ["ansible/**", "gitops/**", "inventory/**", ".github/workflows/lint.yml"]
 
 jobs:
   ansible:
@@ -35,6 +35,9 @@ jobs:
           for f in ansible/playbooks/*.yml; do
             ansible-playbook -i localhost, --syntax-check "$f"
           done
+
+      - name: containerd runtime options are quoted strings
+        run: python3 ansible/scripts/check-containerd-runtime-options.py
 
       - uses: ansible/ansible-lint@v26.6.0
         with:

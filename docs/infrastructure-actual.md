@@ -1,7 +1,7 @@
 # Infrastructure — Actual State
 
 > **Source of truth** for what is currently running.
-> Last updated: 2026-08-04
+> Last updated: 2026-08-31
 > Owner: hermesagent (this AI)
 >
 > **Stale-sections flag (2026-07-28, §2/§3 K8s-nodes part resolved
@@ -133,9 +133,19 @@ untouched — it was never the actual blocker (see
 The PVE PCI Resource Mapping `gpu` exists
 (`node=bnei,path=0000:0b:00,id=10de:1e84,iommugroup=2`), and
 `terraform/k8s-vms.tf`'s `hostpci0` block on `k8s-worker-01` is
-re-enabled (not yet merged/applied). **Not yet attached to any VM** —
-`k8s-worker-01` doesn't exist yet, so the GPU is passthrough-ready but
-idle.
+re-enabled, merged and **applied**. **Attached to `k8s-worker-01`** —
+verified on the guest 2026-08-31, where all four TU104 functions appear at
+`01:00.0-3` (`10de:1e84` VGA, `10de:10f8` audio, `10de:1ad8` USB,
+`10de:1ad9` UCSI). This paragraph previously read "not yet attached to any
+VM — `k8s-worker-01` doesn't exist yet", written 2026-07-14 and left
+behind when the node was built; it contradicted `:185`/`:220`/`:244` below,
+and the node settled it.
+
+No NVIDIA driver is loaded in the guest as of that check (`Kernel modules:
+nvidiafb`, nothing bound, no `nvidia-smi`, nouveau neither loaded nor
+blacklisted), so the card is attached but unused. ADR-0043 covers the
+Kubernetes half — driver, container toolkit, `RuntimeClass` and device
+plugin.
 
 Raw PCI/VFIO passthrough is exclusive by construction: the GPU can be
 attached to only one VM at a time. Once `k8s-worker-01` holds it,

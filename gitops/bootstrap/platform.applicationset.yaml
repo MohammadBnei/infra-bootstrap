@@ -46,6 +46,29 @@ spec:
         chartName: csi-driver-nfs
         valuesPath: gitops/platform/values/csi-driver-nfs/values.yaml
 
+      # wave 0 — Node-level hardware enablement. Advertises `nvidia.com/gpu`
+      # on k8s-worker-01, the only node with a GPU (RTX 2070 SUPER passed
+      # through from .165). Wave 0 because any GPU workload is a wave-10
+      # user app and would sit Pending with no error until this exists —
+      # a nodeSelector/resource matching nothing is not an error condition.
+      #
+      # Chosen over kubespray's `nvidia_accelerator_enabled` deliberately:
+      # that variable's only in-repo trace is the GKE-era block in the
+      # unused inventory/mycluster/, and the kubespray/ submodule is not
+      # checked out here, so the role behind it cannot be read. See ADR-0043
+      # Decision 4.
+      #
+      # Requires ansible/playbooks/gpu-node-configure.yml to have run first
+      # (driver + toolkit in the VM) and the `nvidia` RuntimeClass to exist.
+      # The plugin installs fine either way — it just reports 0 GPUs.
+      - name: nvidia-device-plugin
+        namespace: kube-system
+        syncWave: "0"
+        chartRepoURL: https://nvidia.github.io/k8s-device-plugin
+        chartRevision: "0.17.1" # confirm against `helm search repo nvdp/nvidia-device-plugin --versions` before first apply
+        chartName: nvidia-device-plugin
+        valuesPath: gitops/platform/values/nvidia-device-plugin/values.yaml
+
       # wave 1 — Secrets engine (must be first; serves SSH keys to ArgoCD for all other apps)
       - name: infisical
         namespace: infisical
