@@ -338,3 +338,67 @@ the assumption got made anyway, in a Dockerfile comment that called CUDA 12.6 a
 
 Also corrected in passing: `ukubi-stt`'s README claimed the registry keeps the
 last 3 tags. It keeps **2** for this repo (#219) — the image is a ~5GB CUDA tree.
+
+---
+
+## Gate 0 PASSED, 2026-08-31 — the engine is settled
+
+`ukubi-stt:0.2.0`, on `k8s-worker-01`, against a real 16 kHz mono WAV:
+
+```
+gpu.used before load : 1 MiB
+gpu.used after warmup: 3488 MiB (delta 3487 MiB)
+audio_seconds        : 9.23
+decode_seconds       : 0.05
+real-time factor     : 0.006
+transcript           : "The quick brown fox jumps over the lazy dog, testing speech
+                        recognition on the Yukie cluster with a parakeet model
+                        running on an NVIDIA GPU."
+```
+
+Word-perfect with punctuation and casing. "ukubi" came back as "Yukie", which is
+the right kind of wrong — a phonetic guess at a word in no vocabulary, not a
+model failure.
+
+ORT now says what it is doing, which is the whole point of the subscriber added
+in `ukubi-stt#1`:
+
+```
+Discovered OrtHardwareDevice {vendor_id:0x10de, device_id:0x1e84, pci_bus_id=0000:01:00.0}
+Successfully registered `CUDAExecutionProvider`  source=session options
+Creating BFCArena for Cuda ...
+cuDNN version: 91400
+```
+
+**165x faster than realtime, against 12x on the CPU fallback.** ADR-0044
+Decision 1 is verified rather than assumed, and the streaming proto is
+unblocked.
+
+Two carry-forwards:
+
+- **`cuDNN version: 91400` kills the "drop `-cudnn-runtime`" idea.** It looked
+  free — the provider has no `DT_NEEDED` entry for cuDNN — and that reasoning is
+  correct and still lands on the wrong answer, because it is dlopened by name.
+  ~1.5-2GB that is not available. Recorded in ADR-0045 Decision 3 so it is not
+  re-proposed.
+- **`WARN: 2 Memcpy nodes are added to the graph ... may prevent CUDA graph
+  capture`.** Irrelevant at 0.006 RTF. It matters in Phase E, where per-chunk
+  overhead is the entire latency budget.
+
+### Image composition decided — ADR-0045
+
+Run as an architecture interview immediately after the gate passed, while the
+numbers were fresh. Weights move to a `local-path` PVC fetched only when absent;
+CUDA libraries stay in the image because the image is the ABI pin, not storage —
+pyke chooses the soname set, not us, and splitting it across two repos gives no
+CI anywhere the ability to check it still agrees.
+
+The revisit trigger for the CUDA half is named rather than left open: **a second
+GPU workload on this node**, at which point two images carrying an identical
+3.3GB stack makes amortisation a real argument. It is not one today.
+
+The largest single win turned out to be somewhere nobody was looking: the
+**builder** base is `nvidia/cuda:13.0.3-cudnn-devel` at **8.23GB**, and nothing
+in the compile touches CUDA — `ort-sys` downloads a prebuilt ONNX Runtime, links
+it statically, and dlopens the provider. Plain `ubuntu:24.04` should do, and a
+wrong guess there is a compile error rather than a silent fallback.
