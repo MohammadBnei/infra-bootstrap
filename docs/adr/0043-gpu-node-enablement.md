@@ -257,10 +257,15 @@ nothing.
   `ansible/scripts/check-containerd-runtime-options.py` in CI, because
   nothing else catches it — the YAML is valid, ansible-lint is happy, and
   the damage only appears mid-`cluster.yml`.
-- **The driver version is pinned and confirmed.** `nvidia-driver-570-server`
-  is available on Ubuntu 24.04 as `570.211.01-0ubuntu1.24.04.1` from
-  `noble-updates/restricted` (checked on the node, 2026-08-31), comfortably
-  above the ≥ 525.60.13 that any CUDA 12.x consumer needs. Separately
+- **The driver pin is `nvidia-driver-580-server`, and the 570 one was a
+  fiction.** On noble `nvidia-driver-570-server` is a transitional shim whose
+  entire dependency list is `nvidia-driver-580-server`; installing it pulls
+  the 580 branch, and the first real run (2026-08-31) came up on
+  **580.173.02**, not the 570.211.01 the playbook claimed to pin. A
+  metapackage named for a branch is not evidence it installs that branch —
+  check `apt-cache depends`, not just `apt-cache madison`. Both are in
+  `noble-updates/restricted`, and either way it is far above the ≥ 525.60.13
+  any CUDA 12.x consumer needs. Separately
   confirmed: `nvidia-container-toolkit` is in **no** Ubuntu pocket, so
   Decision 1's NVIDIA apt repository is genuinely required rather than
   belt-and-braces.
