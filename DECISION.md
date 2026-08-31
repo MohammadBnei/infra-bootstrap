@@ -140,6 +140,10 @@ updated.
   Retention is **last 3 tags per image plus `latest`** with
   `deleteUntagged` — keyed on push order, never pull recency, because the
   metaDB holding pull stats is that same `emptyDir` and resets on restart.
+  One documented exception: **`ukubi-stt` keeps 2**, because a CUDA + baked-
+  weights image is ~5GB against ~2.5GB for the largest other one. Its policy
+  must stay ordered *before* the `**` catch-all — zot applies the first
+  matching policy, so a repo rule placed after it is silently inert.
   `latest` is pinned explicitly: thot's executor and `agent-fleet`'s
   `catalog.go` both float on it.
   **Images are built on the `build-runner` LXC, never in the cluster** —
