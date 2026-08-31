@@ -402,3 +402,82 @@ The largest single win turned out to be somewhere nobody was looking: the
 in the compile touches CUDA — `ort-sys` downloads a prebuilt ONNX Runtime, links
 it statically, and dlopens the provider. Plain `ubuntu:24.04` should do, and a
 wrong guess there is a compile error rather than a silent fallback.
+
+---
+
+## The service is live, 2026-08-31 — `stt.bnei.dev`
+
+Phase C done in one pass after Gate 0. `ukubi-stt` 0.3.0 is deployed, ArgoCD-managed,
+and answering over the internet.
+
+```
+$ grpcurl -authority stt.bnei.dev -H "authorization: Bearer $T" \
+    -d @ 82.65.231.50:443 stt.v1.Stt/Recognize < req.json
+{
+  "text": "The quick brown fox jumps over the lazy dog, testing speech recognition
+           on the Yukie cluster with a parakeet model running on an NVIDIA GPU.",
+  "audioSeconds": 9.2275,
+  "decodeSeconds": 0.079
+}
+```
+
+**117x realtime**, through the full path: WAN -> Freebox -> Traefik VIP -> the
+hand-written `scheme: h2c` IngressRoute -> the pod -> the RTX 2070 SUPER.
+
+Verified, not assumed:
+
+| | result |
+|---|---|
+| CUDA at startup | `CUDA engaged (3367 MiB resident)`, health binds only after |
+| no token | `Unauthenticated: missing authorization metadata` |
+| wrong token | `Unauthenticated: invalid token` |
+| `sample_rate_hertz: 44100` | `InvalidArgument`, with the ffmpeg line to fix it |
+| in-cluster gRPC | 0.104s for 9.23s of audio |
+| through Traefik + TLS | 0.081s |
+| via the public WAN IP | 0.079s |
+| cert | the existing `*.bnei.dev` wildcard already covers `stt` — no new issuance |
+
+**ADR-0045 Decision 1 proved itself on the second pod.** The first pod's init
+container downloaded the 2.4GB of weights; the replacement pod's logged
+`model already present in /models/tdt` and skipped straight to serving. The PVC
+behaved as a cache, exactly as designed.
+
+### DNS: four cache layers, and only one of them was real
+
+`stt.bnei.dev` was created grey (DNS-only) per ADR-0044 Decision 6. Verifying it
+cost more than creating it, because the answer differed at every layer:
+
+- `dig @<cloudflare NS>` returned the **proxied wildcard's** IPs with a
+  *counting-down* TTL. An authoritative server returns a fixed TTL — the
+  countdown was the tell that something local was intercepting port 53 and
+  answering from cache. `dig @anything` is not a reliable check on this LAN.
+- **DoH bypasses it.** `https://cloudflare-dns.com/dns-query?name=...&type=A`
+  and Google's `dns.google/resolve` both showed `82.65.231.50` immediately.
+  That is the check to use here.
+- Plain `dig` came good on its own once the local cache expired.
+- **macOS's own resolver was last.** `dig` bypasses mDNSResponder, so `dig` was
+  right while `curl`/`grpcurl` still went to Cloudflare — a 403 with
+  `server: cloudflare` and a `cf-ray` header, which reads like an origin
+  problem and is not one. `dscacheutil -q host -a name <host>` shows what
+  applications will actually get.
+
+I spent several minutes convinced Cloudflare was ignoring `proxied: false`. The
+API said `proxied: False` the whole time and was telling the truth.
+
+### Open
+
+- **No browser client yet**, so the `grpcWeb` + CORS `headers` middlewares are
+  deliberately not deployed. `grpcWeb` exposes only `allowOrigins`; CORS lives
+  on a separate `headers` middleware and every browser call is preflighted
+  because it carries `authorization`. Both land with the client, when the origin
+  is a real value rather than a guess.
+- **`Cargo.lock` is still not committed**, so builds are not reproducible. The
+  Dockerfile says to commit the one the first green build produces. Easiest fix
+  is to pull it out of a build-runner container.
+- **Traefik's `readTimeout` (60s default) is still untested** for a long-lived
+  HTTP/2 connection. Irrelevant at 0.08s per call; it decides whether Phase E
+  needs the Traefik maintenance window.
+- `release-it` was added after the fact — 0.2.0 and 0.3.0 were tagged by hand,
+  so neither has a changelog entry.
+- ADR-0044 stays **Proposed**: Decisions 1-6 are now built, but streaming
+  (Phase E) and the browser client are not.
