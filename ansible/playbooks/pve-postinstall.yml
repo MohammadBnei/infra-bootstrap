@@ -261,7 +261,10 @@
         enabled: true
         state: started
         daemon_reload: true
-      when: nic0_driver.rc == 0
+      # not ansible_check_mode: in --check the copy above is simulated, so the
+      # unit does not exist on disk and systemd cannot enable it — the task
+      # would fail every dry run and train people to skip dry runs.
+      when: nic0_driver.rc == 0 and not ansible_check_mode
 
     - name: Report the negotiated speed
       ansible.builtin.shell: |
