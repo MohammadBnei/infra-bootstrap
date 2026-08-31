@@ -1,6 +1,7 @@
 # ADR-0044: `ukubi-stt` — a GPU speech-to-text gRPC service
 
-**Status:** Proposed
+**Status:** Proposed — **Decision 1's gate passed 2026-08-31** (see the gate
+result below); Decisions 2–6 are designed and unbuilt.
 **Date:** 2026-08-31
 **Related:** [ADR-0043](0043-gpu-node-enablement.md) (the GPU this runs on),
 [ADR-0011](0011-reject-multi-region-dr-service-mesh.md) (GPU multi-tenancy
@@ -9,7 +10,9 @@ proxied wildcard this hostname opts out of), [ADR-0039](0039-authentik-identity-
 (the identity layer this deliberately does *not* use),
 [ADR-0034](0034-in-cluster-oci-registry-zot-garage-backed.md) (where the image
 is built and stored), [ADR-0037](0037-worker-cpu-capacity-vs-agent-fleet-burst.md)
-(the node capacity this consumes)
+(the node capacity this consumes),
+[ADR-0045](0045-model-weights-out-of-the-image.md) (where this image's weights
+and CUDA libraries live, decided once the gate below had passed)
 
 ## Context
 
@@ -62,6 +65,46 @@ does not**, which is why the gate comes first.
 
 Language coverage is 25 European languages, not Whisper's ~99. Accepted. See
 Consequences for what that defers.
+
+#### Gate result, 2026-08-31 — PASSED
+
+Run on `k8s-worker-01` with `runtimeClassName: nvidia` and `nvidia.com/gpu: 1`,
+against a real 16 kHz mono WAV:
+
+```
+gpu.used before load : 1 MiB
+gpu.used after warmup: 3488 MiB (delta 3487 MiB)
+audio_seconds        : 9.23
+decode_seconds       : 0.05
+real-time factor     : 0.006
+transcript           : "The quick brown fox jumps over the lazy dog, testing speech
+                        recognition on the Yukie cluster with a parakeet model
+                        running on an NVIDIA GPU."
+```
+
+ORT's own logs confirm the mechanism rather than leaving it inferred from the
+memory delta:
+
+```
+Discovered OrtHardwareDevice {vendor_id:0x10de, device_id:0x1e84, pci_bus_id=0000:01:00.0}
+Successfully registered `CUDAExecutionProvider`  source=session options
+Creating BFCArena for Cuda ...
+cuDNN version: 91400
+```
+
+**The engine choice is settled; the streaming proto is unblocked.** Two things
+worth carrying forward:
+
+- The **first** run of this gate failed with a 0 MiB delta at an RTF of 0.081 —
+  12x realtime, which reads as a healthy GPU result. Decision 3's assertion is
+  the only reason that was caught. It found a real defect on first contact.
+- ORT warns `2 Memcpy nodes are added to the graph ... may prevent CUDA graph
+  capture`. Irrelevant at 0.006 RTF; it matters in Phase E, where per-chunk
+  overhead is the whole game.
+
+The root cause of the first failure, and the image composition decision that
+came out of it, are in [ADR-0045](0045-model-weights-out-of-the-image.md) and
+`../stt-log.md`.
 
 ### 2. gRPC, with gRPC-Web conversion at the edge — not `tonic-web`
 
