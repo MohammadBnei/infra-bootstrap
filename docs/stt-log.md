@@ -481,3 +481,114 @@ API said `proxied: False` the whole time and was telling the truth.
   so neither has a changelog entry.
 - ADR-0044 stays **Proposed**: Decisions 1-6 are now built, but streaming
   (Phase E) and the browser client are not.
+
+---
+
+## Realtime streaming, 2026-08-31 — ~4s to ~0.6s
+
+ADR-0046, shipped as `ukubi-stt` 0.5.0 + 0.5.1. Same unary RPC, second model,
+per-session state.
+
+```
+chunk  1/17  decode 5287ms  ''                 <- lazy load of the second model
+chunk  2/17  decode   27ms  ' The quick brow'
+chunk  3/17  decode   25ms  'n fox ju'
+chunk  4/17  decode   25ms  'mps over the'
+...
+chunk 17/17  decode   26ms  'PU'   LAST
+transcript: ' The quick brown fox jumps over the lazy dog.  Testing speech
+              recognition on the UK cluster with a perikeed model running on
+              an NVIDIA GPU'
+```
+
+| | measured |
+|---|---|
+| decode per 560ms chunk | **22-28ms** (the crate documents 20-50ms) |
+| round trip | 230-320ms — latency is now **network**, not GPU |
+| both models resident | **6880 MiB** of 8GB, ~1.3GB headroom |
+| lazy load, first streaming request | 4.9s, `mode Multilingual` |
+| RTF excluding the one-time load | ~0.045 |
+
+**ADR-0046's one real estimate held.** It said "~6.8GB of an 8GB card" and hedged
+the whole design on that being uncertain — lazy loading, so a bad fit would be
+one failed RPC instead of an outage of the working batch service under
+`strategy: Recreate`. Measured 6880 MiB. The hedge cost nothing and was still the
+right call while it was a guess.
+
+### The bug that only measuring would have found
+
+The first run's transcript ended `...on an NVIDIA G`. The final `PU.` was gone.
+
+Chunk 17 was a 270ms partial, and **the streaming encoder emits only on a
+complete 560ms chunk** — so a final partial chunk is buffered and never decoded.
+Every utterance would have silently lost its ending, with no symptom beyond a
+transcript that is slightly short. Nothing in the code reads as wrong; the
+`transcribe_chunk` contract is doing exactly what it says.
+
+Fixed server-side on `last: true` by padding with silence to the next chunk
+boundary plus one further full chunk, which pushes the model's right-context
+window past the real speech. Silence decodes to nothing, so it costs one ~25ms
+decode. Server-side rather than client-side because `last` already means
+precisely "flush what you have", and a client that forgot would drop words
+invisibly.
+
+### Streaming is less accurate than offline, and that is the trade
+
+"UK cluster" for "Yukie cluster", "perikeed" for "parakeet" — against the offline
+model's word-perfect run on the same clip. Expected: less context. It is why file
+uploads still route to the batch model, which sees the whole utterance.
+
+### Traefik's timeout — the ADR-0044 open question, closed
+
+Measured before building anything, because the answer decided whether Phase E
+needed a maintenance window:
+
+- requests at t=0/30/65/125s: all 4 on **one** HTTP/2 connection
+- requests every 20s for 220s: **all 12 succeed, no GOAWAY, no error**
+- a 65s idle gap: connection closed
+
+So `readTimeout` is **per-request, not connection-level**, and the close is
+**idle-based, not age-based**. Streaming sends every 560ms and is never idle.
+**No Traefik change and no maintenance window** — which matters because Traefik
+is `replicas: 1` with `Recreate` on an RWO `acme.json` PVC, so touching its
+values is a cluster-wide ingress blackhole.
+
+### CI: deploy after push, not before
+
+0.4.0 deployed against a tag that was still uploading — `helm/values.yaml`'s
+`image.tag` was hand-edited in the feature PR, ArgoCD synced main within seconds
+of the merge, and the image landed minutes later. With `strategy: Recreate` the
+old pod was already gone, so that was an **outage**, not a no-op upgrade.
+
+`image.yml` now bumps the tag in a `deploy` job after a successful push, the
+shape `agent-fleet`'s `docker.yml` already used. Verified on 0.5.0/0.5.1:
+`Successfully pulled image ... in 832ms`, zero `ImagePullBackOff`.
+
+Two details carried over from agent-fleet rather than rediscovered: `always()`
+plus an explicit `needs.*.result` check (a job's implicit success()-on-needs
+default was observed skipping deploy after a green build), and an assertion that
+the `sed` actually matched (a no-op `sed` leaves the previous tag, ArgoCD
+redeploys nothing, and the workflow is green — silence reading as success).
+
+`release-it` was added at the same time, matching the other three build repos.
+Two deviations, both forced by `image.yml`: bare `${version}` tags, and an
+`after:bump` hook syncing `Cargo.toml` from `package.json`.
+
+### The image got much smaller
+
+**5.85GB -> 2.09GB**, which is ADR-0045's weights-out-of-the-image change
+becoming visible. The init container fetched TDT once and logged `already
+present in /models/tdt` on every pod since; only the new Nemotron weights were
+downloaded when 0.5.0 rolled out.
+
+### Open
+
+- **`k8s-worker-01`'s OS disk is at 79%, 21G free**, and `/models` is a hostPath
+  on it shared with agent-fleet's session volumes. Two models is ~5.1GB. It fits;
+  it is now worth watching.
+- **`session_id` is client-chosen and the bearer token is shared**, so any caller
+  can interleave audio into another's session. Accepted at this trust boundary
+  (ADR-0046) and untenable the moment tokens become per-client.
+- **`Cargo.lock` is still not committed**, so builds are not reproducible.
+- Parakeet EOU 120M (160ms chunks, ~0.2s) remains the lower-latency option if
+  0.6s ever proves too slow — at the cost of English-only and no punctuation.
