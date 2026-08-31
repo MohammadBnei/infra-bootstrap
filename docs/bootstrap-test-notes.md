@@ -3972,3 +3972,87 @@ guarantee holds: an `nvidia/cuda:*` image on the GPU node with no
 The positive control, same image with `runtimeClassName: nvidia` and
 `nvidia.com/gpu: 1`, prints the full table (580.173.02, CUDA 13.0, 8192 MiB).
 Run both; the negative one alone can pass for boring reasons like a bad image.
+
+## 2026-08-31 — the thin pool nobody was watching, and why `pct resize` looked free
+
+Phase B of the STT plan opens with `pct resize 103 rootfs +40G` on `server1`, to
+give the build-runner room for a ~5GB CUDA image with a ~15GB build peak. The
+plan cited `terraform/README.md`'s warning that doing it through Terraform is
+ForceNew and would destroy the LXC. That warning is correct and beside the
+point: the resize should not happen through *any* route.
+
+### What the check found
+
+```
+pve/data           348.82 GiB thin pool, 94.96% data, 3.43% metadata
+sum of thin LVs    527 GiB provisioned          -> 151% overprovisioned
+VG free             16 GiB                      -> autoextend cannot rescue it
+                                                   (no thin_pool_autoextend policy set)
+physical headroom  ~17.7 GiB, shared by every guest on server1
+vm-205-disk-0      100.00%   <- pg01, the Pigsty Postgres VM
+```
+
+The guests sharing that headroom: `k8s-worker-02`, `k8s-cp-02`, **`pg01`**,
+`nfs-storage`, `k9s-dashboard`, `build-runner`.
+
+**A thin resize consumes nothing at the moment you run it.** `pct resize` would
+have returned instantly and looked completely fine. The damage arrives later,
+when the build writes 15 GiB into a pool with 17.7 GiB left — and a thin pool
+that reaches 100% does not fail politely. Writes error and **every filesystem
+on it goes read-only at once**, Postgres included. A build-runner convenience
+would have taken out the database.
+
+Lesson: on LVM-thin, "did the command succeed" and "is there space" are
+unrelated questions. Check `lvs`, not the exit code.
+
+### The root cause: `discard=ignore` everywhere
+
+```
+VM 203/204/205/302:  discard=ignore   (every disk)
+CT 102/103:          no discard option at all
+```
+
+Nothing ever returns freed blocks to the pool. Delete a file in a guest and the
+guest's `df` drops; the thin pool's allocation does not. It only ever ratchets
+upward. That is why the numbers refused to reconcile:
+
+| Guest | Thin allocated | Guest `df` used |
+|---|---|---|
+| build-runner (103) | 40G @ 93.92% | **8.0G** |
+| k8s-cp-02 (204) | 38G @ 92% | 16G |
+| k8s-worker-02 (203) | 58G @ 94% | 45G |
+
+30 GiB of build-runner's "usage" was stale blocks from deleted image layers.
+
+### The fix, which was better than the resize
+
+`pct fstrim` on the two containers — no config change, no restart, no downtime,
+runs online against a live filesystem:
+
+```
+pct fstrim 103   ->  31 GiB trimmed    vm-103-disk-0: 93.92% -> 22.60%
+pct fstrim 102   ->  6.8 GiB trimmed
+                     pool: 94.96% -> 86.67%,  available 18.4 GiB -> 48.7 GiB
+```
+
+**37.8 GiB reclaimed, more than the +40G resize would have provided**, and the
+pool ended up *safer* rather than more overcommitted. The resize was then not
+merely unsafe but unnecessary: build-runner's internal filesystem was always
+40G with 30G free — trimming releases host-side blocks, not guest-visible
+space — and a 12–15 GiB build fits in 30 GiB.
+
+Two separate questions that look like one: *does the pool have room* (it did
+not) and *does the guest have room* (it always did).
+
+### Still outstanding
+
+- The four **VMs** (`203`, `204`, `205`, `302`) still have `discard=ignore`.
+  Changing it needs a guest restart before qemu honours it, and one of them is
+  Postgres — deliberately not done unattended.
+- **Nothing trims the containers on a schedule.** Proxmox does not auto-trim
+  LXC rootfs, so this will ratchet back. A weekly `pct fstrim` timer on the PVE
+  hosts belongs in `ansible/playbooks/pve-postinstall.yml`.
+- No monitoring on the pool at all. `blackbox-exporter` probes the PVE hosts'
+  `pveproxy` but nothing watches `lvs` data_percent. A pool crossing 90% is
+  exactly the kind of slow-moving, total-outage condition the
+  `monitoring-blind` rule exists for.
