@@ -97,6 +97,26 @@
       - "192.168.1.198 nfs-storage.bnei.lan"
       - "192.168.1.110 k9s-dashboard.bnei.lan"
       - "192.168.1.111 build-runner.bnei.lan" # image build runner LXC (ADR-0034) — builds and pushes to registry.bnei.lan; an LXC rather than a pod because buildah cannot extract layers unprivileged
+      # SPLIT HORIZON — the only .bnei.dev record here, and the only one that
+      # shadows a PUBLIC name rather than naming a private one.
+      #
+      # stt.bnei.dev resolves publicly to the WAN address (82.65.231.50), so a
+      # LAN client's traffic leaves through the Freebox and hairpins straight
+      # back in. Measured 2026-08-31: 54.4ms via the WAN address against 4.8ms
+      # to the MetalLB VIP — ~50ms of pure NAT round-trip on EVERY request, and
+      # a streaming STT session makes ~2 requests a second.
+      #
+      # Safe here specifically because stt is GREY (DNS-only, ADR-0044
+      # Decision 6): there is no Cloudflare in the public path either, so
+      # pointing LAN clients at the origin bypasses nothing that exists. Do NOT
+      # extend this pattern to a PROXIED host without an ADR — for those it
+      # would take LAN clients off the WAF and rate limiting, and ADR-0038's
+      # origin-lock middleware would see a LAN peer instead of a Cloudflare IP.
+      #
+      # Caveat: this only helps clients that actually query the Pi. The Freebox
+      # hands out its own resolver alongside this one, so a client that picked
+      # the other will still hairpin.
+      - "192.168.1.233 stt.bnei.dev" # Traefik VIP — see ADR-0044/0046
       - "192.168.1.180 k8s.bnei.lan" # kube-vip control-plane VIP, ADR-0016 — use this, not any individual node below, for anything that needs the API server
       - "192.168.1.201 k8s-cp-01.bnei.lan"
       - "192.168.1.202 k8s-worker-01.bnei.lan"
