@@ -586,9 +586,11 @@ downloaded when 0.5.0 rolled out.
 - **`k8s-worker-01`'s OS disk is at 79%, 21G free**, and `/models` is a hostPath
   on it shared with agent-fleet's session volumes. Two models is ~5.1GB. It fits;
   it is now worth watching.
-- **`session_id` is client-chosen and the bearer token is shared**, so any caller
-  can interleave audio into another's session. Accepted at this trust boundary
-  (ADR-0046) and untenable the moment tokens become per-client.
+- ~~**`session_id` is client-chosen and the bearer token is shared**, so any
+  caller can interleave audio into another's session.~~ **Closed 2026-09-01.**
+  Tokens went per-client in 0.6.0 and both consumers turned out to be backend
+  proxies that mint the `session_id` server-side from their own authenticated
+  user — so the browser never picks one. See the reconciliation entry below.
 - **`Cargo.lock` is still not committed**, so builds are not reproducible.
 - Parakeet EOU 120M (160ms chunks, ~0.2s) remains the lower-latency option if
   0.6s ever proves too slow — at the cost of English-only and no punctuation.
@@ -726,6 +728,22 @@ It documents a single `STT_AUTH_TOKEN` and contains **zero** occurrences of
 open. Both predate 0.6.0. **They must be corrected in the same change as the
 first consumer wiring**, or `mission-drift` flags it and ADR-0046's
 session-hijack caveat reads as open when it is mitigated.
+
+**Done 2026-09-01**, alongside the agent-fleet wiring. `docs/secrets.md`'s
+ukubi-stt row now lists the per-client tokens by name, ADR-0044 Decision 5
+carries an amendment recording why one shared token stopped being acceptable at
+two consumers, and ADR-0046's caveat is marked resolved rather than left to be
+re-read as open. Worth noting *how* it resolved: the caveat predicted per-client
+tokens would make the hijack a real problem, and the opposite happened — because
+both consumers landed as backend proxies rather than browser clients, which was
+not the shape assumed when the caveat was written. The prediction was right about
+the mechanism and wrong about the architecture.
+
+The secrets row also now records that `STT_TOKEN_FLEET` is **duplicated** into
+`agent-fleet-nygh` rather than read cross-project. An `InfisicalSecret` syncs a
+whole project env, so pointing fleet's identity at `ukubi-stt-bhr-m` would have
+put `REGISTRY_PASSWORD` into its namespace — the same mistake made and reverted
+for dream-analyst a few days earlier. Two copies to rotate is the accepted cost.
 
 ---
 

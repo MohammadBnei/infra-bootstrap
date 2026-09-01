@@ -176,6 +176,31 @@ ADR-0039's direction, scoped to non-browser protocol clients.
 
 `:8080` health is unauthenticated and never routed externally. Only `:9090` is.
 
+**Amended 2026-09-01 (0.6.0): one token per client, not one shared token.** The
+interceptor now scans every `STT_TOKEN_<NAME>` in the environment and attaches the
+matched `<NAME>` to the request as a `ClientName` extension, which every RPC logs
+as `client=`. `STT_AUTH_TOKEN` is still accepted, as the client named `default`,
+so the browser test page did not have to be redeployed to keep working.
+
+The comparison loop is deliberately **without an early exit** — it checks every
+configured token even after a match. Returning on first hit makes the response
+time a function of the token's position in the map, which is a side channel that
+grows as consumers are added.
+
+What forced this was consumers, not theory. `stt.bnei.dev` has two real callers
+now (dream-analyst and agent-fleet `core`, both server-side proxies), and a
+single shared token has three properties that stop being acceptable at two
+callers: a leak cannot be attributed, a rotation is a simultaneous outage for
+everyone, and the log line cannot say who is using the GPU. None of that mattered
+with one caller and all of it matters now.
+
+**This closes ADR-0046's `session_id` caveat**, which accepted that any caller
+could interleave audio into another's session *because they all held the same
+token*. That premise is gone: each consumer holds its own credential and derives
+the STT `session_id` server-side from its own authenticated user, so no browser
+ever picks a raw session id. The forwardAuth rejection above is untouched and
+still stands — this changes the credential, not the mechanism.
+
 ### 6. Grey-cloud DNS, and edge middleware written from scratch
 
 `stt.bnei.dev` as an explicit **DNS-only A record** overriding ADR-0038's

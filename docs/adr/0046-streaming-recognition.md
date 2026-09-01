@@ -198,6 +198,15 @@ attacker-controlled key. Three bounds, all of them necessary:
   browsers, which is the same trust boundary the single shared token already
   assumes. It becomes a real problem the moment tokens are per-client.
 
+  **Resolved 2026-09-01.** Tokens did become per-client (0.6.0, ADR-0044
+  Decision 5 as amended), which by the sentence above should have made this a
+  real problem — instead it removed it. Both consumers are backend proxies:
+  each holds its own `STT_TOKEN_<NAME>` server-side and derives the STT
+  `session_id` by HMAC over its own authenticated user identity, so a browser
+  never chooses a raw session id and cannot name another user's. The caveat now
+  applies only to the `stt.bnei.dev` test page, which holds `STT_AUTH_TOKEN` in
+  `localStorage` and is a single-operator tool.
+
 ## Out of scope
 
 WebSocket (revisit trigger: a measured ceiling on chunked unary, which does not
