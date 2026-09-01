@@ -872,3 +872,99 @@ any file-existence claim against the remote before planning on it.
 - **Extracting the capture module needs care.** The page is `include_str!`'d and
   the IngressRoute matches `Path(/)` *exactly*, so a `<script src=...>` would
   404. Either a third route, or ukubi-stt keeps an inline copy.
+
+---
+
+## First consumer live, 2026-09-01 — dream-analyst dictates to the GPU
+
+`dream-analyst` 0.31.2 streams dictation to `ukubi-stt`, replacing an external
+n8n webhook. Confirmed working by the operator, and from the service side:
+
+```
+recognize audio_seconds=0.56 decode=0.023 rtf=0.041 chars=8 streaming=true client="dreamer"
+recognize audio_seconds=0.40 ...                                          <- the tail chunk
+streaming session opened 12:08:49 -> closed 12:09:01
+```
+
+Each field confirms a different piece, which is why the log line carries them:
+
+- `client="dreamer"` — the per-client token works and is attributed, so revoking
+  one consumer would not touch the other.
+- `audio_seconds=0.56` **exactly** — the capture module chunks correctly in a
+  real browser, not only in the replay harness.
+- the final `0.40s` chunk — the partial tail flushing via `last`. That is the
+  0.5.1 bug (every utterance silently losing its ending) working for real.
+- session **closed**, not swept — no leaked slot.
+
+Shape: the browser holds no STT credential. It authenticates to dream-analyst
+with its own cookie; the server calls STT with the app's token. No CORS anywhere,
+and the session id is HMAC-derived server-side so one user cannot join another's
+recognizer.
+
+### Two bugs on the way in, both mine
+
+**`JWT_SECRET is not set; cannot derive a session id`** — every transcription
+500'd. I keyed the session HMAC on `JWT_SECRET` assuming it was configured, and
+had *listed that project's secrets earlier in the same session* without noticing
+it was absent. Re-keyed on the STT token, which makes the feature
+self-contained: the secret that authorises the call derives the id, so it cannot
+be half-configured. Verified in a pod with no `JWT_SECRET`, the exact failing
+condition.
+
+**A module-scope `throw` broke the image build.** Requiring `JWT_SECRET` at
+import also fires during `vite build`, which evaluates server modules — so the
+first attempt at hardening failed CI rather than the insecure default. The check
+moved to the use sites, and in `verifyToken` it sits *outside* the `try`: inside,
+a missing secret is caught and returned as `null`, indistinguishable from an
+invalid token, so a misconfigured deploy would look like every session quietly
+expiring.
+
+### The serious finding, which was not mine
+
+`front/src/lib/server/auth.ts` read:
+
+```ts
+const JWT_SECRET = env.JWT_SECRET || 'your_jwt_secret_here';
+```
+
+and `JWT_SECRET` was **not set on the deployment**. So production session cookies
+were signed with a placeholder published in a public repository — anyone reading
+that line could forge an `auth_token` for any user.
+
+**The fallback is what hid it.** The app booted, logins worked, nothing anywhere
+reported that the signing key was public. It surfaced only because unrelated code
+hard-required the variable and crashed. A real secret is now set (users were
+logged out, unavoidable when rotating a key that was public) and the fallback is
+gone.
+
+Worth generalising: a default that lets a security-critical value go unset does
+not make the system tolerant, it makes the failure silent. The same shape exists
+anywhere else `env.X || 'placeholder'` appears.
+
+### Secret topology, and its cost
+
+`STT_TOKEN_DREAMER` exists in **both** `ukubi-stt-bhr-m` and
+`dream-analyst-8-fxf`, chosen over a cross-project read for simpler wiring.
+Rotating it means editing **both**; change one and dictation fails
+`UNAUTHENTICATED` -> 503, which reads like the GPU node being down rather than a
+secret mismatch. Recorded next to the `infisical:` block in that repo, where
+someone rotating it will actually be looking.
+
+**A finding from the road not taken, kept because it generalises:** an
+`InfisicalSecret` without `secretsScope.secretName` syncs the **whole project**.
+Applying one to test put `REGISTRY_PASSWORD` — push rights on the registry every
+node pulls from — into the consuming namespace. Anyone reaching for a
+cross-project read later needs that field.
+
+n8n secrets (`N8N_AUDIO_TRANSCRIBE_URL`, `N8N_AUTH`, `N8N_WEBHOOK_URL`) deleted
+after confirmation, not before — they were the rollback. Note `infisical secrets
+delete` defaults to `--type personal` and silently no-ops on shared secrets.
+
+### Also shipped
+
+`ukubi-stt` 0.7.0: `STT_MAX_SESSIONS` env-configurable, and `web/stt-capture.js`
+extracted and served at an exactly-matched route so the page and consumers share
+one copy. `/healthz` verified still unrouted afterwards — adding a second route
+was the risk, and `Path()` rather than `PathPrefix()` is what contains it.
+
+Remaining: agent-fleet.
