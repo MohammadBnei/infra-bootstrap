@@ -57,3 +57,4 @@ ADR-000N` (replaced by a later decision).
 | [0044](0044-stt-grpc-service.md) | `ukubi-stt`: GPU speech-to-text gRPC service — parakeet-rs behind a CUDA gate, gRPC-Web at the edge, shared bearer token, grey-cloud hostname | Proposed (Decision 1's gate **passed** 2026-08-31 — engine confirmed; Decisions 2–6 unbuilt) |
 | [0045](0045-model-weights-out-of-the-image.md) | Model weights on a node-local `local-path` PVC; CUDA libraries stay in the image as the ABI pin | Accepted |
 | [0046](0046-streaming-recognition.md) | Realtime streaming: Nemotron 3.5 as a lazily-loaded second model, per-session state, still chunked unary rather than WebSocket | Accepted |
+| [0047](0047-persian-speech-to-text.md) | Persian speech-to-text — a third model, on the CPU, and Arabic that was already working | Accepted |

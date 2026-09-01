@@ -1138,3 +1138,104 @@ diagnosis that cannot fail to be confirmed is not a diagnosis.
   2026-09-01. Six decisions shipped and two consumers were on it while the ADR
   still said "designed and unbuilt" — a status field only stays true if flipping
   it is part of shipping, not a separate errand.
+
+---
+
+## 2026-09-01 — Persian, and the Arabic nobody had checked
+
+### Arabic was already working
+
+ADR-0044 deferred Persian and Arabic together; ADR-0046 added Nemotron and predicted
+it would cover both. Nobody tested it. Measured against the live service:
+
+| request | result |
+|---|---|
+| streaming, no `language`, Arabic speech | correct Arabic script, auto-detect unaided |
+| offline, `language: "ar-AR"` | `"Ahlan wasahlan Hada ihtibar..."` — Latin transliteration, silently |
+| streaming, `language: "fa-IR"` | `<unk><unk><unk>-l--<unk>` — accepted, garbage |
+
+So Arabic dictation has worked in both consumers since 0.7.0 and the ADRs said it
+was pending. `fa-IR` is accepted because `parakeet-rs`'s `PROMPT_DICTIONARY` has a
+prompt slot for it that the model was never trained on — the crate's own docs warn
+that such codes "will run, but accuracy is not guaranteed".
+
+### The model: Shenava Koochik v1.0, on the CPU
+
+114M FastConformer CTC, Apache-2.0, fine-tuned from
+`nvidia/stt_fa_fastconformer_hybrid_large`. Gate on `k8s-worker-01`:
+
+```
+CER 0.000    44.8 ms per model step (step = 1.12s)    RTF 0.045    0 <unk>
+```
+
+4% duty per stream, ~0.32 core at the session cap of 8. **It does not touch the
+GPU**, which deletes the VRAM measurement, the eviction policy, the thrash risk and
+a third silent-CUDA-fallback surface all at once. Two models already hold 6880 MiB
+of 8192.
+
+### What testing overturned that reasoning had not
+
+Three times in one day, and all three in the same direction — the things predicted
+to be silent hazards mostly were not, and the real problems were elsewhere.
+
+- **Only one feature-pipeline trap is real.** Applying per-feature CMVN (NeMo's
+  default, and what `parakeet-rs` does) takes CER from 0.033 to **1.000 with empty
+  output**. Window at offset 0 instead of centred: 0.042. No preemphasis at all:
+  0.056. An adversarial review had flagged the window placement as wrong by "6.35
+  log units across 82% of cells" — numerically correct, and consequentially almost
+  irrelevant. The encoder is tolerant of it.
+- **The golden fixture was measuring float noise.** Built on the repo's sine sweep,
+  it failed on a 0.0013 difference. The tempting fix was to relax the tolerance;
+  running the reference in f32 showed only 6e-5 of drift, which proved the gap was
+  real and the *input* was wrong. A sweep leaves the high mel bins holding pure
+  spectral leakage, where f32 and f64 differ by 0.24. Switched to deterministic LCG
+  noise so all 80 bins carry energy.
+- **The centre reflect-pad was built from the first chunk, not the utterance.**
+  Found by testing arbitrary chunk sizes, which nothing did before. A first chunk
+  under 256 samples zero-filled the pad instead of mirroring and corrupted frames
+  0-1 by up to 3.57 log units, silently. Unreachable from the browser's 8960-sample
+  chunks; reachable the moment the offline path feeds engine-sized slices.
+
+### The step-count question, which only a run could answer
+
+121 input frames at `subsampling_factor: 8` do not divide by the 14 encoder frames a
+112-frame shift implies, and NeMo carries a `drop_extra_pre_encoded` for exactly
+that. **The graph declares no output shapes**, so it was unanswerable by reading.
+One ORT session settled it: `logprobs` is `[1, 14, 1025]` — the export already drops
+the overlap. Had it not, consuming every step would have duplicated a token every
+1.12 s, fluently and undetectably.
+
+Also measured and now relied on: `encoded_lengths` tracks `length` (60 frames in, 7
+steps out), and `cache_last_channel_len` climbs 14→28→42→56→70 and saturates itself.
+
+### Two operating assumptions that were wrong
+
+- **A gate pod does not need the Deployment stopped.** `local-path` RWO means one
+  *node*, not one *pod*. The gate mounted the same PVC as the running service and
+  `stt.bnei.dev` served 200 throughout. An outage was requested and was never needed.
+- **`kubectl scale` on an ArgoCD-managed Deployment does nothing.** The
+  ApplicationSet restores `syncPolicy.automated` and selfHeal returns the replica
+  within seconds. Watched it happen twice before working out why.
+
+### A build trap caught before it fired
+
+Committing `Cargo.lock` and adding `--locked` left the `release-it` `after:bump`
+hook seding only `Cargo.toml`. The lock records this package's own version, so the
+first build after any release would have died with "cannot update the lock file
+because --locked was passed" — in the tag build on the build-runner, the
+fifteen-minute loop, not on a PR. Reproduced by bumping the version by hand before
+releasing anything. Fixed with `cargo update -p ukubi-stt --offline`.
+
+### Still open
+
+- **Persian is not reachable from any UI.** Routing is designed, not built, and
+  neither consumer can name a language: `agent-fleet` never sends one, and
+  `dream-analyst` sends `?lang=` from a two-option `<select>`. Persian is a
+  *different model*, so unlike Arabic it cannot arrive by auto-detect.
+- Offline with no `language` still transliterates Arabic; closing that needs a
+  language-ID model.
+- `intra_op_num_threads` is unset, so ORT sizes its pool from the node's 6 cores
+  rather than the 3-core cgroup quota. Harmless at 25x headroom, but it is the kind
+  of thing that only appears under load.
+- Numbers come out spelled, and `text` carries no RTL direction marker.
+
