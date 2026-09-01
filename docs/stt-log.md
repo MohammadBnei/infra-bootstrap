@@ -1125,9 +1125,16 @@ diagnosis that cannot fail to be confirmed is not a diagnosis.
 
 - **`secrets.PAT` on `agent-fleet` is expired.** Every release needs a local
   `release-it` until it is rotated (fine-grained, `contents: write`).
-- **`ukubi-stt`'s own image has not been rebuilt** since `prewarm()` merged, so
-  the test page at `stt.bnei.dev` still serves the pre-fix module.
-- **dream-analyst's vendored copy is stale** and carries the same cold start.
+- ~~`ukubi-stt`'s own image has not been rebuilt since `prewarm()` merged.~~
+  Closed 2026-09-01 — 0.8.0 is live and `stt.bnei.dev/stt-capture.js` serves the
+  warmed module.
+- ~~dream-analyst's vendored copy is stale.~~ Closed 2026-09-01 in 0.31.3, which
+  its own `Release It` workflow cut unaided — the PAT break is agent-fleet's
+  alone, which is worth knowing before blaming the shared pipeline.
 - No regression test for either UI bug: the dashboard has no jsdom/happy-dom
   (`Markdown.test.tsx` says so explicitly) and both bugs need two callbacks with
   no re-render between them. Flagged rather than hidden.
+- **ADR-0044 read `Proposed` for a day after the thing was live.** Corrected
+  2026-09-01. Six decisions shipped and two consumers were on it while the ADR
+  still said "designed and unbuilt" — a status field only stays true if flipping
+  it is part of shipping, not a separate errand.
