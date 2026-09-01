@@ -679,3 +679,196 @@ and the bare close only happens 1 time in 35.
 
 **The operator noticing "it feels slower" was worth more than any of the tests.**
 Perceived latency is a property of the whole chain, and the chain had no test.
+
+---
+
+## Consumable by other services, 2026-09-01 — `ukubi-stt` 0.6.0
+
+Two additions, both aimed at "another service can actually use this".
+
+**gRPC reflection**, so a caller needs no vendored `.proto`:
+
+```
+$ grpcurl -plaintext ukubi-stt:9090 list
+grpc.reflection.v1.ServerReflection
+stt.v1.Stt
+```
+
+Registered **unauthenticated**, which is deliberate and worth understanding
+rather than trusting: the IngressRoute matches `PathPrefix(/stt.v1.Stt/)` while
+reflection answers on `/grpc.reflection.v1.*`, so Traefik 404s it and only the
+pod network can reach it. **That was a reasoned claim, so it was tested before
+being believed** — externally `grpcurl stt.bnei.dev:443 list` returns "server
+does not support the reflection API" while the RPC itself still works. Both v1
+and v1alpha are served, because clients disagree about which they ask for and
+serving one looks fine until someone else's tooling fails.
+
+**Per-client bearer tokens.** ADR-0044 Decision 5 specified one shared token,
+which was right when the callers were a browser and the owner's machines. Other
+services calling it changes the arithmetic: one secret means **revoking any
+caller revokes all of them** — and it is why ADR-0046 had to accept that a caller
+can interleave audio into another's `session_id`, since the id was the only thing
+separating callers holding identical credentials.
+
+Credentials are now `STT_TOKEN_<NAME>`, one per caller, with `STT_AUTH_TOKEN`
+still accepted as `default`. `common-app-chart`'s `infisical` block passes the
+whole project as env vars, so **adding a caller is adding a secret and revoking
+one is deleting it** — no redeploy, no code change. The matched name rides on the
+request and is logged, so "who is calling this" is answerable.
+
+The comparison loop deliberately does not exit on first match; stopping early
+would make response time depend on *which* client is calling.
+
+### `docs/secrets.md` is now stale, and that is a real problem
+
+It documents a single `STT_AUTH_TOKEN` and contains **zero** occurrences of
+`STT_TOKEN_`. `docs/stt-log.md` above still lists "the bearer token is shared" as
+open. Both predate 0.6.0. **They must be corrected in the same change as the
+first consumer wiring**, or `mission-drift` flags it and ADR-0046's
+session-hijack caveat reads as open when it is mitigated.
+
+---
+
+## A latency diagnosis I got wrong, 2026-09-01
+
+Recorded because the wrong answer was plausible, published, and committed.
+
+Chasing streaming latency turned up ~50ms per request that had nothing to do with
+the service:
+
+```
+LAN VIP  (192.168.1.233)  ->  4.8 ms
+WAN IP   (82.65.231.50)   -> 54.4 ms
+```
+
+I called it **Freebox hairpin NAT** — LAN traffic leaving and coming back — and
+wrote that into a playbook comment, a commit message and a PR body (#231). It was
+wrong, and the evidence was available before I wrote it:
+
+```
+route -n get 192.168.1.233  -> interface: en0     (direct LAN)
+route -n get 82.65.231.50   -> interface: utun22  (VPN tunnel)
+external IP                 -> 212.102.36.233, loc=CH
+```
+
+The measuring workstation was on a **VPN with a Swiss exit**, so the ~50ms was a
+round trip to Switzerland — about right for that hop. I saw a large number,
+reached for the plausible LAN explanation, and never checked the routing table.
+Corrected in #232.
+
+**The fix did not change**, because both failure modes have one cause: resolving
+a LAN-reachable service to its public address. `stt.bnei.dev` now has a
+split-horizon record on the Pi (`192.168.1.233`), scoped to that host only — safe
+precisely because it is grey-cloud, so pointing LAN clients at the origin bypasses
+nothing that exists. Verified that `fleet` (grey) and `wedding` (proxied) are both
+unshadowed.
+
+**But the corollary matters more than the fix:** a VPN'd client sends DNS to the
+VPN's resolvers, so it never asks the Pi and this record cannot help it at all.
+That needs split-DNS on the VPN, not a DHCP change — and my "point LAN DHCP at
+the Pi" advice, while right in general, was useless for the machine I gave it to.
+
+---
+
+## How consumers will use this, 2026-09-01
+
+Planned for `agent-fleet` and `dream-analyst`. Two facts from reading them
+reshaped the design away from what seemed obvious:
+
+- **Neither browser can call `stt.bnei.dev` directly.** agent-fleet's `core`
+  never allows CORS and its `__Host-fleet_session` cookie is `SameSite=Lax`.
+  dream-analyst has its own JWT cookie and its own non-authentik users.
+- **Both apps are already backend-proxy shaped.** dream-analyst already
+  transcribes through a server route that checks `locals.user` first. The
+  architecture the design wanted was already built, pointed at a different
+  backend.
+
+So: **no browser ever holds an STT credential.** Each backend holds its own
+`STT_TOKEN_<APP>` and dials
+`ukubi-stt.ukubi-stt.svc.cluster.local:9090` over plaintext h2c — which means the
+entire gRPC-Web edge, the hand-written `grpcWeb`/CORS middlewares and the Traefik
+idle-close finding are all **irrelevant to consumers**. They exist for browsers
+talking to `stt` directly, which now nothing does.
+
+Three properties fall out: no CORS anywhere, no credential in any browser, and
+**the session id stops being client-chosen** — the backend mints it per
+authenticated user, which closes ADR-0046's interleaving caveat for these callers.
+
+**authentik is still the gate for agent-fleet, indirectly.** The browser is
+authenticated to `core` by an authentik-derived session; `core` then calls STT
+with its own service credential. No forwardAuth on `stt` is needed, and
+ADR-0044 Decision 5's rejection of it stays intact rather than being reversed.
+
+---
+
+## The doubt pass found two live bugs, 2026-09-01
+
+The consumer plan was run through an adversarial review before implementation.
+It found two defects **in already-deployed code**, neither of which any test or
+demo would have surfaced.
+
+### 1. A close could leak the session slot it was freeing
+
+`decode_chunk` called `self.session()` *before* looking at `last`:
+
+```
+let recognizer = self.session(session_id, &handle, language)?;   // can return RESOURCE_EXHAUSTED
+...
+if last { map.remove(session_id); }
+```
+
+So a close for an already-swept session **created a recognizer purely to delete
+it**. Harmless with capacity; with the cap full the create is *refused*, the close
+fails, and the slot it was freeing leaks — so **a full cap stays full**, every
+subsequent close hitting the same wall.
+
+Invisible with one operator and one browser. Reachable the moment two consumers
+share the 8-session pool, which is exactly what the plan proposes. Fixed in
+`ukubi-stt` #12: `session()` takes `create` and returns `Option`.
+
+The guard is `last && samples.is_empty()`, **not** `last` — a recording shorter
+than one 560ms chunk sends exactly one request with `last` set, and refusing to
+create there would lose the whole utterance. Same class as 0.5.1's tail bug.
+
+### 2. dream-analyst had an unauthenticated transcription endpoint
+
+`transcribeAudio` in `front/src/lib/remote/audio.remote.ts` had **no auth check
+of any kind**, while the route it was written to replace does. A SvelteKit
+`command` compiles to an addressable POST endpoint, reachable whether or not any
+component imports it — and nothing imports this one. Audio transcription, and the
+n8n spend behind it, were open to anyone who found the route on a public host.
+
+Fixed in dream-analyst #12 with the same `getCurrentUser()` helper
+`dream.remote.ts` uses. A guard rather than a deletion: `main` is 8 commits behind
+an active local branch that may add a caller, so *authenticated* is correct either
+way while *deleted* is only correct if that branch agrees.
+
+**The plan would have wired this endpoint to a GPU.**
+
+### What the review got wrong, and a pattern worth naming
+
+Three separate agents claimed dream-analyst's `helm/values.yaml` does not exist on
+`main`, and two claimed `/api/transcribe` does not exist. **All of it false** —
+verified against `origin/main` via the GitHub API, with ArgoCD `Synced`/`Healthy`
+against `$values/helm/values.yaml`. Every one of them read the local clone, which
+is mid-merge-conflict and `[ahead 21, behind 8]`.
+
+The lesson is not "agents are unreliable" — their substantive findings were
+excellent and two of them were live bugs. It is that **a stale working tree
+produces confident, specific, wrong claims**, and the cheap defence is to verify
+any file-existence claim against the remote before planning on it.
+
+### Amendments the review forced into the plan
+
+- **Add both consumer tokens in one go.** Each Infisical addition triggers
+  `autoReload` -> `Recreate` -> a two-model CUDA reload that destroys live
+  sessions. Adding them one at a time kills the first consumer's users mid-
+  dictation when the second lands.
+- **Reject an empty computed `session_id` loudly.** `FLEET_AUTH_DISABLED=1`
+  yields an empty identity, hence an empty id, which the server routes to the
+  *batch* model behind `Semaphore(1)`: a garbage transcript, then
+  `RESOURCE_EXHAUSTED` on the second chunk.
+- **HMAC the session id, do not plain-hash it.** The client controls one input.
+- **Extracting the capture module needs care.** The page is `include_str!`'d and
+  the IngressRoute matches `Path(/)` *exactly*, so a `<script src=...>` would
+  404. Either a third route, or ukubi-stt keeps an inline copy.
