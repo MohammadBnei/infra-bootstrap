@@ -986,3 +986,148 @@ one copy. `/healthz` verified still unrouted afterwards — adding a second rout
 was the risk, and `Path()` rather than `PathPrefix()` is what contains it.
 
 Remaining: agent-fleet.
+
+---
+
+## agent-fleet, and what shipping to a second consumer actually cost — 2026-09-01
+
+The remaining item above. It landed, but the STT work was the small half of the
+day: two of the three bugs were in the *consumer's* UI, and the thing that
+blocked the deploy for an hour had nothing to do with speech at all.
+
+### The wiring
+
+`core` proxies. The dashboard cannot call `stt.bnei.dev` itself — core allows no
+CORS and `__Host-fleet_session` is `SameSite=Lax`, so a cross-origin call carries
+no identity — and handing the browser an STT bearer token to work around that
+would give every dashboard user a credential for the GPU. So core holds
+`STT_TOKEN_FLEET` and derives the recognizer id by HMAC over the authenticated
+identity. Same shape as dream-analyst, arrived at for the same reason.
+
+Chunked unary, not server-streaming: the browser cannot stream *up* under any
+transport gRPC offers, so audio arrives as discrete requests regardless, and each
+chunk's text comes back in its own response. A server stream would add lifecycle,
+reconnect machinery and a cursor to deliver one message per request already made.
+
+The stream id is per **dictation**, not per fleet session — a fleet session is a
+conversation, an STT session is a recognizer lifecycle swept after 120s idle, and
+two tabs can dictate into one conversation.
+
+The proto is vendored under `core/` with its own buf module listing **Go plugins
+only**. `proto/buf.gen.yaml` runs `protoc-gen-es` over the whole module into
+`dashboard/src/gen`, so dropping `stt.proto` there would have emitted a
+`stt_pb.ts` nothing imports — the dead generated code ADR-0048 deleted 8,692
+lines of. Worth stating as a general rule: in a repo with a module-wide codegen
+config, adding a proto is not a local decision.
+
+### The token, and why it is a second copy
+
+`STT_TOKEN_FLEET` was created in `agent-fleet-nygh`
+(`ae771c2c-5115-452a-8f1c-1e03fa0e2b9a`) by copying the value out of the running
+`ukubi-stt-infisical` Secret rather than out of Infisical — the CLI has no
+project-listing command and `secrets get` needs a project id that was not to
+hand, while the cluster already held the value under a name that identified it.
+
+It is duplicated rather than read cross-project for the reason recorded a few
+days earlier: an `InfisicalSecret` syncs a whole project env, so pointing fleet
+at `ukubi-stt-bhr-m` would have put `REGISTRY_PASSWORD` in its namespace. Two
+copies to rotate is the accepted cost. The operator picked the new key up with no
+intervention.
+
+### The deploy was blocked by something unrelated, and had been for five days
+
+Merging to `main` shipped nothing. Chasing it:
+
+- `Release It` fails at checkout — `fatal: could not read Username for
+  'https://github.com'`. `secrets.PAT` is expired. No tag is cut, so **nothing
+  downstream ever fires**.
+- Before that, the 4.13.0 tag build failed on buildah (exit 125), so **#241's
+  session-retention work had never deployed either**. The cluster had been
+  running 4.12.1 from 2026-08-25 while `main` moved on.
+
+Neither was visible from the repo: `main` looked healthy, PR checks were green,
+and the only symptom was a running image that quietly stopped advancing. **A
+green PR does not mean a shipped change**, and nothing was watching the gap
+between the two.
+
+Released by running `release-it` locally instead. It is configured
+`github.release: false`, so it only commits, tags and pushes — the tag then
+triggers the normal build, and the deploy job bumps the manifest with the
+built-in `GITHUB_TOKEN`, which is unaffected. Three releases went out this way
+(4.14.0, .1, .2). **The PAT is still expired**; until it is rotated, every
+release needs that manual step.
+
+One trap: `release-it --dry-run` executes `npm version` for real, leaving
+`package.json` dirty so the next run refuses on "working dir must be clean". The
+CI workflow's `git reset --hard` prefix exists for exactly this.
+
+### Two UI bugs, both about time, neither in the audio path
+
+**Dictation overwrote itself.** `onText={(t) => onChange(value + t)}` captured
+`value` from the render that started the recording, and MicButton's send loop
+holds the callback it was constructed with — so every chunk computed
+`staleValue + chunk` and each one visibly replaced the last.
+
+Fixed with a functional update, `onChange((prev) => prev + t)`, **not** the more
+common latest-callback ref. The ref fixes the stale render but not two chunks
+landing in the same tick, which `stop()` does when it flushes the tail right
+after a regular chunk — both closures would read the same `value` and the second
+would still clobber the first. The functional update removes the read entirely.
+
+**The first words were never captured.** The click did four things in series
+before any audio existed: fetch the code-split module, construct an
+`AudioContext`, compile the worklet, then open the device. And `getUserMedia` —
+the slow one at 100-300ms — was queued *behind* `addModule()`, which it has no
+dependency on.
+
+Fixed upstream in `ukubi-stt` (`prewarm()` plus starting `getUserMedia` before
+awaiting the context work) and re-vendored, because that file is owned upstream
+and two consumers copy it.
+
+Three things worth keeping from it:
+
+- Prewarming is safe **only** because building a context and compiling a worklet
+  touch no device. That is what makes it legitimate on hover, before the user has
+  committed to anything.
+- A context built outside a user gesture starts **suspended**, and a suspended
+  context runs no worklet. A naive prewarm would look live and record pure
+  silence — a worse failure than the original, because nothing errors. `start()`
+  resumes it, which is allowed because the click is what reached it.
+- A failed warm must not be memoised, or the button is dead until reload.
+
+The remaining delay is `getUserMedia` alone, and it is not removable without
+holding the microphone open on a page the user has not asked to record on. So the
+other half of the fix is honesty: the button now reads as *arming* and is
+disabled until audio is genuinely being captured. **Silence about the gap was
+half the bug** — warming shrinks it, showing it stops it costing a sentence.
+
+### A correction: ArgoCD was never the problem
+
+Two rollouts were reported here as needing a manual hard refresh, with a webhook
+proposed as the fix. Both claims were wrong, and were caught only because the
+operator said "don't hard refresh yet, and check whether the PAT affects ArgoCD".
+
+- `argocd-cm` sets `timeout.reconciliation: 120s`. Both refreshes were inside
+  that window — the observation was impatience, not a fault. Left alone, 4.14.2
+  was `Synced/Healthy` before the first sample.
+- ArgoCD does not use the PAT at all. There is exactly one repository secret in
+  `argocd`: an **SSH deploy key** for `infra-bootstrap`. `agent-fleet` is reached
+  **anonymously over HTTPS** because the repo is public. Nothing there can
+  expire.
+
+The generalisable part is the failure mode, not the facts: an intervention that
+is followed by success reads as the cause of it. Both hard refreshes "worked",
+which is precisely why the wrong explanation survived twice. Reaching for the
+fix before establishing the baseline is what made it unfalsifiable — a
+diagnosis that cannot fail to be confirmed is not a diagnosis.
+
+### Open
+
+- **`secrets.PAT` on `agent-fleet` is expired.** Every release needs a local
+  `release-it` until it is rotated (fine-grained, `contents: write`).
+- **`ukubi-stt`'s own image has not been rebuilt** since `prewarm()` merged, so
+  the test page at `stt.bnei.dev` still serves the pre-fix module.
+- **dream-analyst's vendored copy is stale** and carries the same cold start.
+- No regression test for either UI bug: the dashboard has no jsdom/happy-dom
+  (`Markdown.test.tsx` says so explicitly) and both bugs need two callbacks with
+  no re-render between them. Flagged rather than hidden.
