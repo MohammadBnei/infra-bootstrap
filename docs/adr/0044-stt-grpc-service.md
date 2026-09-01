@@ -1,7 +1,9 @@
 # ADR-0044: `ukubi-stt` — a GPU speech-to-text gRPC service
 
-**Status:** Proposed — **Decision 1's gate passed 2026-08-31** (see the gate
-result below); Decisions 2–6 are designed and unbuilt.
+**Status:** Accepted — decided 2026-08-31, **all six decisions built and live
+by 2026-09-01**. Decision 1's gate passed 2026-08-31 (see the gate result
+below); Decisions 2–6 shipped over 0.4.0–0.8.0 and are serving two consumers.
+Decision 5 is amended in place — per-client tokens, not one shared token.
 **Date:** 2026-08-31
 **Related:** [ADR-0043](0043-gpu-node-enablement.md) (the GPU this runs on),
 [ADR-0011](0011-reject-multi-region-dr-service-mesh.md) (GPU multi-tenancy
