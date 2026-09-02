@@ -30,6 +30,31 @@ spec:
     # The outpost is behind Traefik, so it sees Traefik as the client. Without
     # this it builds its redirect from the wrong host and the sign-in loop
     # never terminates.
+    #
+    # The cost, learned the hard way (infra-bootstrap #240, editable-blog #21):
+    # trusting the header means the host authentik matches its application on
+    # is whatever the middlewares AHEAD of this one left in `X-Forwarded-Host`,
+    # not the real Host. editable-blog's own CORS middleware overwrote it with
+    # an un-templated `{{ .Host }}` — Traefik v3 does not template
+    # `customRequestHeaders` — and every gated request came back 404 with an
+    # empty body and this outpost's `x-powered-by: authentik` on it. There is
+    # no log line on the authentik side at all for that case, so it reads as
+    # "authentik has no application for the host" and sends you here, to a
+    # blueprint with nothing wrong with it.
+    #
+    # It fails CLOSED, so it is not a leak. Reproduce in one line, from
+    # anywhere — the host is the only variable:
+    #
+    #   curl -so /dev/null -w '%{http_code}\n' \
+    #     -H 'X-Forwarded-Host: blog.bnei.dev' \
+    #     https://authentik.bnei.dev/outpost.goauthentik.io/auth/traefik
+    #
+    # 302 for any host under bnei.dev (the provider is forward_domain over the
+    # whole zone), 404 for anything else — `nope.example` and `{{ .Host }}`
+    # alike. Whichever the gated app produces is what you are debugging.
+    #
+    # An app that puts a `headers` middleware in front of this one must not
+    # touch `X-Forwarded-*`; Traefik's entrypoint already sets them correctly.
     trustForwardHeader: true
     # Per-user attribution, free, for anything downstream that wants it.
     #
