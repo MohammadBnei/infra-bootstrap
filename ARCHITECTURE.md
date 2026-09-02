@@ -707,7 +707,7 @@ Four access tiers:
 |---|---|---|
 | Public | none | — |
 | Native OIDC | the app is an OIDC relying party | **Live.** ArgoCD, Grafana, and agent-fleet `core` |
-| forwardAuth | Traefik `Middleware/authentik-forwardauth` in front of the route | **Live.** e2e preview hosts, `wedding.bnei.dev/admin`. Alertmanager, pgweb and Proxmox still to move |
+| forwardAuth | Traefik `Middleware/authentik-forwardauth` in front of the route | **Live.** e2e preview hosts, `wedding.bnei.dev/admin`, `blog.bnei.dev/linkedin`. Alertmanager, pgweb and Proxmox still to move |
 | Critical | adds a WebAuthn passkey policy | Not built |
 
 Three properties that are load-bearing rather than incidental:
