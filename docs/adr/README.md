@@ -58,3 +58,4 @@ ADR-000N` (replaced by a later decision).
 | [0045](0045-model-weights-out-of-the-image.md) | Model weights on a node-local `local-path` PVC; CUDA libraries stay in the image as the ABI pin | Accepted |
 | [0046](0046-streaming-recognition.md) | Realtime streaming: Nemotron 3.5 as a lazily-loaded second model, per-session state, still chunked unary rather than WebSocket | Accepted |
 | [0047](0047-persian-speech-to-text.md) | Persian speech-to-text — a third model, on the CPU, and Arabic that was already working | Accepted |
+| [0048](0048-chunk-boundary-word-splitting.md) | A word split across a chunk boundary was a client join bug, not the model — and the correction model we did not build | Accepted |
