@@ -157,6 +157,19 @@
   # wildcard — same mechanism as fleet/s3/*.ente. See docs/dns/bnei.dev.zone.
   hostname: stt.bnei.dev
 
+- name: has-journal
+  namespace: has-journal
+  syncWave: "10"
+  repoURL: https://github.com/MohammadBnei/has-journal.git
+  valuesPath: [helm/values.yaml]
+  # master, NOT main — every other entry here says main, and this one genuinely
+  # does not. A wrong branch is what silently pointed vos-monolith at dev.
+  targetRevision: master
+  # The journal viewer. Gated by the shared authentik-forwardauth middleware AND a
+  # NetworkPolicy: the middleware only covers traffic arriving through Traefik, and
+  # everything this app serves is internal (ticket keys, internal hostnames).
+  hostname: journal.bnei.dev
+
 # searxng and pgweb are NOT here: they're public-image tools with no
 # app-specific code, so they're driven as platform apps instead — see
 # gitops/bootstrap/platform-common-apps.applicationset.yaml and

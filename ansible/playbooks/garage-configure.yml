@@ -153,6 +153,28 @@
         # failure. Retention policy is deferred (ADR-0034); this bound isn't.
         # Garage's own size format ("40GB"/"1TB", or "none" to lift it).
         max_size: "40GB"
+      - name: "wedding-wall" # guest photos posted to wedding.bnei.dev's live projector wall
+        key_name: "wedding-wall-key"
+        infisical_prefix: "WEDDING_WALL_S3"
+        # NO cors: block, deliberately. Nothing browser-side ever touches Garage
+        # for this bucket — unlike ente-photos and agent-fleet-files, which both
+        # genuinely do. The wedding app proxies BOTH directions: uploads arrive
+        # as a multipart POST to a SvelteKit form action (the pod has to hold
+        # the bytes anyway, because re-encoding them through Bun.Image is the
+        # trust boundary), and wall images are served back through
+        # /api/wall/img/<id>.jpg. An <img src> is not a CORS request, so there
+        # is nothing for a rule to permit. Serving them through
+        # wedding.bnei.dev, which is Cloudflare-proxied, also puts a CDN in
+        # front of every slide — a presigned URL against grey s3.bnei.dev would
+        # pull each one over the home uplink instead, all evening.
+        #
+        # Two objects per post: orig/<uuid> (the untouched upload, write-only,
+        # kept so the originals can be pulled down and dragged into ente by
+        # hand afterwards) and wall/<uuid>.jpg (the 1080p derivative the
+        # projector shows). Bounded because nothing prunes it and it shares this
+        # LXC's 200GB with the Longhorn and pgBackRest targets — see the
+        # zot-registry note above for why that matters more than it looks.
+        max_size: "10GB"
 
   handlers:
     - name: Restart garage

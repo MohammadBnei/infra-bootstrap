@@ -60,6 +60,8 @@
         url: https://github.com/MohammadBnei/wedding-2026
       - name: ukubi-stt
         url: https://github.com/MohammadBnei/ukubi-stt
+      - name: has-journal
+        url: https://github.com/MohammadBnei/has-journal
     # NOT `ukubi` — that label belongs to the in-cluster runner holding a
     # ServiceAccount token with `create jobs` in vos/vos-dev. Builds must
     # not land there and cluster jobs must not land here.
