@@ -91,14 +91,6 @@ spec:
         # See gitops/apps/registry.yaml's matching entry for why this
         # hostname (not helm/values.yaml) is the source of truth.
         hostname: wedding.bnei.dev
-
-      - name: has-journal
-        namespace: has-journal
-        syncWave: "10"
-        repoURL: https://github.com/MohammadBnei/has-journal.git
-        valuesPath: [helm/values.yaml]
-        targetRevision: master
-        hostname: journal.bnei.dev
       - name: ukubi-stt
         namespace: ukubi-stt
         syncWave: "10"
