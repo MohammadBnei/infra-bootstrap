@@ -67,8 +67,16 @@ spec:
         env:
           {{- toYaml . | nindent 10 }}
         {{- end }}
-        {{- if or .Values.envFrom .Values.infisical.enabled }}
+        {{- if or .Values.envFrom .Values.infisical.enabled .Values.sharedSecrets.keys }}
         envFrom:
+          {{- /* Commons is listed FIRST on purpose: envFrom is last-wins on
+                 duplicate keys, so the shared layer is the weakest and anything
+                 app-specific — envFrom, the app's own Infisical secret, or an
+                 explicit env: entry — shadows it. */}}
+          {{- if .Values.sharedSecrets.keys }}
+          - secretRef:
+              name: {{ .Release.Name }}-commons
+          {{- end }}
           {{- with .Values.envFrom }}
           {{- toYaml . | nindent 10 }}
           {{- end }}

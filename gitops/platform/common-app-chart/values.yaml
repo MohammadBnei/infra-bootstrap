@@ -233,6 +233,31 @@ infisical:
     secretName: universal-auth-credentials
     secretNamespace: infisical
 
+# Keys pulled from the shared `platform-commons` Infisical project into this
+# namespace as the Secret `<release>-commons`, mounted onto the main container
+# via envFrom. Kills the hand-copying recorded in docs/secrets.md (STT_TOKEN_FLEET
+# duplicated into agent-fleet-nygh, WEDDING_WALL_S3_* into wedding-2026-ih1x).
+#
+# This list is env hygiene, NOT an access boundary. The operator's `template.data`
+# filters the OUTPUT of a request made with universal-auth-credentials, which can
+# read the root project; it does not narrow the identity's grant (docs/secrets.md
+# says this outright: "a secretsScope narrows the sync but not the identity's read
+# grant"). Containment comes from platform-commons holding only app-safe keys, and
+# from the source project being a literal in shared-infisicalsecret.yaml rather
+# than a value you could override from an app repo.
+#
+# Literal key names only — the operator's template.data has no glob.
+#
+# Precedence, lowest to highest: commons -> envFrom -> the app's own Infisical
+# secret -> an explicit `env:` entry. So an app can always shadow a commons key,
+# and a stale per-app copy will silently win during migration — verify by VALUE,
+# not by presence, before deleting the old copy.
+#
+# Not inherited by `hooks:` or `oneOffJobs:` containers, on purpose. See the
+# annotation comment in templates/shared-infisicalsecret.yaml.
+sharedSecrets:
+  keys: []   # e.g. [STT_TOKEN_FLEET]
+
 # Init containers, rendered verbatim into the pod spec. Each entry is a normal
 # container object (name/image/command/env/volumeMounts/...).
 #
