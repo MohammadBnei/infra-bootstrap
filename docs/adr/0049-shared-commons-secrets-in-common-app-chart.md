@@ -1,6 +1,8 @@
 # ADR-0049: Shared commons secrets via a dedicated `platform-commons` Infisical project
 
-**Status:** Accepted — decided 2026-09-10.
+**Status:** Accepted — decided 2026-09-10. Operator behaviour in "Consequences"
+verified empirically against `infisical/kubernetes-operator:v0.11.3` on
+2026-09-10, not inferred from docs.
 **Date:** 2026-09-10
 **Related:** [ADR-0004](0004-gitops-pattern-c-registry-applicationset.md) (the
 registry + `list`-generator ApplicationSet this deliberately does not touch),
@@ -95,11 +97,31 @@ anything app-specific shadows it.
 - A chart default reaches app repos that are never edited here. Verified: with
   `sharedSecrets.keys: []`, 25 values files across every local app and platform
   chart render **byte-identical** to `main`.
-- A key requested but absent from `platform-commons` fails the operator's template,
-  so no managed Secret is created and the container sits in
-  `CreateContainerConfigError`. The signal path is poor — `InfisicalSecret` has no
-  ArgoCD health check and the real error is in the `infisical-operator` logs in
-  another namespace.
+- **A missing key does not fail — it poisons.** Verified empirically against
+  operator **v0.11.3** in a throwaway namespace, not assumed. An unguarded
+  `{{ .KEY.Value }}` for a key absent from the source renders the **literal string
+  `<no value>`**: the managed Secret is created, the container starts, and the app
+  receives a real-looking 10-character credential. The CR reports
+  `ReadyToSyncSecrets: True` throughout. An earlier draft of this ADR claimed the
+  template fails and the pod sits in `CreateContainerConfigError`; that was wrong.
+- **Worse, this applies on resync to an already-good Secret.** With a key present
+  and synced correctly, making it disappear from the source overwrote the good
+  value with `<no value>` within one resync tick. Nothing surfaced an error — the
+  only signal was the status message changing to "Last reconcile synced 0 secrets".
+  So renaming or deleting a key in `platform-commons` silently poisons every
+  consuming app within 60s.
+- **Mitigation, also verified:** the template wraps each key in
+  `{{ if .KEY }}{{ .KEY.Value }}{{ end }}`, which turns both cases into an **empty
+  string** instead of `<no value>`. An SDK treats empty as "no credential
+  provided" and fails clearly, rather than sending a bogus one and getting a
+  confusing 403. The key cannot be omitted entirely — `template.data` is a flat
+  map. Anything renaming a key in `platform-commons` must treat it as a breaking
+  change to every consumer.
+- `creationPolicy: Owner` is honored by v0.11.3 — verified `ownerReferences` with
+  `controller: true` and `blockOwnerDeletion: true` on the managed Secret, so
+  deleting the CR garbage-collects it and revocation through git works. Note the
+  CRD does **not** constrain this field with an enum (free string, default
+  `Orphan`), so a typo here would silently fall back rather than be rejected.
 - During migration a stale per-app copy silently **wins** over commons, because the
   app's own secret has higher precedence. Verify by *value*, not by presence,
   before deleting the old copy.
