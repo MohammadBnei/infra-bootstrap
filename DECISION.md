@@ -55,7 +55,7 @@ updated.
   time, per the schema in `docs/secrets.md`. Never committed to
   this repo.
 - **Shared secrets between apps:** come from the dedicated
-  `platform-commons` Infisical project via `common-app-chart`'s
+  `platform-commons-76pb` Infisical project via `common-app-chart`'s
   `sharedSecrets.keys`, never by copying a value into a second per-app
   project — [ADR-0049](docs/adr/0049-shared-commons-secrets-in-common-app-chart.md).
   The source project is a **literal in the template, never a value**: app
@@ -63,7 +63,9 @@ updated.
   values-driven `projectSlug` would let any of them read the root project into
   a pod with no PR here. The key list is env hygiene, **not** an access
   boundary — `template.data` filters the response, it does not narrow the
-  identity's grant.
+  identity's grant. That project also holds the **zot push credential** for CI, so
+  any app opting in can read it — an accepted risk, recorded in ADR-0049's
+  Consequences, not an oversight.
 - **DNS authority:** Pi-hole on Pi 4 (`.55`) is authoritative for
   `bnei.lan`; `bnei.dev` is external, hosted at **Cloudflare** (registration
   stays at Squarespace) with **wildcard A records** — `*.bnei.dev`,
