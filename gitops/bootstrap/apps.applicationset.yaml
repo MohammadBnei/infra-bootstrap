@@ -125,7 +125,7 @@ spec:
         # networkPolicy support, so it is declared in the app's own extraManifests. The
         # first version of this entry claimed the gate without that being true anywhere
         # — see the #243 revert.
-        hostname: journal.bnei.dev
+        hostname: has-journal.bnei.dev
   template:
     metadata:
       name: '{{.name}}'
