@@ -59,7 +59,16 @@
       - name: wedding-2026
         url: https://github.com/MohammadBnei/wedding-2026
       - name: ukubi-stt
-        url: https://github.com/MohammadBnei/ukubi-stt    # NOT `ukubi` — that label belongs to the in-cluster runner holding a
+        url: https://github.com/MohammadBnei/ukubi-stt
+      # Re-declared after the #243 revert. That revert removed this entry because
+      # has-journal had no .github/workflows at the time, so a runner registered
+      # for it could never receive a job. It has build.yml now. The instance was
+      # never actually removed from the box — /opt/actions-runner-has-journal is
+      # registered and its service is running — so this entry is the config
+      # catching up with reality, not a new install. A re-run will find .runner
+      # present and leave it alone.
+      - name: has-journal
+        url: https://github.com/MohammadBnei/has-journal    # NOT `ukubi` — that label belongs to the in-cluster runner holding a
     # ServiceAccount token with `create jobs` in vos/vos-dev. Builds must
     # not land there and cluster jobs must not land here.
     #

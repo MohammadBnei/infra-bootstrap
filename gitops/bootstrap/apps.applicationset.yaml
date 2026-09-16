@@ -110,6 +110,22 @@ spec:
         # wildcard — same mechanism as fleet/s3/*.ente. See docs/dns/bnei.dev.zone.
         hostname: stt.bnei.dev
 
+      - name: has-journal
+        namespace: has-journal
+        syncWave: "10"
+        repoURL: https://github.com/MohammadBnei/has-journal.git
+        valuesPath: [helm/values.yaml]
+        # master, NOT main — every other entry here says main, and this one genuinely
+        # does not. A wrong branch is what silently pointed vos-monolith at dev.
+        targetRevision: master
+        # The journal viewer. Gated by the shared authentik-forwardauth middleware AND a
+        # NetworkPolicy, because the middleware only covers traffic arriving through
+        # Traefik and everything this app serves is internal (ticket keys, internal
+        # hostnames). Note where the NetworkPolicy comes from: common-app-chart has no
+        # networkPolicy support, so it is declared in the app's own extraManifests. The
+        # first version of this entry claimed the gate without that being true anywhere
+        # — see the #243 revert.
+        hostname: journal.bnei.dev
   template:
     metadata:
       name: '{{.name}}'
