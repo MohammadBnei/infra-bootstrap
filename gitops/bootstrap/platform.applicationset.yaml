@@ -209,9 +209,35 @@ spec:
         syncOptions:
         - CreateNamespace=true
         - ServerSideApply=true
+        # Required for ignoreDifferences below to affect what gets APPLIED, not
+        # just what the UI reports. Without it ArgoCD still pushes the ignored
+        # field and the pod template churns anyway.
+        - RespectIgnoreDifferences=true
         retry:
           limit: 5
           backoff:
             duration: 5s
             factor: 2
             maxDuration: 3m
+      # The Infisical chart stamps a render timestamp into `updatedAt` on both the
+      # Deployment and its pod template. Every render therefore produces a
+      # different pod spec, so with automated+selfHeal ANY commit to this repo —
+      # including a docs-only one, verified 2026-09-16 with #245 — rolls the
+      # Infisical backend. That is the secrets engine every other app's
+      # InfisicalSecret depends on, and it had reached deployment revision 301 of
+      # pure churn (a fresh ReplicaSet most days, plus one per commit).
+      #
+      # Scoped to this one Deployment by name rather than a blanket
+      # apps/Deployment rule: `updatedAt` is normally a DELIBERATE restart
+      # trigger (the checksum-annotation idiom), so ignoring it everywhere would
+      # suppress intended rollouts. Verified cluster-wide that nothing else sets
+      # it. Harmless on the other elements of this list — the name simply never
+      # matches.
+      ignoreDifferences:
+      - group: apps
+        kind: Deployment
+        name: platform-infisical-backend
+        namespace: infisical
+        jsonPointers:
+        - /metadata/annotations/updatedAt
+        - /spec/template/metadata/annotations/updatedAt
