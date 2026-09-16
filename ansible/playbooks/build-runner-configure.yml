@@ -68,7 +68,12 @@
       # catching up with reality, not a new install. A re-run will find .runner
       # present and leave it alone.
       - name: has-journal
-        url: https://github.com/MohammadBnei/has-journal    # NOT `ukubi` — that label belongs to the in-cluster runner holding a
+        url: https://github.com/MohammadBnei/has-journal
+      # Migrated off Docker Hub onto this box so its image lands in the local registry like
+      # every other app's. Needs adding to the ACCESS_TOKEN PAT's repo list first, or the
+      # registration-token call 403s in a way that reads like a bad token.
+      - name: dream-analyst
+        url: https://github.com/MohammadBnei/dream-analyst    # NOT `ukubi` — that label belongs to the in-cluster runner holding a
     # ServiceAccount token with `create jobs` in vos/vos-dev. Builds must
     # not land there and cluster jobs must not land here.
     #
