@@ -111,7 +111,7 @@ anything app-specific shadows it.
   credential.** `platform-commons-76pb` holds both `REDIS_URL` and the zot
   push user/password, and `universal-auth-credentials` is granted on the whole
   project. Because the key list is not an access boundary (Decision 2), an app
-  repo can name `ZOT_PUSH_PASSWORD` in its own `sharedSecrets.keys` and receive
+  repo can name `REGISTRY_PASSWORD` in its own `sharedSecrets.keys` and receive
   it. An app pod that can push to the registry can overwrite `latest` for any
   image, and every node pulls from that registry anonymously with no signature
   verification — so this is an app-pod-to-cluster-wide-code-execution path.
