@@ -54,6 +54,22 @@ client has no secret, so its blueprint is a plain ConfigMap and all of §1 below
 is skipped — see "Public clients" at the end of this file before copying the
 template for a mobile or browser app.
 
+### Every application needs a policy binding now
+
+`core_default_app_access` is set to `false` on this cluster (ADR-0050), so an
+application with **no policy binding denies everyone** — it no longer falls
+through to "any authenticated user". Adding a provider is therefore two
+blueprints, not one: the provider/application, and a binding to a group. Model
+it on `authentik-blueprint-platform-apps-policy.yaml` (one group binding) or
+`authentik-blueprint-wird-policy.yaml` (a group binding plus an expression
+policy, which also needs `policy_engine_mode: all` on the application, since the
+default `MODE_ANY` makes passing either one enough).
+
+That flag is not a blueprint and not an env var — `Tenant` is
+`InternallyManagedMixin`, and `Flag.get()` never consults config. It is asserted
+by `gitops/bootstrap/authentik-flags-job.yaml`, a PostSync hook. A Postgres
+restore reverts it silently; `docs/runbook-authentik-identity.md` has the check.
+
 ## Do this
 
 ### 1. Generate and store the credentials
