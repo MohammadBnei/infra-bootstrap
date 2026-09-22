@@ -15,7 +15,7 @@ Custom playbooks for things kubespray and pigsty don't cover:
 | `playbooks/k8s-node-prereqs.yml` | K8s-node prereqs kubespray does *not* cover — currently just `nfs-common`, required for Longhorn RWX volumes |
 | `playbooks/garage-configure.yml` | Install/configure Garage on the bare LXC terraform/garage.tf creates — drafted, see below |
 | `playbooks/nfs-configure.yml` | Format + export NFS on the bare VM terraform/nfs.tf creates — two exports since ADR-0036, see below |
-| `playbooks/k9s-dashboard-configure.yml` | Install kubectl/k9s + write a cluster-admin kubeconfig on the bare k9s-dashboard LXC terraform/k9s-dashboard.tf creates — drafted, see below |
+| `playbooks/k9s-dashboard-configure.yml` | Install kubectl/k9s + write a cluster-admin kubeconfig on the bare k9s-dashboard LXC terraform/k9s-dashboard.tf creates — drafted, see below. Also carries the **opt-in operational-hub role** (`-e k9s_hub=true`): repo checkout, pinned ansible venv, infisical/helm, so ops can be driven from that box when off the LAN — see `docs/runbook-k9s-ops-hub.md` |
 | `playbooks/build-runner-configure.yml` | Install podman/buildah + register **one GitHub Actions runner instance per build repo** on the bare LXC terraform/build-runner.tf creates (ADR-0034) — an LXC rather than a pod because buildah cannot extract image layers unprivileged. Config-driven via `build_runner_repos` (same shape as `garage-configure.yml`'s `garage_buckets`); adding a repo means adding an entry and re-running, plus widening the `ACCESS_TOKEN` PAT first. See the `build-runner-ops` skill |
 | `playbooks/pihole-configure.yml` | Install/configure Pi-hole on the Pi 4, authoritative for `bnei.lan` — drafted, see below |
 | `playbooks/self-drain-configure.yml` | Configure k8s-cp-01/k8s-worker-01 to drain + uncordon themselves around their own graceful reboot — drafted and run, see below |
@@ -273,6 +273,17 @@ Safe to re-run: the format step is `blkid`-guarded, the mount/exports are
 declarative, `exportfs -ra` just re-reads current state.
 
 ## `playbooks/k9s-dashboard-configure.yml`
+
+> **Operational hub (`-e k9s_hub=true`).** Beyond the dashboard role, this
+> playbook can turn the LXC into the box ops are *driven from* — `/opt/infra-bootstrap`,
+> an `ansible-core` 2.18.x venv at the exact path `run-ukubi-ops/driver.sh`
+> expects, plus `infisical` and `helm`. Off by default, because it puts a
+> standing Infisical token on a host whose root SSH is port-forwarded to the
+> internet. The token is **read-only and project-scoped**, minted on the
+> workstation and copied in — the playbook never creates it, since a playbook
+> able to mint its own credential would need a broader one to do it with.
+> Procedure, rotation and the daily run pattern: `docs/runbook-k9s-ops-hub.md`.
+
 
 Installs `kubectl` + `k9s` and writes a cluster-admin-scoped kubeconfig on
 the bare `k9s-dashboard` LXC `terraform/k9s-dashboard.tf` creates — a

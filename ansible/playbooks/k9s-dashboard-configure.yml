@@ -257,12 +257,141 @@
                 token: "{{ k9s_token }}"
 
     # -------------------------------------------------------------------
+    # 4. Operational hub (opt-in: -e k9s_hub=true)
+    # -------------------------------------------------------------------
+    # This LXC is the only host reachable from outside the LAN (root SSH is
+    # port-forwarded), so it doubles as the box ops are driven FROM when the
+    # operator is away. That is a real departure from README.md's "you run the
+    # tool on your Mac", and it is opt-in rather than always-on because it puts
+    # a standing Infisical token on an internet-facing host.
+    #
+    # The Infisical credential is NOT created here. It is a project-scoped,
+    # READ-ONLY service token minted from the workstation and copied in — see
+    # docs/runbook-k9s-ops-hub.md. Read-only is sufficient because runs only
+    # fetch (SSH keys, PGBACKREST_S3_*); minting and rotating secrets stays on
+    # the workstation. A playbook that could mint its own credential would need
+    # a broader one to do it with, which defeats the point.
+    - name: Operational hub tooling
+      when: k9s_hub | default(false) | bool
+      block:
+        - name: Install hub packages
+          ansible.builtin.apt:
+            name:
+              - git
+              - curl
+              - jq
+              - python3-venv
+              # psql 17 against a PG 18 server: fine for the checks we run
+              # here. trixie has no 18 client without adding pgdg.
+              - postgresql-client
+            state: present
+            update_cache: true
+
+        - name: Clone infra-bootstrap
+          # Public repo, so HTTPS and no deploy key. Submodules are NOT
+          # initialised: k8s-cluster and agent-fleet are git@ URLs needing a
+          # key, and nothing in an ops run reads them. kubespray is only needed
+          # if a kubespray run is ever driven from here.
+          ansible.builtin.git:
+            repo: https://github.com/MohammadBnei/infra-bootstrap.git
+            dest: /opt/infra-bootstrap
+            version: main
+            recursive: false
+            update: true
+
+        - name: Create the ansible venv
+          # The path is not arbitrary: .claude/skills/run-ukubi-ops/driver.sh
+          # looks for exactly $REPO/kubespray-venv/bin/ansible-playbook and
+          # asserts ansible-core 2.18.*, which is what kubespray v2.31.0
+          # requires. Debian trixie's own ansible is 12.x / core 2.19 and would
+          # fail kubespray's version assertion, so apt is not an option here.
+          ansible.builtin.pip:
+            name:
+              - ansible==11.13.0
+              - cryptography==46.0.7
+              - netaddr==1.3.0
+              - jmespath==1.1.0
+            virtualenv: /opt/infra-bootstrap/kubespray-venv
+            virtualenv_command: python3 -m venv
+
+        - name: Look up the latest infisical CLI release
+          # .deb from the release rather than the vendor's curl|bash installer,
+          # so what runs as root is auditable. dpkg puts it at /usr/bin/
+          # infisical, which is the path bin/inf-env.sh hardcodes.
+          ansible.builtin.uri:
+            url: https://api.github.com/repos/Infisical/cli/releases/latest
+            return_content: true
+          register: infisical_release
+          changed_when: false
+
+        - name: Install infisical CLI
+          vars:
+            infisical_ver: "{{ infisical_release.json.tag_name | regex_replace('^v', '') }}"
+          ansible.builtin.apt:
+            deb: "https://github.com/Infisical/cli/releases/download/{{ infisical_release.json.tag_name }}/infisical_{{ infisical_ver }}_linux_amd64.deb"
+
+        - name: Look up the latest helm release
+          ansible.builtin.uri:
+            url: https://api.github.com/repos/helm/helm/releases/latest
+            return_content: true
+          register: helm_release
+          changed_when: false
+
+        - name: Install helm
+          ansible.builtin.unarchive:
+            src: "https://get.helm.sh/helm-{{ helm_release.json.tag_name }}-linux-amd64.tar.gz"
+            dest: /usr/local/bin
+            remote_src: true
+            extra_opts: [--strip-components=1]
+            include: [linux-amd64/helm]
+            mode: "0755"
+            creates: /usr/local/bin/helm
+
+        - name: Create the Infisical credential directory
+          ansible.builtin.file:
+            path: /root/.hermes/cache
+            state: directory
+            mode: "0700"
+
+        - name: Write the Infisical env shim
+          # Sources the token rather than containing it. The token file itself
+          # is copied in out-of-band and is deliberately not managed here.
+          ansible.builtin.copy:
+            dest: /root/.hermes/cache/inf-env.sh
+            mode: "0600"
+            content: |
+              # Infisical auth for the k9s operational hub.
+              #
+              # A project-scoped, READ-ONLY service token for
+              # infra-bootstrap-1-ge1 / dev — deliberately NOT the org-wide
+              # universal-auth identity bin/inf-env.sh uses, because this box
+              # is reachable from the internet.
+              #
+              # Rotation and the reason for the scope: docs/runbook-k9s-ops-hub.md
+              export INFISICAL_TOKEN="$(cat /root/.hermes/cache/inf-token)"
+              export INFISICAL_API_URL="https://infisical.bnei.dev/api"
+              export INFISICAL_DOMAIN="https://infisical.bnei.dev"
+
+        - name: Check whether the token has been placed
+          ansible.builtin.stat:
+            path: /root/.hermes/cache/inf-token
+          register: inf_token
+
+        - name: Warn if the token is missing
+          when: not inf_token.stat.exists
+          ansible.builtin.debug:
+            msg: >-
+              /root/.hermes/cache/inf-token is absent — the hub is installed but
+              cannot read secrets. Mint and copy one per docs/runbook-k9s-ops-hub.md.
+
+    # -------------------------------------------------------------------
     # Done
     # -------------------------------------------------------------------
     - name: K9s-dashboard configured
       ansible.builtin.debug:
         msg:
           - "kubectl + k9s installed, kubeconfig written (cluster-admin, ukubi-cluster)."
+          - "{{ 'Operational hub installed at /opt/infra-bootstrap.' if (k9s_hub | default(false) | bool) else 'Hub tooling skipped (pass -e k9s_hub=true to install).' }}"
           - ""
           - "Verify:"
           - "  ssh -i ~/.ssh/id_k9s_dashboard root@{{ ansible_host }}"
