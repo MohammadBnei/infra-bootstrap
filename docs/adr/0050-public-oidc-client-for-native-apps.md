@@ -139,6 +139,19 @@ point where it stops describing reality.
     signup, which a consumer-facing app cannot carry; **git-committed
     membership** is what this replaces.
 
+11. **Open enrollment forces `argocd` and `grafana` to get access bindings.**
+    Both applications had none, and `AppAccessWithoutBindings` defaults to
+    `True` — which was safe only while the directory held hand-made operator
+    accounts. Decision 10 makes the directory public, so without a binding every
+    Wird signup would also receive ArgoCD `role:readonly` (its `policy.default`)
+    and Grafana `Viewer` (the fall-through in its `role_attribute_path`): every
+    Application and its manifests, every dashboard and Loki log panel. Those
+    role mappings decide what an authenticated user may do, never who may
+    authenticate. `gitops/bootstrap/authentik-blueprint-platform-apps-policy.yaml`
+    binds both to `platform-admins`, and it must be applied together with the
+    enrollment blueprint, not after it. `fleet` and `e2e-previews` were already
+    bound; these two were the last unbound applications.
+
 7. **`refresh_token_threshold` is set explicitly.** It defaults to `seconds=0`,
    which `views/token.py` treats as "always renew": a new refresh token on every
    refresh, with the old one marked `revoked = True`. One lost response on a

@@ -84,6 +84,11 @@ blueprints:
   # Self-service enrollment into wird-users — the only way a Wird user is
   # created, now that the group carries no git-managed membership list.
   - authentik-blueprint-wird-enrollment
+  # Binds argocd and grafana to platform-admins. Required BY the line above:
+  # those two applications carried no binding, which only ever worked because
+  # the directory held operators alone. Enrollment makes signup public, and
+  # AppAccessWithoutBindings defaults to True.
+  - authentik-blueprint-platform-apps-policy
   secrets:
   - authentik-blueprint-grafana
   - authentik-blueprint-argocd

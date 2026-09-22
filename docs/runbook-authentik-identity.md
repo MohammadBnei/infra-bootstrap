@@ -147,6 +147,7 @@ Current files:
 | `gitops/bootstrap/authentik-blueprint-wird.yaml` | Wird's provider + application — the cluster's first **public** client, so a plain ConfigMap with the `client_id` committed (ADR-0050) |
 | `gitops/bootstrap/authentik-blueprint-wird-policy.yaml` | the `wird-users` group, the `wird-require-pkce` expression policy, and both bindings (plain ConfigMap) |
 | `gitops/bootstrap/authentik-blueprint-wird-enrollment.yaml` | self-service enrollment into `wird-users` — prompt, user write, email verification, login. Needs `AUTHENTIK_EMAIL__*` in `authentik-config` or it dead-ends silently (ADR-0050) |
+| `gitops/bootstrap/authentik-blueprint-platform-apps-policy.yaml` | binds `argocd` and `grafana` to `platform-admins` (plain ConfigMap). Required by the enrollment flow above: those two relied on `AppAccessWithoutBindings` (default True), which was only ever safe while the directory held operators alone |
 
 The **same credential pair is consumed twice**, from opposite ends of the
 exchange: authentik registers it on the provider via the blueprint, the app
