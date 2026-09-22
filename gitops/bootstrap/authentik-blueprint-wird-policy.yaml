@@ -1,0 +1,109 @@
+# The two gates that make Wird's PUBLIC client safe (ADR-0050): who may use the
+# application at all, and whether the request used PKCE.
+#
+# DELIBERATELY A SEPARATE FILE from authentik-blueprint-wird.yaml, for the
+# reason authentik-blueprint-fleet-policy.yaml sets out at length: a blueprint
+# that fails to apply logs and carries on. Split this way, an unverified model
+# shape costs the extra layer and nothing else — the provider still exists and
+# login still works. Folded into the provider's file, the same mistake could
+# take the whole application down and read as a total outage.
+#
+# The shapes of authentik_policies_expression.expressionpolicy and
+# authentik_policies.policybinding have NOT been verified against the running
+# 2026.8.0 instance. Confirm they applied by reading the database rather than
+# the log:
+#   psql -d authentik -tAc 'SELECT * FROM authentik_policies_policybinding'
+#   psql -d authentik -tAc 'SELECT name FROM authentik_policies_expression_expressionpolicy'
+#
+# BOTH bindings only mean something because authentik-blueprint-wird.yaml sets
+# `policy_engine_mode: all` on the application. The default is MODE_ANY, under
+# which passing either binding is enough.
+#
+# A plain ConfigMap: no credential here, so nothing to interpolate and no
+# Infisical operator in the propagation chain.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: authentik-blueprint-wird-policy
+  namespace: authentik
+data:
+  wird-policy.yaml: |
+    version: 1
+    metadata:
+      name: wird-policy
+      labels:
+        blueprints.goauthentik.io/instantiate: "true"
+    entries:
+      # `wird-users`, NOT platform-admins. platform-admins means "operator of
+      # this cluster" and is read by both ArgoCD and Grafana, so putting a Wird
+      # user in it would hand them cluster admin. Two separate powers, two
+      # separate groups — the same reasoning authentik-blueprint-groups.yaml
+      # gives for not reusing authentik's built-in `authentik Admins`.
+      #
+      # This file owns the group OUTRIGHT — creation, membership and binding.
+      # authentik-blueprint-groups.yaml stays about cluster operators only.
+      # Declaring it here rather than there is what lets the binding below use
+      # !KeyOf instead of !Find: !Find on a group another blueprint has not
+      # applied yet resolves to nothing, and a binding that resolves to nothing
+      # is a gate that is not there.
+      - model: authentik_core.group
+        id: wird-users
+        identifiers:
+          name: wird-users
+        attrs:
+          name: wird-users
+          # REPLACED, not merged, on every apply — same trap as
+          # platform-admins. This list is the whole membership; removing a line
+          # removes that person's access to Wird.
+          #
+          # `!Find` resolves an existing user's primary key. It does not create
+          # the account, which is deliberate: declaring an authentik_core.user
+          # here would put this file in charge of the user itself.
+          users:
+            - !Find [authentik_core.user, [username, akadmin]]
+      # Without a binding, authentik's AppAccessWithoutBindings default (True,
+      # "applications with no policies bound can be accessed by any user") means
+      # every directory user gets a Wird account. Authenticated but not
+      # authorized, the exact failure authentik-blueprint-previews-policy.yaml
+      # names.
+      - model: authentik_policies.policybinding
+        identifiers:
+          target: !Find [authentik_core.application, [slug, wird]]
+          group: !KeyOf wird-users
+          order: 0
+        attrs:
+          enabled: true
+      # PKCE enforcement. OAuth2Provider has no pkce_required field on 2026.8,
+      # and token/authorization_code.py verifies a code_verifier only when the
+      # authorization code carried a challenge — so without this, PKCE is a
+      # promise the client makes to itself. A public client's client_id ships in
+      # the APK, and the provider uses the implicit-consent authorization flow,
+      # so an app that registers dev.bnei.wird:// on the device could otherwise
+      # obtain a code with no user-visible interaction at all.
+      #
+      # This is enforceable only because views/authorize.py's
+      # modify_policy_request() puts oauth_code_challenge and
+      # oauth_code_challenge_method into the policy request context.
+      - model: authentik_policies_expression.expressionpolicy
+        id: wird-require-pkce
+        identifiers:
+          name: wird-require-pkce
+        attrs:
+          name: wird-require-pkce
+          execution_logging: true
+          expression: |
+            # Reject any authorization request that is not PKCE with S256.
+            # `plain` is the OAuth default when code_challenge_method is absent,
+            # so checking the method alone is not enough — an attacker who can
+            # read the challenge can replay it.
+            if request.context.get("oauth_code_challenge_method") != "S256":
+                ak_message("This application requires PKCE with S256.")
+                return False
+            return bool(request.context.get("oauth_code_challenge"))
+      - model: authentik_policies.policybinding
+        identifiers:
+          target: !Find [authentik_core.application, [slug, wird]]
+          policy: !KeyOf wird-require-pkce
+          order: 1
+        attrs:
+          enabled: true

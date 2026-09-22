@@ -74,6 +74,13 @@ blueprints:
   # a Secret because a proxy provider generates its own OAuth credentials; see
   # that file's header for why the InfisicalSecret it used to be was pure cost.
   - authentik-blueprint-forwardauth
+  # Wird is the cluster's first PUBLIC OIDC client (ADR-0050), so its provider
+  # blueprint carries no client secret and is a ConfigMap rather than an
+  # InfisicalSecret — DECISION.md's rule, applied, not bent. Its access and
+  # PKCE bindings are split into their own file for the same isolation reason
+  # as the fleet policy above.
+  - authentik-blueprint-wird
+  - authentik-blueprint-wird-policy
   secrets:
   - authentik-blueprint-grafana
   - authentik-blueprint-argocd

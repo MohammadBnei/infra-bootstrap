@@ -181,9 +181,16 @@ updated.
   authentik, so routing its only login through authentik would make an
   authentik outage recoverable by raw `kubectl` alone. mTLS is structurally
   unavailable (Cloudflare terminates TLS), which is why the critical tier is
-  passkeys. `/authentik-oidc` is the procedure. See
-  [ADR-0039](docs/adr/0039-authentik-identity-layer.md) and
-  [ADR-0041](docs/adr/0041-fleet-native-oidc-not-forwardauth.md).
+  passkeys. **OIDC clients are confidential — except native and browser
+  clients, which are public with PKCE enforced by an authentik expression
+  policy** (ADR-0050, Wird): a secret inside an APK or a JS bundle is not a
+  secret, there is no `pkce_required` field to set, and the application must
+  carry `policy_engine_mode: all` or its bindings are decorative. A public
+  client's blueprint is a plain ConfigMap and its `client_id` is committed,
+  since there is nothing to template. `/authentik-oidc` is the procedure. See
+  [ADR-0039](docs/adr/0039-authentik-identity-layer.md),
+  [ADR-0041](docs/adr/0041-fleet-native-oidc-not-forwardauth.md) and
+  [ADR-0050](docs/adr/0050-public-oidc-client-for-native-apps.md).
 - **Certificate renewal is one token, so it gets an alarm.** Since ADR-0038
   every host in both zones renews through a single `CF_DNS_API_TOKEN`; its
   revocation or expiry stops renewal everywhere with no error anyone sees, on a

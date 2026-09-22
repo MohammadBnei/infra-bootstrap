@@ -133,6 +133,7 @@ delivery shapes, and the choice between them is not cosmetic:
 |---|---|---|
 | `InfisicalSecret` whose template *is* the blueprint | anything embedding an OAuth2 client secret | the blueprint's structure stays in git — reviewable, diffable — while only the credential values are interpolated by the operator. A ConfigMap would put the client secret in plaintext in git |
 | plain `ConfigMap` | group membership | carries no credential, so there is nothing to interpolate and nothing to hide — and it removes the Infisical operator from the propagation chain entirely (§9 step 2 does not apply) |
+| plain `ConfigMap` | group membership, policy bindings, **and the provider itself when the client is public** | carries no credential. A public client (ADR-0050) has no secret to hide and its `client_id` ships inside the app binary, so the whole blueprint is a ConfigMap — same shortened propagation chain |
 
 Current files:
 
@@ -143,6 +144,8 @@ Current files:
 | `gitops/bootstrap/authentik-blueprint-groups.yaml` | the `platform-admins` group (plain ConfigMap) |
 | `gitops/bootstrap/grafana-oidc-secret.yaml` | the client pair materialised into `monitoring` |
 | `gitops/bootstrap/argocd-oidc-secret.yaml` | the client pair materialised into `argocd` — see §7, this one is not symmetric with Grafana's |
+| `gitops/bootstrap/authentik-blueprint-wird.yaml` | Wird's provider + application — the cluster's first **public** client, so a plain ConfigMap with the `client_id` committed (ADR-0050) |
+| `gitops/bootstrap/authentik-blueprint-wird-policy.yaml` | the `wird-users` group, the `wird-require-pkce` expression policy, and both bindings (plain ConfigMap) |
 
 The **same credential pair is consumed twice**, from opposite ends of the
 exchange: authentik registers it on the provider via the blueprint, the app

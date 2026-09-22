@@ -49,6 +49,11 @@ Using an `InfisicalSecret` template keeps the blueprint's **structure** in git �
 reviewable, diffable — while only the credential values are interpolated by the
 operator.
 
+That is the **confidential** case, which is everything server-side. A public
+client has no secret, so its blueprint is a plain ConfigMap and all of §1 below
+is skipped — see "Public clients" at the end of this file before copying the
+template for a mobile or browser app.
+
 ## Do this
 
 ### 1. Generate and store the credentials
@@ -492,3 +497,65 @@ it does not recur.
 
 Finally, drive a real login. "The provider exists" and "a user can log in" are
 different claims.
+
+
+## Public clients (native and browser apps) — ADR-0050
+
+A Flutter binary, a React bundle and a CLI cannot hold a secret: anyone who
+installs the app can read it out. Those get `client_type: public` and
+authorization code **with PKCE**. Server-side consumers stay confidential —
+this is an exception with a test, not a new default. The worked example is
+`gitops/bootstrap/authentik-blueprint-wird.yaml` plus
+`authentik-blueprint-wird-policy.yaml`.
+
+What changes from the procedure above:
+
+- **Step 1 disappears.** No client secret to generate, no Infisical rows. The
+  `client_id` is a literal in the blueprint — it ships inside the APK anyway.
+  Add a line to `docs/secrets.md` saying why there is no `<APP>_OIDC_CLIENT_ID`
+  row, or the next audit reads its absence as a gap.
+- **The blueprint is a plain ConfigMap**, listed under `blueprints.configMaps`,
+  not `blueprints.secrets`. Nothing to interpolate means no Infisical operator
+  in the propagation chain — the four-step chain below becomes three.
+- **Omit `client_secret` entirely.** `OAuth2Provider.client_secret` is
+  `CharField(blank=True, default=generate_client_secret)` and its serializer
+  field is `required=False`, so authentik generates one and never reads it:
+  `token/base.py` runs the `compare_digest` check only when
+  `client_type == ClientType.CONFIDENTIAL`. An empty string works too; omitting
+  is cleaner.
+
+Four traps, each of which fails **silently** — the provider still works, it
+just does not do what you think:
+
+1. **There is no `pkce_required` field.** `token/authorization_code.py` verifies
+   a `code_verifier` only when the code already carried a challenge, so a client
+   that omits `code_challenge` is never checked. Enforce it with an
+   `authentik_policies_expression.expressionpolicy` bound to the application,
+   reading `request.context["oauth_code_challenge_method"]` — `views/authorize.py`'s
+   `modify_policy_request()` is what puts it there. Require `S256`; the OAuth
+   default when the method is absent is `plain`.
+2. **`policy_engine_mode` defaults to `MODE_ANY`.** Bind two policies (access +
+   PKCE) at the default and passing *either* grants access. Set
+   `policy_engine_mode: all` on the `authentik_core.application`.
+3. **`refresh_token_threshold` defaults to `seconds=0`** — rotate on every
+   refresh, old token `revoked = True`. On mobile, one dropped response is a
+   forced re-login plus a `SUSPICIOUS_REQUEST` event. Set it (`days=3`), and set
+   `refresh_token_validity` if 30 days is not the session length you mean.
+4. **`offline_access` must be in `property_mappings`** or no refresh token is
+   ever issued, whatever `grant_types` says. Managed slug:
+   `goauthentik.io/providers/oauth2/scope-offline_access`.
+
+And two that are not specific to public clients but bite hardest here:
+
+- **`sub_mode`: leave it at the default `hashed_user_id`** for any app that
+  stores rows against `sub`. Grafana and fleet use `user_email` because they key
+  on the address; `User.email` is mutable and not unique.
+- **The `signing_key` is shared.** Every provider here uses the same
+  `authentik Self-signed Certificate`, served at every per-app JWKS URL — so a
+  Grafana token verifies against your app's JWKS. Validating "against JWKS" is
+  not authentication: the app must check `aud` **and** `iss`.
+
+Verify the PKCE gate with the negative test that actually proves it: call
+`/authorize` with **no `code_challenge` at all** and expect a denial. Omitting
+only `code_verifier` at the token step proves nothing — that request is rejected
+for two different reasons, and if no challenge was sent it simply succeeds.

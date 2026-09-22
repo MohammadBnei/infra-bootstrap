@@ -60,3 +60,4 @@ ADR-000N` (replaced by a later decision).
 | [0047](0047-persian-speech-to-text.md) | Persian speech-to-text — a third model, on the CPU, and Arabic that was already working | Accepted |
 | [0048](0048-chunk-boundary-word-splitting.md) | A word split across a chunk boundary was a client join bug, not the model — and the correction model we did not build | Accepted |
 | [0049](0049-shared-commons-secrets-in-common-app-chart.md) | Shared commons secrets via a dedicated `platform-commons` Infisical project | Accepted |
+| [0050](0050-public-oidc-client-for-native-apps.md) | Public OIDC clients for native/browser apps, with PKCE enforced by an authentik policy (Wird) | Accepted |
