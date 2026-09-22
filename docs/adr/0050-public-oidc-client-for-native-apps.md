@@ -115,7 +115,20 @@ point where it stops describing reality.
     makes **SMTP a hard dependency of this ADR**: `AUTHENTIK_EMAIL__*` is now
     part of `authentik-config`, and without it authentik falls back to
     `localhost:25` and silently drops every message — enrollment, password
-    recovery and email MFA alike. A password policy (12 characters minimum, plus
+    recovery and email MFA alike.
+
+    The credential already existed, in the **`ente-uovi`** project (SMTP2GO,
+    `mail-eu.smtp2go.com:587`, from `server@bnei.dev`), with a third partial
+    copy outside Infisical in the local `register-repos.env` that installed
+    Infisical itself. It was **copied into the root project rather than moved to
+    `platform-commons-76pb`**, knowingly against ADR-0049's general rule: that
+    project is readable by any app opting into `sharedSecrets.keys` — its own
+    accepted risk — and a relay credential that can send mail as `bnei.dev` is
+    not something to hand every user app. The price is a credential in two
+    places that must rotate together; the key names were kept byte-identical
+    across projects (`SMTP_EMAIL`, not `SMTP_FROM`) so that a rotation is a
+    find-and-replace rather than a translation. Consolidating ente onto one copy
+    is its own change. A password policy (12 characters minimum, plus
     a Have I Been Pwned check with `hibp_allowed_count: 0`) is bound to the
     prompt stage for the same reason.
 
