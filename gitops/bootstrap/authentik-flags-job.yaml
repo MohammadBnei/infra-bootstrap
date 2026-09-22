@@ -1,0 +1,80 @@
+# Asserts `core_default_app_access = false` on every sync of the bootstrap
+# Application (ADR-0050 Decision 12).
+#
+# WHY A JOB AND NOT A BLUEPRINT. The flag lives on `authentik_tenants.tenant`,
+# and `Tenant` is declared `InternallyManagedMixin, TenantMixin,
+# SerializerModel` — the blueprint importer refuses any `InternallyManagedMixin`
+# subclass, so no blueprint entry can target it.
+#
+# WHY NOT AN ENV VAR. `Flag.get()` (authentik/tenants/flags.py) reads
+# `tenant.flags` and falls back to the hardcoded class default. There is no
+# `CONFIG.get(...)` on that path, so the chart's AUTHENTIK_* → config mapping
+# cannot reach it, and `ensure_default_tenant()` creates the tenant with
+# `{"name": "Default", "ready": True}` and no flags. The value exists only as a
+# Postgres row.
+#
+# WHAT THE FLAG DOES. `AppAccessWithoutBindings` defaults to True:
+# "Applications with no policies bound can be accessed by any user." Since
+# Wird's self-service enrollment, that default means anyone who signs up
+# reaches any application whose binding is missing — and a binding goes missing
+# quietly: `!Find` returns None rather than failing, writing a policybinding row
+# with group_id = NULL, which PolicyEngine.build() skips because it is neither
+# dynamic nor static, leaving _combine_results to fall through to empty_result.
+# At false, that same failure denies instead.
+#
+# IDEMPOTENT. `ak set_flag` is `tenant.flags[key] = value; tenant.save()` — it
+# writes one key and leaves the rest of the tenant's flags alone. Running it on
+# every sync is free.
+#
+# WHAT THIS DOES NOT COVER: a Postgres restore or a rebuilt tenant, neither of
+# which triggers an ArgoCD sync. The flag silently returns to True and every
+# gate fails open again with no error anywhere. That path stays a runbook step —
+# see docs/runbook-authentik-identity.md, and treat it like the cert-expiry
+# alarm: load-bearing, and invisible when it goes.
+#
+# ON A FRESH CLUSTER the image handles half of this itself. `args` whose first
+# element is not server/worker/allinone/healthcheck falls through the `ak`
+# dispatcher (lifecycle/ak) to `wait_for_db; exec python -m manage "$@"`, so the
+# Job blocks on Postgres rather than crash-looping against it. What it does NOT
+# wait for is migrations and the default tenant, which the authentik chart
+# creates from a separate ArgoCD Application with no ordering against this one —
+# hence the backoffLimit below rather than failing the sync on first contact.
+#
+# THE IMAGE TAG MUST MOVE WITH THE CHART. `chartRevision` in
+# gitops/bootstrap/platform.applicationset.yaml pins authentik 2026.8.0, and the
+# chart's appVersion is what the server runs. A stale tag here means running an
+# old `ak` against a newer schema.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: authentik-set-flags
+  namespace: authentik
+  annotations:
+    argocd.argoproj.io/hook: PostSync
+    argocd.argoproj.io/hook-delete-policy: BeforeHookCreation
+spec:
+  # Roughly 20 minutes of exponential backoff, covering the migrations window
+  # above. Not 0 like common-app-chart's hooks: those run against a cluster that
+  # is already up, this one may be the first thing to touch a new database.
+  backoffLimit: 10
+  template:
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: set-flags
+          image: ghcr.io/goauthentik/server:2026.8.0
+          # No `command:` on purpose — the chart invokes this image the same
+          # way (`args: [worker]`), so the ENTRYPOINT is the `ak` dispatcher.
+          args: ["set_flag", "core_default_app_access", "false"]
+          # The same Secret the server and worker read: Postgres coordinates and
+          # AUTHENTIK_SECRET_KEY, which `ak` needs to reach the tenant row. No
+          # new credential, and nothing here is Wird-specific.
+          envFrom:
+            - secretRef:
+                name: authentik-config
+          resources:
+            requests:
+              cpu: 50m
+              memory: 256Mi
+            limits:
+              memory: 512Mi

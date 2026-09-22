@@ -191,7 +191,9 @@ updated.
   makes "any directory user" mean "anyone", so **every application now carries a
   policy binding** and `core_default_app_access` is set to `false` — the one
   piece of authentik state that is deliberately **not** a blueprint, because
-  `Tenant` is internally managed. Nothing re-asserts it after a restore; see
+  `Tenant` is internally managed and no env var reaches it. A PostSync hook
+  (`gitops/bootstrap/authentik-flags-job.yaml`) re-asserts it on every sync, but
+  a Postgres restore triggers no sync and silently reverts it; see
   `docs/runbook-authentik-identity.md`. `/authentik-oidc` is the procedure. See
   [ADR-0039](docs/adr/0039-authentik-identity-layer.md),
   [ADR-0041](docs/adr/0041-fleet-native-oidc-not-forwardauth.md) and

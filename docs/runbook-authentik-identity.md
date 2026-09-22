@@ -148,6 +148,7 @@ Current files:
 | `gitops/bootstrap/authentik-blueprint-wird-policy.yaml` | the `wird-users` group, the `wird-require-pkce` expression policy, and both bindings (plain ConfigMap) |
 | `gitops/bootstrap/authentik-blueprint-wird-enrollment.yaml` | self-service enrollment into `wird-users` — prompt, user write, email verification, login. Needs `AUTHENTIK_EMAIL__*` in `authentik-config` or it dead-ends silently (ADR-0050) |
 | `gitops/bootstrap/authentik-blueprint-platform-apps-policy.yaml` | binds `argocd` and `grafana` to `platform-admins` — they were the last two applications with no binding (ADR-0050 Decision 11) |
+| `gitops/bootstrap/authentik-flags-job.yaml` | PostSync hook asserting `core_default_app_access=false` — not a blueprint, because `Tenant` is internally managed (ADR-0050 Decision 12) |
 | `gitops/bootstrap/authentik-blueprint-platform-apps-policy.yaml` | binds `argocd` and `grafana` to `platform-admins` (plain ConfigMap). Required by the enrollment flow above: those two relied on `AppAccessWithoutBindings` (default True), which was only ever safe while the directory held operators alone |
 
 The **same credential pair is consumed twice**, from opposite ends of the
@@ -828,7 +829,14 @@ obvious check passes.
 The blueprint importer refuses any `InternallyManagedMixin` subclass, so no
 entry can target it.
 
-**Set it:**
+**It is asserted from git, but only on sync.**
+`gitops/bootstrap/authentik-flags-job.yaml` is an ArgoCD PostSync hook that runs
+the command below on every sync of the bootstrap Application, so a fresh install
+and any change under `gitops/bootstrap/` set it automatically. A **Postgres
+restore triggers no sync**, which is exactly when the flag reverts — so after
+any restore, run it by hand or force a sync of the `bootstrap` Application.
+
+**Set it by hand:**
 
 ```
 kubectl -n authentik exec deploy/platform-authentik-server -- \
@@ -845,10 +853,11 @@ kubectl -n authentik exec deploy/platform-authentik-server -- \
   ak shell -c "from authentik.tenants.utils import get_current_tenant; print(get_current_tenant().flags)"
 ```
 
-**Nothing re-asserts this.** A restored authentik or a rebuilt tenant comes back
-at the `True` default, and every gate quietly fails open again with no error
-anywhere. Treat it like the cert-expiry alarm in DECISION.md: load-bearing, and
-invisible when it goes.
+**A restore is the gap.** A restored authentik or a rebuilt tenant comes back at
+the `True` default, and every gate quietly fails open again with no error
+anywhere — the PostSync hook will not notice, because nothing synced. Treat it
+like the cert-expiry alarm in DECISION.md: load-bearing, and invisible when it
+goes.
 
 **The cost of having flipped it:** an application whose binding blueprint fails
 now denies *everyone* rather than admitting everyone. ArgoCD and Grafana keep

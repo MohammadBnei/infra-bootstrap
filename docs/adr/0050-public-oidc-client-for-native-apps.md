@@ -201,21 +201,31 @@ point where it stops describing reality.
     looks present and is not. `!KeyOf` is no safer: it raises, the blueprint
     aborts, and no row means open by the same flag.
 
-    **This one cannot be a blueprint.** The flag lives on
-    `authentik_tenants.tenant`, and `Tenant` is
+    **This one cannot be a blueprint, and there is no env var either.** The
+    flag lives on `authentik_tenants.tenant`, and `Tenant` is
     `InternallyManagedMixin, TenantMixin, SerializerModel` — the importer
-    refuses any `InternallyManagedMixin` subclass. It is set with the
-    management command instead, in the server pod:
+    refuses any `InternallyManagedMixin` subclass. Nor can configuration reach
+    it: `Flag.get()` (`authentik/tenants/flags.py`) reads `tenant.flags` and
+    falls back to the hardcoded class default with no `CONFIG.get(...)` on the
+    path, and `ensure_default_tenant()` creates the tenant with
+    `{"name": "Default", "ready": True}` and no flags. The value exists only as
+    a Postgres row, settable only by `ak set_flag`.
 
-    ```
-    ak set_flag core_default_app_access false
-    ```
+    So it is asserted from git the one way left:
+    `gitops/bootstrap/authentik-flags-job.yaml`, an ArgoCD **PostSync** hook
+    that runs `ak set_flag core_default_app_access false` on every sync of the
+    bootstrap Application. `ak set_flag` is
+    `tenant.flags[key] = value; tenant.save()` — one key, idempotent, safe to
+    run repeatedly. It needs no new credential: `envFrom` the existing
+    `authentik-config` Secret. An unrecognised first argument falls through the
+    image's `ak` dispatcher to `wait_for_db; python -m manage "$@"`, so the Job
+    waits for Postgres by itself.
 
-    A deliberate exception to ADR-0039's "everything declared as blueprints in
-    git", recorded because **nothing re-asserts it**: a restored authentik, or a
-    rebuilt tenant, comes back at the `True` default and every gate silently
-    fails open again. The runbook carries the command and the check; this ADR
-    carries the reason.
+    **What that still does not cover, and it is the important half:** a Postgres
+    restore or a rebuilt tenant triggers no ArgoCD sync, so the flag returns to
+    its `True` default and every gate fails open again with no error anywhere.
+    That path stays a runbook step. Treat the flag like the cert-expiry alarm in
+    `DECISION.md` — load-bearing, and invisible when it goes.
 
     The cost is the mirror image: an application whose binding blueprint fails
     now denies everyone. ArgoCD and Grafana keep their local admins as
