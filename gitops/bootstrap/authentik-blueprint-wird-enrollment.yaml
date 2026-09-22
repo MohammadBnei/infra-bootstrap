@@ -1,0 +1,222 @@
+# Self-service enrollment for Wird (ADR-0050). New users sign themselves up,
+# verify their email, and land in `wird-users` — which is the group
+# authentik-blueprint-wird-policy.yaml binds to the Wird application, so
+# enrolling IS being granted access and nothing else grants it.
+#
+# WHY THIS EXISTS. Before it, `wird-users` membership was a git-committed list
+# replaced on every blueprint reconcile: invite-by-pull-request for a consumer
+# app, and anyone added through the UI was silently wiped at the next apply.
+#
+# SO THE GROUP NO LONGER CARRIES A `users:` LIST — not here, and not in the
+# policy blueprint. Membership is runtime state now. Re-adding a `users:` list
+# to either file would delete every enrolled user's access on the next
+# reconcile, because that list is REPLACED and not merged.
+#
+# The group is declared in BOTH this file and the policy blueprint, identically
+# and with no attrs beyond the name. That is deliberate, not a duplicate:
+# `!KeyOf` only resolves inside one blueprint, and `!Find` returns **None**
+# rather than failing when it matches nothing (blueprints/v1/common.py). A
+# `!Find` here would mean that on any apply where the group did not yet exist,
+# `create_users_group` would be silently None and every user enrolled in that
+# window would be created with no group and no access — permanently, because
+# the stage applies the group only at creation. Declaring it locally makes
+# `!KeyOf` available, which raises instead of returning None.
+#
+# NOT LINKED FROM THE LOGIN PAGE. The brand's `enrollment_flow` is deliberately
+# left unset: the brand is cluster-wide, so a "Sign up" link there would
+# advertise Wird enrollment on ArgoCD's and Grafana's login screens too. The
+# flow is reached at its own URL:
+#   https://authentik.bnei.dev/if/flow/wird-enrollment/
+#
+# HARD DEPENDENCY: SMTP. The email stage uses authentik's global email settings
+# (AUTHENTIK_EMAIL__* in gitops/bootstrap/authentik-secret.yaml). Until those
+# are populated, authentik falls back to localhost:25, the verification mail is
+# never delivered, and enrollment dead-ends at the "check your email" screen
+# with a signed-up-but-inactive user left behind.
+#
+# Stage shapes are taken from upstream's own
+# blueprints/example/flows-enrollment-email-verification.yaml for
+# version-2026.8, with create_users_group and the password policy added.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: authentik-blueprint-wird-enrollment
+  namespace: authentik
+data:
+  wird-enrollment.yaml: |
+    version: 1
+    metadata:
+      name: wird-enrollment
+      labels:
+        blueprints.goauthentik.io/instantiate: "true"
+    entries:
+      # Same declaration as in authentik-blueprint-wird-policy.yaml, on purpose.
+      # No `users:` — see the header.
+      - model: authentik_core.group
+        id: wird-users
+        identifiers:
+          name: wird-users
+        attrs:
+          name: wird-users
+
+      - model: authentik_flows.flow
+        id: flow
+        identifiers:
+          slug: wird-enrollment
+        attrs:
+          name: Wird enrollment
+          title: Create your Wird account
+          designation: enrollment
+          authentication: require_unauthenticated
+
+      # --- prompts -------------------------------------------------------
+      - model: authentik_stages_prompt.prompt
+        id: prompt-email
+        identifiers:
+          name: wird-enrollment-field-email
+        attrs:
+          field_key: email
+          label: Email
+          type: email
+          required: true
+          placeholder: Email
+          placeholder_expression: false
+          order: 0
+      - model: authentik_stages_prompt.prompt
+        id: prompt-name
+        identifiers:
+          name: wird-enrollment-field-name
+        attrs:
+          field_key: name
+          label: Name
+          type: text
+          required: true
+          placeholder: Name
+          placeholder_expression: false
+          order: 1
+      - model: authentik_stages_prompt.prompt
+        id: prompt-username
+        identifiers:
+          name: wird-enrollment-field-username
+        attrs:
+          field_key: username
+          label: Username
+          type: username
+          required: true
+          placeholder: Username
+          placeholder_expression: false
+          order: 2
+      - model: authentik_stages_prompt.prompt
+        id: prompt-password
+        identifiers:
+          name: wird-enrollment-field-password
+        attrs:
+          field_key: password
+          label: Password
+          type: password
+          required: true
+          placeholder: Password
+          placeholder_expression: false
+          order: 3
+      - model: authentik_stages_prompt.prompt
+        id: prompt-password-repeat
+        identifiers:
+          name: wird-enrollment-field-password-repeat
+        attrs:
+          field_key: password_repeat
+          label: Password (repeat)
+          type: password
+          required: true
+          placeholder: Password (repeat)
+          placeholder_expression: false
+          order: 4
+
+      # This form is open to the internet, so the password rules are not
+      # decoration. check_have_i_been_pwned is a k-anonymity range lookup
+      # against the HIBP API — authentik sends a 5-character hash prefix, never
+      # the password — and hibp_allowed_count: 0 means "reject anything that has
+      # appeared in a breach at all".
+      - model: authentik_policies_password.passwordpolicy
+        id: wird-password-policy
+        identifiers:
+          name: wird-password-strength
+        attrs:
+          name: wird-password-strength
+          password_field: password
+          check_static_rules: true
+          length_min: 12
+          amount_digits: 0
+          amount_uppercase: 0
+          amount_lowercase: 0
+          amount_symbols: 0
+          check_have_i_been_pwned: true
+          hibp_allowed_count: 0
+          error_message: >-
+            Use at least 12 characters, and a password that has not appeared in
+            a known data breach.
+
+      - model: authentik_stages_prompt.promptstage
+        id: stage-prompt
+        identifiers:
+          name: wird-enrollment-prompt
+        attrs:
+          fields:
+            - !KeyOf prompt-email
+            - !KeyOf prompt-name
+            - !KeyOf prompt-username
+            - !KeyOf prompt-password
+            - !KeyOf prompt-password-repeat
+          validation_policies:
+            - !KeyOf wird-password-policy
+
+      # create_users_as_inactive + the email stage's activate_user_on_success
+      # are one mechanism: the account exists but cannot log in until the
+      # address is proven. Without SMTP configured, this is where an enrollment
+      # stops — which is the safe direction.
+      #
+      # user_type is left at its default, `external`. Wird's users are not
+      # operators of this cluster and must not consume an internal seat.
+      - model: authentik_stages_user_write.userwritestage
+        id: stage-user-write
+        identifiers:
+          name: wird-enrollment-user-write
+        attrs:
+          user_creation_mode: always_create
+          create_users_as_inactive: true
+          create_users_group: !KeyOf wird-users
+
+      - model: authentik_stages_email.emailstage
+        id: stage-email
+        identifiers:
+          name: wird-enrollment-email-verification
+        attrs:
+          use_global_settings: true
+          template: email/account_confirmation.html
+          activate_user_on_success: true
+
+      - model: authentik_stages_user_login.userloginstage
+        id: stage-login
+        identifiers:
+          name: wird-enrollment-user-login
+
+      # --- bindings ------------------------------------------------------
+      - model: authentik_flows.flowstagebinding
+        identifiers:
+          target: !KeyOf flow
+          stage: !KeyOf stage-prompt
+          order: 10
+      - model: authentik_flows.flowstagebinding
+        identifiers:
+          target: !KeyOf flow
+          stage: !KeyOf stage-user-write
+          order: 20
+      - model: authentik_flows.flowstagebinding
+        identifiers:
+          target: !KeyOf flow
+          stage: !KeyOf stage-email
+          order: 30
+      - model: authentik_flows.flowstagebinding
+        identifiers:
+          target: !KeyOf flow
+          stage: !KeyOf stage-login
+          order: 100

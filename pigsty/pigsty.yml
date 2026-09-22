@@ -160,6 +160,35 @@ all:
             roles: [dbrole_readwrite] # optional, belonged roles. default roles are: dbrole_{admin,readonly,readwrite,offline}
             pool_connlimit: -1 # optional, max database connections at user level, default -1 disable limit
 
+          # wird — Qur'an study app (ADR-0050). ADR-0039's pattern, not the
+          # older plaintext entries above: what is committed is a
+          # SCRAM-SHA-256 VERIFIER. The plaintext lives only in Infisical as
+          # DBUSER_WIRD_PASSWORD; rotating means regenerating both halves
+          # together.
+          #
+          # `pgbouncer: false` is deliberate and diverges from every other user
+          # here. Wird dials 5432 direct, like authentik and wedding do. Its Go
+          # backend uses pgx v5, which prepares statements server-side by
+          # default, and goose takes a session-scoped advisory lock — both of
+          # which the cluster-default TRANSACTION pool mode breaks. That is the
+          # ente incident (see entedb below); opting out costs one word.
+          #
+          # connlimit: 20 is the point of the whole entry. Wird shares this
+          # instance with authentik, and a runaway Wird must hit its own ceiling
+          # rather than exhaust the pool every login on the cluster depends on.
+          # Caveat worth knowing: every OTHER role here is connlimit: -1, so
+          # this bounds Wird, it does not protect authentik from the rest.
+          #
+          # No pool_connlimit (nothing goes through pgbouncer) and no expire_in
+          # (pg-user.sql emits VALID UNTIL only when it is present) — the same
+          # trio dbuser_authentik and dbuser_wedding already omit.
+          - name: dbuser_wird
+            password: 'SCRAM-SHA-256$4096:isDmv0PqP77mYZkEJqvV3A==$tVQP1UdzUmMCcGU9BisTZdr3HFsvH6pN8iE7XNlKLYc=:IAJjyRoqTpWV1SyIcSs9Fx+3J09TflAzQPIs+zgIajw='
+            pgbouncer: false
+            connlimit: 20
+            comment: wird — Qur'an study backend + jidhr root-lookup service
+            roles: [dbrole_readwrite]
+
         # define business databases : https://pigsty.io/docs/pgsql/config/db
         pg_databases:
           - name: meta
@@ -232,6 +261,59 @@ all:
             # dbuser_dba/dbuser_monitor's pool_mode: session in Pigsty's own
             # roles/pgsql/defaults/main.yml.
             pool_mode: session
+
+          # wird (ADR-0050). Every field below except name/owner/comment is
+          # here to switch OFF a Pigsty default that would otherwise bite.
+          - name: wirddb
+            comment: wird — Qur'an corpus and user study state
+            owner: dbuser_wird
+            # jidhr is Wird's Arabic root-lookup engine: its own service, but it
+            # joins against Wird's corpus tables, so it is a schema here rather
+            # than a second database.
+            #
+            # The mapping form with `owner:` is LOAD-BEARING. A bare string
+            # renders `CREATE SCHEMA IF NOT EXISTS "jidhr"` executed as dbsu
+            # (roles/pgsql/templates/pg-db.sql), leaving the schema owned by
+            # postgres — and dbrole_readwrite carries no DDL, so goose would
+            # fail on the first migration into it. The mapping emits
+            # AUTHORIZATION "dbuser_wird".
+            #
+            # And IF NOT EXISTS makes this NON-CORRECTIVE: there is no
+            # ALTER SCHEMA ... OWNER anywhere in that template, so if jidhr is
+            # ever created wrong first, adding owner: later fixes nothing,
+            # silently, forever. Fix it by hand if that happens.
+            schemas:
+              - { name: jidhr, owner: dbuser_wird }
+            # Without this, PUBLIC keeps CONNECT — and pg-db.sql's
+            # ALTER DEFAULT PRIVILEGES FOR ROLE dbuser_wird grants DML on every
+            # future table to dbrole_readwrite, which is a SHARED cluster role
+            # held by dbuser_blog, dbuser_n8n, dbuser_ente, dbuser_authentik and
+            # six others. So dbuser_blog could write Wird's tables. Every other
+            # database in this file omits revokeconn; that is pre-existing
+            # drift, not a reason to repeat it here.
+            revokeconn: true
+            # Matches dbuser_wird above: nothing about Wird goes through
+            # pgbouncer, so it does not belong in database.txt.
+            pgbouncer: false
+            # pgsql-db.yml otherwise registers this as a Grafana datasource
+            # unconditionally, and that task is NOT gated on pg_role — a
+            # two-node run creates two datasources, each pinned to a node IP
+            # instead of the .232 VIP, each holding pg_monitor_password in
+            # cleartext on disk.
+            register_datasource: false
+            #
+            # roles: [dbrole_readwrite] on the user is enough, rather than the
+            # dbrole_admin dbuser_agentfleet took: dbuser_wird can still DDL
+            # because it OWNS this database, and because PG 15+ makes the public
+            # schema owned by pg_database_owner. The ceiling: adding a NEW
+            # schema later needs this file edited and pgsql-db.yml re-run, not a
+            # bare CREATE SCHEMA from the app.
+            #
+            # Accepted trade-off: wird and jidhr share dbuser_wird, so they
+            # share the 20 connections and jidhr alone can starve wird. Same
+            # trust domain, and the ceiling that matters (Wird vs authentik)
+            # still holds. Upgrade path is a second dbuser_jidhr with its own
+            # connlimit and dbrole_readonly on Wird's tables.
 
         pg_hba_rules:   # https://pigsty.io/docs/pgsql/config/hba
           - { user: all ,db: all ,addr: intra ,auth: pwd ,title: 'everyone intranet access with password' ,order: 800 }

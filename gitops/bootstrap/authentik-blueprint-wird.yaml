@@ -1,0 +1,155 @@
+# Wird's OIDC provider — the first PUBLIC client on this cluster (ADR-0050).
+#
+# A plain ConfigMap, not an InfisicalSecret, and that follows DECISION.md's own
+# rule rather than breaking it: the blueprint is an InfisicalSecret "when it
+# carries an OAuth2 client secret, a plain ConfigMap when it does not". A public
+# client has none. The client_id below is committed deliberately — it ships
+# inside the iOS/Android binary and the website's JS bundle, so treating it as a
+# secret would be theatre. docs/secrets.md says the same, in the row that
+# explains why there is no WIRD_OIDC_CLIENT_ID.
+#
+# WHY PUBLIC, when grafana/argocd/fleet are all confidential: Wird is a Flutter
+# app plus a browser front-end. Neither can hold a secret — anyone can pull it
+# out of an IPA, an APK or devtools — so a confidential client here would be
+# confidential in name only. RFC 8252 requires native apps to be public clients
+# using authorization code + PKCE. Verified against the running 2026.8.0's
+# source, not its docs: OAuth2Provider.client_secret is
+# CharField(blank=True, default=generate_client_secret) and its serializer field
+# is required=False, so omitting the attr is legal; authentik generates a secret
+# that is never read, because token/base.py only runs the compare_digest check
+# when client_type == ClientType.CONFIDENTIAL.
+#
+# WHAT REPLACES THE SECRET. Dropping it removes the only thing that currently
+# stops an unknown client from completing the code flow here, so three things
+# have to carry that weight instead, and two of them are NOT in this file:
+#
+#   1. A single https:// redirect URI, claimed through App Links / Universal
+#      Links. This is the control that stops a copycat app, NOT PKCE — see the
+#      redirect_uris comment below for why they are different problems.
+#   2. PKCE, enforced by an expression policy —
+#      gitops/bootstrap/authentik-blueprint-wird-policy.yaml. There is no
+#      pkce_required field on OAuth2Provider; enforcement is possible only
+#      because views/authorize.py's modify_policy_request() puts
+#      oauth_code_challenge and oauth_code_challenge_method into the policy
+#      context. It closes code INTERCEPTION, nothing more.
+#   3. `policy_engine_mode: all` below. Without it those bindings are worthless.
+#   4. Audience validation, app-side, in Wird's Go backend. `signing_key` is the
+#      SAME "authentik Self-signed Certificate" every other provider here uses,
+#      and jwks.py serves it at every per-app JWKS URL — so a Grafana or ArgoCD
+#      access token verifies cleanly against Wird's JWKS. "Validate the JWT
+#      against JWKS" is not authentication on this cluster. The backend MUST
+#      check aud == this client_id AND
+#      iss == https://authentik.bnei.dev/application/o/wird/.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: authentik-blueprint-wird
+  namespace: authentik
+data:
+  wird-oidc.yaml: |
+    version: 1
+    metadata:
+      name: wird-oidc
+      labels:
+        blueprints.goauthentik.io/instantiate: "true"
+    entries:
+      - model: authentik_providers_oauth2.oauth2provider
+        # `id` is what !KeyOf below resolves against. A typo here does not fail
+        # loudly — the blueprint logs and carries on, per this repo's own
+        # experience, so the application would simply never get a provider.
+        id: wird-provider
+        identifiers:
+          name: wird
+        attrs:
+          name: wird
+          client_type: public
+          client_id: "Um9Je1MQghdZ4SqAjB7cWtGNubP64phIuGqzdzro"
+          # No client_secret. See the header.
+          #
+          # redirect_uris is a list of OBJECTS, not strings, in 2026.x — the
+          # single most expensive shape mistake in this repo's authentik work.
+          #
+          # EXACTLY ONE URI, HTTPS, AND THAT IS THE SECURITY CONTROL.
+          #
+          # A custom scheme (dev.bnei.wird://) was the obvious choice for the
+          # mobile app and is deliberately NOT here. Custom schemes are
+          # first-come and unclaimable on both platforms: any app can register
+          # the same one. PKCE does not help — it stops a third party
+          # INTERCEPTING this app's code, but a rogue app runs the whole flow
+          # itself, with its own challenge and its own verifier, and passes
+          # every check. Combined with the implicit-consent authorization flow
+          # below, that is an access token and a 90-day refresh token for
+          # anyone who ships a copycat app, with no user interaction at all.
+          #
+          # https:// is claimed through Android App Links and iOS Universal
+          # Links, which are verified against the domain — hijacking one means
+          # controlling wird.bnei.dev. The website uses the same URI.
+          #
+          # THE APP SIDE OWES TWO FILES for this to work, served from
+          # wird.bnei.dev over HTTPS:
+          #   /.well-known/assetlinks.json            (Android)
+          #   /.well-known/apple-app-site-association (iOS, no extension,
+          #                                            Content-Type: application/json)
+          # Until they are served and verified, the redirect opens the system
+          # browser instead of the app and mobile login does not complete.
+          #
+          # No http://localhost entry for `vite dev` either: on a public client
+          # with no consent screen, a dev redirect on the production provider
+          # means an attacker-crafted /authorize link plus anything listening on
+          # that port yields a code. Dev gets its own provider if it needs one.
+          #
+          # The match is a fullmatch (token/base.py, views/authorize.py), so a
+          # trailing slash or an appended query string fails as invalid_client.
+          redirect_uris:
+            - matching_mode: strict
+              url: https://wird.bnei.dev/auth/callback
+          # grant_types defaults to EMPTY, which permits nothing. Not optional.
+          grant_types:
+            - authorization_code
+            - refresh_token
+          # The requirement is "the app must not re-prompt on every launch", and
+          # the defaults actively break it. refresh_token_threshold defaults to
+          # seconds=0, which views/token.py reads as "always renew" — it mints a
+          # new refresh token on every refresh and marks the old one
+          # revoked=True. One lost response on mobile radio, or two screens
+          # refreshing at once, and the next refresh is invalid_grant plus a
+          # SUSPICIOUS_REQUEST event, i.e. a forced re-login. Non-zero turns
+          # that into rotate-only-near-expiry.
+          refresh_token_threshold: "days=3"
+          # Default is days=30, so "no re-prompt" would have meant "monthly".
+          refresh_token_validity: "days=90"
+          # sub_mode deliberately OMITTED -> the default, hashed_user_id.
+          # grafana and fleet set user_email because they key attribution on the
+          # address. Wird's backend stores per-user rows against `sub`, and
+          # authentik's User.email is mutable and not unique: with user_email, a
+          # user who changes their address comes back as a brand-new account
+          # with nothing in it, and whoever inherits the old address inherits
+          # their data.
+          authorization_flow: !Find [authentik_flows.flow, [slug, default-provider-authorization-implicit-consent]]
+          invalidation_flow: !Find [authentik_flows.flow, [slug, default-provider-invalidation-flow]]
+          signing_key: !Find [authentik_crypto.certificatekeypair, [name, "authentik Self-signed Certificate"]]
+          property_mappings:
+            - !Find [authentik_providers_oauth2.scopemapping, [managed, "goauthentik.io/providers/oauth2/scope-openid"]]
+            - !Find [authentik_providers_oauth2.scopemapping, [managed, "goauthentik.io/providers/oauth2/scope-email"]]
+            - !Find [authentik_providers_oauth2.scopemapping, [managed, "goauthentik.io/providers/oauth2/scope-profile"]]
+            # The one no other blueprint here binds, and refresh tokens do not
+            # work without it: views/token.py issues a refresh token only if
+            # SCOPE_OFFLINE_ACCESS is in the authorization code's scope, and the
+            # refresh endpoint raises invalid_scope when it is absent. Listing
+            # refresh_token in grant_types alone issues nothing.
+            - !Find [authentik_providers_oauth2.scopemapping, [managed, "goauthentik.io/providers/oauth2/scope-offline_access"]]
+      - model: authentik_core.application
+        identifiers:
+          slug: wird
+        attrs:
+          name: Wird
+          slug: wird
+          provider: !KeyOf wird-provider
+          # LOAD-BEARING. PolicyBindingModel.policy_engine_mode defaults to
+          # MODE_ANY — "any policy must pass". The companion blueprint binds
+          # two: group membership and PKCE. At the default, passing either one
+          # grants access, so a wird-users member who skips PKCE would sail
+          # through and the enforcement would be decorative.
+          policy_engine_mode: all
+          meta_launch_url: https://wird.bnei.dev
+          meta_description: Qur'an study and in-prayer recitation follower

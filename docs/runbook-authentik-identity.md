@@ -133,6 +133,7 @@ delivery shapes, and the choice between them is not cosmetic:
 |---|---|---|
 | `InfisicalSecret` whose template *is* the blueprint | anything embedding an OAuth2 client secret | the blueprint's structure stays in git — reviewable, diffable — while only the credential values are interpolated by the operator. A ConfigMap would put the client secret in plaintext in git |
 | plain `ConfigMap` | group membership | carries no credential, so there is nothing to interpolate and nothing to hide — and it removes the Infisical operator from the propagation chain entirely (§9 step 2 does not apply) |
+| plain `ConfigMap` | group membership, policy bindings, **and the provider itself when the client is public** | carries no credential. A public client (ADR-0050) has no secret to hide and its `client_id` ships inside the app binary, so the whole blueprint is a ConfigMap — same shortened propagation chain |
 
 Current files:
 
@@ -143,6 +144,12 @@ Current files:
 | `gitops/bootstrap/authentik-blueprint-groups.yaml` | the `platform-admins` group (plain ConfigMap) |
 | `gitops/bootstrap/grafana-oidc-secret.yaml` | the client pair materialised into `monitoring` |
 | `gitops/bootstrap/argocd-oidc-secret.yaml` | the client pair materialised into `argocd` — see §7, this one is not symmetric with Grafana's |
+| `gitops/bootstrap/authentik-blueprint-wird.yaml` | Wird's provider + application — the cluster's first **public** client, so a plain ConfigMap with the `client_id` committed (ADR-0050) |
+| `gitops/bootstrap/authentik-blueprint-wird-policy.yaml` | the `wird-users` group, the `wird-require-pkce` expression policy, and both bindings (plain ConfigMap) |
+| `gitops/bootstrap/authentik-blueprint-wird-enrollment.yaml` | self-service enrollment into `wird-users` — prompt, user write, email verification, login. Needs `AUTHENTIK_EMAIL__*` in `authentik-config` or it dead-ends silently (ADR-0050) |
+| `gitops/bootstrap/authentik-blueprint-platform-apps-policy.yaml` | binds `argocd` and `grafana` to `platform-admins` — they were the last two applications with no binding (ADR-0050 Decision 11) |
+| `gitops/bootstrap/authentik-flags-job.yaml` | PostSync hook asserting `core_default_app_access=false` — not a blueprint, because `Tenant` is internally managed (ADR-0050 Decision 12) |
+| `gitops/bootstrap/authentik-blueprint-platform-apps-policy.yaml` | binds `argocd` and `grafana` to `platform-admins` (plain ConfigMap). Required by the enrollment flow above: those two relied on `AppAccessWithoutBindings` (default True), which was only ever safe while the directory held operators alone |
 
 The **same credential pair is consumed twice**, from opposite ends of the
 exchange: authentik registers it on the provider via the blueprint, the app
@@ -796,3 +803,63 @@ user ID. Treat it as immutable.
   known reason for it to fail; that is not the same as having seen it succeed.
 
 Log anything surprising to `docs/bootstrap-test-notes.md`, not to memory.
+
+
+## The one setting that is not in git: `core_default_app_access`
+
+Every other thing authentik knows is a blueprint. This is not, and cannot be.
+
+**What it does.** `AppAccessWithoutBindings` (`authentik/core/apps.py`, key
+`core_default_app_access`) defaults to `True`: *"Applications with no policies
+bound can be accessed by any user."* Since ADR-0050 the directory is
+self-service, so that default means an application which loses its policy
+binding silently admits everyone who ever signed up for Wird.
+
+And it loses it more easily than it looks. `!Find` returns `None` instead of
+failing, so a blueprint that runs before its target exists writes a
+`policybinding` row with `group_id = NULL`. `PolicyEngine.build()` keeps only
+bindings that are dynamic (`policy_id is not None`) or static
+(`policy_id is None and (group_id or user_id)`); that row is neither, so it is
+skipped, `_combine_results` sees an empty list, and the result is
+`empty_result` — open. Meanwhile the row is right there in the table, so the
+obvious check passes.
+
+**Why it is not a blueprint.** The flag lives on `authentik_tenants.tenant`, and
+`Tenant` is declared `InternallyManagedMixin, TenantMixin, SerializerModel`.
+The blueprint importer refuses any `InternallyManagedMixin` subclass, so no
+entry can target it.
+
+**It is asserted from git, but only on sync.**
+`gitops/bootstrap/authentik-flags-job.yaml` is an ArgoCD PostSync hook that runs
+the command below on every sync of the bootstrap Application, so a fresh install
+and any change under `gitops/bootstrap/` set it automatically. A **Postgres
+restore triggers no sync**, which is exactly when the flag reverts — so after
+any restore, run it by hand or force a sync of the `bootstrap` Application.
+
+**Set it by hand:**
+
+```
+kubectl -n authentik exec deploy/platform-authentik-server -- \
+  ak set_flag core_default_app_access false
+```
+
+(`ak set_flag` assigns one key — `tenant.flags[key] = value` — so it does not
+disturb the other flags on the tenant.)
+
+**Check it, and check it again after any authentik restore:**
+
+```
+kubectl -n authentik exec deploy/platform-authentik-server -- \
+  ak shell -c "from authentik.tenants.utils import get_current_tenant; print(get_current_tenant().flags)"
+```
+
+**A restore is the gap.** A restored authentik or a rebuilt tenant comes back at
+the `True` default, and every gate quietly fails open again with no error
+anywhere — the PostSync hook will not notice, because nothing synced. Treat it
+like the cert-expiry alarm in DECISION.md: load-bearing, and invisible when it
+goes.
+
+**The cost of having flipped it:** an application whose binding blueprint fails
+now denies *everyone* rather than admitting everyone. ArgoCD and Grafana keep
+their local admins as break-glass (ADR-0039); agent-fleet's `core` does not, so
+a broken `fleet` binding locks the console until the blueprint is fixed.

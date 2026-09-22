@@ -1,0 +1,148 @@
+# The two gates that make Wird's PUBLIC client safe (ADR-0050): who may use the
+# application at all, and whether the request used PKCE.
+#
+# DELIBERATELY A SEPARATE FILE from authentik-blueprint-wird.yaml, for the
+# reason authentik-blueprint-fleet-policy.yaml sets out at length: a blueprint
+# that fails to apply logs and carries on. Split this way, an unverified model
+# shape costs the extra layer and nothing else — the provider still exists.
+# Folded into the provider's file, the same mistake could take the whole
+# application down and read as a total outage.
+#
+# WHAT "COSTS THE EXTRA LAYER" MEANS NOW. When fleet-policy was written, a
+# failed gate meant login carried on ungated. ADR-0050 Decision 12 flips
+# `core_default_app_access` to false, so an application whose bindings are
+# missing or unresolved DENIES everyone instead. Both failure modes are bad;
+# this one is at least visible. Note a !Find miss does not even fail loudly — it
+# writes a row with group_id = NULL, which PolicyEngine.build() skips because it
+# is neither dynamic nor static, leaving _combine_results to fall through to
+# empty_result, i.e. the flag.
+#
+# The shapes of authentik_policies_expression.expressionpolicy and
+# authentik_policies.policybinding have NOT been verified against the running
+# 2026.8.0 instance. Confirm they applied by reading the database rather than
+# the log — and select group_id explicitly, because the NULL-group row is
+# exactly the one that looks fine under SELECT *:
+#   psql -d authentik -tAc 'SELECT target_id, group_id, policy_id, enabled
+#                           FROM authentik_policies_policybinding'
+#   psql -d authentik -tAc 'SELECT name FROM authentik_policies_expression_expressionpolicy'
+#
+# BOTH bindings only mean something because authentik-blueprint-wird.yaml sets
+# `policy_engine_mode: all` on the application. The default is MODE_ANY, under
+# which passing either binding is enough.
+#
+# A plain ConfigMap: no credential here, so nothing to interpolate and no
+# Infisical operator in the propagation chain.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: authentik-blueprint-wird-policy
+  namespace: authentik
+data:
+  wird-policy.yaml: |
+    version: 1
+    metadata:
+      name: wird-policy
+      labels:
+        blueprints.goauthentik.io/instantiate: "true"
+    entries:
+      # `wird-users`, NOT platform-admins. platform-admins means "operator of
+      # this cluster" and is read by both ArgoCD and Grafana, so putting a Wird
+      # user in it would hand them cluster admin. Two separate powers, two
+      # separate groups — the same reasoning authentik-blueprint-groups.yaml
+      # gives for not reusing authentik's built-in `authentik Admins`.
+      #
+      # Declared here AND, identically, in
+      # authentik-blueprint-wird-enrollment.yaml. Not a duplicate: `!KeyOf`
+      # resolves only within one blueprint, and both files need a local handle —
+      # this one to bind the group, that one to write new users into it. `!Find`
+      # would not do, because it returns None instead of failing when it matches
+      # nothing (blueprints/v1/common.py), and silently-None is the wrong
+      # failure direction in both places.
+      #
+      # NO `users:` LIST, DELIBERATELY. authentik-blueprint-groups.yaml manages
+      # platform-admins that way and documents the trap: the list is REPLACED on
+      # every apply, not merged. Wird's membership is written at runtime by the
+      # enrollment flow, so a `users:` list here would delete every enrolled
+      # user's access at the next reconcile. Membership is runtime state; this
+      # file only decides what membership *means*.
+      - model: authentik_core.group
+        id: wird-users
+        identifiers:
+          name: wird-users
+        attrs:
+          name: wird-users
+      # Without a binding, authentik's AppAccessWithoutBindings default (True,
+      # "applications with no policies bound can be accessed by any user") means
+      # every directory user gets a Wird account. Authenticated but not
+      # authorized, the exact failure authentik-blueprint-previews-policy.yaml
+      # names.
+      - model: authentik_policies.policybinding
+        identifiers:
+          target: !Find [authentik_core.application, [slug, wird]]
+          group: !KeyOf wird-users
+          order: 0
+        attrs:
+          enabled: true
+      # PKCE enforcement. OAuth2Provider has no pkce_required field on 2026.8,
+      # and token/authorization_code.py verifies a code_verifier only when the
+      # authorization code carried a challenge — so without this, PKCE is a
+      # promise the client makes to itself.
+      #
+      # WHAT THIS DOES AND DOES NOT STOP. It closes code INTERCEPTION: a third
+      # party that grabs this app's authorization code cannot redeem it. It does
+      # NOT stop a rogue app running the whole flow itself with its own
+      # challenge and verifier — that one passes cleanly. The control for that
+      # is the single App-Links-verified redirect URI in
+      # authentik-blueprint-wird.yaml, not this policy.
+      #
+      # This is enforceable only because views/authorize.py's
+      # modify_policy_request() puts oauth_code_challenge and
+      # oauth_code_challenge_method into the policy request context.
+      - model: authentik_policies_expression.expressionpolicy
+        id: wird-require-pkce
+        identifiers:
+          name: wird-require-pkce
+        attrs:
+          name: wird-require-pkce
+          # Left at the default (false). execution_logging writes a
+          # POLICY_EXECUTION event on EVERY evaluation — and per the guard
+          # below, this policy is evaluated on every user-library refresh by
+          # every user, not only at login.
+          expression: |
+            # THE GUARD IS NOT OPTIONAL, and it is not a style choice.
+            #
+            # Application access is evaluated in more places than /authorize.
+            # core/api/applications.py's _get_allowed_applications() runs the
+            # SAME bindings through a ListPolicyEngine to decide which tiles a
+            # user sees in their library, with no OAuth request behind it — so
+            # none of the oauth_* context keys exist there. Without this guard
+            # the expression returns False, and because the application sets
+            # policy_engine_mode: all, Wird would be filtered out of every
+            # user's dashboard forever while login kept working. A confusing
+            # bug to chase from the symptom.
+            #
+            # Key PRESENCE is the right test, not truthiness:
+            # modify_policy_request() always assigns oauth_code_challenge at
+            # /authorize, setting it to None when the client sent no challenge.
+            # So absent == "not an authorization request", while present-and-
+            # empty == "an authorization request that skipped PKCE", which is
+            # exactly the case this policy exists to reject.
+            if "oauth_code_challenge" not in request.context:
+                return True
+            if not request.context["oauth_code_challenge"]:
+                ak_message("This application requires PKCE.")
+                return False
+            # `plain` is what authorize.py defaults the method to when the
+            # client omits it, so checking the challenge alone is not enough:
+            # a challenge an attacker can read is a challenge they can replay.
+            if request.context.get("oauth_code_challenge_method") != "S256":
+                ak_message("This application requires PKCE with S256.")
+                return False
+            return True
+      - model: authentik_policies.policybinding
+        identifiers:
+          target: !Find [authentik_core.application, [slug, wird]]
+          policy: !KeyOf wird-require-pkce
+          order: 1
+        attrs:
+          enabled: true

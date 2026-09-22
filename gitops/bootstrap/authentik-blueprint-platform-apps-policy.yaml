@@ -1,0 +1,79 @@
+# Restricts the `argocd` and `grafana` applications to the platform-admins
+# group.
+#
+# WHY NOW: until ADR-0050 these two were the only applications with no policy
+# binding, and that was safe for exactly one reason — the directory held nothing
+# but hand-made operator accounts, so `AppAccessWithoutBindings` (default True,
+# "applications with no policies bound can be accessed by any user") admitted
+# only operators. Wird's self-service enrollment ends that: anyone who reaches
+# https://authentik.bnei.dev/if/flow/wird-enrollment/ is now a directory user.
+#
+# Without these bindings, every Wird signup would also get:
+#   - ArgoCD `role:readonly` (gitops/bootstrap/argocd-application.yaml's
+#     `policy.default`) — every Application, its manifests, the repo URLs and
+#     the cluster inventory;
+#   - Grafana `Viewer` (gitops/platform/values/grafana/values.yaml's
+#     `role_attribute_path` falls through to it) — every dashboard, Loki log
+#     panels included.
+# Both of those role mappings decide WHAT an authenticated user may do; neither
+# decides WHO may authenticate. That second half is this file.
+#
+# platform-admins by !Find, not !KeyOf: the group is declared in
+# authentik-blueprint-groups.yaml and must not be re-declared here, or this file
+# would own its membership list and wipe it on every apply. The cost is !Find's
+# silent-None failure mode (blueprints/v1/common.py) if that blueprint has not
+# applied yet — the same trade authentik-blueprint-previews-policy.yaml and
+# -fleet-policy.yaml already make.
+#
+# That trade used to fail OPEN and no longer does. A !Find miss writes a row
+# with group_id = NULL; PolicyEngine.build() keeps only bindings that are
+# dynamic (policy_id is not None) or static (policy_id is None and (group_id or
+# user_id)), so that row is skipped entirely and _combine_results falls through
+# to empty_result. empty_result is the `core_default_app_access` flag, which
+# ADR-0050 Decision 12 flips to false — so a miss now DENIES everyone instead of
+# admitting them. That flag is a one-shot `ak set_flag`, not a blueprint
+# (Tenant is InternallyManagedMixin); if it is ever lost, this file silently
+# stops gating. See docs/runbook-authentik-identity.md.
+#
+# Verify in the database, not the log — and assert the group actually resolved,
+# because a NULL group_id is exactly the row that looks fine here:
+#   psql -d authentik -tAc 'SELECT target_id, group_id, enabled
+#                           FROM authentik_policies_policybinding'
+#
+# No policy_engine_mode on either application: one binding each, so MODE_ANY and
+# MODE_ALL are the same thing. That differs from wird, which binds two.
+#
+# SEPARATE FILE, same reasoning as the fleet and previews policies: a blueprint
+# that fails to apply logs and carries on, so an unverified shape here costs the
+# gate and nothing else — both providers keep working, and both apps keep their
+# own RBAC.
+#
+# A plain ConfigMap: no credential to interpolate, so no Infisical operator in
+# the propagation chain.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: authentik-blueprint-platform-apps-policy
+  namespace: authentik
+data:
+  platform-apps-policy.yaml: |
+    version: 1
+    metadata:
+      name: platform-apps-policy
+      labels:
+        blueprints.goauthentik.io/instantiate: "true"
+    entries:
+      - model: authentik_policies.policybinding
+        identifiers:
+          target: !Find [authentik_core.application, [slug, argocd]]
+          group: !Find [authentik_core.group, [name, platform-admins]]
+          order: 0
+        attrs:
+          enabled: true
+      - model: authentik_policies.policybinding
+        identifiers:
+          target: !Find [authentik_core.application, [slug, grafana]]
+          group: !Find [authentik_core.group, [name, platform-admins]]
+          order: 0
+        attrs:
+          enabled: true
