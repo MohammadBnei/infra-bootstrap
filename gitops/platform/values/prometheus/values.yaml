@@ -170,6 +170,26 @@ prometheus:
           resources:
             requests:
               storage: 20Gi
+    # No requests/limits here left this pod QoS BestEffort — confirmed live
+    # 2026-09-22 (`kubectl get pod ... -o jsonpath='{.spec.containers[?(@.name=="prometheus")].resources}'`
+    # returned `{}`). PrometheusTSDBCompactionsFailing fired after a `panic:
+    # corruption in head chunk file ...: checksum mismatch`, crash-looping
+    # the pod (restartCount 10) until it happened to recover; queries during
+    # the same window also hit `checksum mismatch` reading persisted blocks.
+    # That's consistent with an abrupt SIGKILL mid-write, not a software bug:
+    # `k8s-worker-01` was running with memory *limits* summed to 163% of
+    # allocatable at the time (requests only 40%) — real overcommit, so a
+    # BestEffort pod (highest kernel oom_score_adj, first killed) can get cut
+    # off mid-chunk-write under any memory spike from its neighbors. Giving
+    # this pod its own request/limit doesn't fix the node-wide overcommit
+    # (a separate, wider problem — not resource-scoped here) but moves it out
+    # of BestEffort and off the front of the OOM-kill line.
+    resources:
+      requests:
+        cpu: 200m
+        memory: 1Gi
+      limits:
+        memory: 2Gi
 
 # node-exporter on every node
 nodeExporter:
