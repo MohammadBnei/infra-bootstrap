@@ -30,17 +30,33 @@ all:
     # PGSQL : https://pigsty.io/docs/pgsql
     #----------------------------------------------#
     # this is an example single-node postgres cluster with pgvector installed, with one biz database & two biz users
-    # NOTE (2026-07-30, ADR-0029): `patronictl list` shows the LIVE roles
-    # are the opposite of pg_seq/pg_role below — .207 is the current
-    # Leader, .205 the current Replica. A Patroni failover already
-    # promoted .207 at some point; this config's pg_seq/pg_role only seeded
-    # the original bootstrap and isn't reconciled by Pigsty afterward, so
-    # it's stale metadata, not a live bug — left as-is rather than
-    # "corrected" to avoid implying a config change would move anything.
+    # NOTE (2026-09-22): pg_role here now MATCHES the live cluster —
+    # .207 is Leader, .205 Replica, confirmed by `pg_is_in_recovery()` (f on
+    # .207, t on .205) and Patroni's /cluster endpoint.
+    #
+    # It did not always. From 2026-07-30 until 2026-09-22 this block claimed
+    # .205 was primary, described as harmless stale metadata "left as-is
+    # rather than corrected to avoid implying a config change would move
+    # anything". It was not harmless: every per-object playbook gates its SQL
+    # on `when: pg_role == 'primary'` (pgsql-user.yml, pgsql-db.yml,
+    # roles/pgsql/tasks/{user,database}.yml), so the writes were aimed at a
+    # READ-ONLY STANDBY — and because every task in that path is
+    # `ignore_errors: true` with the psql call ending in `|| true`, the run
+    # reported a green PLAY RECAP and created nothing. That is how the first
+    # attempt at dbuser_wird/wirddb silently did nothing.
+    #
+    # pg_seq is NOT swapped, deliberately: it names the Patroni members, and
+    # pg-proxmox-1 really is .205 and pg-proxmox-2 really is .207. Only the
+    # role label was wrong.
+    #
+    # This is a label, not a mechanism — Pigsty does not reconcile it, and the
+    # next Patroni failover inverts it again with nothing to warn you. Check
+    # `curl -s http://192.168.1.205:8008/cluster` before any pgsql-* run, and
+    # fix this block when it disagrees.
     pg-proxmox:
       hosts:
-        192.168.1.205: { pg_seq: 1, pg_role: primary } # <---- primary instance with read-write capability
-        192.168.1.207: { pg_seq: 2, pg_role: replica } # <---- read only replica for read-only online traffic
+        192.168.1.205: { pg_seq: 1, pg_role: replica } # <---- read only replica for read-only online traffic
+        192.168.1.207: { pg_seq: 2, pg_role: primary } # <---- primary instance with read-write capability
       vars:
         pg_cluster: pg-proxmox
 

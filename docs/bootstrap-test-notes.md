@@ -4294,3 +4294,86 @@ The **60s ceiling on registry uploads** is real and independent of the link
 speed. It did not matter once throughput was fixed, but a large layer on a slow
 path will always die at 60s. Nothing has been changed for it and nothing
 measures it.
+
+## 2026-09-22 — `pg_role` lied, and `ignore_errors` made the lie look like success
+
+Applying ADR-0050's Postgres half (`dbuser_wird` / `wirddb`) from the k9s hub.
+First run, cluster-scoped exactly as `pgsql-user.yml`'s own header documents:
+
+```
+ansible-playbook -l pg-proxmox -e username=dbuser_wird pgsql-user.yml
+
+192.168.1.205 : ok=8 changed=2 unreachable=0 failed=0 skipped=6 ignored=1
+192.168.1.207 : ok=4 changed=0 unreachable=0 failed=0 skipped=5 ignored=0
+```
+
+Reads as a success. It created nothing:
+
+```
+role:     ABSENT
+database: ABSENT
+```
+
+### Why
+
+`pigsty.yml` labelled `.205` primary. Patroni has had `.207` as Leader since some
+earlier failover — `pg_is_in_recovery()` is `f` on `.207`, `t` on `.205`. Every
+per-object playbook gates its SQL on `when: pg_role == 'primary'`
+(`pgsql-user.yml:124`, `pgsql-db.yml:125`, `roles/pgsql/tasks/{user,database}.yml`),
+so `CREATE ROLE` was aimed at a read-only standby.
+
+That alone would have been a loud failure. It was silent because the whole path
+swallows errors:
+
+- `roles/pgsql/tasks/user.yml:48` — `ignore_errors: true`
+- `roles/pgsql/tasks/user.yml:51` — the psql call ends in `|| true`, so **every
+  SQL error inside `pg-user.sql` is discarded**; only a `pg_authid` existence
+  check can fail the task, and that is ignored too
+- `roles/pgsql/tasks/database.yml:65,95` — same on both create and provision
+- `.../database.yml:98` — `provision database` redirects stdout *and* stderr into
+  `/pg/tmp/pg-db-<name>.log` and runs without `ON_ERROR_STOP`
+
+`ignored=1` in that recap is the entire visible trace of the failure.
+
+### What had been written down, and why it did not help
+
+The inventory carried a note from 2026-07-30 saying the live roles were the
+opposite of the config, and calling it *"stale metadata, not a live bug — left
+as-is rather than 'corrected' to avoid implying a config change would move
+anything."* That reasoning was right about Patroni (editing `pg_role` does not
+promote anything) and wrong about Ansible: the label is not inert, it is the
+`when:` condition on every write.
+
+Fixed by correcting `pg_role` (PR #253). `pg_seq` was deliberately **not**
+swapped — it names the Patroni members, and `pg-proxmox-1` really is `.205`.
+
+### After
+
+```
+192.168.1.207 : ok=8 changed=2 ... ignored=0     # pgsql-user.yml
+192.168.1.207 : ok=9 changed=3 ... ignored=0     # pgsql-db.yml
+
+role:      dbuser_wird  connlimit=20
+database:  wirddb  owner=dbuser_wird
+pubconnect:revoked (revokeconn ok)
+schema:    jidhr  owner=dbuser_wird
+```
+
+`ignored=0` is the signal worth watching on this playbook family, more than
+`changed=`.
+
+Also confirmed here, having been asserted without proof in #252: connecting as
+`dbuser_wird` with the Infisical plaintext against the committed SCRAM-SHA-256
+verifier works, and `create table jidhr.smoke` succeeds — so database
+**ownership** is what grants DDL, not the `GRANT ALL` / `REVOKE … FROM PUBLIC`
+ordering the first draft of that PR claimed.
+
+### Lesson
+
+On this cluster, check Patroni before any `pgsql-*` run:
+
+```
+curl -s http://192.168.1.205:8008/cluster | jq '.members[] | {name, role, host}'
+```
+
+and verify the object exists afterwards. The recap cannot tell you.
