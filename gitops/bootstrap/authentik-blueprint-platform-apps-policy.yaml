@@ -23,8 +23,22 @@
 # would own its membership list and wipe it on every apply. The cost is !Find's
 # silent-None failure mode (blueprints/v1/common.py) if that blueprint has not
 # applied yet — the same trade authentik-blueprint-previews-policy.yaml and
-# -fleet-policy.yaml already make. Verify in the database, not the log:
-#   psql -d authentik -tAc 'SELECT * FROM authentik_policies_policybinding'
+# -fleet-policy.yaml already make.
+#
+# That trade used to fail OPEN and no longer does. A !Find miss writes a row
+# with group_id = NULL; PolicyEngine.build() keeps only bindings that are
+# dynamic (policy_id is not None) or static (policy_id is None and (group_id or
+# user_id)), so that row is skipped entirely and _combine_results falls through
+# to empty_result. empty_result is the `core_default_app_access` flag, which
+# ADR-0050 Decision 12 flips to false — so a miss now DENIES everyone instead of
+# admitting them. That flag is a one-shot `ak set_flag`, not a blueprint
+# (Tenant is InternallyManagedMixin); if it is ever lost, this file silently
+# stops gating. See docs/runbook-authentik-identity.md.
+#
+# Verify in the database, not the log — and assert the group actually resolved,
+# because a NULL group_id is exactly the row that looks fine here:
+#   psql -d authentik -tAc 'SELECT target_id, group_id, enabled
+#                           FROM authentik_policies_policybinding'
 #
 # No policy_engine_mode on either application: one binding each, so MODE_ANY and
 # MODE_ALL are the same thing. That differs from wird, which binds two.

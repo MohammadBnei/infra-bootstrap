@@ -187,7 +187,12 @@ updated.
   secret, there is no `pkce_required` field to set, and the application must
   carry `policy_engine_mode: all` or its bindings are decorative. A public
   client's blueprint is a plain ConfigMap and its `client_id` is committed,
-  since there is nothing to template. `/authentik-oidc` is the procedure. See
+  since there is nothing to template. Wird's enrollment is self-service, which
+  makes "any directory user" mean "anyone", so **every application now carries a
+  policy binding** and `core_default_app_access` is set to `false` — the one
+  piece of authentik state that is deliberately **not** a blueprint, because
+  `Tenant` is internally managed. Nothing re-asserts it after a restore; see
+  `docs/runbook-authentik-identity.md`. `/authentik-oidc` is the procedure. See
   [ADR-0039](docs/adr/0039-authentik-identity-layer.md),
   [ADR-0041](docs/adr/0041-fleet-native-oidc-not-forwardauth.md) and
   [ADR-0050](docs/adr/0050-public-oidc-client-for-native-apps.md).

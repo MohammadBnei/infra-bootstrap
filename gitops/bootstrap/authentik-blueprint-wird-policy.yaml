@@ -4,15 +4,26 @@
 # DELIBERATELY A SEPARATE FILE from authentik-blueprint-wird.yaml, for the
 # reason authentik-blueprint-fleet-policy.yaml sets out at length: a blueprint
 # that fails to apply logs and carries on. Split this way, an unverified model
-# shape costs the extra layer and nothing else — the provider still exists and
-# login still works. Folded into the provider's file, the same mistake could
-# take the whole application down and read as a total outage.
+# shape costs the extra layer and nothing else — the provider still exists.
+# Folded into the provider's file, the same mistake could take the whole
+# application down and read as a total outage.
+#
+# WHAT "COSTS THE EXTRA LAYER" MEANS NOW. When fleet-policy was written, a
+# failed gate meant login carried on ungated. ADR-0050 Decision 12 flips
+# `core_default_app_access` to false, so an application whose bindings are
+# missing or unresolved DENIES everyone instead. Both failure modes are bad;
+# this one is at least visible. Note a !Find miss does not even fail loudly — it
+# writes a row with group_id = NULL, which PolicyEngine.build() skips because it
+# is neither dynamic nor static, leaving _combine_results to fall through to
+# empty_result, i.e. the flag.
 #
 # The shapes of authentik_policies_expression.expressionpolicy and
 # authentik_policies.policybinding have NOT been verified against the running
 # 2026.8.0 instance. Confirm they applied by reading the database rather than
-# the log:
-#   psql -d authentik -tAc 'SELECT * FROM authentik_policies_policybinding'
+# the log — and select group_id explicitly, because the NULL-group row is
+# exactly the one that looks fine under SELECT *:
+#   psql -d authentik -tAc 'SELECT target_id, group_id, policy_id, enabled
+#                           FROM authentik_policies_policybinding'
 #   psql -d authentik -tAc 'SELECT name FROM authentik_policies_expression_expressionpolicy'
 #
 # BOTH bindings only mean something because authentik-blueprint-wird.yaml sets

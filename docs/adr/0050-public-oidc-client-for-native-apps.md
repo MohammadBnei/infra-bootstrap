@@ -101,6 +101,27 @@ point where it stops describing reality.
    deliberately **not** `platform-admins`, which means "operator of this
    cluster" and is read by ArgoCD and Grafana.
 
+7. **`refresh_token_threshold` is set explicitly.** It defaults to `seconds=0`,
+   which `views/token.py` treats as "always renew": a new refresh token on every
+   refresh, with the old one marked `revoked = True`. One lost response on a
+   mobile radio, or two screens refreshing at once, and the next refresh is
+   `invalid_grant` plus a `SUSPICIOUS_REQUEST` event — a forced re-login, the
+   exact thing the requirement forbids. Wird uses `days=3` against a
+   `refresh_token_validity` of `days=90` (default `days=30`).
+
+8. **`offline_access` must be bound as a property mapping.** Listing
+   `refresh_token` in `grant_types` issues nothing on its own: `views/token.py`
+   gates issuance on `SCOPE_OFFLINE_ACCESS` being in the authorization code's
+   scope, and the refresh endpoint raises `invalid_scope` without it. No
+   existing blueprint here binds it, because no existing app needed a refresh
+   token.
+
+9. **`sub_mode` is left at its default (`hashed_user_id`).** Grafana and fleet
+   set `user_email` because they key attribution on the address. An app that
+   stores per-user rows against `sub` must not: `User.email` is mutable and not
+   unique, so a user who changes their address returns as a new, empty account,
+   and whoever later takes that address inherits their data.
+
 10. **Membership in that group comes from a self-service enrollment flow, not
     from git.** `gitops/bootstrap/authentik-blueprint-wird-enrollment.yaml`:
     prompt → user write (inactive, into `wird-users`) → email verification →
@@ -133,6 +154,20 @@ point where it stops describing reality.
     a Have I Been Pwned check with `hibp_allowed_count: 0`) is bound to the
     prompt stage for the same reason.
 
+    **Accepted, not solved: the form has no captcha and no rate limit.** Every
+    submission spends SMTP2GO quota and a HIBP range lookup, and the sender
+    reputation it burns belongs to a domain that also carries this cluster's
+    password recovery. Email verification is what stops a signup becoming an
+    *account*, but it is itself the resource being spent, so it is not a rate
+    limit. The flow's URL is unlisted, which is obscurity and not a control.
+    `authentik_stages_captcha.captchastage` bound ahead of the prompt stage is
+    the small fix if abuse appears; it is not built now because it needs another
+    external credential pair for an app with no users yet.
+
+    Also accepted: enrollment lets the user pick a username, and
+    `user_creation_mode: always_create` surfaces a collision as a uniqueness
+    error — a weak account-enumeration oracle against operator usernames.
+
     Rejected alternatives: **invitation-gated enrollment** (an
     `invitationstage` with `continue_flow_without_invitation: false`) is the
     smaller change and needs no SMTP, but it keeps a human in the loop for every
@@ -152,26 +187,39 @@ point where it stops describing reality.
     enrollment blueprint, not after it. `fleet` and `e2e-previews` were already
     bound; these two were the last unbound applications.
 
-7. **`refresh_token_threshold` is set explicitly.** It defaults to `seconds=0`,
-   which `views/token.py` treats as "always renew": a new refresh token on every
-   refresh, with the old one marked `revoked = True`. One lost response on a
-   mobile radio, or two screens refreshing at once, and the next refresh is
-   `invalid_grant` plus a `SUSPICIOUS_REQUEST` event — a forced re-login, the
-   exact thing the requirement forbids. Wird uses `days=3` against a
-   `refresh_token_validity` of `days=90` (default `days=30`).
+12. **`core_default_app_access` is flipped to `false`, so an unbound
+    application denies rather than admits.** Decisions 10 and 11 leave the
+    cluster one blueprint miss away from an open application, and that failure
+    is silent in a way worth spelling out: `!Find` returns `None` rather than
+    failing (`blueprints/v1/common.py`), so a miss writes a `policybinding` row
+    with `group_id = NULL`; `PolicyEngine.build()` sorts bindings into dynamic
+    (`policy_id is not None`) and static (`policy_id is None and (group_id or
+    user_id)`), and that row matches neither, so it is skipped entirely;
+    `_combine_results` then returns `PolicyResult(empty_result)`. With the flag
+    at its default the application is **open**, while
+    `SELECT * FROM authentik_policies_policybinding` shows a row — a gate that
+    looks present and is not. `!KeyOf` is no safer: it raises, the blueprint
+    aborts, and no row means open by the same flag.
 
-8. **`offline_access` must be bound as a property mapping.** Listing
-   `refresh_token` in `grant_types` issues nothing on its own: `views/token.py`
-   gates issuance on `SCOPE_OFFLINE_ACCESS` being in the authorization code's
-   scope, and the refresh endpoint raises `invalid_scope` without it. No
-   existing blueprint here binds it, because no existing app needed a refresh
-   token.
+    **This one cannot be a blueprint.** The flag lives on
+    `authentik_tenants.tenant`, and `Tenant` is
+    `InternallyManagedMixin, TenantMixin, SerializerModel` — the importer
+    refuses any `InternallyManagedMixin` subclass. It is set with the
+    management command instead, in the server pod:
 
-9. **`sub_mode` is left at its default (`hashed_user_id`).** Grafana and fleet
-   set `user_email` because they key attribution on the address. An app that
-   stores per-user rows against `sub` must not: `User.email` is mutable and not
-   unique, so a user who changes their address returns as a new, empty account,
-   and whoever later takes that address inherits their data.
+    ```
+    ak set_flag core_default_app_access false
+    ```
+
+    A deliberate exception to ADR-0039's "everything declared as blueprints in
+    git", recorded because **nothing re-asserts it**: a restored authentik, or a
+    rebuilt tenant, comes back at the `True` default and every gate silently
+    fails open again. The runbook carries the command and the check; this ADR
+    carries the reason.
+
+    The cost is the mirror image: an application whose binding blueprint fails
+    now denies everyone. ArgoCD and Grafana keep their local admins as
+    break-glass per ADR-0039; agent-fleet's `core` does not.
 
 ## Consequences
 
@@ -192,10 +240,13 @@ point where it stops describing reality.
 
 - **The `expressionpolicy` shapes are unverified.** Mitigated the way
   ADR-0039's bindings were: the policy lives in its own blueprint file, so if a
-  shape is wrong the blueprint logs and carries on, the provider still exists,
-  and login still works — ungated. That failure mode is silent, which is why the
-  verification steps read the database rather than the log, and why the negative
-  test (authorize with **no** `code_challenge`) is the one that matters.
+  shape is wrong the blueprint logs and carries on and the provider still
+  exists. **Decision 12 changes which way that fails.** Before the flag flip a
+  missing binding meant login still worked, ungated — silently. After it, the
+  same miss stops login for everyone, loudly. The second is the right direction
+  for a gate and the wrong one at 3am, which is why the verification steps read
+  the database rather than the log, and why the negative test (authorize with
+  **no** `code_challenge`) is the one that matters.
 
 - **Known drift this does not fix:** every pre-existing database in
   `pigsty/pigsty.yml` omits `revokeconn`, so PUBLIC keeps CONNECT on them and
