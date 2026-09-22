@@ -39,7 +39,18 @@ point where it stops describing reality.
    no `client_secret` attribute at all. Server-side consumers stay confidential;
    this is an exception with a stated test, not a new default.
 
-2. **PKCE is enforced by an authentik expression policy**, not left to the
+2. **Exactly one redirect URI, `https://`, claimed through App Links and
+   Universal Links.** No custom scheme (`dev.bnei.wird://`) and no
+   `http://localhost` dev entry. Custom schemes are first-come and unclaimable
+   on both platforms, so any app can register the same one; domain-verified
+   https links cannot be taken without controlling `wird.bnei.dev`. This is the
+   control that stops a copycat app — not PKCE, see below. It puts a
+   prerequisite on the app side: `wird.bnei.dev` must serve
+   `/.well-known/assetlinks.json` and `/.well-known/apple-app-site-association`
+   before mobile login completes, and until it does the redirect opens the
+   system browser instead of the app.
+
+3. **PKCE is enforced by an authentik expression policy**, not left to the
    client. `OAuth2Provider` has no `pkce_required` field on 2026.8, and
    `token/authorization_code.py` verifies a `code_verifier` only when the
    authorization code already carried a challenge — so a client that simply
@@ -51,13 +62,31 @@ point where it stops describing reality.
    default when the method is absent is `plain` and a challenge an attacker can
    read is not a challenge.
 
-3. **The application sets `policy_engine_mode: all`.**
+   **What it does and does not buy.** PKCE closes code *interception*. It does
+   **not** stop a rogue app running the whole flow itself with its own challenge
+   and verifier — that request passes the policy cleanly. Decision 2 is what
+   addresses that; the two are different problems and were conflated in this
+   PR's first draft.
+
+   **The policy must guard on OAuth context.** `modify_policy_request()` runs
+   only on the authorize view. `core/api/applications.py`'s
+   `_get_allowed_applications()` evaluates the same bindings through a
+   `ListPolicyEngine` to decide which tiles a user sees in their library, with
+   no OAuth request behind it — so an ungarded expression returns `False` there
+   and, under Decision 4's `MODE_ALL`, the application disappears from every
+   user's dashboard while login keeps working. The guard tests key *presence*:
+   `modify_policy_request()` always assigns `oauth_code_challenge`, setting it
+   to `None` when the client sent none, so absent means "not an authorization
+   request" and present-but-empty means "an authorization request that skipped
+   PKCE".
+
+4. **The application sets `policy_engine_mode: all`.**
    `PolicyBindingModel.policy_engine_mode` defaults to `MODE_ANY` — "any policy
    must pass". With two bindings (group membership and PKCE) at the default,
    passing either one grants access, and the PKCE gate becomes decorative. This
    one field is what makes Decision 2 real.
 
-4. **A public client's blueprint is a plain `ConfigMap`, and its `client_id` is
+5. **A public client's blueprint is a plain `ConfigMap`, and its `client_id` is
    committed.** This follows `DECISION.md`'s existing rule rather than bending
    it: the blueprint is an `InfisicalSecret` "when it carries an OAuth2 client
    secret, a plain `ConfigMap` when it does not". There is no secret, and the
@@ -65,14 +94,38 @@ point where it stops describing reality.
    `WIRD_OIDC_CLIENT_ID` row in Infisical — `docs/secrets.md` says so explicitly
    so the next audit does not read its absence as a gap.
 
-5. **Every public client gets its own access binding.** authentik's
+6. **Every public client gets its own access binding.** authentik's
    `AppAccessWithoutBindings` default is `True` — "applications with no policies
    bound can be accessed by any user" — so an unbound application means every
    directory user gets an account on it. Wird binds a new `wird-users` group,
    deliberately **not** `platform-admins`, which means "operator of this
    cluster" and is read by ArgoCD and Grafana.
 
-6. **`refresh_token_threshold` is set explicitly.** It defaults to `seconds=0`,
+10. **Membership in that group comes from a self-service enrollment flow, not
+    from git.** `gitops/bootstrap/authentik-blueprint-wird-enrollment.yaml`:
+    prompt → user write (inactive, into `wird-users`) → email verification →
+    login. The group therefore carries **no `users:` list** in any blueprint,
+    because that list is replaced rather than merged on every reconcile and
+    would delete every enrolled user's access.
+
+    The flow is **open** — anyone who reaches its URL can sign up — and is
+    deliberately **not** linked from the brand, since the brand is cluster-wide
+    and a "Sign up" link would appear on ArgoCD's and Grafana's login pages too.
+    What keeps it from being an open spam surface is email verification, which
+    makes **SMTP a hard dependency of this ADR**: `AUTHENTIK_EMAIL__*` is now
+    part of `authentik-config`, and without it authentik falls back to
+    `localhost:25` and silently drops every message — enrollment, password
+    recovery and email MFA alike. A password policy (12 characters minimum, plus
+    a Have I Been Pwned check with `hibp_allowed_count: 0`) is bound to the
+    prompt stage for the same reason.
+
+    Rejected alternatives: **invitation-gated enrollment** (an
+    `invitationstage` with `continue_flow_without_invitation: false`) is the
+    smaller change and needs no SMTP, but it keeps a human in the loop for every
+    signup, which a consumer-facing app cannot carry; **git-committed
+    membership** is what this replaces.
+
+7. **`refresh_token_threshold` is set explicitly.** It defaults to `seconds=0`,
    which `views/token.py` treats as "always renew": a new refresh token on every
    refresh, with the old one marked `revoked = True`. One lost response on a
    mobile radio, or two screens refreshing at once, and the next refresh is
@@ -80,14 +133,14 @@ point where it stops describing reality.
    exact thing the requirement forbids. Wird uses `days=3` against a
    `refresh_token_validity` of `days=90` (default `days=30`).
 
-7. **`offline_access` must be bound as a property mapping.** Listing
+8. **`offline_access` must be bound as a property mapping.** Listing
    `refresh_token` in `grant_types` issues nothing on its own: `views/token.py`
    gates issuance on `SCOPE_OFFLINE_ACCESS` being in the authorization code's
    scope, and the refresh endpoint raises `invalid_scope` without it. No
    existing blueprint here binds it, because no existing app needed a refresh
    token.
 
-8. **`sub_mode` is left at its default (`hashed_user_id`).** Grafana and fleet
+9. **`sub_mode` is left at its default (`hashed_user_id`).** Grafana and fleet
    set `user_email` because they key attribution on the address. An app that
    stores per-user rows against `sub` must not: `User.email` is mutable and not
    unique, so a user who changes their address returns as a new, empty account,
@@ -122,6 +175,22 @@ point where it stops describing reality.
   `dbrole_readwrite` — a shared role — can write their tables. `wirddb` sets
   `revokeconn: true` and is the first that does. Fixing the others is its own
   change.
+
+- **`!Find` returns `None` rather than failing**
+  (`blueprints/v1/common.py`), which decides where objects are declared. The
+  `wird-users` group is declared *identically in two blueprints* — the policy
+  file and the enrollment file — because `!KeyOf` resolves only within one
+  blueprint and raises when it cannot, while a `!Find` for the enrollment
+  stage's `create_users_group` would silently be `None` on any apply where the
+  group did not yet exist, creating users with no group and no access,
+  permanently, since the stage applies the group only at creation time.
+
+- **Three of this ADR's decisions came out of PR review, not design.** The first
+  draft used a custom scheme plus a localhost dev redirect, claimed PKCE stopped
+  a rogue app, and left the PKCE expression unguarded. All three were wrong in
+  the same direction: treating a public client as the confidential template with
+  a field removed. Recorded here because the reasoning is easier to repeat than
+  to re-derive.
 
 - **The skill and the runbook had to change with it.**
   `.claude/skills/authentik-oidc/SKILL.md` described the OIDC tier as always an

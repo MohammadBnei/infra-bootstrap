@@ -534,6 +534,24 @@ just does not do what you think:
    reading `request.context["oauth_code_challenge_method"]` — `views/authorize.py`'s
    `modify_policy_request()` is what puts it there. Require `S256`; the OAuth
    default when the method is absent is `plain`.
+
+   **Guard that expression on key presence, or you break the user library.**
+   `modify_policy_request()` runs only on the authorize view;
+   `core/api/applications.py` evaluates the same bindings with no OAuth context
+   to decide which tiles a user sees. Unguarded, the expression returns `False`
+   there and `policy_engine_mode: all` hides the app from every dashboard while
+   login still works. Start the expression with
+   `if "oauth_code_challenge" not in request.context: return True` — the key is
+   always assigned at `/authorize`, as `None` when PKCE was skipped, so presence
+   is the reliable test and truthiness is the check.
+
+   **And know what it buys.** PKCE closes code *interception*. It does not stop
+   a rogue app running the whole flow with its own challenge and verifier. For
+   a mobile client that protection comes from the redirect URI: use one
+   `https://` URI claimed through Android App Links / iOS Universal Links, which
+   are domain-verified, rather than a custom scheme, which any app can register.
+   Do not register `http://localhost` dev callbacks on a production public
+   client — with no consent screen that is a code-for-the-taking.
 2. **`policy_engine_mode` defaults to `MODE_ANY`.** Bind two policies (access +
    PKCE) at the default and passing *either* grants access. Set
    `policy_engine_mode: all` on the `authentik_core.application`.

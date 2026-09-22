@@ -40,27 +40,26 @@ data:
       # separate groups — the same reasoning authentik-blueprint-groups.yaml
       # gives for not reusing authentik's built-in `authentik Admins`.
       #
-      # This file owns the group OUTRIGHT — creation, membership and binding.
-      # authentik-blueprint-groups.yaml stays about cluster operators only.
-      # Declaring it here rather than there is what lets the binding below use
-      # !KeyOf instead of !Find: !Find on a group another blueprint has not
-      # applied yet resolves to nothing, and a binding that resolves to nothing
-      # is a gate that is not there.
+      # Declared here AND, identically, in
+      # authentik-blueprint-wird-enrollment.yaml. Not a duplicate: `!KeyOf`
+      # resolves only within one blueprint, and both files need a local handle —
+      # this one to bind the group, that one to write new users into it. `!Find`
+      # would not do, because it returns None instead of failing when it matches
+      # nothing (blueprints/v1/common.py), and silently-None is the wrong
+      # failure direction in both places.
+      #
+      # NO `users:` LIST, DELIBERATELY. authentik-blueprint-groups.yaml manages
+      # platform-admins that way and documents the trap: the list is REPLACED on
+      # every apply, not merged. Wird's membership is written at runtime by the
+      # enrollment flow, so a `users:` list here would delete every enrolled
+      # user's access at the next reconcile. Membership is runtime state; this
+      # file only decides what membership *means*.
       - model: authentik_core.group
         id: wird-users
         identifiers:
           name: wird-users
         attrs:
           name: wird-users
-          # REPLACED, not merged, on every apply — same trap as
-          # platform-admins. This list is the whole membership; removing a line
-          # removes that person's access to Wird.
-          #
-          # `!Find` resolves an existing user's primary key. It does not create
-          # the account, which is deliberate: declaring an authentik_core.user
-          # here would put this file in charge of the user itself.
-          users:
-            - !Find [authentik_core.user, [username, akadmin]]
       # Without a binding, authentik's AppAccessWithoutBindings default (True,
       # "applications with no policies bound can be accessed by any user") means
       # every directory user gets a Wird account. Authenticated but not
@@ -76,10 +75,14 @@ data:
       # PKCE enforcement. OAuth2Provider has no pkce_required field on 2026.8,
       # and token/authorization_code.py verifies a code_verifier only when the
       # authorization code carried a challenge — so without this, PKCE is a
-      # promise the client makes to itself. A public client's client_id ships in
-      # the APK, and the provider uses the implicit-consent authorization flow,
-      # so an app that registers dev.bnei.wird:// on the device could otherwise
-      # obtain a code with no user-visible interaction at all.
+      # promise the client makes to itself.
+      #
+      # WHAT THIS DOES AND DOES NOT STOP. It closes code INTERCEPTION: a third
+      # party that grabs this app's authorization code cannot redeem it. It does
+      # NOT stop a rogue app running the whole flow itself with its own
+      # challenge and verifier — that one passes cleanly. The control for that
+      # is the single App-Links-verified redirect URI in
+      # authentik-blueprint-wird.yaml, not this policy.
       #
       # This is enforceable only because views/authorize.py's
       # modify_policy_request() puts oauth_code_challenge and
@@ -90,16 +93,41 @@ data:
           name: wird-require-pkce
         attrs:
           name: wird-require-pkce
-          execution_logging: true
+          # Left at the default (false). execution_logging writes a
+          # POLICY_EXECUTION event on EVERY evaluation — and per the guard
+          # below, this policy is evaluated on every user-library refresh by
+          # every user, not only at login.
           expression: |
-            # Reject any authorization request that is not PKCE with S256.
-            # `plain` is the OAuth default when code_challenge_method is absent,
-            # so checking the method alone is not enough — an attacker who can
-            # read the challenge can replay it.
+            # THE GUARD IS NOT OPTIONAL, and it is not a style choice.
+            #
+            # Application access is evaluated in more places than /authorize.
+            # core/api/applications.py's _get_allowed_applications() runs the
+            # SAME bindings through a ListPolicyEngine to decide which tiles a
+            # user sees in their library, with no OAuth request behind it — so
+            # none of the oauth_* context keys exist there. Without this guard
+            # the expression returns False, and because the application sets
+            # policy_engine_mode: all, Wird would be filtered out of every
+            # user's dashboard forever while login kept working. A confusing
+            # bug to chase from the symptom.
+            #
+            # Key PRESENCE is the right test, not truthiness:
+            # modify_policy_request() always assigns oauth_code_challenge at
+            # /authorize, setting it to None when the client sent no challenge.
+            # So absent == "not an authorization request", while present-and-
+            # empty == "an authorization request that skipped PKCE", which is
+            # exactly the case this policy exists to reject.
+            if "oauth_code_challenge" not in request.context:
+                return True
+            if not request.context["oauth_code_challenge"]:
+                ak_message("This application requires PKCE.")
+                return False
+            # `plain` is what authorize.py defaults the method to when the
+            # client omits it, so checking the challenge alone is not enough:
+            # a challenge an attacker can read is a challenge they can replay.
             if request.context.get("oauth_code_challenge_method") != "S256":
                 ak_message("This application requires PKCE with S256.")
                 return False
-            return bool(request.context.get("oauth_code_challenge"))
+            return True
       - model: authentik_policies.policybinding
         identifiers:
           target: !Find [authentik_core.application, [slug, wird]]

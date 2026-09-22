@@ -81,6 +81,9 @@ blueprints:
   # as the fleet policy above.
   - authentik-blueprint-wird
   - authentik-blueprint-wird-policy
+  # Self-service enrollment into wird-users — the only way a Wird user is
+  # created, now that the group carries no git-managed membership list.
+  - authentik-blueprint-wird-enrollment
   secrets:
   - authentik-blueprint-grafana
   - authentik-blueprint-argocd

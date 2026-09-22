@@ -23,14 +23,17 @@
 # stops an unknown client from completing the code flow here, so three things
 # have to carry that weight instead, and two of them are NOT in this file:
 #
-#   1. PKCE, enforced by an expression policy —
+#   1. A single https:// redirect URI, claimed through App Links / Universal
+#      Links. This is the control that stops a copycat app, NOT PKCE — see the
+#      redirect_uris comment below for why they are different problems.
+#   2. PKCE, enforced by an expression policy —
 #      gitops/bootstrap/authentik-blueprint-wird-policy.yaml. There is no
 #      pkce_required field on OAuth2Provider; enforcement is possible only
 #      because views/authorize.py's modify_policy_request() puts
 #      oauth_code_challenge and oauth_code_challenge_method into the policy
-#      context.
-#   2. `policy_engine_mode: all` below. Without it those bindings are worthless.
-#   3. Audience validation, app-side, in Wird's Go backend. `signing_key` is the
+#      context. It closes code INTERCEPTION, nothing more.
+#   3. `policy_engine_mode: all` below. Without it those bindings are worthless.
+#   4. Audience validation, app-side, in Wird's Go backend. `signing_key` is the
 #      SAME "authentik Self-signed Certificate" every other provider here uses,
 #      and jwks.py serves it at every per-app JWKS URL — so a Grafana or ArgoCD
 #      access token verifies cleanly against Wird's JWKS. "Validate the JWT
@@ -65,21 +68,41 @@ data:
           #
           # redirect_uris is a list of OBJECTS, not strings, in 2026.x — the
           # single most expensive shape mistake in this repo's authentik work.
-          # All three are `strict`: every other entry in gitops/bootstrap/ is,
-          # and matching_mode: regex on a public client's redirect is the one
-          # place a loose pattern turns into token interception.
+          #
+          # EXACTLY ONE URI, HTTPS, AND THAT IS THE SECURITY CONTROL.
+          #
+          # A custom scheme (dev.bnei.wird://) was the obvious choice for the
+          # mobile app and is deliberately NOT here. Custom schemes are
+          # first-come and unclaimable on both platforms: any app can register
+          # the same one. PKCE does not help — it stops a third party
+          # INTERCEPTING this app's code, but a rogue app runs the whole flow
+          # itself, with its own challenge and its own verifier, and passes
+          # every check. Combined with the implicit-consent authorization flow
+          # below, that is an access token and a 90-day refresh token for
+          # anyone who ships a copycat app, with no user interaction at all.
+          #
+          # https:// is claimed through Android App Links and iOS Universal
+          # Links, which are verified against the domain — hijacking one means
+          # controlling wird.bnei.dev. The website uses the same URI.
+          #
+          # THE APP SIDE OWES TWO FILES for this to work, served from
+          # wird.bnei.dev over HTTPS:
+          #   /.well-known/assetlinks.json            (Android)
+          #   /.well-known/apple-app-site-association (iOS, no extension,
+          #                                            Content-Type: application/json)
+          # Until they are served and verified, the redirect opens the system
+          # browser instead of the app and mobile login does not complete.
+          #
+          # No http://localhost entry for `vite dev` either: on a public client
+          # with no consent screen, a dev redirect on the production provider
+          # means an attacker-crafted /authorize link plus anything listening on
+          # that port yields a code. Dev gets its own provider if it needs one.
+          #
+          # The match is a fullmatch (token/base.py, views/authorize.py), so a
+          # trailing slash or an appended query string fails as invalid_client.
           redirect_uris:
-            # Mobile. Custom schemes are first-come and unclaimable on both
-            # platforms, which is exactly why the PKCE policy is not optional.
-            - matching_mode: strict
-              url: dev.bnei.wird://oauth/callback
             - matching_mode: strict
               url: https://wird.bnei.dev/auth/callback
-            # Local `vite dev` for the website. Note the match is a fullmatch
-            # (token/base.py, views/authorize.py), so a trailing slash or an
-            # appended query string fails with invalid_client.
-            - matching_mode: strict
-              url: http://localhost:5173/auth/callback
           # grant_types defaults to EMPTY, which permits nothing. Not optional.
           grant_types:
             - authorization_code
