@@ -1,0 +1,105 @@
+# The cluster-wide authentik brand: page title, theme and accent colours for
+# every authentik-rendered screen.
+#
+# THIS IS NOT WIRD-SPECIFIC, and cannot be made so without a second brand. A
+# Brand is selected by `domain`, and the only brand here is the default one
+# (`domain: authentik-default`, matched when nothing else matches). So these
+# values are what ArgoCD's, Grafana's and Wird's login screens all show. That
+# is the same reasoning as authentik-blueprint-wird-enrollment.yaml's refusal to
+# set the brand's `enrollment_flow`: the brand is shared, so anything put on it
+# is advertised everywhere.
+#
+# IDENTIFIED BY DOMAIN, AND GUARDED SO IT CAN ONLY UPDATE. `authentik-default`
+# is not created by a migration — it comes from authentik's own shipped
+# blueprint, /blueprints/default/default-brand.yaml, which is `state: created`
+# behind `!Condition [NOR, !Find [authentik_brands.brand, [default, True]]]`
+# and which also sets flow_authentication, flow_invalidation,
+# flow_user_settings and flow_request on it.
+#
+# That is why the `conditions:` below exists. Blueprint files are discovered and
+# dispatched per file with no ordering between them, so on an empty database —
+# a rebuild, or a Postgres restore — this entry could win the race, create the
+# brand itself, and turn the shipped blueprint's NOR condition false. The brand
+# would then exist with none of those four flows, and `flow_user_settings` has
+# no fallback (the other two resolve through `ToDefaultFlow.flow_by_policy`).
+# The condition makes this entry a no-op until the brand exists, so authentik
+# always creates it and this file only ever restyles it.
+#
+# Matching by domain also keeps it to ONE brand. `BrandSerializer.validate`
+# rejects a second `default: true`, so a different identifier here would fail
+# the blueprint rather than corrupt anything — loudly, but still broken.
+#
+# THE THEME IS NOT A COLUMN. `ui_theme` is read out of
+# `attributes.settings.theme.base` (authentik/brands/api.py,
+# CurrentBrandSerializer), so it goes in the free-form `attributes` JSON rather
+# than in a field of its own. Valid values are automatic/light/dark
+# (brands/api.py `Themes`); it was `automatic` here, i.e. whatever the visitor's
+# OS asks for.
+#
+# `attributes` IS REPLACED WHOLESALE, not merged, and the theme is not the only
+# thing that lives in it — `Brand.default_locale` reads
+# `attributes.settings.locale`. Nothing sets a locale on this cluster, so this
+# is a known and accepted edge rather than a live bug: if one is ever set in the
+# UI, it belongs in this block or the next reconcile drops it.
+#
+# LOGO AND FAVICON ARE LEFT ALONE deliberately — both fields are `minLength: 1`
+# in the blueprint schema, so there is no "unset" to write, and pointing them
+# anywhere means hosting an asset that every login screen then depends on.
+# Stock authentik icons are the lazy correct answer until there is a real logo.
+#
+# CUSTOM CSS IS ADOPTED INTO SHADOW ROOTS, not appended to the document — the
+# frontend keeps it as a constructed stylesheet and attaches it to each
+# component root (`hostStyleSheets`). Custom properties are the reliable lever
+# there: they inherit through shadow boundaries, whereas a rule written against
+# some internal class name is one frontend refactor away from silently doing
+# nothing. Hence variables only, and both `:root` and `:host` so it applies
+# whether the sheet lands on the document or on a component.
+#
+# `.pf-t-dark` / `.pf-t-light` are in that list because PatternFly's own theme
+# rules redefine `--pf-global--primary-color--100` and `--pf-global--link--Color`
+# on those classes (read out of the 2026.8.0 bundle — note it is NOT
+# `html[data-theme=...]` in this version). A declaration only on `:root` ties
+# with them on specificity and is not guaranteed to win. `--ak-accent` and the
+# font stack are declared nowhere else and would have been fine either way.
+#
+# Field shapes read from the running 2026.8.0 instance's /blueprints/schema.json
+# and its brands/api.py, not from docs.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: authentik-blueprint-brand
+  namespace: authentik
+data:
+  brand.yaml: |
+    version: 1
+    metadata:
+      name: brand
+      labels:
+        blueprints.goauthentik.io/instantiate: "true"
+    entries:
+      - model: authentik_brands.brand
+        id: brand
+        identifiers:
+          domain: authentik-default
+        # Update-only: skipped entirely until authentik's own blueprint has
+        # created the brand. See the header.
+        conditions:
+          - !Find [authentik_brands.brand, [domain, authentik-default]]
+        attrs:
+          default: true
+          branding_title: bnei.dev
+          attributes:
+            settings:
+              theme:
+                base: dark
+          branding_custom_css: |
+            :root, :host, .pf-t-dark, .pf-t-light {
+              --ak-accent: #6ea8fe;
+              --pf-global--primary-color--100: #6ea8fe;
+              --pf-global--primary-color--200: #4c8bf5;
+              --pf-global--active-color--100: #6ea8fe;
+              --pf-global--link--Color: #6ea8fe;
+              --pf-global--link--Color--hover: #9cc4ff;
+              --pf-global--FontFamily--sans-serif: ui-sans-serif, system-ui,
+                -apple-system, "Segoe UI", Roboto, sans-serif;
+            }
