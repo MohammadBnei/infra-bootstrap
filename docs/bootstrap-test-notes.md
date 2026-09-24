@@ -4434,3 +4434,43 @@ transcripts.
 
 Any object above a few MB goes in over the LAN or a tunnel, never through
 `s3.bnei.dev`. Verify with ETag-vs-MD5, not with a status code.
+
+## 2026-09-25 — `Synced Healthy` is not "running your commit"
+
+Watched a CI-driven release land for the first time on an app whose pipeline
+bumps its own image tag (wird, whose `deploy` job commits `tag:` into
+`helm/values.yaml` — the same shape `editable-blog` and `ukubi-stt` use).
+
+GitHub run `36074938048` finished all three jobs green and pushed the bump
+commit. For roughly **twenty minutes afterwards** the Application reported:
+
+```
+$ kubectl -n argocd get application wird -o jsonpath='{.status.sync.status} {.status.health.status}'
+Synced Healthy
+```
+
+while the Deployment still named the **previous** tag and the pod was 131
+minutes old. Nothing was wrong: `status.sync.status` describes the revision
+ArgoCD last reconciled, and that reconcile predated the bump commit. A green
+`Synced` immediately after a deploy job means "synced to what I last looked
+at", which is exactly the reading a human takes as "my release is live".
+
+### How to actually tell whether a release landed
+
+Compare the running image against what git says, or ask the route:
+
+```bash
+ssh k9s "kubectl -n <ns> get deploy <app> -o jsonpath='{.spec.template.spec.containers[0].image}'"
+gh api repos/MohammadBnei/<repo>/contents/helm/values.yaml --jq .content | base64 -d | grep '^  tag:'
+```
+
+Equal tags, or a route that answers as the new code would, is evidence.
+`Synced` is not. `status.reconciledAt` tells you when the answer was last
+computed and is worth reading alongside it.
+
+### Lesson
+
+For any app whose CI commits its own tag, the deploy is complete when the
+Deployment's image matches `values.yaml` — not when ArgoCD says `Synced`. The
+same trap applies to a hand-pushed gitops change watched too soon after the
+push.
