@@ -4377,3 +4377,60 @@ curl -s http://192.168.1.205:8008/cluster | jq '.members[] | {name, role, host}'
 ```
 
 and verify the object exists afterwards. The recap cannot tell you.
+
+## 2026-09-24 — `wird-models` bucket: two Garage/Traefik limits worth knowing before the next large object
+
+Bringing up the `wird-models` bucket (160MB ONNX speech model, three objects,
+ADR-0030 Decision 2 kept intact via a wird-api 302 to a presigned URL rather
+than a public bucket) surfaced two things no runbook had.
+
+### 1. Large PUTs through `https://s3.bnei.dev` fail at exactly 60s with 502
+
+`quran-tokens.txt` (797KB) uploaded fine. Both ONNX objects returned **502
+after 60.4s and 60.3s** — the body was still going up, so this is a timeout in
+front of Garage, not a Garage or SigV4 error. The upload was running at
+~146KB/s, which is the home uplink, so anything above roughly 9MB cannot
+finish inside the window.
+
+Fix used: upload over the LAN instead. From off-LAN that means an SSH tunnel to
+the Garage LXC's S3 port through the k9s hub, which has no HTTP timeout:
+
+```bash
+ssh -f -N -L 3900:192.168.1.199:3900 k9s
+curl --aws-sigv4 "aws:amz:garage:s3" -u "$KEY:$SECRET" \
+  -T quran-decoder.int8.onnx \
+  "http://127.0.0.1:3900/wird-models/base-ar-quran/<sha12>/quran-decoder.int8.onnx"
+```
+
+124.6MB took 918s and returned 200. **Downloads are unaffected** — different
+direction, and a presigned GET goes straight to grey `s3.bnei.dev` with nothing
+buffering it. Ranged GETs (`206`) work including a tail range on the 130MB
+object.
+
+### 2. HEAD on a presigned URL returns 403
+
+The signature covers the method. A presigned GET answers `200`/`206` and the
+same URL answers **403 to HEAD**, which reads like a permissions problem and is
+not. Read the total length off `Content-Range` and the `ETag` off the GET
+response instead of preflighting with HEAD.
+
+### Verifying a large upload without downloading it
+
+Garage's ETag on a single-part PUT is the MD5 of the stored object, so
+
+```bash
+md5 -q quran-decoder.int8.onnx        # local
+curl -sL -H "Range: bytes=0-0" -D - "<presigned or route URL>" | grep -i etag
+```
+
+proves the stored bytes match without pulling 130MB back. All three matched on
+this run, and the wird session then loaded the *downloaded* files into
+sherpa-onnx 1.13.8 and decoded Husary 096001.mp3 to the correct fully-vowelled
+Al-'Alaq 96:1 — the check that a size comparison cannot make, since an int8
+encoder/decoder pair from mismatched exports loads cleanly and returns empty
+transcripts.
+
+### Lesson
+
+Any object above a few MB goes in over the LAN or a tunnel, never through
+`s3.bnei.dev`. Verify with ETag-vs-MD5, not with a status code.
