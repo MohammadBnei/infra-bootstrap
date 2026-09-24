@@ -1,3 +1,4 @@
+
 # User app registry — single source of truth for apps.applicationset.yaml
 #
 # IMPORTANT: when you add or remove an entry here, mirror the change in
@@ -173,6 +174,63 @@
   # first version of this entry claimed the gate without that being true anywhere
   # — see the #243 revert.
   hostname: has-journal.bnei.dev
+
+# wird: Qur'an study app (ADR-0050) — a Go API (server/cmd/api) that the
+# Flutter client flushes its offline queue into. First app here whose CLIENT
+# is not a browser, which is what makes the hostname below load-bearing in a
+# way no other entry's is.
+#
+# hostname: THE APP ALREADY HARDCODES IT, in two places that must agree with
+# this line and with each other:
+#   - app/lib/data/flush.dart `syncOrigin` defaults to https://wird.bnei.dev
+#     (a --dart-define, WIRD_ORIGIN, so a build can override it)
+#   - authentik-blueprint-wird.yaml registers exactly one redirect URI,
+#     https://wird.bnei.dev/auth/callback, matching_mode: strict — a fullmatch
+#   and the application's meta_launch_url is the same host.
+# So this is not a free choice: any other hostname means the phone posts its
+# queue at a host with no API behind it, silently, forever — flush.dart reads
+# a connection error as "not reached the server yet" and keeps the ops queued.
+# Changing it later means changing the blueprint, the app default AND every
+# already-installed build. It stays wird.bnei.dev.
+#
+# What that host must serve, beyond /v1/* and /healthz, before mobile sign-in
+# can ever complete without the manual paste-back flow:
+#   /auth/callback                          (the API has no route for it today)
+#   /.well-known/assetlinks.json            (Android App Links)
+#   /.well-known/apple-app-site-association (iOS Universal Links)
+# See authentik-blueprint-wird.yaml's redirect_uris comment — those files are
+# the security control that replaces the client secret, not a nicety.
+#
+# LIVE AS OF 2026-09-24: the app's default build sends `dev.bnei.wird://` as
+# its redirect (app/lib/data/auth.dart `authRedirect`) and authentik does not
+# register it, so a real sign-in fails with a bad-redirect error. That is an
+# app-side define (WIRD_REDIRECT), not a change here or in the blueprint —
+# deliberately, because ADR-0050 rejects custom schemes: they are first-come
+# and unclaimable, and PKCE does not stop a copycat app that runs the whole
+# flow itself.
+#
+# namespace wird, syncWave 10: nothing special, the same as every other user
+# app. Postgres is NOT in-cluster — dbuser_wird/wirddb live on the Pigsty VIP
+# 192.168.1.232 (pigsty/pigsty.yml) and reach the pod as DATABASE_URL from
+# wird's OWN Infisical project, the editable-blog-555c pattern. There is no
+# default-deny NetworkPolicy on this cluster (ADR-0040 Decision 5 is unbuilt),
+# so that egress needs no carve-out today.
+#
+# adminweb (server/cmd/adminweb, the operations view) gets NO entry and no
+# hostname yet, and the reason is upstream of deployment: it authorises on a
+# `groups` claim carrying platform-admins, and this provider's
+# property_mappings bind only openid/email/profile/offline_access — no group
+# scope mapping. Its check is written the safe way round (nil contains
+# nothing -> 403), so shipping it now would deploy a dashboard nobody can
+# open. Add the mapping to authentik-blueprint-wird.yaml and this entry in
+# the same change, not before.
+- name: wird
+  namespace: wird
+  syncWave: "10"
+  repoURL: https://github.com/MohammadBnei/wird.git
+  valuesPath: [helm/values.yaml]
+  targetRevision: main
+  hostname: wird.bnei.dev
 
 # searxng and pgweb are NOT here: they're public-image tools with no
 # app-specific code, so they're driven as platform apps instead — see

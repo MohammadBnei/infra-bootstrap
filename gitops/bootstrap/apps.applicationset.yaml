@@ -126,6 +126,21 @@ spec:
         # first version of this entry claimed the gate without that being true anywhere
         # — see the #243 revert.
         hostname: has-journal.bnei.dev
+
+      # wird: Qur'an study app (ADR-0050). See gitops/apps/registry.yaml's
+      # matching entry for why this hostname is not a free choice — the Flutter
+      # client hardcodes it as its sync origin AND it is the single redirect URI
+      # authentik fullmatches for this client. A different hostname here is a
+      # phone posting its queue into a 404 with no error a reader would see.
+      # adminweb has no entry yet: the provider emits no `groups` claim, so it
+      # would 403 everyone. Reasons in full in the registry.
+      - name: wird
+        namespace: wird
+        syncWave: "10"
+        repoURL: https://github.com/MohammadBnei/wird.git
+        valuesPath: [helm/values.yaml]
+        targetRevision: main
+        hostname: wird.bnei.dev
   template:
     metadata:
       name: '{{.name}}'
