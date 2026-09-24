@@ -211,10 +211,21 @@
 #
 # namespace wird, syncWave 10: nothing special, the same as every other user
 # app. Postgres is NOT in-cluster — dbuser_wird/wirddb live on the Pigsty VIP
-# 192.168.1.232 (pigsty/pigsty.yml) and reach the pod as DATABASE_URL from
-# wird's OWN Infisical project, the editable-blog-555c pattern. There is no
+# (pigsty/pigsty.yml), reached by name as postgres.bnei.lan. There is no
 # default-deny NetworkPolicy on this cluster (ADR-0040 Decision 5 is unbuilt),
 # so that egress needs no carve-out today.
+#
+# DATABASE_URL does NOT come from a per-app Infisical project, which is what
+# this comment used to say (the editable-blog-555c pattern). It is assembled
+# from DBUSER_WIRD_PASSWORD by gitops/bootstrap/wird-secret.yaml into the
+# Secret `wird-config`, which Wird's helm/values.yaml picks up by envFrom and
+# nothing else. A per-app project would have meant the password living in two
+# Infisical entries with a hand-copy between them — the drift docs/secrets.md
+# already records for WEDDING_WALL_S3, where skipping the copy fails silently
+# at runtime. It would also have bought no containment: docs/secrets.md notes
+# that a secretsScope narrows the sync, not the identity's read grant, so
+# universal-auth-credentials can read the root project either way. See Wird's
+# docs/adr/0005-deploying-the-api.md.
 #
 # adminweb (server/cmd/adminweb, the operations view) gets NO entry and no
 # hostname yet, and the reason is upstream of deployment: it authorises on a
