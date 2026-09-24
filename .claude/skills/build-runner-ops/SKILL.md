@@ -83,11 +83,31 @@ playbook is idempotent and this keeps the box reproducible.
        url: https://github.com/MohammadBnei/some-repo
        # home: optional, defaults to /opt/actions-runner-<name>
    ```
-3. Set the registry push credentials on that repo:
+3. Name the repo in the shared CI machine identity's bound claims. The
+   registry password is **not** a per-repo GitHub secret any more — every build
+   repo but `wedding-2026` (which still uses `secrets.REGISTRY_PASSWORD` in its
+   `docker.yml` and predates this) reads `REGISTRY_USERNAME`/`REGISTRY_PASSWORD`
+   out of the `platform-commons-76pb` Infisical project over GitHub OIDC
+   (ADR-0049), and
+   that identity (`19807471-d73a-48d4-9e58-1dc34255ef77`) gates on a
+   comma-separated `boundClaims.repository` list. A repo missing from it
+   registers its runner fine, picks the job up, and then fails the Infisical
+   step with `Access denied: OIDC claim not allowed` and HTTP 401 — which reads
+   like a bad credential rather than an unlisted repo. Read the list first, then
+   PATCH it back with the new repo appended and every other field byte-identical:
    ```bash
-   gh secret set REGISTRY_USERNAME -R MohammadBnei/some-repo
-   gh secret set REGISTRY_PASSWORD -R MohammadBnei/some-repo
+   infisical user get token --plain > /tmp/t
+   curl -s -H "Authorization: Bearer $(cat /tmp/t)" \
+     https://infisical.bnei.dev/api/v1/auth/oidc-auth/identities/19807471-d73a-48d4-9e58-1dc34255ef77
+   # then, with the boundClaims from that response plus the new repo:
+   curl -s -X PATCH -H "Authorization: Bearer $(cat /tmp/t)" -H 'Content-Type: application/json' \
+     https://infisical.bnei.dev/api/v1/auth/oidc-auth/identities/19807471-d73a-48d4-9e58-1dc34255ef77 \
+     -d '{"boundClaims":{"event_name":"push, workflow_dispatch","repository":"<existing list>, MohammadBnei/some-repo","repository_owner":"MohammadBnei"}}'
+   rm -f /tmp/t
    ```
+   `event_name` is bound too, so a `pull_request` build can never read the
+   password — which is why agent-fleet's and wird's workflows guard that step
+   with an `if` instead of letting every PR fail on it.
 4. Re-run the playbook:
    ```bash
    ansible-playbook -i ansible/inventories/build-runner/hosts.yml \
