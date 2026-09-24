@@ -58,6 +58,11 @@ blueprints:
   # Group membership is a plain ConfigMap: no credential in it, so nothing to
   # interpolate from Infisical and one fewer restart in the propagation chain.
   configMaps:
+  # Cluster-wide look and feel: title, dark theme, accent colours. A plain
+  # ConfigMap for the same reason as the group list — nothing in it is secret.
+  # It updates the brand row authentik creates for itself; see that file's
+  # header for why it is matched by `domain` and not by anything else.
+  - authentik-blueprint-brand
   - authentik-blueprint-groups
   # No credential in the fleet policy binding either — it only references an
   # application and a group by name. Kept out of the fleet provider's own

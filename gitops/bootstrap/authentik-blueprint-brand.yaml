@@ -1,0 +1,75 @@
+# The cluster-wide authentik brand: page title, theme and accent colours for
+# every authentik-rendered screen.
+#
+# THIS IS NOT WIRD-SPECIFIC, and cannot be made so without a second brand. A
+# Brand is selected by `domain`, and the only brand here is the default one
+# (`domain: authentik-default`, matched when nothing else matches). So these
+# values are what ArgoCD's, Grafana's and Wird's login screens all show. That
+# is the same reasoning as authentik-blueprint-wird-enrollment.yaml's refusal to
+# set the brand's `enrollment_flow`: the brand is shared, so anything put on it
+# is advertised everywhere.
+#
+# IDENTIFIED BY DOMAIN, ON PURPOSE. `authentik-default` is the row authentik's
+# own migration creates, and it already carries `default: true`. Matching it
+# UPDATES that row. Identifying this entry any other way (by name, or with no
+# stable identifier) creates a SECOND brand with `default: true`, and
+# `Brand.objects.filter(default=True).first()` then picks between them by
+# insertion order — a coin flip that changes on a database restore.
+#
+# THE THEME IS NOT A COLUMN. `ui_theme` is read out of
+# `attributes.settings.theme.base` (authentik/brands/api.py,
+# CurrentBrandSerializer), so it goes in the free-form `attributes` JSON rather
+# than in a field of its own. Valid values are automatic/light/dark
+# (brands/api.py `Themes`); it was `automatic` here, i.e. whatever the visitor's
+# OS asks for.
+#
+# LOGO AND FAVICON ARE LEFT ALONE deliberately — both fields are `minLength: 1`
+# in the blueprint schema, so there is no "unset" to write, and pointing them
+# anywhere means hosting an asset that every login screen then depends on.
+# Stock authentik icons are the lazy correct answer until there is a real logo.
+#
+# CUSTOM CSS IS ADOPTED INTO SHADOW ROOTS, not appended to the document — the
+# frontend keeps it as a constructed stylesheet and attaches it to each
+# component root (`hostStyleSheets`). Custom properties are the reliable lever
+# there: they inherit through shadow boundaries, whereas a rule written against
+# some internal class name is one frontend refactor away from silently doing
+# nothing. Hence variables only, and both `:root` and `:host` so it applies
+# whether the sheet lands on the document or on a component.
+#
+# Field shapes read from the running 2026.8.0 instance's /blueprints/schema.json
+# and its brands/api.py, not from docs.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: authentik-blueprint-brand
+  namespace: authentik
+data:
+  brand.yaml: |
+    version: 1
+    metadata:
+      name: brand
+      labels:
+        blueprints.goauthentik.io/instantiate: "true"
+    entries:
+      - model: authentik_brands.brand
+        id: brand
+        identifiers:
+          domain: authentik-default
+        attrs:
+          default: true
+          branding_title: bnei.dev
+          attributes:
+            settings:
+              theme:
+                base: dark
+          branding_custom_css: |
+            :root, :host {
+              --ak-accent: #6ea8fe;
+              --pf-global--primary-color--100: #6ea8fe;
+              --pf-global--primary-color--200: #4c8bf5;
+              --pf-global--active-color--100: #6ea8fe;
+              --pf-global--link--Color: #6ea8fe;
+              --pf-global--link--Color--hover: #9cc4ff;
+              --pf-global--FontFamily--sans-serif: ui-sans-serif, system-ui,
+                -apple-system, "Segoe UI", Roboto, sans-serif;
+            }
