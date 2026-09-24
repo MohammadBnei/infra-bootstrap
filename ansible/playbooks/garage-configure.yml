@@ -175,6 +175,30 @@
         # LXC's 200GB with the Longhorn and pgBackRest targets — see the
         # zot-registry note above for why that matters more than it looks.
         max_size: "10GB"
+      - name: "wird-models" # the ONNX speech model wird's voice-follow downloads to the phone
+        key_name: "wird-models-key"
+        infisical_prefix: "WIRD_MODELS_S3"
+        # NO cors: block — a Flutter client is not a browser origin, so there is
+        # nothing for a rule to permit. Same reasoning as wedding-wall above.
+        #
+        # NOT publicly readable, and that is the whole design. ADR-0030
+        # Decision 2 keeps Garage SigV4-only and names the website/public-access
+        # feature as a separate decision with a different security posture. So
+        # wird-api answers an unauthenticated GET /models/... by minting a
+        # short-lived presigned URL and returning 302; the bytes go straight
+        # from grey s3.bnei.dev to the phone, never through the pod, and the app
+        # holds a path rather than a URL with an expiry it cannot refresh.
+        #
+        # Objects are keyed by export sha, not by name alone: an int8 ONNX
+        # encoder and decoder from different exports load without error and
+        # return empty transcripts, so a resumed download that straddles a
+        # re-export must not be able to mix halves.
+        #
+        # 160MB per export today (29.1 encoder + 130.7 decoder + 0.8 tokens) and
+        # nothing prunes old versions. Bounded for the same reason as
+        # wedding-wall: this LXC's 200GB also holds the Longhorn, pgBackRest and
+        # zot targets.
+        max_size: "2GB"
 
   handlers:
     - name: Restart garage
