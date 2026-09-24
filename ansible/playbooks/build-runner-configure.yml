@@ -41,10 +41,19 @@
     #
     # `home` is optional and defaults to /opt/actions-runner-<name>.
     #
-    # Adding an entry is NOT sufficient on its own: the repo must first be
-    # added to the ACCESS_TOKEN PAT's repository list, or "Mint a runner
-    # registration token" below 403s. That is a GitHub UI action on a
-    # fine-grained PAT — `gh` cannot edit PAT scopes.
+    # Adding an entry is NOT sufficient on its own. TWO grants live outside
+    # this file and neither is inferable from the failure it produces:
+    #
+    # 1. The repo must be in the ACCESS_TOKEN PAT's repository list, or "Mint
+    #    a runner registration token" below 403s. That is a GitHub UI action
+    #    on a fine-grained PAT — `gh` cannot edit PAT scopes.
+    # 2. The repo must be named in the platform-commons CI machine identity's
+    #    `boundClaims.repository` (identity 19807471-d73a-48d4-9e58-1dc34255ef77,
+    #    a comma-separated repo list). That gate is in the workflow rather than
+    #    here: the runner registers fine and picks the job up, then the
+    #    Infisical step fails with `Access denied: OIDC claim not allowed` and
+    #    HTTP 401 — which reads like a bad credential, not an unlisted repo.
+    #    Confirmed live on wird, 2026-09-24.
     build_runner_repos:
       - name: editable-blog
         url: https://github.com/MohammadBnei/editable-blog
@@ -715,7 +724,9 @@
           - ""
           - "To add a build repo: add an entry to build_runner_repos and re-run"
           - "— but add that repo to the ACCESS_TOKEN PAT's repository list FIRST,"
-          - "or the registration-token task 403s. One instance per repo: repo-scoped"
+          - "or the registration-token task 403s, AND to the platform-commons CI"
+          - "identity's boundClaims.repository, or the build's Infisical step 401s"
+          - "with OIDC claim not allowed. One instance per repo: repo-scoped"
           - "runners are repo-only and personal accounts cannot register org-level"
           - "ones, so the registration cannot be shared — only this box and its"
           - "buildah image cache are. See the /build-runner-ops skill."
