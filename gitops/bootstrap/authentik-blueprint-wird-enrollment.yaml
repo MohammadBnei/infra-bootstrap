@@ -144,7 +144,7 @@ data:
           name: wird-password-strength
           password_field: password
           check_static_rules: true
-          length_min: 12
+          length_min: 8
           amount_digits: 0
           amount_uppercase: 0
           amount_lowercase: 0
@@ -152,7 +152,7 @@ data:
           check_have_i_been_pwned: true
           hibp_allowed_count: 0
           error_message: >-
-            Use at least 12 characters, and a password that has not appeared in
+            Use at least 8 characters, and a password that has not appeared in
             a known data breach.
 
       - model: authentik_stages_prompt.promptstage
