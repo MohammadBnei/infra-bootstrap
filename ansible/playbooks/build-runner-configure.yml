@@ -73,7 +73,15 @@
       # every other app's. Needs adding to the ACCESS_TOKEN PAT's repo list first, or the
       # registration-token call 403s in a way that reads like a bad token.
       - name: dream-analyst
-        url: https://github.com/MohammadBnei/dream-analyst    # NOT `ukubi` — that label belongs to the in-cluster runner holding a
+        url: https://github.com/MohammadBnei/dream-analyst
+      # Offline-first app whose outbox has nowhere to flush until an image
+      # exists: registry.bnei.lan:5000 is LAN-only, so nothing outside the
+      # network can push it. See #255 — its release.yml already declares
+      # `runs-on: [self-hosted, ukubi-build]`, so only the registration is
+      # missing. PAT repo list first, as above.
+      - name: wird
+        url: https://github.com/MohammadBnei/wird
+    # NOT `ukubi` — that label belongs to the in-cluster runner holding a
     # ServiceAccount token with `create jobs` in vos/vos-dev. Builds must
     # not land there and cluster jobs must not land here.
     #
