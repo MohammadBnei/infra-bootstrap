@@ -147,7 +147,8 @@ Current files:
 | `gitops/bootstrap/authentik-blueprint-wird.yaml` | Wird's provider + application — the cluster's first **public** client, so a plain ConfigMap with the `client_id` committed (ADR-0050) |
 | `gitops/bootstrap/authentik-blueprint-wird-policy.yaml` | the `wird-users` group, the `wird-require-pkce` expression policy, and both bindings (plain ConfigMap) |
 | `gitops/bootstrap/authentik-blueprint-wird-enrollment.yaml` | self-service enrollment into `wird-users` — prompt, user write, email verification, login. Needs `AUTHENTIK_EMAIL__*` in `authentik-config` or it dead-ends silently (ADR-0050) |
-| `gitops/bootstrap/authentik-blueprint-platform-apps-policy.yaml` | binds `argocd`, `grafana` and `hermes` to `platform-admins`, and declares + binds `hermes-require-pkce` — argocd/grafana were the last two applications with no binding (ADR-0050 Decision 11, ADR-0051) |
+| `gitops/bootstrap/authentik-blueprint-platform-apps-policy.yaml` | binds `argocd` and `grafana` to `platform-admins` — the last two applications with no binding (ADR-0050 Decision 11) |
+| `gitops/bootstrap/authentik-blueprint-hermes-policy.yaml` | hermes' `platform-admins` binding plus its own `hermes-require-pkce` expression policy (plain ConfigMap). Its own file because a blueprint applies as one transaction and `PolicyBinding.target` is a required FK, so a `!Find` miss here must not be able to roll back argocd's and grafana's bindings (ADR-0051) |
 | `gitops/bootstrap/authentik-blueprint-hermes.yaml` | the Hermes dashboard's provider + application — the second **public** client, public because upstream's self-hosted OIDC plugin refuses confidential ones, not because a secret would ship in a binary (ADR-0051). Plain ConfigMap, provider+application only |
 | `gitops/bootstrap/authentik-flags-job.yaml` | PostSync hook asserting `core_default_app_access=false` — not a blueprint, because `Tenant` is internally managed (ADR-0050 Decision 12) |
 

@@ -56,6 +56,9 @@
   gather_facts: false
   become: true
 
+  vars_files:
+    - vars/hermes-dashboard.yml
+
   vars:
     hermes_ctid: 101
     hermes_port: 9119
@@ -78,30 +81,13 @@
     # /login when the access token expires, which on the Chat tab is a dropped
     # PTY mid-command.
     hermes_scopes: "openid profile email offline_access"
-    # Peers allowed to supply X-Forwarded-*: the five k8s nodes from
-    # inventory/ukubi/hosts.yaml, and NOT the pod CIDR.
-    #
-    # MEASURED 2026-10-02, not assumed. tcpdump inside this container while a pod
-    # on k8s-worker-02 curled 192.168.1.72:9119 showed
-    #   192.168.1.203.36060 > 192.168.1.72.9119: Flags [S]
-    # — the node address, so Cilium masquerades pod egress to the LAN and a pod
-    # address never arrives here. Listing 10.233.64.0/18 would therefore trust
-    # (and, in the firewall below, admit) every pod in every namespace for
-    # nothing. If masquerading is ever turned off, Traefik stops being able to
-    # connect at all, which fails loudly rather than silently.
-    #
-    # THIS LIST IS LOGIN-CRITICAL, NOT COSMETIC. The PKCE cookie is
-    # SameSite=None + Secure, which browsers only accept over HTTPS. If
-    # X-Forwarded-Proto is not honoured the dashboard believes it is on HTTP,
-    # writes the cookie SameSite=Lax, Chromium drops it on authentik's 302, and
-    # the callback fails with a missing verifier — a symptom that looks like an
-    # authentik problem. Add a sixth node here when the cluster grows one.
-    hermes_trusted_proxies:
-      - "192.168.1.201"
-      - "192.168.1.202"
-      - "192.168.1.203"
-      - "192.168.1.204"
-      - "192.168.1.206"
+    # hermes_node_ips (the five k8s nodes) comes from vars/hermes-dashboard.yml —
+    # one list, because this play trusts those addresses to supply X-Forwarded-*
+    # while play 2 admits them through the firewall, and the two drifting apart
+    # fails in opposite ways: the firewall copy fails loudly (Traefik on a new
+    # node gets dropped), the trusted_proxies copy fails silently in the PKCE
+    # cookie, which reads as an authentik bug. See that file's header.
+    hermes_trusted_proxies: "{{ hermes_node_ips }}"
     hermes_dropin_dir: /etc/systemd/system/hermes-dashboard.service.d
 
   tasks:
@@ -191,6 +177,39 @@
     # ------------------------------------------------------------------
     # 2. The probe that can sink the whole design
     # ------------------------------------------------------------------
+    # Resolved HERE, before the probes below, because both the httpx probe and the
+# config.yaml merge need a real interpreter and the probe must not be the task
+# that discovers the path is wrong — its name and comment blame Cloudflare, so a
+# bare "No such file or directory" there is the wrong diagnosis.
+# The interpreter must import BOTH yaml (the merge) and httpx (the probe).
+    # The install's own venv has it (Hermes reads its own config with it);
+    # Debian's system python3 has no PyYAML by default, and the directory
+    # holding the `hermes` wrapper is not necessarily the venv — so the venv
+    # path is tried first and the others are only fallbacks.
+    - name: Resolve an interpreter that can read config.yaml
+      ansible.builtin.shell:
+        cmd: |
+          pct exec {{ hermes_ctid }} -- bash -lc '
+            for p in "{{ hermes_home }}/hermes-agent/venv/bin/python" "{{ hermes_bin | dirname }}/python" "{{ hermes_bin | dirname }}/python3" python3; do
+              command -v "$p" >/dev/null 2>&1 || continue
+              "$p" -c "import yaml, httpx" 2>/dev/null || continue
+              echo "$p"; exit 0
+            done
+            exit 1'
+      args:
+        executable: /bin/bash
+      register: python_probe
+      changed_when: false
+      failed_when: python_probe.rc != 0
+      # Failure means no interpreter in the container can import yaml. Install
+      # python3-yaml (apt) or set dashboard.trusted_proxies by hand — see this
+      # playbook's header for why that value cannot simply be an env var.
+
+    - name: Record the interpreter
+      ansible.builtin.set_fact:
+        hermes_python: "{{ python_probe.stdout_lines | last | trim }}"
+
+
     # The self-hosted OIDC plugin makes four SERVER-SIDE HTTPS calls to
     # authentik.bnei.dev: discovery, token exchange, JWKS and RFC 7009
     # revocation. authentik.bnei.dev is a PROXIED Cloudflare record, and
@@ -231,7 +250,7 @@
           - exec
           - "{{ hermes_ctid }}"
           - --
-          - "{{ hermes_home }}/hermes-agent/venv/bin/python"
+          - "{{ hermes_python }}"
           - -c
           - >-
             import httpx,sys;
@@ -263,34 +282,6 @@
           ansible.builtin.command:
             argv: [pct, exec, "{{ hermes_ctid }}", --, mkdir, -p, "{{ hermes_dropin_dir }}"]
           changed_when: false
-
-        # config.yaml is YAML, so the merge below needs an interpreter with PyYAML.
-        # The install's own venv has it (Hermes reads its own config with it);
-        # Debian's system python3 has no PyYAML by default, and the directory
-        # holding the `hermes` wrapper is not necessarily the venv — so the venv
-        # path is tried first and the others are only fallbacks.
-        - name: Resolve an interpreter that can read config.yaml
-          ansible.builtin.shell:
-            cmd: |
-              pct exec {{ hermes_ctid }} -- bash -lc '
-                for p in "{{ hermes_home }}/hermes-agent/venv/bin/python" "{{ hermes_bin | dirname }}/python" "{{ hermes_bin | dirname }}/python3" python3; do
-                  command -v "$p" >/dev/null 2>&1 || continue
-                  "$p" -c "import yaml" 2>/dev/null || continue
-                  echo "$p"; exit 0
-                done
-                exit 1'
-          args:
-            executable: /bin/bash
-          register: python_probe
-          changed_when: false
-          failed_when: python_probe.rc != 0
-          # Failure means no interpreter in the container can import yaml. Install
-          # python3-yaml (apt) or set dashboard.trusted_proxies by hand — see this
-          # playbook's header for why that value cannot simply be an env var.
-
-        - name: Record the interpreter
-          ansible.builtin.set_fact:
-            hermes_python: "{{ python_probe.stdout_lines | last | trim }}"
 
         - name: Render the OIDC drop-in content
           ansible.builtin.set_fact:
@@ -439,9 +430,16 @@
             - "'self-hosted' in ((api_status.stdout | from_json).auth_providers | default([]))"
 
       rescue:
-        - name: Roll back the OIDC drop-in
+        # BOTH drop-ins, not just the one this phase wrote. On a re-run the box
+        # already carries 20-bind.conf from a previous Phase B, and removing only
+        # the OIDC half would leave `--host 0.0.0.0` with no auth provider — which
+        # Hermes refuses with exit 78, which RestartPreventExitStatus=78 then parks.
+        # That is a dead service with no tunnel either, recoverable only from
+        # `pct enter`, i.e. the exact state this playbook's header promises never
+        # to leave behind.
+        - name: Roll back to loopback with no gate (both drop-ins)
           ansible.builtin.command:
-            argv: [pct, exec, "{{ hermes_ctid }}", --, bash, -lc, "rm -f {{ hermes_dropin_dir }}/10-oidc.conf; systemctl daemon-reload; systemctl restart hermes-dashboard"]
+            argv: [pct, exec, "{{ hermes_ctid }}", --, bash, -lc, "rm -f {{ hermes_dropin_dir }}/10-oidc.conf {{ hermes_dropin_dir }}/20-bind.conf; systemctl daemon-reload; systemctl restart hermes-dashboard"]
           changed_when: true
 
         - name: Collect the journal for the failed start
@@ -453,7 +451,8 @@
         - name: Fail with the journal
           ansible.builtin.fail:
             msg: |
-              Phase A failed; the dashboard is back on its previous (loopback) config.
+              Phase A failed; both drop-ins are removed, so the dashboard is back on a
+              loopback bind with no auth gate and the SSH tunnel works again.
               Exit 78 means Hermes refused the configuration and named the reason.
               {{ dash_journal.stdout }}
 
@@ -469,6 +468,9 @@
   gather_facts: false
   become: true
 
+  vars_files:
+    - vars/hermes-dashboard.yml
+
   vars:
     hermes_ctid: 101
     hermes_port: 9119
@@ -478,17 +480,7 @@
     # below rather than trusted — the NIC is static (`pct set`), and this is the
     # check that catches it silently going back to DHCP.
     hermes_expected_ip: "192.168.1.72"
-    # The five k8s nodes only — see phase A's note on the tcpdump that measured
-    # pod egress arriving as the node address. Admitting 10.233.64.0/18 here
-    # would let any pod in any namespace reach this plain-HTTP admin surface
-    # directly, skipping Traefik and therefore both authentik-forwardauth and
-    # cloudflare-origin-lock, which is the whole point of the rule.
-    hermes_allowed_peers:
-      - "192.168.1.201"
-      - "192.168.1.202"
-      - "192.168.1.203"
-      - "192.168.1.204"
-      - "192.168.1.206"
+    hermes_allowed_peers: "{{ hermes_node_ips }}"
 
   tasks:
     - name: Ensure nftables is installed in the container
@@ -561,9 +553,14 @@
       register: nft_include
       changed_when: "'ADDED' in nft_include.stdout"
 
-    - name: Enable and apply nftables
+    # Our file only. `nft -f /etc/nftables.conf` would re-run the `flush ruleset`
+    # Debian puts at the top of it, discarding anything loaded at runtime from
+    # elsewhere — the opposite of the no-op-on-re-run behaviour the rest of this
+    # playbook goes to lengths for. The include added above is what makes the
+    # rule come back at boot.
+    - name: Enable nftables and load the hermes table
       ansible.builtin.command:
-        argv: [pct, exec, "{{ hermes_ctid }}", --, bash, -lc, "systemctl enable --now nftables && nft -f /etc/nftables.conf"]
+        argv: [pct, exec, "{{ hermes_ctid }}", --, bash, -lc, "systemctl enable --now nftables && nft -f /etc/nftables.d/hermes-dashboard.conf"]
       changed_when: true
 
     - name: Assert the rule is actually loaded

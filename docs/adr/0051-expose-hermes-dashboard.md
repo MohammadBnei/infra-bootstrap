@@ -78,7 +78,14 @@ Two upstream properties shape everything else:
    a single strict HTTPS redirect URI, PKCE S256 enforced by an authentik
    expression policy, the group binding, forwardAuth, and the origin lock.
 4. **PKCE enforced by its own policy object, `hermes-require-pkce`, declared in
-   the policy file and bound with `!KeyOf`.** Not a `!Find` reference to
+   `authentik-blueprint-hermes-policy.yaml` — hermes' own policy file, not the
+   shared `platform-apps` one — and bound with `!KeyOf`.** The separate file is
+   not tidiness: a blueprint applies as a single transaction and
+   `PolicyBinding.target` is a required FK, so a `!Find` miss on a
+   not-yet-registered `hermes` is a validation error that rolls the whole file
+   back. Sharing the file would let that take argocd's and grafana's bindings
+   down too, which with `core_default_app_access: false` locks the operator out
+   of both. Not a `!Find` reference to
    `wird-require-pkce`, even though the expression is identical and app-agnostic:
    `!Find` returns `None` rather than failing, which writes a row with
    `policy_id = NULL` that `PolicyEngine.build()` drops — PKCE silently

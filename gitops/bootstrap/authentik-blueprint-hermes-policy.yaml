@@ -1,0 +1,116 @@
+# Who may use the `hermes` application, and the PKCE enforcement that makes its
+# public client safe. ADR-0051.
+#
+# SEPARATE FROM authentik-blueprint-hermes.yaml, and separate from
+# authentik-blueprint-platform-apps-policy.yaml — two different reasons:
+#
+#   - Split from the PROVIDER's file for the reason every policy file here gives:
+#     a blueprint that fails to apply logs and carries on, so an unverified model
+#     shape costs the gate and nothing else. Folded in, the same mistake takes the
+#     provider and the application with it, and with core_default_app_access false
+#     nobody can log in at all.
+#
+#   - Split from the SHARED platform-apps policy because authentik applies one
+#     blueprint as a single transaction and PolicyBinding.target is a required FK.
+#     A !Find miss on `hermes` — a cold rebuild where authentik-blueprint-hermes
+#     has not registered yet — is a validation error that rolls the whole file
+#     back. In the shared file that would also drop argocd's and grafana's
+#     bindings, locking the operator out of both. Here it costs only this app.
+#
+# Two bindings, which is why authentik-blueprint-hermes.yaml sets
+# `policy_engine_mode: all` on the application: at the MODE_ANY default, passing
+# either one alone would grant access and PKCE enforcement would be decorative.
+#
+# Verify in the database, not the log — and select the FKs explicitly, because the
+# NULL-FK row is exactly the one that looks fine under SELECT *:
+#   psql -d authentik -tAc 'SELECT target_id, group_id, policy_id, enabled
+#                           FROM authentik_policies_policybinding'
+#   psql -d authentik -tAc 'SELECT name FROM authentik_policies_expression_expressionpolicy'
+#
+# A plain ConfigMap: no credential to interpolate, so no Infisical operator in the
+# propagation chain.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: authentik-blueprint-hermes-policy
+  namespace: authentik
+data:
+  hermes-policy.yaml: |
+    version: 1
+    metadata:
+      name: hermes-policy
+      labels:
+        blueprints.goauthentik.io/instantiate: "true"
+    entries:
+      # Two bindings, not one, so `hermes` needs policy_engine_mode: all — which
+      # authentik-blueprint-hermes.yaml sets on the application. The note above
+      # about MODE_ANY and MODE_ALL being equivalent applies to argocd and
+      # grafana only.
+      - model: authentik_policies.policybinding
+        identifiers:
+          target: !Find [authentik_core.application, [slug, hermes]]
+          group: !Find [authentik_core.group, [name, platform-admins]]
+          order: 0
+        attrs:
+          enabled: true
+      # PKCE S256 enforced by policy, because authentik does not require it of a
+      # public client on its own and the Hermes dashboard is a public client (it
+      # has no client_secret to fall back on — see authentik-blueprint-hermes.yaml).
+      #
+      # DECLARED HERE rather than reusing wird-require-pkce from
+      # authentik-blueprint-wird-policy.yaml, even though the expression is
+      # identical and app-agnostic. !Find returns None instead of failing when it
+      # matches nothing (blueprints/v1/common.py), which would write a row with
+      # policy_id = NULL; PolicyEngine.build() drops that row, so PKCE would be
+      # silently unenforced with nothing logged. Alphabetically
+      # authentik-blueprint-hermes/-platform-apps-policy sort before
+      # -wird-policy, so a cold rebuild is exactly when it would happen. !KeyOf
+      # resolves only within one blueprint, so the local declaration is what buys
+      # the loud failure.
+      - model: authentik_policies_expression.expressionpolicy
+        id: hermes-require-pkce
+        identifiers:
+          name: hermes-require-pkce
+        attrs:
+          name: hermes-require-pkce
+          # execution_logging left at the default (false): per the guard below
+          # this policy is evaluated on every user-library refresh by every user,
+          # not only at login, and each evaluation would write a
+          # POLICY_EXECUTION event.
+          expression: |
+            # THE GUARD IS NOT OPTIONAL, and it is not a style choice.
+            #
+            # Application access is evaluated in more places than /authorize.
+            # core/api/applications.py's _get_allowed_applications() runs the
+            # SAME bindings through a ListPolicyEngine to decide which tiles a
+            # user sees in their library, with no OAuth request behind it — so
+            # none of the oauth_* context keys exist there. Without this guard
+            # the expression returns False, and because the application sets
+            # policy_engine_mode: all, hermes would be filtered out of every
+            # user's dashboard forever while login kept working.
+            #
+            # Key PRESENCE is the right test, not truthiness:
+            # modify_policy_request() always assigns oauth_code_challenge at
+            # /authorize, setting it to None when the client sent no challenge.
+            # So absent == "not an authorization request", while present-and-
+            # empty == "an authorization request that skipped PKCE", which is
+            # exactly the case this policy exists to reject.
+            if "oauth_code_challenge" not in request.context:
+                return True
+            if not request.context["oauth_code_challenge"]:
+                ak_message("This application requires PKCE.")
+                return False
+            # `plain` is what authorize.py defaults the method to when the
+            # client omits it, so checking the challenge alone is not enough:
+            # a challenge an attacker can read is a challenge they can replay.
+            if request.context.get("oauth_code_challenge_method") != "S256":
+                ak_message("This application requires PKCE with S256.")
+                return False
+            return True
+      - model: authentik_policies.policybinding
+        identifiers:
+          target: !Find [authentik_core.application, [slug, hermes]]
+          policy: !KeyOf hermes-require-pkce
+          order: 1
+        attrs:
+          enabled: true

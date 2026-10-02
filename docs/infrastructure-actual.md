@@ -88,7 +88,13 @@ a fake `10000Mb/s`.
   under AMD CBS → NBIO Common Options.
 - Storage: LVM with `pve` volume group, `local-lvm` thinpool
 - Running LXCs:
-  - VMID 101 `hermesagent` (2 vCPU / 4GB / 19GB) — this AI. Its web
+  - VMID 101 `hermesagent` (2 vCPU / 4GB / 19GB) — this AI. **Runs on
+    `ex-laptop` (192.168.1.161), not on this host**, despite sitting in this
+    section: it was migrated there and the config never followed, which is the
+    same assumption that once made `terraform plan` drop it from state and plan
+    a CREATE onto the live VMID (`terraform/imported.tf`). Every `pct` command
+    for it — including ADR-0051's break-glass `pct enter 101` — must be run on
+    ex-laptop. Its web
     dashboard is being exposed at `hermes.bnei.dev`
     ([ADR-0051](adr/0051-expose-hermes-dashboard.md)): authentik OIDC on the
     app *and* `authentik-forwardauth` on the route, `:9119` firewalled to
