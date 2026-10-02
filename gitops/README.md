@@ -70,8 +70,9 @@ gitops/
 │       ├── ente-museum/values.yaml        # ditto
 │       └── ente-web/values.yaml           # ditto
 ├── redirectors/                           # Plain manifests, no chart — TLS-terminating redirects to out-of-cluster hosts
-│   ├── proxmox.yaml                       # Namespace+Service(ExternalName)+ServersTransport+IngressRoute → proxmox.bnei.dev (192.168.1.165:8006)
-│   └── garage-s3.yaml                     # Namespace+Service(ExternalName)+IngressRoute → s3.bnei.dev (Garage S3 API, 192.168.1.199:3900) — ADR-0030
+│   ├── proxmox.yaml                       # Namespace+Service(ExternalName)+ServersTransport+IngressRoute → proxmox.bnei.dev (192.168.1.200:8006)
+│   ├── garage-s3.yaml                     # Namespace+Service(ExternalName)+IngressRoute → s3.bnei.dev (Garage S3 API, 192.168.1.199:3900) — ADR-0030
+│   └── hermes.yaml                        # Namespace+Service(ExternalName)+IngressRoute → hermes.bnei.dev (Hermes Agent dashboard, 192.168.1.72:9119) — ADR-0051, the only redirector with authentik forwardAuth on it
 └── apps/
     └── registry.yaml                      # Human source of truth for user apps (apps needing their own repo)
 ```
@@ -156,13 +157,15 @@ Each user app: `common-app-chart` from infra-bootstrap + per-app `values.yaml` f
 
 Image updates are handled by each app's own CD pipeline — ArgoCD just syncs whatever `image.tag` is in `values.yaml`.
 
-**`redirectors-application.yaml`** (wave 10) is also standalone, deliberately not a chart or ApplicationSet: TLS-terminating redirects to out-of-cluster LAN hosts (e.g. Proxmox's web UI at `192.168.1.165:8006`), which have no pods to template a Deployment/Service around. Each redirect is one self-contained plain manifest (own `Namespace` object — `CreateNamespace=true` only auto-creates the Application's own `destination.namespace`, not other namespaces referenced inside a directory source, same reason `actions-runner`'s manifests declare their own `Namespace` too — plus a `type: ExternalName` Service pointing at the bare IP, optional `ServersTransport` for a self-signed backend cert, IngressRoute with `tls.certResolver: le`) dropped straight into `gitops/redirectors/`, synced the same flat-directory way as `bootstrap-application.yaml` itself (ADR-0021). Add one: copy `proxmox.yaml`, change the name/namespace/hostname/backend IP:port.
+**`redirectors-application.yaml`** (wave 10) is also standalone, deliberately not a chart or ApplicationSet: TLS-terminating redirects to out-of-cluster LAN hosts (e.g. Proxmox's web UI at `192.168.1.200:8006`), which have no pods to template a Deployment/Service around. Each redirect is one self-contained plain manifest (own `Namespace` object — `CreateNamespace=true` only auto-creates the Application's own `destination.namespace`, not other namespaces referenced inside a directory source, same reason `actions-runner`'s manifests declare their own `Namespace` too — plus a `type: ExternalName` Service pointing at the bare IP, optional `ServersTransport` for a self-signed backend cert, IngressRoute with `tls.certResolver: le`) dropped straight into `gitops/redirectors/`, synced the same flat-directory way as `bootstrap-application.yaml` itself (ADR-0021). Add one: copy `proxmox.yaml`, change the name/namespace/hostname/backend IP:port.
 
 Deliberately `ExternalName`, not `ClusterIP` + hand-authored `Endpoints`/`EndpointSlice`: `argocd-cm`'s `resource.exclusions` excludes both `Endpoints` and `EndpointSlice` cluster-wide (standard tuning to cut watch/UI churn from the control-plane-managed ones), so ArgoCD silently drops them from any manifest it applies — Traefik ends up with a Service but zero backends ("no available server"). `ExternalName` sidesteps this entirely: no Endpoints/EndpointSlice exist for that Service type, and Traefik's `kubernetesCRD` provider resolves `spec.externalName` directly, IP literals included.
 
 This requires `providers.kubernetesCRD.allowExternalNameServices: true` in `gitops/platform/values/traefik/values.yaml` — off by default in Traefik itself (an SSRF guardrail), so without it every redirector's IngressRoute fails with `externalName services not allowed` and clients get a 404 (no router gets built at all).
 
-Currently: `proxmox.yaml` (proxmox.bnei.dev) and `garage-s3.yaml` (s3.bnei.dev, [ADR-0030](../docs/adr/0030-expose-garage-s3-externally.md)).
+Currently: `proxmox.yaml` (proxmox.bnei.dev), `garage-s3.yaml` (s3.bnei.dev, [ADR-0030](../docs/adr/0030-expose-garage-s3-externally.md)) and `hermes.yaml` (hermes.bnei.dev, [ADR-0051](../docs/adr/0051-expose-hermes-dashboard.md)).
+
+`hermes.yaml` is the one redirector that also carries the `authentik-forwardauth` middleware. A redirector normally leans on the backend's own login (PVE's, Garage's SigV4), but the Hermes dashboard serves `GET /api/status` with no credential check at all, and a session on it is a PTY on the box holding the Proxmox API token, the k8s node key and the Infisical identity — so authentik gates the host as well as the app. If that hostname ever goes grey-cloud, drop `cloudflare-origin-lock` from it in the same commit: the lock 403s every non-Cloudflare source.
 
 **`provisioner-application.yaml`** (wave 10) is also standalone, same shape as `actions-runner-application.yaml`, but its manifests live OUT-OF-REPO as of agent-fleet's `docs/adr/0019`/`0020`/`0021`: this Application's `source` points at agent-fleet's own `k8s/provisioner/` (own scoped `Role`/`RoleBinding`, `NetworkPolicy`, `Deployment`, shared workspace PVC) instead of a directory here, deploying agent-fleet's provisioner (task-worker-pod spawning + e2e task-preview) into the existing `agent-fleet` namespace. See agent-fleet's `k8s/provisioner/README.md` and `docs/adr/0012`/`0019`/`0020`/`0021` for the design.
 

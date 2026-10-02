@@ -326,6 +326,14 @@ resource "proxmox_virtual_environment_container" "hermesagent" {
       console,
       environment_variables,
       features[0].mount,
+      # initialization[0].ip_config: the live NIC was `ip=dhcp` until
+      # 2026-10-02, when exposing the dashboard at hermes.bnei.dev
+      # (ADR-0051) needed a stable backend for
+      # gitops/redirectors/hermes.yaml's ExternalName. It is now a static
+      # `ip=192.168.1.72/24,gw=192.168.1.254`, set with `pct set 101
+      # -net0 …` on ex-laptop. Deliberately NOT declared above: this
+      # attribute is ignored here, so declaring it would read as enforced
+      # while changing nothing.
       initialization[0].ip_config,
       memory[0].swap,
       disk[0].mount_options,

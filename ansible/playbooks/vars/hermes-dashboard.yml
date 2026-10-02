@@ -1,0 +1,23 @@
+---
+# Shared by both plays in ../hermes-dashboard-configure.yml (ADR-0051). One list,
+# deliberately: play 1 trusts these addresses to supply `X-Forwarded-*` on the
+# dashboard (`dashboard.trusted_proxies`) and play 2 admits them through the
+# container's nftables rule. If the two copies drift, the firewall one fails
+# loudly — Traefik on a new node gets dropped — while the trusted_proxies one
+# fails silently: `X-Forwarded-Proto` is ignored, the PKCE cookie is written
+# `SameSite=Lax`, Chromium drops it on authentik's 302, and the symptom reads as
+# an authentik problem rather than a missing IP.
+#
+# These are the five k8s nodes from inventory/ukubi/hosts.yaml. Pod traffic
+# arrives as the NODE address (Cilium masquerades pod egress to the LAN —
+# measured 2026-10-02 with tcpdump inside the container while a pod on
+# k8s-worker-02 curled it), which is why the pod CIDR is absent and also why this
+# list cannot single out Traefik: see ADR-0051 Decision 7 for that residual hole.
+#
+# Add a sixth node here when the cluster grows one, and re-run the playbook.
+hermes_node_ips:
+  - "192.168.1.201"
+  - "192.168.1.202"
+  - "192.168.1.203"
+  - "192.168.1.204"
+  - "192.168.1.206"

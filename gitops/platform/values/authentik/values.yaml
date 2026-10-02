@@ -94,6 +94,18 @@ blueprints:
   # the directory held operators alone. Enrollment makes signup public, and
   # AppAccessWithoutBindings defaults to True.
   - authentik-blueprint-platform-apps-policy
+  # The Hermes Agent dashboard on LXC 101 (ADR-0051): the second PUBLIC client
+  # here, and public for a different reason than wird — upstream's self-hosted
+  # OIDC plugin refuses confidential clients, so there is no secret to keep and
+  # this is a ConfigMap too. Provider + application only; its bindings are in
+  # its own policy file below.
+  - authentik-blueprint-hermes
+  # hermes' access binding + its PKCE policy. Its own file rather than a few lines
+  # in the platform-apps policy: PolicyBinding.target is a required FK and a
+  # blueprint applies as one transaction, so a !Find miss on a not-yet-registered
+  # `hermes` would roll the whole file back — taking argocd's and grafana's
+  # bindings with it if they shared it (ADR-0051).
+  - authentik-blueprint-hermes-policy
   secrets:
   - authentik-blueprint-grafana
   - authentik-blueprint-argocd

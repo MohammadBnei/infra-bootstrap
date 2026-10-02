@@ -1,6 +1,16 @@
 # Restricts the `argocd` and `grafana` applications to the platform-admins
 # group.
 #
+# `hermes` is deliberately NOT here, though it binds the same group:
+# authentik applies one blueprint in a single transaction, and
+# PolicyBinding.target is a required FK — so a !Find miss on a not-yet-registered
+# application is a validation error that rolls back the WHOLE file, not the silent
+# NULL described below for `group`/`policy`. Folding hermes in would therefore let
+# a cold rebuild where authentik-blueprint-hermes has not applied yet take
+# argocd's and grafana's bindings down with it, and with core_default_app_access
+# false that denies everyone, operator included. See
+# authentik-blueprint-hermes-policy.yaml (ADR-0051).
+#
 # WHY NOW: until ADR-0050 these two were the only applications with no policy
 # binding, and that was safe for exactly one reason — the directory held nothing
 # but hand-made operator accounts, so `AppAccessWithoutBindings` (default True,

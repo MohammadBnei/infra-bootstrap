@@ -88,7 +88,26 @@ a fake `10000Mb/s`.
   under AMD CBS → NBIO Common Options.
 - Storage: LVM with `pve` volume group, `local-lvm` thinpool
 - Running LXCs:
-  - VMID 101 `hermesagent` (2 vCPU / 4GB / 19GB) — this AI
+  - VMID 101 `hermesagent` (2 vCPU / 4GB / 20GB rootfs) — this AI. **Runs on
+    `ex-laptop` (192.168.1.161), not on this host**, despite sitting in this
+    section: it was migrated there and the config never followed, which is the
+    same assumption that once made `terraform plan` drop it from state and plan
+    a CREATE onto the live VMID (`terraform/imported.tf`). Every `pct` command
+    for it — including ADR-0051's break-glass `pct enter 101` — must be run on
+    ex-laptop. Its web
+    dashboard is being exposed at `hermes.bnei.dev`
+    ([ADR-0051](adr/0051-expose-hermes-dashboard.md)): authentik OIDC on the
+    app *and* `authentik-forwardauth` on the route, `:9119` firewalled to
+    the five k8s nodes, config in two systemd drop-ins so removing them is
+    the whole rollback. `:9119` is firewalled to the node addresses, which still
+    leaves every pod able to reach it directly — ADR-0051 Decision 7.
+    **Address, corrected 2026-10-02:** the live address is
+    `192.168.1.72`, not the `192.168.1.181` this file and
+    `bin/install-requirements.sh` recorded (.181 is free and unanswered), and
+    the NIC is now static rather than DHCP. The box is up — the "hermesagent is
+    down" claim in `docs/runbook-k9s-ops-hub.md` was an address error, and that
+    file now says so. Hermes itself was `0.15.1` and had to be updated to
+    `0.21.5 (2026.9.24)`: 0.15.1 ships no self-hosted OIDC plugin at all
   - VMID 301 `garage-storage` (2 vCPU / 2GB / 200GB, Debian 13, IP
     192.168.1.199) — running, configured (Garage v2.3.0, single-node
     layout applied). Five buckets + per-bucket S3 keys, all driven from
@@ -560,6 +579,13 @@ host-level config/data still don't.
 - Role: `PVEVMAdmin` (VM lifecycle, GPU passthrough)
 - Token saved at `/home/hermes/.proxmox_api`
 - `cv4pve-cli` v2.2.1 installed and configured for `bnei` context
+
+> **What one login to `hermes.bnei.dev` now buys** (ADR-0051): everything in this
+> section. The dashboard's Chat tab is a PTY as the service user, so the Proxmox
+> `PVEVMAdmin` token below, the hypervisor SSH access, the k8s node key and the
+> Infisical machine identity are all reachable from a browser session. That is
+> why that host is the only one gated twice, and why moving these credentials off
+> this box is worth doing on its own.
 
 ### SSH
 

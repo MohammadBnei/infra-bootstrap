@@ -54,7 +54,7 @@ echo "Installed: $CACHE_DIR/inf-env.sh"
 
 # 7. Prompt for the secret credentials. They are NEVER in git — the user
 #    must place them manually (typically from 1Password or by secure copy
-#    from the agent LXC at 192.168.1.181).
+#    from the agent LXC at 192.168.1.72).
 if [[ ! -f "$CACHE_DIR/inf-cid" ]] || [[ ! -f "$CACHE_DIR/inf-csec" ]]; then
   cat <<'EOF'
 
@@ -69,7 +69,7 @@ must be placed manually at:
 
 Get them from one of:
   - 1Password vault "Infisical - hermes-agent"
-  - The agent LXC: scp hermes@192.168.1.181:.hermes/cache/inf-{cid,csec} ~/.hermes/cache/
+  - The agent LXC: scp hermes@192.168.1.72:.hermes/cache/inf-{cid,csec} ~/.hermes/cache/
 
 After placing them, re-run this script to verify the smoke test.
 EOF

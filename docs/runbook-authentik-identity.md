@@ -147,9 +147,10 @@ Current files:
 | `gitops/bootstrap/authentik-blueprint-wird.yaml` | Wird's provider + application — the cluster's first **public** client, so a plain ConfigMap with the `client_id` committed (ADR-0050) |
 | `gitops/bootstrap/authentik-blueprint-wird-policy.yaml` | the `wird-users` group, the `wird-require-pkce` expression policy, and both bindings (plain ConfigMap) |
 | `gitops/bootstrap/authentik-blueprint-wird-enrollment.yaml` | self-service enrollment into `wird-users` — prompt, user write, email verification, login. Needs `AUTHENTIK_EMAIL__*` in `authentik-config` or it dead-ends silently (ADR-0050) |
-| `gitops/bootstrap/authentik-blueprint-platform-apps-policy.yaml` | binds `argocd` and `grafana` to `platform-admins` — they were the last two applications with no binding (ADR-0050 Decision 11) |
+| `gitops/bootstrap/authentik-blueprint-platform-apps-policy.yaml` | binds `argocd` and `grafana` to `platform-admins` — the last two applications with no binding (ADR-0050 Decision 11) |
+| `gitops/bootstrap/authentik-blueprint-hermes-policy.yaml` | hermes' `platform-admins` binding plus its own `hermes-require-pkce` expression policy (plain ConfigMap). Its own file because a blueprint applies as one transaction and `PolicyBinding.target` is a required FK, so a `!Find` miss here must not be able to roll back argocd's and grafana's bindings (ADR-0051) |
+| `gitops/bootstrap/authentik-blueprint-hermes.yaml` | the Hermes dashboard's provider + application — the second **public** client, public because upstream's self-hosted OIDC plugin refuses confidential ones, not because a secret would ship in a binary (ADR-0051). Plain ConfigMap, provider+application only |
 | `gitops/bootstrap/authentik-flags-job.yaml` | PostSync hook asserting `core_default_app_access=false` — not a blueprint, because `Tenant` is internally managed (ADR-0050 Decision 12) |
-| `gitops/bootstrap/authentik-blueprint-platform-apps-policy.yaml` | binds `argocd` and `grafana` to `platform-admins` (plain ConfigMap). Required by the enrollment flow above: those two relied on `AppAccessWithoutBindings` (default True), which was only ever safe while the directory held operators alone |
 
 The **same credential pair is consumed twice**, from opposite ends of the
 exchange: authentik registers it on the provider via the blueprint, the app
@@ -164,6 +165,7 @@ one Infisical row.
 |---|---|---|
 | ArgoCD | `gitops/bootstrap/argocd-application.yaml` | `configs.rbac.policy.default: role:readonly` + `policy.csv: g, platform-admins, role:admin` + `scopes: "[groups, email]"` |
 | Grafana | `gitops/platform/values/grafana/values.yaml` | `role_attribute_path: contains(groups[*], 'platform-admins') && 'Admin' \|\| 'Viewer'`, with `allow_assign_grafana_admin: false` |
+| Hermes dashboard | nowhere — it has no roles | **none.** The `policybinding` in `authentik-blueprint-hermes-policy.yaml` is the entire authorization decision, which is why `gitops/redirectors/hermes.yaml` also carries `authentik-forwardauth`: two gates reading the same group, because there is no in-app floor to fall back to (ADR-0051) |
 
 Adding a person is one line in one file, not a per-app allowlist that drifts.
 
@@ -194,6 +196,22 @@ it rejects the session outright and nobody logs in. See §6. Do not generalise
 `allow_assign_grafana_admin: false` grants org Admin, not Grafana **server**
 admin. Server admin manages users, orgs and the instance itself; nothing about
 operating this cluster needs it, and the local admin already has it.
+
+**The Hermes dashboard has no local account, and that is the one argued exception**
+(ADR-0051 Decision 6). A shared password there would be a second credential to a
+PTY that holds the Proxmox API token, the k8s node key and the Infisical machine
+identity. Its break-glass is the hypervisor console instead:
+
+```
+pct enter 101                      # from ex-laptop
+rm /etc/systemd/system/hermes-dashboard.service.d/{10-oidc,20-bind}.conf
+systemctl daemon-reload && systemctl restart hermes-dashboard
+ssh -fNL 9119:localhost:9119 <the LXC>   # gate is off again, tunnel works
+```
+
+Every OIDC setting lives in those two drop-ins precisely so that one `rm` is the
+whole rollback — and so the dashboard's own Config page, which can rewrite
+`config.yaml`, cannot delete the auth that protects it.
 
 **Local admin accounts stay enabled on both apps** (ADR-0039 Decision 6). A
 Traefik `ClientIP()` break-glass route bypasses a *middleware*; it cannot bypass

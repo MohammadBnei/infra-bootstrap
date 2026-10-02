@@ -15,11 +15,14 @@ port-forwarded, `82.65.231.50:49222`) **and** sits on the LAN with working
 Pi-hole DNS. That makes it the natural hub, and this runbook is how it becomes
 one without quietly becoming a second copy of every credential.
 
-`DECISION.md` names `hermesagent` as where "operations live". That LXC is
-currently **down** — `192.168.1.181:22` refuses connections and it has no DNS
-record — and its Infisical machine-identity files live on it, so they are not
-recoverable from a remote session. This hub does not replace that decision; it
-is what works today.
+`DECISION.md` names `hermesagent` as where "operations live". This runbook was
+written while that LXC looked dead: `192.168.1.181:22` refused connections and it
+had no DNS record. **Corrected 2026-10-02 (ADR-0051): it was never at
+`192.168.1.181`.** The container is up, now on a static `192.168.1.72`, and `.181`
+is simply an unused address this repo recorded in three places. Its Infisical
+machine-identity files do live on it and are still not recoverable from a remote
+session if the box is off, so this hub remains useful — but "hermesagent is down"
+was an address error, not an outage.
 
 ## What it is allowed to hold
 

@@ -198,6 +198,25 @@ updated.
   [ADR-0039](docs/adr/0039-authentik-identity-layer.md),
   [ADR-0041](docs/adr/0041-fleet-native-oidc-not-forwardauth.md) and
   [ADR-0050](docs/adr/0050-public-oidc-client-for-native-apps.md).
+- **A host with no in-app role floor gets two gates, not one** (ADR-0051,
+  `hermes.bnei.dev`). ArgoCD and Grafana survive a binding that fails open at
+  `role:readonly`/`Viewer`; the Hermes dashboard has no roles, and a session on
+  it is a PTY on the LXC holding the `PVEVMAdmin` Proxmox token, the k8s node
+  key and the Infisical machine identity — so it carries native OIDC *and*
+  `authentik-forwardauth` on its route, which also closes the `/api/status`
+  endpoint it serves with no credential check. Its client is public for a
+  **different** reason than ADR-0050's: upstream refuses confidential clients,
+  not because a secret would ship in a binary. Its break-glass is the hypervisor
+  console (`pct enter 101`, remove two systemd drop-ins) rather than a local
+  password — an argued deviation from ADR-0039 Decision 6, because a shared
+  password on that box is a second credential to the same shell. The
+  `nftables` rule on `:9119` narrows reach from the whole LAN to the five k8s
+  node addresses — which, because Cilium masquerades pod egress to the node
+  IP (measured with tcpdump, not assumed), means every pod in every namespace
+  rather than Traefik alone: those callers skip forwardAuth and meet the app's
+  own OIDC gate only. Accepted, because closing it needs a secret header or
+  mTLS that the app cannot require. See
+  [ADR-0051](docs/adr/0051-expose-hermes-dashboard.md).
 - **Certificate renewal is one token, so it gets an alarm.** Since ADR-0038
   every host in both zones renews through a single `CF_DNS_API_TOKEN`; its
   revocation or expiry stops renewal everywhere with no error anyone sees, on a

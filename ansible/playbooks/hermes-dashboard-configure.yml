@@ -1,0 +1,791 @@
+---
+# Point the Hermes Agent dashboard on LXC 101 (hermesagent) at authentik as its
+# OIDC provider and bind it where Traefik can reach it, so
+# https://hermes.bnei.dev works. ADR-0051. Safe to re-run.
+#
+# RUN IT (no Infisical session needed — a public OIDC client has no secret, and
+# nothing here reads one):
+#   ansible-playbook -i ansible/inventories/proxmox/hosts.yml \
+#     ansible/playbooks/hermes-dashboard-configure.yml -l ex-laptop
+#
+# WHY IT TARGETS A PVE HOST AND NOT THE CONTAINER
+# The inbound SSH key for LXC 101 is recorded nowhere in this repo (its
+# *outbound* bastion key is — docs/infrastructure-actual.md §9), and the box has
+# no DNS record. `pct exec` / `pct push` from its own hypervisor needs neither,
+# so this playbook drives the container from ex-laptop over the SSH access
+# ansible/inventories/proxmox/hosts.yml already requires. One less credential to
+# own, and it keeps working if the lease moves.
+#
+# NOTHING IS HARDCODED THAT THE BOX CAN BE ASKED
+# The unit's User=, its ExecStart binary and HERMES_HOME all come out of
+# `systemctl show` at run time. The repo's own docs disagree about the home
+# directory (/root/.hermes in docs/runbook-k9s-ops-hub.md, /home/hermes/.hermes
+# in docs/infrastructure-actual.md), and writing OIDC config to the wrong one
+# means the provider never registers, the later bind flip fails closed, and the
+# dashboard is simply down. So that value is derived and asserted, never assumed.
+#
+# TWO PHASES, DELIBERATELY
+#   Phase A configures OIDC while the dashboard is still bound to loopback.
+#     Setting a non-loopback public_url engages Hermes' auth gate on its own, so
+#     this phase is where a wrong issuer/client_id shows up — and it shows up as
+#     a verifiable /api/status response rather than as an unreachable box.
+#   Phase B firewalls :9119 and only then flips the bind to 0.0.0.0.
+# Each phase is wrapped in block/rescue: on failure the drop-in it just wrote is
+# removed, the service is restarted, and the run fails with the journal. The box
+# is never left in a state where neither the tunnel nor the proxy works.
+#
+# BREAK-GLASS (ADR-0039 Decision 6 says this must exist; here it is not a local
+# password provider, deliberately — see ADR-0051):
+#   pct enter 101
+#   rm /etc/systemd/system/hermes-dashboard.service.d/{10-oidc,20-bind}.conf
+#   systemctl daemon-reload && systemctl restart hermes-dashboard
+# That reverts to a loopback bind with the gate off, because every OIDC setting
+# lives in those drop-ins and env wins over config.yaml — so the SSH-tunnel
+# path (ssh -fNL 9119:localhost:9119 …) works again with no authentik involved.
+#
+# WHY THE OIDC SETTINGS ARE ENV VARS AND NOT config.yaml
+# The dashboard's own Config page writes config.yaml (Save / Reset to defaults /
+# Import). Anyone who logs in could drop dashboard.oauth there, and the next
+# restart would fail closed on the 0.0.0.0 bind with no way back in except the
+# hypervisor console. Env wins over config.yaml and the UI cannot write env, so
+# the auth configuration is out of reach of the thing it protects.
+# trusted_proxies has no env override upstream, so that one value does live in
+# config.yaml — it cannot lock anyone out, it only breaks login until re-set.
+- name: Configure the Hermes dashboard for authentik OIDC (phase A — loopback)
+  hosts: ex-laptop
+  gather_facts: false
+  become: true
+
+  vars_files:
+    - vars/hermes-dashboard.yml
+
+  vars:
+    hermes_ctid: 101
+    hermes_port: 9119
+    # Matches authentik-blueprint-hermes.yaml's client_id exactly. A public
+    # client has no secret, so this is not a credential (ADR-0050 precedent);
+    # if the two ever disagree, login fails at /authorize as invalid_client.
+    hermes_client_id: "yZV1pW2e1rfELhesLNJeGcf4Y0YN4jYlgWtwAYQ8"
+    # Trailing slash REQUIRED: the dashboard compares this against the `issuer`
+    # the discovery document advertises, and authentik advertises it with the
+    # slash.
+    hermes_issuer: "https://authentik.bnei.dev/application/o/hermes/"
+    # Trailing slash FORBIDDEN: the callback is <public_url>/auth/callback
+    # verbatim, and authentik fullmatches the redirect_uri, so a slash here
+    # produces //auth/callback and fails as invalid_client.
+    hermes_public_url: "https://hermes.bnei.dev"
+    # offline_access is not in upstream's default scope list ("openid profile
+    # email"), and without it authentik issues no refresh token however the
+    # provider is configured — views/token.py gates issuance on the scope being
+    # in the authorization code. No refresh token means the SPA bounces to
+    # /login when the access token expires, which on the Chat tab is a dropped
+    # PTY mid-command.
+    hermes_scopes: "openid profile email offline_access"
+    # hermes_node_ips (the five k8s nodes) comes from vars/hermes-dashboard.yml —
+    # one list, because this play trusts those addresses to supply X-Forwarded-*
+    # while play 2 admits them through the firewall, and the two drifting apart
+    # fails in opposite ways: the firewall copy fails loudly (Traefik on a new
+    # node gets dropped), the trusted_proxies copy fails silently in the PKCE
+    # cookie, which reads as an authentik bug. See that file's header.
+    hermes_trusted_proxies: "{{ hermes_node_ips }}"
+    hermes_dropin_dir: /etc/systemd/system/hermes-dashboard.service.d
+
+  tasks:
+    - name: Assert the container is running
+      ansible.builtin.command:
+        argv: [pct, status, "{{ hermes_ctid }}"]
+      register: ct_status
+      changed_when: false
+      failed_when: "'running' not in ct_status.stdout"
+
+    # ------------------------------------------------------------------
+    # 1. Discover the unit — every path below comes from here
+    # ------------------------------------------------------------------
+    # A SYSTEM unit, verified on this box 2026-10-02:
+    # FragmentPath=/etc/systemd/system/hermes-dashboard.service, User=hermes. Worth
+    # stating because the sibling gateway is a USER unit (hermes-gateway.service
+    # with Linger=yes), so "it is systemd" says nothing about which scope — and
+    # every drop-in path, restart and documented rollback here assumes the system
+    # one. The listing below makes a future change visible instead of surfacing as
+    # the "run hermes-setup" message in the assert further down.
+    - name: List hermes units in both scopes (for the record)
+      ansible.builtin.shell:
+        cmd: |
+          pct exec {{ hermes_ctid }} -- systemctl list-units 'hermes*' --no-pager --no-legend || true
+          pct exec {{ hermes_ctid }} -- su - hermes -c 'XDG_RUNTIME_DIR=/run/user/$(id -u) systemctl --user list-units "hermes*" --no-pager --no-legend' || true
+      args:
+        executable: /bin/bash
+      register: hermes_units
+      changed_when: false
+
+    - name: Show the hermes units
+      ansible.builtin.debug:
+        var: hermes_units.stdout_lines
+
+    - name: Read the hermes-dashboard unit
+      ansible.builtin.command:
+        argv:
+          - pct
+          - exec
+          - "{{ hermes_ctid }}"
+          - --
+          - systemctl
+          - show
+          - hermes-dashboard
+          - --no-pager
+          - -p
+          - FragmentPath
+          - -p
+          - User
+          - -p
+          - Environment
+          - -p
+          - ExecStart
+      register: unit_show
+      changed_when: false
+
+    - name: Parse the unit's properties
+      ansible.builtin.set_fact:
+        hermes_unit: "{{ dict(unit_show.stdout_lines | map('split', '=', 1) | map('map', 'trim')) }}"
+
+    - name: Assert the unit exists
+      ansible.builtin.assert:
+        that: hermes_unit.FragmentPath | default('') | length > 0
+        fail_msg: >-
+          No hermes-dashboard unit in CT {{ hermes_ctid }}. The community-scripts
+          installer creates it; run `hermes-setup` in the container first, or
+          check the service name with `pct exec {{ hermes_ctid }} -- systemctl
+          list-units 'hermes*'`.
+
+    - name: Resolve the service user (empty User= means root)
+      ansible.builtin.set_fact:
+        hermes_user: "{{ hermes_unit.User | default('') | ternary(hermes_unit.User | default(''), 'root') }}"
+
+    - name: Read that user's home directory
+      ansible.builtin.command:
+        argv: [pct, exec, "{{ hermes_ctid }}", --, getent, passwd, "{{ hermes_user }}"]
+      register: ct_passwd
+      changed_when: false
+
+    # HERMES_HOME in the unit's Environment= wins, exactly as the binary reads
+    # it; otherwise it is <home>/.hermes.
+    - name: Resolve HERMES_HOME
+      ansible.builtin.set_fact:
+        hermes_home: >-
+          {{ (hermes_unit.Environment | default('') | regex_search('HERMES_HOME=(\S+)', '\1') | first)
+             if (hermes_unit.Environment | default('')) is search('HERMES_HOME=')
+             else (ct_passwd.stdout.split(':')[5] ~ '/.hermes') }}
+
+    - name: Show what was discovered
+      ansible.builtin.debug:
+        msg: "user={{ hermes_user }} HERMES_HOME={{ hermes_home }} ExecStart={{ hermes_unit.ExecStart | default('?') }}"
+
+    # `systemctl show -p ExecStart` prints a structured value; the binary is the
+    # `path=` field, not the whole line.
+    - name: Resolve the hermes binary from ExecStart
+      ansible.builtin.set_fact:
+        # regex_search returns None (not []) on no match, and `first` raises on
+        # None before any `default` can apply — hence the default([], true) in
+        # the middle. Same shape as the HERMES_HOME fact above, which guards with
+        # `is search`.
+        hermes_bin: "{{ hermes_unit.ExecStart | default('') | regex_search('path=(\\S+)', '\\1') | default([], true) | first | default('/usr/bin/hermes', true) }}"
+
+    - name: Assert HERMES_HOME exists in the container
+      ansible.builtin.command:
+        argv: [pct, exec, "{{ hermes_ctid }}", --, test, -d, "{{ hermes_home }}"]
+      changed_when: false
+
+    # ------------------------------------------------------------------
+    # 2. The probe that can sink the whole design
+    # ------------------------------------------------------------------
+    # Resolved HERE, before the probes below, because both the httpx probe and the
+# config.yaml merge need a real interpreter and the probe must not be the task
+# that discovers the path is wrong — its name and comment blame Cloudflare, so a
+# bare "No such file or directory" there is the wrong diagnosis.
+# The interpreter must import BOTH yaml (the merge) and httpx (the probe).
+    # The install's own venv has it (Hermes reads its own config with it);
+    # Debian's system python3 has no PyYAML by default, and the directory
+    # holding the `hermes` wrapper is not necessarily the venv — so the venv
+    # path is tried first and the others are only fallbacks.
+    - name: Resolve an interpreter that can read config.yaml
+      ansible.builtin.shell:
+        cmd: |
+          pct exec {{ hermes_ctid }} -- bash -lc '
+            for p in "{{ hermes_home }}/hermes-agent/venv/bin/python" "{{ hermes_bin | dirname }}/python" "{{ hermes_bin | dirname }}/python3" python3; do
+              command -v "$p" >/dev/null 2>&1 || continue
+              "$p" -c "import yaml, httpx" 2>/dev/null || continue
+              echo "$p"; exit 0
+            done
+            exit 1'
+      args:
+        executable: /bin/bash
+      register: python_probe
+      changed_when: false
+      failed_when: python_probe.rc != 0
+      # Failure means no interpreter in the container can import yaml. Install
+      # python3-yaml (apt) or set dashboard.trusted_proxies by hand — see this
+      # playbook's header for why that value cannot simply be an env var.
+
+    - name: Record the interpreter
+      ansible.builtin.set_fact:
+        hermes_python: "{{ python_probe.stdout_lines | last | trim }}"
+
+
+    # The self-hosted OIDC plugin makes four SERVER-SIDE HTTPS calls to
+    # authentik.bnei.dev: discovery, token exchange, JWKS and RFC 7009
+    # revocation. authentik.bnei.dev is a PROXIED Cloudflare record, and
+    # .claude/skills/authentik-oidc/SKILL.md records from a real incident that
+    # this zone's Browser Integrity Check rejects Python-urllib specifically.
+    # MEASURED FROM THIS CONTAINER 2026-10-02: urllib gets 403, curl gets 200,
+    # and httpx gets 200 — and the plugin uses httpx, with
+    # plugins/dashboard_auth/_shared.py setting an explicit
+    # `User-Agent: HermesAgent/1.0` on its JWKS client for exactly this reason.
+    # So the probe below is httpx, the client that actually matters; a urllib
+    # probe would fail here forever and prove nothing. If httpx ever starts
+    # getting 403, the remedy is a Pi-hole split-horizon entry for
+    # authentik.bnei.dev -> 192.168.1.233 (the Traefik VIP), the same thing
+    # ansible/playbooks/pihole-configure.yml already does for stt.bnei.dev, or a
+    # Cloudflare WAF exception.
+    - name: Probe authentik discovery from inside the container (curl)
+      ansible.builtin.command:
+        argv:
+          - pct
+          - exec
+          - "{{ hermes_ctid }}"
+          - --
+          - curl
+          - -sS
+          - -o
+          - /dev/null
+          - -w
+          - "%{http_code}"
+          - "{{ hermes_issuer }}.well-known/openid-configuration"
+      register: probe_curl
+      changed_when: false
+      failed_when: probe_curl.stdout | trim != '200'
+      # READ THE CODE BEFORE BLAMING CLOUDFLARE. 404 means authentik has no
+      # `hermes` application yet: gitops/bootstrap/authentik-blueprint-hermes.yaml
+      # is not merged, not synced, or the worker has not been restarted since it
+      # was mounted (blueprints_discovery runs at worker boot only). That is the
+      # expected state immediately after merge. 403 is the WAF case described
+      # above; 000/timeout is DNS or egress.
+
+    - name: Probe authentik discovery from inside the container (httpx, the client the plugin uses)
+      ansible.builtin.command:
+        argv:
+          - pct
+          - exec
+          - "{{ hermes_ctid }}"
+          - --
+          - "{{ hermes_python }}"
+          - -c
+          - >-
+            import httpx,sys;
+            sys.exit(0 if httpx.get("{{ hermes_issuer }}.well-known/openid-configuration", timeout=10).status_code == 200 else 1)
+      register: probe_python
+      changed_when: false
+      failed_when: probe_python.rc != 0
+      # A 403 here with a 200 from curl above IS the Cloudflare Browser Integrity
+      # Check reaching httpx too. See this task's preceding comment for the
+      # remedies; do not work around it by disabling TLS verification.
+
+    - name: Assert the self-hosted dashboard-auth plugin is installed
+      ansible.builtin.shell:
+        cmd: >-
+          pct exec {{ hermes_ctid }} -- find / -path '*dashboard_auth/self_hosted*' -print -quit 2>/dev/null
+      register: plugin_find
+      changed_when: false
+      failed_when: plugin_find.stdout | trim | length == 0
+      # Empty means the installed Hermes predates the plugin (the vendored
+      # Pigsty notes describe v0.8.0). Update the container first — the
+      # community-scripts helper's own update path — then re-run.
+
+    # ------------------------------------------------------------------
+    # 3. Phase A — OIDC config, still bound to loopback
+    # ------------------------------------------------------------------
+    - name: Configure OIDC and verify the gate
+      block:
+        - name: Ensure the drop-in directory exists
+          ansible.builtin.command:
+            argv: [pct, exec, "{{ hermes_ctid }}", --, mkdir, -p, "{{ hermes_dropin_dir }}"]
+          changed_when: false
+
+        - name: Render the OIDC drop-in content
+          ansible.builtin.set_fact:
+            hermes_oidc_dropin: |
+              # Managed by ansible/playbooks/hermes-dashboard-configure.yml (ADR-0051).
+              # Env, not config.yaml, so the dashboard's own Config page cannot
+              # delete the auth configuration that protects it.
+              # EVERY Environment= VALUE IS QUOTED, and the scope list is why.
+              # systemd parses Environment= as a SPACE-SEPARATED LIST of
+              # assignments, so an unquoted `…SCOPES=openid profile email
+              # offline_access` sets SCOPES=openid and logs "Ignoring invalid
+              # environment assignment 'profile'" for the rest. That silently
+              # drops offline_access — no refresh token, so the Chat tab's PTY
+              # dies on access-token expiry — and drops the email/profile scopes
+              # the dashboard reads for its session identity.
+              [Service]
+              Environment="HERMES_DASHBOARD_OIDC_ISSUER={{ hermes_issuer }}"
+              Environment="HERMES_DASHBOARD_OIDC_CLIENT_ID={{ hermes_client_id }}"
+              Environment="HERMES_DASHBOARD_OIDC_SCOPES={{ hermes_scopes }}"
+              Environment="HERMES_DASHBOARD_PUBLIC_URL={{ hermes_public_url }}"
+
+        - name: Stage the OIDC drop-in on the hypervisor
+          ansible.builtin.copy:
+            dest: /tmp/hermes-10-oidc.conf
+            mode: "0644"
+            content: "{{ hermes_oidc_dropin }}"
+
+        - name: Read the drop-in currently in the container
+          ansible.builtin.command:
+            argv: [pct, exec, "{{ hermes_ctid }}", --, cat, "{{ hermes_dropin_dir }}/10-oidc.conf"]
+          register: oidc_current
+          changed_when: false
+          failed_when: false
+
+        # Compared against the rendered FACT, not against the staged file:
+        # lookup() always evaluates on the control node, and that file was written
+        # on ex-laptop — so a lookup here reads a path that does not exist on the
+        # operator's workstation (templating error, straight into the rescue) or,
+        # worse, a stale local copy that makes the comparison quietly wrong.
+        - name: Push the OIDC drop-in
+          ansible.builtin.command:
+            argv: [pct, push, "{{ hermes_ctid }}", /tmp/hermes-10-oidc.conf, "{{ hermes_dropin_dir }}/10-oidc.conf", --perms, "0644"]
+          # Both sides trimmed: command strips the trailing newline from stdout while a
+          # YAML literal block keeps it, so an untrimmed compare is never equal and the
+          # restart below would fire on every re-run.
+          when: oidc_current.stdout | default('', true) | trim != hermes_oidc_dropin | trim
+          register: oidc_pushed
+
+        # trusted_proxies has no env override, so it goes into config.yaml. Done
+        # with the venv's own python (which has PyYAML because Hermes reads its
+        # config with it) and only rewritten when the value actually differs, so
+        # re-runs are no-ops.
+        #
+        # When it DOES write, it round-trips the whole file through safe_load /
+        # safe_dump: every key and value survives, comments and key order do not.
+        # That matters because the dashboard's own Config page writes this file
+        # too. Each rewrite leaves a timestamped .bak-ansible-<epoch> beside it
+        # rather than overwriting one backup.
+        - name: Merge dashboard.trusted_proxies into config.yaml
+          ansible.builtin.shell:
+            cmd: |
+              pct exec {{ hermes_ctid }} -- {{ hermes_python }} - <<'PY'
+              import yaml, pathlib, shutil, time
+              p = pathlib.Path("{{ hermes_home }}/config.yaml")
+              want = {{ hermes_trusted_proxies | to_json }}
+              cfg = yaml.safe_load(p.read_text()) if p.exists() else {}
+              cfg = cfg or {}
+              dash = cfg.setdefault("dashboard", {})
+              if dash.get("trusted_proxies") == want:
+                  # NOT "UNCHANGED": `"CHANGED" in "UNCHANGED"` is True, so that
+                  # token would report a change on every re-run.
+                  print("NOCHANGE"); raise SystemExit(0)
+              if p.exists():
+                  shutil.copy2(p, "%s.bak-ansible-%d" % (p, time.time()))
+              dash["trusted_proxies"] = want
+              p.write_text(yaml.safe_dump(cfg, sort_keys=False))
+              print("CHANGED")
+              PY
+          args:
+            executable: /bin/bash
+          register: proxies_merge
+          changed_when: "'CHANGED' in proxies_merge.stdout_lines | default([])"
+          failed_when: >-
+            proxies_merge.rc != 0
+            or not (proxies_merge.stdout_lines | default([]) | intersect(['CHANGED', 'NOCHANGE']))
+
+        # The heredoc above is the one step whose exit code proves nothing: `python
+        # - ` with stdin that never arrived exits 0 having printed nothing. Without
+        # this assert, trusted_proxies silently stays unset and login later fails
+        # with the SameSite=Lax-dropped PKCE cookie symptom — which reads as an
+        # authentik problem, not a missing config key.
+        - name: Assert trusted_proxies really landed in config.yaml
+          ansible.builtin.command:
+            argv:
+              - pct
+              - exec
+              - "{{ hermes_ctid }}"
+              - --
+              - grep
+              - -q
+              - "{{ hermes_trusted_proxies | last }}"
+              - "{{ hermes_home }}/config.yaml"
+          changed_when: false
+
+        # Conditional, because a restart drops the Chat tab's WebSocket PTY and
+        # every live gateway session. "Safe to re-run" has to mean re-running
+        # changes nothing, not that it reconverges by killing sessions twice.
+        - name: Reload systemd and restart the dashboard
+          ansible.builtin.command:
+            argv: [pct, exec, "{{ hermes_ctid }}", --, bash, -lc, "systemctl daemon-reload && systemctl restart hermes-dashboard"]
+          when: oidc_pushed is changed or proxies_merge is changed
+          changed_when: true
+
+        # The only check that tells the three states apart: gate off
+        # (auth_required false), gate on but the plugin never registered
+        # (auth_providers without self-hosted — a typo'd issuer or client_id),
+        # and correct. A `curl -I /` → 302 distinguishes none of them, and -I is
+        # a HEAD that a GET-only route answers 405 to.
+        - name: Assert the auth gate engaged with the self-hosted provider
+          ansible.builtin.command:
+            argv:
+              - pct
+              - exec
+              - "{{ hermes_ctid }}"
+              - --
+              - curl
+              - -sS
+              - -H
+              # Same Host the DNS-rebinding guard accepts. public_url is already
+              # set at this point, and its hostname is the exact Host value the
+              # guard allows — probing with `Host: 127.0.0.1:9119` can be rejected
+              # outright, which would burn all ten retries and trip the rescue.
+              - "Host: {{ hermes_public_url | regex_replace('^https?://', '') }}"
+              - "http://127.0.0.1:{{ hermes_port }}/api/status"
+          register: api_status
+          changed_when: false
+          retries: 10
+          delay: 3
+          # The JSON parse is guarded by the substring test in front of it:
+          # `from_json` on a non-JSON error body raises INSIDE the until list,
+          # which aborts the task with a Jinja traceback instead of retrying.
+          until:
+            - api_status.rc == 0
+            - api_status.stdout is search('auth_required')
+            - (api_status.stdout | from_json).auth_required | default(false)
+            - "'self-hosted' in ((api_status.stdout | from_json).auth_providers | default([]))"
+
+      rescue:
+        # BOTH drop-ins, not just the one this phase wrote. On a re-run the box
+        # already carries 20-bind.conf from a previous Phase B, and removing only
+        # the OIDC half would leave `--host 0.0.0.0` with no auth provider — which
+        # Hermes refuses with exit 78, which RestartPreventExitStatus=78 then parks.
+        # That is a dead service with no tunnel either, recoverable only from
+        # `pct enter`, i.e. the exact state this playbook's header promises never
+        # to leave behind.
+        # `|| true` on the restart: its rc is this task's rc, so a unit that still
+        # refuses to start would abort the play here and the journal tasks below —
+        # the whole point of the rescue — would never run.
+        - name: Roll back to loopback with no gate (both drop-ins)
+          ansible.builtin.command:
+            argv: [pct, exec, "{{ hermes_ctid }}", --, bash, -lc, "rm -f {{ hermes_dropin_dir }}/10-oidc.conf {{ hermes_dropin_dir }}/20-bind.conf; systemctl daemon-reload; systemctl restart hermes-dashboard || true"]
+          changed_when: true
+
+        - name: Collect the journal for the failed start
+          ansible.builtin.command:
+            argv: [pct, exec, "{{ hermes_ctid }}", --, journalctl, -u, hermes-dashboard, -n, "60", --no-pager]
+          register: dash_journal
+          changed_when: false
+
+        - name: Fail with the journal
+          ansible.builtin.fail:
+            msg: |
+              Phase A failed; both drop-ins are removed, so the dashboard is back on a
+              loopback bind with no auth gate and the SSH tunnel works again.
+              Exit 78 means Hermes refused the configuration and named the reason.
+              {{ dash_journal.stdout }}
+
+# ----------------------------------------------------------------------
+# Phase B — firewall first, then expose
+# ----------------------------------------------------------------------
+# Order matters: the forwardAuth gate only exists on the Traefik path, so
+# between flipping the bind and installing the rule, every LAN device and every
+# pod could reach a plain-HTTP root-equivalent admin surface and face one gate
+# instead of two. The rule goes in first.
+- name: Expose the Hermes dashboard to Traefik (phase B — firewall, then bind)
+  hosts: ex-laptop
+  gather_facts: false
+  become: true
+
+  vars_files:
+    - vars/hermes-dashboard.yml
+
+  vars:
+    hermes_ctid: 101
+    hermes_port: 9119
+    hermes_public_url: "https://hermes.bnei.dev"
+    hermes_dropin_dir: /etc/systemd/system/hermes-dashboard.service.d
+    # Must equal spec.externalName in gitops/redirectors/hermes.yaml. Asserted
+    # below rather than trusted — the NIC is static (`pct set`), and this is the
+    # check that catches it silently going back to DHCP.
+    hermes_expected_ip: "192.168.1.72"
+    hermes_allowed_peers: "{{ hermes_node_ips }}"
+
+  tasks:
+    - name: Ensure nftables is installed in the container
+      ansible.builtin.command:
+        argv: [pct, exec, "{{ hermes_ctid }}", --, bash, -lc, "command -v nft >/dev/null || (apt-get update && apt-get install -y nftables)"]
+      register: nft_install
+      changed_when: "'Setting up nftables' in nft_install.stdout"
+
+    # Only tcp dport 9119 is touched and the chain policy stays accept, so SSH
+    # and everything else on the box are unaffected even if this rule is wrong.
+    #
+    # WRITTEN TO /etc/nftables.d/, NOT /etc/nftables.conf. Debian's nftables
+    # package ships that file with `flush ruleset` and an uncommented
+    # `table inet filter` of its own (confirmed on this container), so pushing
+    # over it would delete the distribution's ruleset and any later rule — for
+    # instance one for the already-LAN-open :8642 — on every run. The include
+    # line below is what makes nftables.service actually read our file; it is
+    # appended once and is idempotent.
+    - name: Stage the nftables rule on the hypervisor
+      ansible.builtin.copy:
+        dest: /tmp/hermes-nftables.conf
+        mode: "0644"
+        content: |
+          # Managed by ansible/playbooks/hermes-dashboard-configure.yml (ADR-0051).
+          #
+          # WHAT THIS DOES AND DOES NOT BUY. The dashboard binds 0.0.0.0 because
+          # Traefik is not loopback and Hermes' peer-IP guard rejects non-loopback
+          # clients otherwise. This rule takes :9119 from "every device on
+          # 192.168.1.0/24" down to "the five k8s nodes" — and because Cilium
+          # masquerades pod egress to the node address (measured, see the playbook),
+          # "the five k8s nodes" means every pod in every namespace plus any
+          # node-local process. It is NOT "Traefik only", and nothing at this layer
+          # can make it so. See ADR-0051 Decision 7 for the residual risk and the
+          # upgrade path (a secret header or mTLS on the upstream hop).
+          table inet hermes_dashboard
+          delete table inet hermes_dashboard
+          table inet hermes_dashboard {
+            chain input {
+              type filter hook input priority 0; policy accept;
+              iif lo accept
+              tcp dport {{ hermes_port }} ip saddr { {{ hermes_allowed_peers | join(', ') }} } accept
+              tcp dport {{ hermes_port }} drop
+            }
+          }
+
+    - name: Ensure /etc/nftables.d exists in the container
+      ansible.builtin.command:
+        argv: [pct, exec, "{{ hermes_ctid }}", --, mkdir, -p, /etc/nftables.d]
+      changed_when: false
+
+    - name: Push the nftables rule
+      ansible.builtin.command:
+        argv: [pct, push, "{{ hermes_ctid }}", /tmp/hermes-nftables.conf, /etc/nftables.d/hermes-dashboard.conf, --perms, "0644"]
+      changed_when: true
+
+    # Separate task rather than part of the push, so "the include is missing" and
+    # "the rule file is missing" fail in distinguishable places.
+    - name: Ensure /etc/nftables.conf includes /etc/nftables.d
+      ansible.builtin.shell:
+        cmd: |
+          set -euo pipefail
+          if pct exec {{ hermes_ctid }} -- grep -qF 'include "/etc/nftables.d/*.conf"' /etc/nftables.conf; then
+            echo PRESENT
+          else
+            pct exec {{ hermes_ctid }} -- bash -c 'printf "\ninclude \"/etc/nftables.d/*.conf\"\n" >> /etc/nftables.conf'
+            echo ADDED
+          fi
+      args:
+        executable: /bin/bash
+      register: nft_include
+      changed_when: "'ADDED' in nft_include.stdout"
+
+    # The explicit load targets OUR file only: `nft -f /etc/nftables.conf` would
+    # re-run the `flush ruleset` Debian puts at the top of it, discarding anything
+    # loaded at runtime from elsewhere. Note `enable --now` still runs that file
+    # once if the unit was inactive — unavoidable, it is what the unit does — so
+    # the first pass on a box with hand-loaded runtime rules will flush them. The
+    # include added above is what brings our table back at boot.
+    - name: Enable nftables and load the hermes table
+      ansible.builtin.command:
+        argv: [pct, exec, "{{ hermes_ctid }}", --, bash, -lc, "systemctl enable --now nftables && nft -f /etc/nftables.d/hermes-dashboard.conf"]
+      changed_when: true
+
+    - name: Assert the rule is actually loaded
+      ansible.builtin.command:
+        argv: [pct, exec, "{{ hermes_ctid }}", --, nft, list, table, inet, hermes_dashboard]
+      register: nft_loaded
+      changed_when: false
+      failed_when: "'dport ' ~ hermes_port not in nft_loaded.stdout"
+
+    - name: Bind the dashboard where Traefik can reach it
+      block:
+        - name: Read the unit's current ExecStart
+          ansible.builtin.command:
+            argv: [pct, exec, "{{ hermes_ctid }}", --, systemctl, show, hermes-dashboard, --no-pager, -p, ExecStart]
+          register: exec_show
+          changed_when: false
+
+        - name: Resolve the hermes binary from ExecStart
+          ansible.builtin.set_fact:
+            hermes_bin: "{{ exec_show.stdout | regex_search('path=(\\S+)', '\\1') | default([], true) | first | default('', true) }}"
+
+        - name: Assert the hermes binary resolved from ExecStart
+          ansible.builtin.assert:
+            that: hermes_bin | length > 0
+            fail_msg: >-
+              Could not read a `path=` out of the unit's ExecStart. Inspect with
+              `pct exec {{ hermes_ctid }} -- systemctl cat hermes-dashboard`; do
+              not let this fall through to an empty ExecStart override.
+
+        # The override below rebuilds the command line from `path=` plus flags of
+        # our own, so any OTHER flag the original unit carried (--config,
+        # --log-level, a data dir) would be dropped silently — the binary resolved,
+        # so the assert above would still pass. Hence this second assert: the
+        # original argv must be the plain `dashboard --host … --port … --no-open`
+        # shape this playbook knows how to reproduce.
+        - name: Assert the original ExecStart carries no flags this override would drop
+          ansible.builtin.assert:
+            that:
+              - exec_show.stdout is search('argv\\[\\]=\\S+ dashboard ')
+              - exec_show.stdout | regex_search('argv\\[\\]=(.*?) ;', '\\1') | default([''], true) | first
+                  | regex_replace('^\\S+ ', '')
+                  | regex_replace('--host \\S+|--port \\S+|--no-open|dashboard', '')
+                  | trim | length == 0
+            fail_msg: >-
+              The unit's ExecStart carries arguments beyond
+              `dashboard --host … --port … --no-open`, and the 20-bind.conf override
+              would discard them. Read it with `pct exec {{ hermes_ctid }} --
+              systemctl cat hermes-dashboard` and extend
+              ansible/playbooks/hermes-dashboard-configure.yml's bind drop-in to
+              preserve them.
+
+        - name: Render the bind drop-in content
+          ansible.builtin.set_fact:
+            hermes_bind_dropin: |
+              # Managed by ansible/playbooks/hermes-dashboard-configure.yml (ADR-0051).
+              # An override needs the empty ExecStart= first, or systemd refuses
+              # the unit outright.
+              #
+              # RestartPreventExitStatus=78 is upstream's own guidance: exit 78
+              # (EX_CONFIG) is a deliberate refusal — a fail-closed auth gate, or
+              # another dashboard already holding this host:port — and parking on
+              # it beats an infinite restart loop with nothing listening. The
+              # journal names the reason.
+              [Service]
+              ExecStart=
+              ExecStart={{ hermes_bin }} dashboard --host 0.0.0.0 --port {{ hermes_port }} --no-open
+              RestartPreventExitStatus=78
+
+        - name: Stage the bind drop-in on the hypervisor
+          ansible.builtin.copy:
+            dest: /tmp/hermes-20-bind.conf
+            mode: "0644"
+            content: "{{ hermes_bind_dropin }}"
+
+        - name: Read the bind drop-in currently in the container
+          ansible.builtin.command:
+            argv: [pct, exec, "{{ hermes_ctid }}", --, cat, "{{ hermes_dropin_dir }}/20-bind.conf"]
+          register: bind_current
+          changed_when: false
+          failed_when: false
+
+        - name: Push the bind drop-in
+          ansible.builtin.command:
+            argv: [pct, push, "{{ hermes_ctid }}", /tmp/hermes-20-bind.conf, "{{ hermes_dropin_dir }}/20-bind.conf", --perms, "0644"]
+          when: bind_current.stdout | default('', true) | trim != hermes_bind_dropin | trim
+          register: bind_pushed
+          changed_when: true
+
+        # Conditional for the same reason as phase A's: an unconditional restart
+        # on every re-run kills the PTY and the gateway sessions for nothing.
+        - name: Reload systemd and restart the dashboard
+          ansible.builtin.command:
+            argv: [pct, exec, "{{ hermes_ctid }}", --, bash, -lc, "systemctl daemon-reload && systemctl restart hermes-dashboard"]
+          when: bind_pushed is changed
+          changed_when: true
+
+        # Sent with the exact Host public_url declares, because that hostname is
+        # also the only value the DNS-rebinding guard accepts — an IP Host is
+        # rejected, which would look like a failure and prove nothing.
+        - name: Assert the gate still holds on the exposed bind
+          ansible.builtin.command:
+            argv:
+              - pct
+              - exec
+              - "{{ hermes_ctid }}"
+              - --
+              - curl
+              - -sS
+              - -H
+              - "Host: {{ hermes_public_url | regex_replace('^https?://', '') }}"
+              - "http://127.0.0.1:{{ hermes_port }}/api/status"
+          register: api_status_b
+          changed_when: false
+          retries: 10
+          delay: 3
+          until:
+            - api_status_b.rc == 0
+            - api_status_b.stdout is search('auth_required')
+            - (api_status_b.stdout | from_json).auth_required | default(false)
+            - "'self-hosted' in ((api_status_b.stdout | from_json).auth_providers | default([]))"
+
+        # Belt and braces for the one state the other checks cannot see: an earlier
+        # run interrupted between pushing 20-bind.conf and restarting leaves the
+        # file on disk with the process still on 127.0.0.1. The conditional push
+        # and conditional restart both then skip, /api/status answers over loopback
+        # either way, and the LAN probe below *expects* a refusal — so the run goes
+        # green while hermes.bnei.dev 502s.
+        - name: Assert the dashboard is actually listening on 0.0.0.0
+          ansible.builtin.shell:
+            cmd: "pct exec {{ hermes_ctid }} -- ss -ltn | awk '{print $4}' | grep -qx '0.0.0.0:{{ hermes_port }}'"
+          args:
+            executable: /bin/bash
+          register: bind_check
+          changed_when: false
+          # If this fails with 20-bind.conf present, the unit never picked it up:
+          # `pct exec 101 -- systemctl restart hermes-dashboard` and re-run.
+
+        # The container's own address, read from the container — also the value
+        # gitops/redirectors/hermes.yaml pins as its ExternalName. If this does
+        # not match that manifest, the route is broken and this is where it shows.
+        - name: Read the container's IPv4 address
+          ansible.builtin.shell:
+            # eth0 explicitly, not "the first global address on any interface" —
+            # `head -n1` picks arbitrarily once a second one exists.
+            cmd: "pct exec {{ hermes_ctid }} -- ip -4 -o addr show dev eth0 scope global | awk '{print $4}' | cut -d/ -f1 | head -n1"
+          args:
+            executable: /bin/bash
+          register: ct_ip
+          changed_when: false
+
+        # An assert, not a debug: if the static config is ever lost (restore, a
+        # hand edit, DHCP re-enabled) the address drifts, hermes.bnei.dev starts
+        # 502-ing, and nothing in this repo changed. A debug line mid-run is not
+        # where anyone will notice that.
+        - name: Assert the container's address matches the redirector's externalName
+          ansible.builtin.assert:
+            that: ct_ip.stdout | trim == hermes_expected_ip
+            fail_msg: >-
+              CT {{ hermes_ctid }} is at {{ ct_ip.stdout | trim }} but
+              gitops/redirectors/hermes.yaml pins {{ hermes_expected_ip }}. Fix one
+              of them before this is routable: `pct set {{ hermes_ctid }} -net0
+              …,ip={{ hermes_expected_ip }}/24,gw=192.168.1.254` on the hypervisor,
+              or update the manifest and merge.
+            success_msg: "CT {{ hermes_ctid }} is at {{ hermes_expected_ip }}, matching the redirector."
+
+        # ex-laptop is a hypervisor, not a k8s node, so it is NOT in the allow
+        # list: a refusal here is the firewall working. The allow path is proven
+        # by the route itself (see ADR-0051's verification section), not from here.
+        - name: Assert :9119 is firewalled off from a non-node LAN host
+          ansible.builtin.shell:
+            cmd: "timeout 5 bash -c '</dev/tcp/{{ ct_ip.stdout | trim }}/{{ hermes_port }}'"
+          args:
+            executable: /bin/bash
+          register: lan_probe
+          changed_when: false
+          failed_when: lan_probe.rc == 0
+
+      rescue:
+        - name: Roll back the bind drop-in
+          ansible.builtin.command:
+            argv: [pct, exec, "{{ hermes_ctid }}", --, bash, -lc, "rm -f {{ hermes_dropin_dir }}/20-bind.conf; systemctl daemon-reload; systemctl restart hermes-dashboard || true"]
+          changed_when: true
+
+        - name: Collect the journal for the failed start
+          ansible.builtin.command:
+            argv: [pct, exec, "{{ hermes_ctid }}", --, journalctl, -u, hermes-dashboard, -n, "60", --no-pager]
+          register: dash_journal_b
+          changed_when: false
+
+        - name: Fail with the journal
+          ansible.builtin.fail:
+            msg: |
+              Phase B failed; the bind drop-in is removed and the dashboard is back
+              on loopback with OIDC configured (phase A's state). The nftables rule
+              is harmless on its own. Exit 78 names the conflicting owner if another
+              dashboard already holds this host:port.
+              {{ dash_journal_b.stdout }}

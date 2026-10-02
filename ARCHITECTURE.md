@@ -706,8 +706,8 @@ Four access tiers:
 | Tier | Mechanism | Status |
 |---|---|---|
 | Public | none | — |
-| Native OIDC | the app is an OIDC relying party | **Live.** ArgoCD, Grafana, and agent-fleet `core` |
-| forwardAuth | Traefik `Middleware/authentik-forwardauth` in front of the route | **Live.** e2e preview hosts, `wedding.bnei.dev/admin`, `blog.bnei.dev/linkedin`. Alertmanager, pgweb and Proxmox still to move |
+| Native OIDC | the app is an OIDC relying party | **Live.** ArgoCD, Grafana, agent-fleet `core` and Wird. **Pending:** the Hermes dashboard (`hermes.bnei.dev`), which is on *both* this tier and forwardAuth — manifests and playbook merged, the LXC-side run outstanding ([ADR-0051](docs/adr/0051-expose-hermes-dashboard.md)) |
+| forwardAuth | Traefik `Middleware/authentik-forwardauth` in front of the route | **Live.** e2e preview hosts, `wedding.bnei.dev/admin`, `blog.bnei.dev/linkedin`. **Pending:** `hermes.bnei.dev` (ADR-0051). Alertmanager, pgweb and Proxmox still to move |
 | Critical | adds a WebAuthn passkey policy | Not built |
 
 Three properties that are load-bearing rather than incidental:
@@ -721,6 +721,11 @@ Three properties that are load-bearing rather than incidental:
   `Viewer`). Deliberately not authentik's built-in `authentik Admins` — that
   would make "can administer the IdP" and "can administer the cluster" the same
   claim. Both expressions fail closed.
+- **Two gates where there is no in-app floor.** ArgoCD and Grafana fall through
+  to `role:readonly`/`Viewer`, so one authentik binding failing open costs
+  read access. The Hermes dashboard has no roles at all and a session on it is a
+  PTY on the box holding the Proxmox API token and the Infisical identity — so it
+  is the one host gated twice, natively *and* by the middleware (ADR-0051).
 - **Local admins are kept** on ArgoCD and Grafana. ArgoCD is what deploys
   authentik; if its only login path ran through authentik, an authentik failure
   would be recoverable through nothing but raw `kubectl`. This is what makes the
