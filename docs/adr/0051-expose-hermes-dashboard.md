@@ -130,7 +130,11 @@ Two things the plan had as "probably fine" turned out to be the real work:
   on 0.15.1 there was *no* self-hostable gate of any kind. `hermes update` also
   failed silently the first time (`✗ Failed to fetch updates from origin`,
   exit 0) on stale remote refs — `git remote prune origin` in
-  `~/.hermes/hermes-agent` cleared it.
+  `~/.hermes/hermes-agent` cleared it. The box is now on `0.21.5 (2026.9.24)`,
+  `config_version` migrated 26 → 49, with the dashboard and the user-level
+  `hermes-gateway.service` (`Linger=yes`, so it survives the reboot the static
+  IP needed) both back up. `plugins/dashboard_auth/` now carries `basic`,
+  `drain`, `nous` and `self_hosted` where it had only `nous`.
 - **`:8642` was already bound `0.0.0.0`.** The OpenAI-compatible API server,
   keyed from `/home/hermes/.hermes/.env`, has been LAN-reachable independently of
   this work. It is out of scope here and was left alone, but the `nftables` rule
@@ -155,15 +159,17 @@ Two things the plan had as "probably fine" turned out to be the real work:
   would read as enforced while changing nothing — its comment records the live
   value instead. If `.72` is inside the Freebox DHCP pool, a reservation is still
   worth adding.
-- **Cloudflare's Browser Integrity Check may block the plugin's server-side
-  calls.** The plugin fetches discovery, token, JWKS and revocation from
-  `authentik.bnei.dev` in Python, and that zone is proxied;
-  `.claude/skills/authentik-oidc/SKILL.md` records BIC rejecting `Python-urllib`
-  specifically. The playbook probes with both `curl` and `urllib` and fails
-  early. The remedy is a Pi-hole split-horizon entry for `authentik.bnei.dev` →
-  `192.168.1.233` (the same mechanism `pihole-configure.yml` already uses for
-  `stt.bnei.dev`, and the same blocker ADR-0039 Decision 5 waits on), or a
-  Cloudflare WAF exception.
+- **Cloudflare's Browser Integrity Check does not block the plugin — measured,
+  not assumed.** From inside LXC 101 on 2026-10-02: `urllib` → **403**, `curl` →
+  200, `httpx` → 200. The plugin uses `httpx`, and
+  `plugins/dashboard_auth/_shared.py` sets an explicit
+  `User-Agent: HermesAgent/1.0` on its JWKS client with the comment that "some
+  WAFs block the library default" — upstream had already met this. The playbook's
+  probe is therefore httpx, the client that matters; a urllib probe would fail
+  here forever and prove nothing. If httpx ever starts getting 403, the remedy is
+  a Pi-hole split-horizon entry for `authentik.bnei.dev` → `192.168.1.233` (the
+  mechanism `pihole-configure.yml` already uses for `stt.bnei.dev`, and the
+  blocker ADR-0039 Decision 5 waits on) or a Cloudflare WAF exception.
 - **Grey-clouding is the likely end state, not an edge case.** `fleet.bnei.dev`
   is already DNS-only because of Cloudflare's 100s timeout versus streaming. The
   Chat tab is a WebSocket PTY; it sends a 20s keepalive and silently reattaches
