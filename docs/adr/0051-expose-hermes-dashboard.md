@@ -1,6 +1,8 @@
 # ADR-0051: Expose the Hermes Agent dashboard at `hermes.bnei.dev` — two gates, not one
 
-**Status:** Accepted — decided 2026-10-02. The authentik behaviour reused here is
+**Status:** Accepted and **rolled out 2026-10-02** — see the implementation note
+for what the live run changed. Outstanding: the Freebox reservation for
+`192.168.1.72`, and a first interactive login. The authentik behaviour reused here is
 the same shape ADR-0050 verified against goauthentik 2026.8 source; the Hermes
 dashboard behaviour below was verified against upstream's own documentation for
 `plugins/dashboard_auth/self_hosted`, not against a running instance, so the
@@ -160,18 +162,49 @@ Two things the plan had as "probably fine" turned out to be the real work:
   `hermes-gateway.service` (`Linger=yes`, so it survives the reboot the static
   IP needed) both back up. `plugins/dashboard_auth/` now carries `basic`,
   `drain`, `nous` and `self_hosted` where it had only `nous`.
-- **Expect to restart the authentik worker twice after the first sync.** The
-  mounted blueprint directory sorts `authentik-blueprint-hermes-policy` *before*
-  `authentik-blueprint-hermes` (`-` < `/`), so a discovery pass can apply the
-  policy file while the application does not exist yet. `PolicyBinding.target` is
-  a required FK and a blueprint applies as one transaction, so that file rolls back
-  whole. It fails closed — no binding, and `core_default_app_access: false` denies
-  — and self-heals on the next pass, which is the second restart.
+- **It took THREE authentik worker restarts, not two — measured on the real
+  sync.** Pass 1 (the restart the chart does when the ConfigMap mount changes)
+  mounted the files and registered nothing. Pass 2 created the provider and the
+  application — discovery was 404 until then, then 200. Pass 3 was needed for
+  `authentik-blueprint-hermes-policy`: the mounted directory sorts it *before*
+  `authentik-blueprint-hermes` (`-` < `/`), `PolicyBinding.target` is a required
+  FK, and a blueprint applies as one transaction, so it rolled back whole while
+  the application did not yet exist. Between passes 2 and 3 the application had a
+  provider and **no bindings**, which with `core_default_app_access: false` denies
+  everyone — it fails closed, and it self-heals, but plan for three restarts and
+  verify the bindings in the database rather than assuming two was enough.
 - **`:8642` was already bound `0.0.0.0`.** The OpenAI-compatible API server,
   keyed from `/home/hermes/.hermes/.env`, has been LAN-reachable independently of
   this work. It is out of scope here and was left alone, but the `nftables` rule
   this ADR adds covers only `:9119` — so that endpoint is still open to the LAN.
   Worth its own decision.
+
+## Verified live, 2026-10-02
+
+- authentik: provider `hermes` is `public` / `hashed_user_id` / `per_provider`,
+  `access_token_validity hours=1`, `refresh_token_validity days=90`,
+  `refresh_token_threshold days=3`, one strict redirect URI
+  `https://hermes.bnei.dev/auth/callback`, scope mappings openid + profile + email
+  + offline_access. Application `hermes` has `policy_engine_mode: all` and two
+  bindings: `platform-admins` at order 0, `hermes-require-pkce` at order 1.
+  Discovery advertises `issuer https://authentik.bnei.dev/application/o/hermes/`
+  and `code_challenge_methods_supported ['plain', 'S256']`.
+- Gate 1, on the box: `/api/status` reports `auth_required: true`,
+  `auth_providers: ["self-hosted"]` on Hermes `0.21.5`. The process environment
+  carries the scope list intact — `openid profile email offline_access` — which is
+  the systemd quoting bug the review caught, confirmed fixed where it matters.
+- Gate 2, from the internet side: `https://hermes.bnei.dev/` **and**
+  `https://hermes.bnei.dev/api/status` both 302 to
+  `authentik.bnei.dev/application/o/authorize/` via the embedded outpost. The
+  unauthenticated status endpoint is no longer reachable unauthenticated.
+- Firewall: `nft list table inet hermes_dashboard` shows the five node addresses
+  accepted and everything else dropped on tcp/9119; the dashboard listens on
+  `0.0.0.0:9119`; a connection from ex-laptop (a hypervisor, not a node) is
+  refused.
+- The playbook's own asserts all passed (47 ok, 11 changed, 0 failed), including
+  the container address matching the redirector's `externalName`.
+- Not yet verified: an interactive login, and therefore the Chat tab's WebSocket
+  through Cloudflare. That needs a `platform-admins` credential.
 
 ## Consequences
 

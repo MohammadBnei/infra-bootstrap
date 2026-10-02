@@ -706,8 +706,8 @@ Four access tiers:
 | Tier | Mechanism | Status |
 |---|---|---|
 | Public | none | — |
-| Native OIDC | the app is an OIDC relying party | **Live.** ArgoCD, Grafana, agent-fleet `core` and Wird. **Pending:** the Hermes dashboard (`hermes.bnei.dev`), which is on *both* this tier and forwardAuth — manifests and playbook merged, the LXC-side run outstanding ([ADR-0051](docs/adr/0051-expose-hermes-dashboard.md)) |
-| forwardAuth | Traefik `Middleware/authentik-forwardauth` in front of the route | **Live.** e2e preview hosts, `wedding.bnei.dev/admin`, `blog.bnei.dev/linkedin`. **Pending:** `hermes.bnei.dev` (ADR-0051). Alertmanager, pgweb and Proxmox still to move |
+| Native OIDC | the app is an OIDC relying party | **Live.** ArgoCD, Grafana, agent-fleet `core`, Wird, and the Hermes dashboard (`hermes.bnei.dev`, live 2026-10-02 and the only app on *both* this tier and forwardAuth — [ADR-0051](docs/adr/0051-expose-hermes-dashboard.md)) |
+| forwardAuth | Traefik `Middleware/authentik-forwardauth` in front of the route | **Live.** e2e preview hosts, `wedding.bnei.dev/admin`, `blog.bnei.dev/linkedin`, `hermes.bnei.dev` (ADR-0051 — also a native OIDC client, deliberately both). Alertmanager, pgweb and Proxmox still to move |
 | Critical | adds a WebAuthn passkey policy | Not built |
 
 Three properties that are load-bearing rather than incidental:

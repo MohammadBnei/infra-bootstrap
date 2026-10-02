@@ -95,7 +95,7 @@ a fake `10000Mb/s`.
     a CREATE onto the live VMID (`terraform/imported.tf`). Every `pct` command
     for it — including ADR-0051's break-glass `pct enter 101` — must be run on
     ex-laptop. Its web
-    dashboard is being exposed at `hermes.bnei.dev`
+    dashboard is exposed at `hermes.bnei.dev` (live 2026-10-02)
     ([ADR-0051](adr/0051-expose-hermes-dashboard.md)): authentik OIDC on the
     app *and* `authentik-forwardauth` on the route, `:9119` firewalled to
     the five k8s nodes, config in two systemd drop-ins so removing them is
