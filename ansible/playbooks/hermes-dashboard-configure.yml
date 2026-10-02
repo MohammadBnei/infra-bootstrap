@@ -101,6 +101,27 @@
     # ------------------------------------------------------------------
     # 1. Discover the unit — every path below comes from here
     # ------------------------------------------------------------------
+    # A SYSTEM unit, verified on this box 2026-10-02:
+    # FragmentPath=/etc/systemd/system/hermes-dashboard.service, User=hermes. Worth
+    # stating because the sibling gateway is a USER unit (hermes-gateway.service
+    # with Linger=yes), so "it is systemd" says nothing about which scope — and
+    # every drop-in path, restart and documented rollback here assumes the system
+    # one. The listing below makes a future change visible instead of surfacing as
+    # the "run hermes-setup" message in the assert further down.
+    - name: List hermes units in both scopes (for the record)
+      ansible.builtin.shell:
+        cmd: |
+          pct exec {{ hermes_ctid }} -- systemctl list-units 'hermes*' --no-pager --no-legend || true
+          pct exec {{ hermes_ctid }} -- su - hermes -c 'XDG_RUNTIME_DIR=/run/user/$(id -u) systemctl --user list-units "hermes*" --no-pager --no-legend' || true
+      args:
+        executable: /bin/bash
+      register: hermes_units
+      changed_when: false
+
+    - name: Show the hermes units
+      ansible.builtin.debug:
+        var: hermes_units.stdout_lines
+
     - name: Read the hermes-dashboard unit
       ansible.builtin.command:
         argv:
@@ -242,6 +263,12 @@
       register: probe_curl
       changed_when: false
       failed_when: probe_curl.stdout | trim != '200'
+      # READ THE CODE BEFORE BLAMING CLOUDFLARE. 404 means authentik has no
+      # `hermes` application yet: gitops/bootstrap/authentik-blueprint-hermes.yaml
+      # is not merged, not synced, or the worker has not been restarted since it
+      # was mounted (blueprints_discovery runs at worker boot only). That is the
+      # expected state immediately after merge. 403 is the WAF case described
+      # above; 000/timeout is DNS or egress.
 
     - name: Probe authentik discovery from inside the container (httpx, the client the plugin uses)
       ansible.builtin.command:
@@ -437,9 +464,12 @@
         # That is a dead service with no tunnel either, recoverable only from
         # `pct enter`, i.e. the exact state this playbook's header promises never
         # to leave behind.
+        # `|| true` on the restart: its rc is this task's rc, so a unit that still
+        # refuses to start would abort the play here and the journal tasks below —
+        # the whole point of the rescue — would never run.
         - name: Roll back to loopback with no gate (both drop-ins)
           ansible.builtin.command:
-            argv: [pct, exec, "{{ hermes_ctid }}", --, bash, -lc, "rm -f {{ hermes_dropin_dir }}/10-oidc.conf {{ hermes_dropin_dir }}/20-bind.conf; systemctl daemon-reload; systemctl restart hermes-dashboard"]
+            argv: [pct, exec, "{{ hermes_ctid }}", --, bash, -lc, "rm -f {{ hermes_dropin_dir }}/10-oidc.conf {{ hermes_dropin_dir }}/20-bind.conf; systemctl daemon-reload; systemctl restart hermes-dashboard || true"]
           changed_when: true
 
         - name: Collect the journal for the failed start
@@ -553,11 +583,12 @@
       register: nft_include
       changed_when: "'ADDED' in nft_include.stdout"
 
-    # Our file only. `nft -f /etc/nftables.conf` would re-run the `flush ruleset`
-    # Debian puts at the top of it, discarding anything loaded at runtime from
-    # elsewhere — the opposite of the no-op-on-re-run behaviour the rest of this
-    # playbook goes to lengths for. The include added above is what makes the
-    # rule come back at boot.
+    # The explicit load targets OUR file only: `nft -f /etc/nftables.conf` would
+    # re-run the `flush ruleset` Debian puts at the top of it, discarding anything
+    # loaded at runtime from elsewhere. Note `enable --now` still runs that file
+    # once if the unit was inactive — unavoidable, it is what the unit does — so
+    # the first pass on a box with hand-loaded runtime rules will flush them. The
+    # include added above is what brings our table back at boot.
     - name: Enable nftables and load the hermes table
       ansible.builtin.command:
         argv: [pct, exec, "{{ hermes_ctid }}", --, bash, -lc, "systemctl enable --now nftables && nft -f /etc/nftables.d/hermes-dashboard.conf"]
@@ -682,6 +713,22 @@
             - (api_status_b.stdout | from_json).auth_required | default(false)
             - "'self-hosted' in ((api_status_b.stdout | from_json).auth_providers | default([]))"
 
+        # Belt and braces for the one state the other checks cannot see: an earlier
+        # run interrupted between pushing 20-bind.conf and restarting leaves the
+        # file on disk with the process still on 127.0.0.1. The conditional push
+        # and conditional restart both then skip, /api/status answers over loopback
+        # either way, and the LAN probe below *expects* a refusal — so the run goes
+        # green while hermes.bnei.dev 502s.
+        - name: Assert the dashboard is actually listening on 0.0.0.0
+          ansible.builtin.shell:
+            cmd: "pct exec {{ hermes_ctid }} -- ss -ltn | awk '{print $4}' | grep -qx '0.0.0.0:{{ hermes_port }}'"
+          args:
+            executable: /bin/bash
+          register: bind_check
+          changed_when: false
+          # If this fails with 20-bind.conf present, the unit never picked it up:
+          # `pct exec 101 -- systemctl restart hermes-dashboard` and re-run.
+
         # The container's own address, read from the container — also the value
         # gitops/redirectors/hermes.yaml pins as its ExternalName. If this does
         # not match that manifest, the route is broken and this is where it shows.
@@ -725,7 +772,7 @@
       rescue:
         - name: Roll back the bind drop-in
           ansible.builtin.command:
-            argv: [pct, exec, "{{ hermes_ctid }}", --, bash, -lc, "rm -f {{ hermes_dropin_dir }}/20-bind.conf; systemctl daemon-reload; systemctl restart hermes-dashboard"]
+            argv: [pct, exec, "{{ hermes_ctid }}", --, bash, -lc, "rm -f {{ hermes_dropin_dir }}/20-bind.conf; systemctl daemon-reload; systemctl restart hermes-dashboard || true"]
           changed_when: true
 
         - name: Collect the journal for the failed start

@@ -165,7 +165,7 @@ one Infisical row.
 |---|---|---|
 | ArgoCD | `gitops/bootstrap/argocd-application.yaml` | `configs.rbac.policy.default: role:readonly` + `policy.csv: g, platform-admins, role:admin` + `scopes: "[groups, email]"` |
 | Grafana | `gitops/platform/values/grafana/values.yaml` | `role_attribute_path: contains(groups[*], 'platform-admins') && 'Admin' \|\| 'Viewer'`, with `allow_assign_grafana_admin: false` |
-| Hermes dashboard | nowhere — it has no roles | **none.** The `policybinding` in `authentik-blueprint-platform-apps-policy.yaml` is the entire authorization decision, which is why `gitops/redirectors/hermes.yaml` also carries `authentik-forwardauth`: two gates reading the same group, because there is no in-app floor to fall back to (ADR-0051) |
+| Hermes dashboard | nowhere — it has no roles | **none.** The `policybinding` in `authentik-blueprint-hermes-policy.yaml` is the entire authorization decision, which is why `gitops/redirectors/hermes.yaml` also carries `authentik-forwardauth`: two gates reading the same group, because there is no in-app floor to fall back to (ADR-0051) |
 
 Adding a person is one line in one file, not a per-app allowlist that drifts.
 

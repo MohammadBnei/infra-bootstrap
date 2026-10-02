@@ -62,7 +62,7 @@ Two upstream properties shape everything else:
 2. **`platform-admins`, enforced in authentik, because Hermes has no roles.**
    ArgoCD falls through to `role:readonly` and Grafana to `Viewer`; Hermes has no
    equivalent, so the `policybinding` in
-   `gitops/bootstrap/authentik-blueprint-platform-apps-policy.yaml` is the entire
+   `gitops/bootstrap/authentik-blueprint-hermes-policy.yaml` is the entire
    authorization decision. That is why gate 2 exists at all — the compound
    failure the policy file itself documents (a `!Find` miss writing
    `group_id = NULL`, plus a lost `core_default_app_access` flag, plus Wird's
@@ -160,6 +160,13 @@ Two things the plan had as "probably fine" turned out to be the real work:
   `hermes-gateway.service` (`Linger=yes`, so it survives the reboot the static
   IP needed) both back up. `plugins/dashboard_auth/` now carries `basic`,
   `drain`, `nous` and `self_hosted` where it had only `nous`.
+- **Expect to restart the authentik worker twice after the first sync.** The
+  mounted blueprint directory sorts `authentik-blueprint-hermes-policy` *before*
+  `authentik-blueprint-hermes` (`-` < `/`), so a discovery pass can apply the
+  policy file while the application does not exist yet. `PolicyBinding.target` is
+  a required FK and a blueprint applies as one transaction, so that file rolls back
+  whole. It fails closed — no binding, and `core_default_app_access: false` denies
+  — and self-heals on the next pass, which is the second restart.
 - **`:8642` was already bound `0.0.0.0`.** The OpenAI-compatible API server,
   keyed from `/home/hermes/.hermes/.env`, has been LAN-reachable independently of
   this work. It is out of scope here and was left alone, but the `nftables` rule
@@ -182,8 +189,12 @@ Two things the plan had as "probably fine" turned out to be the real work:
   value is **not** declared in `terraform/imported.tf`: that resource already
   lists `initialization[0].ip_config` in `ignore_changes`, so a declaration there
   would read as enforced while changing nothing — its comment records the live
-  value instead. If `.72` is inside the Freebox DHCP pool, a reservation is still
-  worth adding.
+  value instead. **`.72` came out of the DHCP pool** — recon found the container
+  holding it on a live lease — so a static pin without a matching Freebox
+  reservation is a duplicate address waiting to happen: the Freebox can hand `.72`
+  to another device while the LXC is off, and the playbook's `hermes_expected_ip`
+  assert would still pass while traffic went elsewhere. Reserving it is a required
+  step, and the one part of this change that needs LAN-side access.
 - **Cloudflare's Browser Integrity Check does not block the plugin — measured,
   not assumed.** From inside LXC 101 on 2026-10-02: `urllib` → **403**, `curl` →
   200, `httpx` → 200. The plugin uses `httpx`, and

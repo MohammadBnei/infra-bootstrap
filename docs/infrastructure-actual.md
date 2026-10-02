@@ -88,7 +88,7 @@ a fake `10000Mb/s`.
   under AMD CBS → NBIO Common Options.
 - Storage: LVM with `pve` volume group, `local-lvm` thinpool
 - Running LXCs:
-  - VMID 101 `hermesagent` (2 vCPU / 4GB / 19GB) — this AI. **Runs on
+  - VMID 101 `hermesagent` (2 vCPU / 4GB / 20GB rootfs) — this AI. **Runs on
     `ex-laptop` (192.168.1.161), not on this host**, despite sitting in this
     section: it was migrated there and the config never followed, which is the
     same assumption that once made `terraform plan` drop it from state and plan
