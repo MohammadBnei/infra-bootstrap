@@ -150,7 +150,6 @@ Current files:
 | `gitops/bootstrap/authentik-blueprint-platform-apps-policy.yaml` | binds `argocd`, `grafana` and `hermes` to `platform-admins`, and declares + binds `hermes-require-pkce` — argocd/grafana were the last two applications with no binding (ADR-0050 Decision 11, ADR-0051) |
 | `gitops/bootstrap/authentik-blueprint-hermes.yaml` | the Hermes dashboard's provider + application — the second **public** client, public because upstream's self-hosted OIDC plugin refuses confidential ones, not because a secret would ship in a binary (ADR-0051). Plain ConfigMap, provider+application only |
 | `gitops/bootstrap/authentik-flags-job.yaml` | PostSync hook asserting `core_default_app_access=false` — not a blueprint, because `Tenant` is internally managed (ADR-0050 Decision 12) |
-| `gitops/bootstrap/authentik-blueprint-platform-apps-policy.yaml` | binds `argocd` and `grafana` to `platform-admins` (plain ConfigMap). Required by the enrollment flow above: those two relied on `AppAccessWithoutBindings` (default True), which was only ever safe while the directory held operators alone |
 
 The **same credential pair is consumed twice**, from opposite ends of the
 exchange: authentik registers it on the provider via the blueprint, the app

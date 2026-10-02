@@ -98,10 +98,10 @@ a fake `10000Mb/s`.
     Freebox reservation. **Corrected 2026-10-02:** the live address is
     `192.168.1.72`, not the `192.168.1.181` this file and
     `bin/install-requirements.sh` recorded (.181 is free and unanswered), and
-    the NIC is now static rather than DHCP. The box is up;
-    `docs/runbook-k9s-ops-hub.md`'s "currently down at 192.168.1.181" is stale
-    on both counts. Hermes itself was `0.15.1` and had to be updated — that
-    version has no self-hosted OIDC plugin at all
+    the NIC is now static rather than DHCP. The box is up — the "hermesagent is
+    down" claim in `docs/runbook-k9s-ops-hub.md` was an address error, and that
+    file now says so. Hermes itself was `0.15.1` and had to be updated to
+    `0.21.5 (2026.9.24)`: 0.15.1 ships no self-hosted OIDC plugin at all
   - VMID 301 `garage-storage` (2 vCPU / 2GB / 200GB, Debian 13, IP
     192.168.1.199) — running, configured (Garage v2.3.0, single-node
     layout applied). Five buckets + per-bucket S3 keys, all driven from
