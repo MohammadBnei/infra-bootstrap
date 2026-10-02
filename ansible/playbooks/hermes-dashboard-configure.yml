@@ -183,14 +183,20 @@
     # 2. The probe that can sink the whole design
     # ------------------------------------------------------------------
     # The self-hosted OIDC plugin makes four SERVER-SIDE HTTPS calls to
-    # authentik.bnei.dev from Python: discovery, token exchange, JWKS and
-    # RFC 7009 revocation. authentik.bnei.dev is a PROXIED Cloudflare record, and
+    # authentik.bnei.dev: discovery, token exchange, JWKS and RFC 7009
+    # revocation. authentik.bnei.dev is a PROXIED Cloudflare record, and
     # .claude/skills/authentik-oidc/SKILL.md records from a real incident that
-    # this zone's Browser Integrity Check rejects Python-urllib specifically. If
-    # that bites, no amount of correct blueprint fixes it: add a Pi-hole
-    # split-horizon entry for authentik.bnei.dev -> 192.168.1.233 (the Traefik
-    # VIP), the same thing ansible/playbooks/pihole-configure.yml already does
-    # for stt.bnei.dev, or carve a Cloudflare WAF exception.
+    # this zone's Browser Integrity Check rejects Python-urllib specifically.
+    # MEASURED FROM THIS CONTAINER 2026-10-02: urllib gets 403, curl gets 200,
+    # and httpx gets 200 — and the plugin uses httpx, with
+    # plugins/dashboard_auth/_shared.py setting an explicit
+    # `User-Agent: HermesAgent/1.0` on its JWKS client for exactly this reason.
+    # So the probe below is httpx, the client that actually matters; a urllib
+    # probe would fail here forever and prove nothing. If httpx ever starts
+    # getting 403, the remedy is a Pi-hole split-horizon entry for
+    # authentik.bnei.dev -> 192.168.1.233 (the Traefik VIP), the same thing
+    # ansible/playbooks/pihole-configure.yml already does for stt.bnei.dev, or a
+    # Cloudflare WAF exception.
     - name: Probe authentik discovery from inside the container (curl)
       ansible.builtin.command:
         argv:
@@ -209,24 +215,24 @@
       changed_when: false
       failed_when: probe_curl.stdout | trim != '200'
 
-    - name: Probe authentik discovery from inside the container (python, the client the plugin uses)
+    - name: Probe authentik discovery from inside the container (httpx, the client the plugin uses)
       ansible.builtin.command:
         argv:
           - pct
           - exec
           - "{{ hermes_ctid }}"
           - --
-          - python3
+          - "{{ hermes_home }}/hermes-agent/venv/bin/python"
           - -c
           - >-
-            import urllib.request,sys;
-            sys.exit(0 if urllib.request.urlopen("{{ hermes_issuer }}.well-known/openid-configuration", timeout=10).status == 200 else 1)
+            import httpx,sys;
+            sys.exit(0 if httpx.get("{{ hermes_issuer }}.well-known/openid-configuration", timeout=10).status_code == 200 else 1)
       register: probe_python
       changed_when: false
       failed_when: probe_python.rc != 0
-      # A 403 here with a 200 above IS the Cloudflare Browser Integrity Check.
-      # See this task's preceding comment for the two remedies; do not work
-      # around it by disabling TLS verification.
+      # A 403 here with a 200 from curl above IS the Cloudflare Browser Integrity
+      # Check reaching httpx too. See this task's preceding comment for the
+      # remedies; do not work around it by disabling TLS verification.
 
     - name: Assert the self-hosted dashboard-auth plugin is installed
       ansible.builtin.shell:

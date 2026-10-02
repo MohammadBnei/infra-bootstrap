@@ -118,18 +118,43 @@ Two upstream properties shape everything else:
    enroll two passkeys, then bind a WebAuthn policy to `hermes` **and**
    `proxmox` together, since both are hypervisor-adjacent.
 
+## Implementation note, 2026-10-02
+
+Two things the plan had as "probably fine" turned out to be the real work:
+
+- **The installed Hermes could not do this at all.** LXC 101 was on `0.15.1`
+  (2026.5.29), whose only dashboard-auth plugin is `nous` — no `self_hosted`, no
+  `basic`, and no `HERMES_DASHBOARD_OIDC` anywhere in its source. Upstream added
+  `plugins/dashboard_auth/self_hosted` on 2026-06-04; it ships in `v2026.9.24`.
+  So Decision 1's native gate was unconfigurable until the box was updated, and
+  on 0.15.1 there was *no* self-hostable gate of any kind. `hermes update` also
+  failed silently the first time (`✗ Failed to fetch updates from origin`,
+  exit 0) on stale remote refs — `git remote prune origin` in
+  `~/.hermes/hermes-agent` cleared it.
+- **`:8642` was already bound `0.0.0.0`.** The OpenAI-compatible API server,
+  keyed from `/home/hermes/.hermes/.env`, has been LAN-reachable independently of
+  this work. It is out of scope here and was left alone, but the `nftables` rule
+  this ADR adds covers only `:9119` — so that endpoint is still open to the LAN.
+  Worth its own decision.
+
 ## Consequences
 
 - `hermes.bnei.dev` needs no DNS change: `*.bnei.dev` is a proxied Cloudflare
   wildcard. The route is one new file in `gitops/redirectors/`, picked up by
   `redirectors-application.yaml` with nothing to add to `registry.yaml`.
-- **The backend is pinned to a literal IP while the container's NIC is DHCP.**
-  `terraform/imported.tf` carries `ip_config: dhcp`, so the lease must be
-  reserved on the Freebox — operator-side, outside this repo. Pinning it in
-  Terraform instead is deliberately rejected: that resource has
-  `prevent_destroy` and a recorded near-miss where a config mistake planned a
-  CREATE onto the live VMID 101. The playbook prints the container's real address
-  so a drift is caught at run time.
+- **The container's NIC is now static, and the address is not what the docs
+  said.** Recon on 2026-10-02 found LXC 101 on `192.168.1.72` with eight hours
+  left on its DHCP lease — not the `192.168.1.181` recorded in
+  `docs/infrastructure-actual.md`, `bin/install-requirements.sh` and
+  `docs/runbook-k9s-ops-hub.md` (that address is free and unanswered). It was
+  pinned with `pct set 101 -net0 …,ip=192.168.1.72/24,gw=192.168.1.254` rather
+  than left to the lease, because the redirector points at a literal IP and a
+  renewal would have produced a 502 with nothing in git changing. The static
+  value is **not** declared in `terraform/imported.tf`: that resource already
+  lists `initialization[0].ip_config` in `ignore_changes`, so a declaration there
+  would read as enforced while changing nothing — its comment records the live
+  value instead. If `.72` is inside the Freebox DHCP pool, a reservation is still
+  worth adding.
 - **Cloudflare's Browser Integrity Check may block the plugin's server-side
   calls.** The plugin fetches discovery, token, JWKS and revocation from
   `authentik.bnei.dev` in Python, and that zone is proxied;

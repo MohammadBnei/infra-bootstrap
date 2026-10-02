@@ -72,7 +72,7 @@ gitops/
 ├── redirectors/                           # Plain manifests, no chart — TLS-terminating redirects to out-of-cluster hosts
 │   ├── proxmox.yaml                       # Namespace+Service(ExternalName)+ServersTransport+IngressRoute → proxmox.bnei.dev (192.168.1.200:8006)
 │   ├── garage-s3.yaml                     # Namespace+Service(ExternalName)+IngressRoute → s3.bnei.dev (Garage S3 API, 192.168.1.199:3900) — ADR-0030
-│   └── hermes.yaml                        # Namespace+Service(ExternalName)+IngressRoute → hermes.bnei.dev (Hermes Agent dashboard, 192.168.1.181:9119) — ADR-0051, the only redirector with authentik forwardAuth on it
+│   └── hermes.yaml                        # Namespace+Service(ExternalName)+IngressRoute → hermes.bnei.dev (Hermes Agent dashboard, 192.168.1.72:9119) — ADR-0051, the only redirector with authentik forwardAuth on it
 └── apps/
     └── registry.yaml                      # Human source of truth for user apps (apps needing their own repo)
 ```

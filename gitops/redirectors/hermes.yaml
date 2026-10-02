@@ -2,15 +2,23 @@
 # off-cluster on the hermesagent LXC (VMID 101 on ex-laptop,
 # terraform/imported.tf) listening on :9119. ADR-0051.
 #
-# BACKEND IP — CONFIRM BEFORE MERGE, AND RESERVE THE LEASE. 192.168.1.181 is
-# what docs/infrastructure-actual.md and bin/install-requirements.sh record, but
-# the container's NIC is `ip_config: dhcp` (terraform/imported.tf), so this
-# literal is only correct for as long as the lease holds. Confirm with
-# `pct exec 101 -- ip -4 a` on ex-laptop, and add a DHCP reservation on the
-# Freebox — a new lease turns every request here into a 502 with nothing in this
-# repo changing. Pinning the address in Terraform instead is deliberately NOT
-# the answer: that resource carries prevent_destroy and a comment recording that
-# a config mistake there once planned a CREATE onto the live VMID 101.
+# BACKEND IP. 192.168.1.72, confirmed live with `pct exec 101 -- ip -4 a` on
+# ex-laptop and then PINNED: the NIC was `ip=dhcp` with eight hours left on its
+# lease, which would have turned this literal into a 502 with nothing in this
+# repo changing. It is now a static `ip=192.168.1.72/24,gw=192.168.1.254` set
+# with `pct set 101 -net0 …` on the hypervisor.
+#
+# Note 192.168.1.181 — what docs/infrastructure-actual.md,
+# bin/install-requirements.sh and docs/runbook-k9s-ops-hub.md record — was never
+# this container's address in this lease; it is free and unanswered.
+#
+# The static address is NOT declared in terraform/imported.tf: that resource
+# already carries `initialization[0].ip_config` in `ignore_changes` (it is an
+# imported, prevent_destroy LXC whose import surfaced real drift there), so a
+# declaration would be ignored rather than enforced. Its comment records the
+# live value instead. If .72 turns out to be inside the Freebox DHCP pool, the
+# lease could later be handed to another device — a reservation there is still
+# worth adding.
 #
 # ExternalName, not a headless ClusterIP + hand-authored Endpoints: argocd-cm
 # excludes both Endpoints and EndpointSlice cluster-wide, so a hand-authored one
@@ -70,7 +78,7 @@ metadata:
   namespace: hermes
 spec:
   type: ExternalName
-  externalName: "192.168.1.181"
+  externalName: "192.168.1.72"
   ports:
     - port: 9119
       protocol: TCP

@@ -95,9 +95,13 @@ a fake `10000Mb/s`.
     the five k8s nodes, config in two systemd drop-ins so removing them is
     the whole rollback. Note the NIC is DHCP (`terraform/imported.tf`) while
     `gitops/redirectors/hermes.yaml` pins a literal IP — the lease needs a
-    Freebox reservation. `docs/runbook-k9s-ops-hub.md` still records this box
-    as down at 192.168.1.181; the operator reports it reachable, so confirm
-    with `pct exec 101 -- ip -4 a` before trusting either
+    Freebox reservation. **Corrected 2026-10-02:** the live address is
+    `192.168.1.72`, not the `192.168.1.181` this file and
+    `bin/install-requirements.sh` recorded (.181 is free and unanswered), and
+    the NIC is now static rather than DHCP. The box is up;
+    `docs/runbook-k9s-ops-hub.md`'s "currently down at 192.168.1.181" is stale
+    on both counts. Hermes itself was `0.15.1` and had to be updated — that
+    version has no self-hosted OIDC plugin at all
   - VMID 301 `garage-storage` (2 vCPU / 2GB / 200GB, Debian 13, IP
     192.168.1.199) — running, configured (Garage v2.3.0, single-node
     layout applied). Five buckets + per-bucket S3 keys, all driven from
