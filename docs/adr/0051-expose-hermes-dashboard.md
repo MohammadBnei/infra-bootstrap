@@ -101,12 +101,30 @@ Two upstream properties shape everything else:
    of the path entirely. This is an argued deviation from Decision 6, not an
    oversight: the recovery path exists, it just requires physical/hypervisor
    access rather than a password.
-7. **`0.0.0.0` bind plus an `nftables` allow-list.** The bind is forced by
-   Hermes' peer-IP guard (a loopback bind rejects Traefik at the socket layer),
-   but on its own it would put a plain-HTTP root-equivalent admin surface on all
-   of `192.168.1.0/24` and the whole pod network, reachable with only gate 1. The
-   playbook installs the rule *before* flipping the bind, scoped to tcp/9119 with
-   `policy accept`, so nothing else on the box is affected.
+7. **`0.0.0.0` bind plus an `nftables` allow-list — which narrows the exposure
+   but does not reduce it to Traefik.** The bind is forced by Hermes' peer-IP
+   guard (a loopback bind rejects Traefik at the socket layer). The rule takes
+   `:9119` from "every device on `192.168.1.0/24`" down to "the five k8s node
+   addresses", installed *before* the bind flips, scoped to tcp/9119 with
+   `policy accept` so nothing else on the box is touched.
+
+   **What it does not buy, stated plainly.** Cilium masquerades pod egress to the
+   LAN as the node address — measured 2026-10-02 with tcpdump inside the container
+   while a pod on `k8s-worker-02` curled it, and the SYN arrived from
+   `192.168.1.203`. A packet filter therefore cannot tell Traefik's pod from any
+   other pod, so allowing the node addresses is equivalent to allowing **every pod
+   in every namespace**, plus any node-local process. Those callers reach the
+   dashboard directly, skipping Traefik and so skipping gate 2 and the origin
+   lock: they face gate 1 alone, they can read the unauthenticated `/api/status`,
+   and they can set `X-Forwarded-*` headers that `trusted_proxies` will believe.
+   Internet traffic still crosses both gates — this is a cluster-internal and
+   node-local hole, accepted rather than closed because every fix requires
+   something only Traefik can present (a secret header injected by a Traefik
+   `Middleware`, or mTLS on the upstream hop) and Hermes can require neither, so
+   each means another process on the box. Upgrade path if this stops being
+   acceptable: terminate the upstream hop in a small reverse proxy on the LXC that
+   demands that header or client certificate, and keep Hermes on loopback behind
+   it. An earlier draft of this ADR claimed the rule kept pods out; it does not.
 8. **Two-phase rollout, each phase with a rescue.** Phase A configures OIDC while
    still bound to loopback — `public_url` alone engages the gate, so a wrong
    issuer or client_id surfaces as an `/api/status` response rather than as an
@@ -187,6 +205,9 @@ Two things the plan had as "probably fine" turned out to be the real work:
   only `akadmin`, which is also the account that can edit the binding gating it.
   Negative testing needs a throwaway non-member account. Widening the group is
   the natural next step and it is also the moment Decision 9's trigger matters.
+- **Any cluster workload, and any node-local process, can reach `:9119`
+  directly with gate 1 as its only check.** See Decision 7: that is the
+  firewall's measured limit, not a misconfiguration.
 - **Shrinking the blast radius is a separate change.** Moving the Proxmox token,
   the k8s node key and the Infisical identity off this box would materially
   reduce what one login buys. Out of scope here; worth its own issue.

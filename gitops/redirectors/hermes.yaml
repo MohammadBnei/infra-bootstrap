@@ -38,7 +38,11 @@
 #      credential check at all — version, gateway state, every connected
 #      messaging channel, session count, memory/swap/disk,
 #      last_boot_suspected_oom. Without this middleware that is public on the
-#      internet. The middleware needs no new authentik object: the forwardAuth
+#      internet. It stays reachable by anything that can open a socket to
+#      192.168.1.72:9119 directly — after the playbook's nftables rule that means
+#      the five k8s nodes, and therefore every pod, since Cilium masquerades pod
+#      egress to the node address. ADR-0051 Decision 7 records that residual hole
+#      and its upgrade path. The middleware needs no new authentik object: the forwardAuth
 #      tier's provider is mode: forward_domain with cookie_domain bnei.dev, so
 #      it covers any *.bnei.dev host, and authentik-blueprint-previews-policy
 #      already restricts that application to platform-admins. No

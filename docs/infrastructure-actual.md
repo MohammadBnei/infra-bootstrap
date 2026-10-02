@@ -93,9 +93,9 @@ a fake `10000Mb/s`.
     ([ADR-0051](adr/0051-expose-hermes-dashboard.md)): authentik OIDC on the
     app *and* `authentik-forwardauth` on the route, `:9119` firewalled to
     the five k8s nodes, config in two systemd drop-ins so removing them is
-    the whole rollback. Note the NIC is DHCP (`terraform/imported.tf`) while
-    `gitops/redirectors/hermes.yaml` pins a literal IP — the lease needs a
-    Freebox reservation. **Corrected 2026-10-02:** the live address is
+    the whole rollback. `:9119` is firewalled to the node addresses, which still
+    leaves every pod able to reach it directly — ADR-0051 Decision 7.
+    **Address, corrected 2026-10-02:** the live address is
     `192.168.1.72`, not the `192.168.1.181` this file and
     `bin/install-requirements.sh` recorded (.181 is free and unanswered), and
     the NIC is now static rather than DHCP. The box is up — the "hermesagent is

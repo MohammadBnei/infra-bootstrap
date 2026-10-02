@@ -209,7 +209,13 @@ updated.
   not because a secret would ship in a binary. Its break-glass is the hypervisor
   console (`pct enter 101`, remove two systemd drop-ins) rather than a local
   password — an argued deviation from ADR-0039 Decision 6, because a shared
-  password on that box is a second credential to the same shell. See
+  password on that box is a second credential to the same shell. The
+  `nftables` rule on `:9119` narrows reach from the whole LAN to the five k8s
+  node addresses — which, because Cilium masquerades pod egress to the node
+  IP (measured with tcpdump, not assumed), means every pod in every namespace
+  rather than Traefik alone: those callers skip forwardAuth and meet the app's
+  own OIDC gate only. Accepted, because closing it needs a secret header or
+  mTLS that the app cannot require. See
   [ADR-0051](docs/adr/0051-expose-hermes-dashboard.md).
 - **Certificate renewal is one token, so it gets an alarm.** Since ADR-0038
   every host in both zones renews through a single `CF_DNS_API_TOKEN`; its
