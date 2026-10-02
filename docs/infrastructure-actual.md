@@ -88,7 +88,16 @@ a fake `10000Mb/s`.
   under AMD CBS → NBIO Common Options.
 - Storage: LVM with `pve` volume group, `local-lvm` thinpool
 - Running LXCs:
-  - VMID 101 `hermesagent` (2 vCPU / 4GB / 19GB) — this AI
+  - VMID 101 `hermesagent` (2 vCPU / 4GB / 19GB) — this AI. Its web
+    dashboard is being exposed at `hermes.bnei.dev`
+    ([ADR-0051](adr/0051-expose-hermes-dashboard.md)): authentik OIDC on the
+    app *and* `authentik-forwardauth` on the route, `:9119` firewalled to
+    the five k8s nodes, config in two systemd drop-ins so removing them is
+    the whole rollback. Note the NIC is DHCP (`terraform/imported.tf`) while
+    `gitops/redirectors/hermes.yaml` pins a literal IP — the lease needs a
+    Freebox reservation. `docs/runbook-k9s-ops-hub.md` still records this box
+    as down at 192.168.1.181; the operator reports it reachable, so confirm
+    with `pct exec 101 -- ip -4 a` before trusting either
   - VMID 301 `garage-storage` (2 vCPU / 2GB / 200GB, Debian 13, IP
     192.168.1.199) — running, configured (Garage v2.3.0, single-node
     layout applied). Five buckets + per-bucket S3 keys, all driven from
@@ -560,6 +569,13 @@ host-level config/data still don't.
 - Role: `PVEVMAdmin` (VM lifecycle, GPU passthrough)
 - Token saved at `/home/hermes/.proxmox_api`
 - `cv4pve-cli` v2.2.1 installed and configured for `bnei` context
+
+> **What one login to `hermes.bnei.dev` now buys** (ADR-0051): everything in this
+> section. The dashboard's Chat tab is a PTY as the service user, so the Proxmox
+> `PVEVMAdmin` token below, the hypervisor SSH access, the k8s node key and the
+> Infisical machine identity are all reachable from a browser session. That is
+> why that host is the only one gated twice, and why moving these credentials off
+> this box is worth doing on its own.
 
 ### SSH
 

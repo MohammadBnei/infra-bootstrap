@@ -1,0 +1,99 @@
+# Bridges Traefik-in-cluster to the Hermes Agent web dashboard, which runs
+# off-cluster on the hermesagent LXC (VMID 101 on ex-laptop,
+# terraform/imported.tf) listening on :9119. ADR-0051.
+#
+# BACKEND IP — CONFIRM BEFORE MERGE, AND RESERVE THE LEASE. 192.168.1.181 is
+# what docs/infrastructure-actual.md and bin/install-requirements.sh record, but
+# the container's NIC is `ip_config: dhcp` (terraform/imported.tf), so this
+# literal is only correct for as long as the lease holds. Confirm with
+# `pct exec 101 -- ip -4 a` on ex-laptop, and add a DHCP reservation on the
+# Freebox — a new lease turns every request here into a 502 with nothing in this
+# repo changing. Pinning the address in Terraform instead is deliberately NOT
+# the answer: that resource carries prevent_destroy and a comment recording that
+# a config mistake there once planned a CREATE onto the live VMID 101.
+#
+# ExternalName, not a headless ClusterIP + hand-authored Endpoints: argocd-cm
+# excludes both Endpoints and EndpointSlice cluster-wide, so a hand-authored one
+# is dropped on every sync and Traefik reports "no available server" — the same
+# failure already documented in proxmox.yaml and garage-s3.yaml. Traefik's
+# kubernetesCRD provider resolves spec.externalName directly, and that needs
+# providers.kubernetesCRD.allowExternalNameServices: true in
+# gitops/platform/values/traefik/values.yaml (already set; without it the
+# IngressRoute silently builds no router and clients get a 404).
+#
+# Plain HTTP upstream, so no ServersTransport and no `scheme: https` — unlike
+# proxmox.yaml, whose pveproxy serves a self-signed cert. The client-facing hop
+# still gets a real cert from the `le` resolver.
+#
+# AUTH: TWO INDEPENDENT GATES, and both are load-bearing.
+#   1. authentik-forwardauth below. The dashboard serves GET /api/status with NO
+#      credential check at all — version, gateway state, every connected
+#      messaging channel, session count, memory/swap/disk,
+#      last_boot_suspected_oom. Without this middleware that is public on the
+#      internet. The middleware needs no new authentik object: the forwardAuth
+#      tier's provider is mode: forward_domain with cookie_domain bnei.dev, so
+#      it covers any *.bnei.dev host, and authentik-blueprint-previews-policy
+#      already restricts that application to platform-admins. No
+#      /outpost.goauthentik.io/ route is needed here either, because
+#      external_host is authentik.bnei.dev — same as wedding.bnei.dev/admin.
+#   2. The dashboard's own OIDC gate (authentik-blueprint-hermes.yaml), which is
+#      not optional in any case: Hermes fails closed at startup on a
+#      non-loopback bind until an auth provider is configured, and a reverse
+#      proxy does not satisfy it.
+# cloudflare-origin-lock is NOT a third gate — it is not authentication (see
+# proxmox.yaml). It keeps direct-to-origin requests off the WAF bypass path.
+#
+# WHY TWO: this host is not an app. Per docs/infrastructure-actual.md §9 LXC 101
+# holds a PVEVMAdmin Proxmox token, SSH to two hypervisors, the k8s node key, a
+# GitHub token and the Infisical machine identity, and the dashboard's Chat tab
+# is a real PTY. One policy binding deciding all of that was the single-gate
+# design ADR-0051 rejected.
+#
+# IF THIS HOST EVER GOES GREY (DNS-only, as fleet.bnei.dev did for streaming vs
+# Cloudflare's 100s timeout): REMOVE cloudflare-origin-lock in the same commit.
+# It 403s every non-Cloudflare source, so a grey host with the lock attached is
+# down. forwardAuth and the dashboard's own gate are unaffected either way,
+# which is most of why the two-gate design is worth its one extra line.
+#
+# tls.certResolver: le is this repo's standard pattern for a redirector (see
+# garage-s3.yaml); the *.bnei.dev default store would already serve this host,
+# and this requests its own per-hostname cert on first request.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: hermes
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: hermes
+  namespace: hermes
+spec:
+  type: ExternalName
+  externalName: "192.168.1.181"
+  ports:
+    - port: 9119
+      protocol: TCP
+      name: http
+---
+apiVersion: traefik.io/v1alpha1
+kind: IngressRoute
+metadata:
+  name: hermes
+  namespace: hermes
+spec:
+  entryPoints:
+    - websecure
+  routes:
+    - kind: Rule
+      match: Host(`hermes.bnei.dev`)
+      services:
+        - name: hermes
+          port: 9119
+      middlewares:
+        - name: cloudflare-origin-lock
+          namespace: default
+        - name: authentik-forwardauth
+          namespace: default
+  tls:
+    certResolver: le

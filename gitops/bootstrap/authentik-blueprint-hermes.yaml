@@ -1,0 +1,141 @@
+# OIDC provider + application for the Hermes Agent web dashboard on LXC 101
+# (hermesagent), reached at https://hermes.bnei.dev through
+# gitops/redirectors/hermes.yaml. ADR-0051.
+#
+# WHAT IS BEHIND THIS LOGIN, because it is not "a dashboard": LXC 101 is where
+# DECISION.md §2 says operations live. Per docs/infrastructure-actual.md §9 it
+# holds a Proxmox API token with role PVEVMAdmin, SSH to two of the three
+# hypervisors, ~/.ssh/id_k8s_vm for every k8s node, a GitHub token, and the
+# Infisical machine identity. The dashboard's Chat tab is a real PTY running as
+# that user, and its System page can register shell hooks. So this provider
+# fronts an interactive shell with all of the above, which is why the route in
+# gitops/redirectors/hermes.yaml ALSO carries authentik-forwardauth: two
+# independent gates, not one.
+#
+# PUBLIC CLIENT, AND NOT FOR ADR-0050'S REASON. ADR-0050 made public clients an
+# exception with a stated test — "a secret shipped inside an IPA, an APK or a JS
+# bundle is extractable by anyone who installs the app". The Hermes dashboard is
+# a FastAPI server that could hold a secret at mode 0600, so it fails that test.
+# It is public because upstream's self-hosted OIDC plugin refuses confidential
+# clients outright ("Confidential clients (those with a client_secret) are not
+# supported yet — configure a public + PKCE client"). That is an upstream-gap
+# exception, decided in ADR-0051 on its own terms, and it comes without
+# ADR-0050's compensating control (App Links / Universal Links domain
+# verification is meaningless for a server). The compensating controls here are
+# instead: strict single redirect URI, enforced PKCE S256
+# (authentik-blueprint-platform-apps-policy.yaml), the platform-admins binding,
+# forwardAuth in front of the whole host, and cloudflare-origin-lock.
+#
+# client_id in git is deliberate and not a leak: a public client has no secret,
+# and ADR-0050 set the precedent with wird's literal id. Nothing about this file
+# enters the Infisical propagation chain, which is why it is a plain ConfigMap
+# and not an InfisicalSecret — see docs/runbook-authentik-identity.md §"only a
+# blueprint that interpolates a credential is an InfisicalSecret".
+#
+# PROVIDER AND APPLICATION ONLY. The two policy bindings (platform-admins, and
+# PKCE enforcement) live in authentik-blueprint-platform-apps-policy.yaml, for
+# the reason every policy file in this repo states: a blueprint that fails to
+# apply logs and carries on, so an unverified model shape costs the gate and
+# nothing else. Folded in here, the same mistake would take the provider and the
+# application down with it — and with core_default_app_access false, nobody
+# could log in at all.
+#
+# PROPAGATION: add the name below to blueprints.configMaps in
+# gitops/platform/values/authentik/values.yaml, let ArgoCD sync, then confirm
+# the file is mounted (`find /blueprints/mounted`) BEFORE restarting the
+# authentik worker — blueprints_discovery runs at worker boot only, and a
+# restart that beats the kubelet volume sync registers nothing. Try a second
+# restart before believing any deeper theory
+# (docs/runbook-authentik-identity.md).
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: authentik-blueprint-hermes
+  namespace: authentik
+data:
+  hermes-oidc.yaml: |
+    version: 1
+    metadata:
+      name: hermes-oidc
+      labels:
+        blueprints.goauthentik.io/instantiate: "true"
+    entries:
+      - model: authentik_providers_oauth2.oauth2provider
+        # `id` is what !KeyOf resolves against below. A typo does not fail
+        # loudly — the blueprint logs and carries on — so the application would
+        # simply never get a provider.
+        id: hermes-provider
+        identifiers:
+          name: hermes
+        attrs:
+          name: hermes
+          client_type: public
+          client_id: "yZV1pW2e1rfELhesLNJeGcf4Y0YN4jYlgWtwAYQ8"
+          # No client_secret: the plugin rejects confidential clients. See header.
+          #
+          # redirect_uris is a list of OBJECTS, not strings, in 2026.x.
+          #
+          # The callback path is upstream's, not a choice: it derives the
+          # callback as `<public_url>/auth/callback` verbatim once public_url is
+          # set. That is also why HERMES_DASHBOARD_PUBLIC_URL in
+          # ansible/playbooks/hermes-dashboard-configure.yml must NOT have a
+          # trailing slash — `//auth/callback` fails here as invalid_client,
+          # because authentik fullmatches (views/authorize.py).
+          redirect_uris:
+            - matching_mode: strict
+              url: https://hermes.bnei.dev/auth/callback
+          # Defaults to EMPTY, which permits nothing. Not optional.
+          grant_types:
+            - authorization_code
+            - refresh_token
+          # Without a refresh token the SPA full-page-navigates back to /login
+          # the moment the access token expires — on the Chat tab that is a
+          # dropped PTY mid-command. Three things are needed for that not to
+          # happen, and all three are easy to half-do:
+          #   1. scope-offline_access in property_mappings below (views/token.py
+          #      issues a refresh token ONLY if it is in the authorization
+          #      code's scope);
+          #   2. the client actually REQUESTING offline_access — the playbook
+          #      sets HERMES_DASHBOARD_OIDC_SCOPES for exactly this reason,
+          #      since upstream's default scope list is "openid profile email";
+          #   3. a non-zero threshold here. The default seconds=0 means
+          #      rotate-and-revoke on every refresh (ADR-0050 Decision 7): one
+          #      lost response and the next refresh is invalid_grant plus a
+          #      SUSPICIOUS_REQUEST event, i.e. a forced re-login.
+          refresh_token_threshold: "days=3"
+          refresh_token_validity: "days=90"
+          # Pinned rather than left at authentik's default, which is short
+          # enough to make the refresh path load-bearing on a long PTY session.
+          access_token_validity: "hours=1"
+          # Pinned because the dashboard verifies that the discovery document's
+          # advertised `issuer` matches the one it was configured with. The
+          # default already is per_provider, so this is a lock against a future
+          # global change silently breaking login with a confusing error.
+          issuer_mode: per_provider
+          # sub_mode deliberately OMITTED -> default hashed_user_id, per
+          # ADR-0050 Decision 9. The dashboard maps `sub` to its session
+          # user_id and treats it as required, while reading `email` from the
+          # email claim separately — so user_email would buy nothing and make a
+          # required claim mutable.
+          authorization_flow: !Find [authentik_flows.flow, [slug, default-provider-authorization-implicit-consent]]
+          invalidation_flow: !Find [authentik_flows.flow, [slug, default-provider-invalidation-flow]]
+          signing_key: !Find [authentik_crypto.certificatekeypair, [name, "authentik Self-signed Certificate"]]
+          property_mappings:
+            - !Find [authentik_providers_oauth2.scopemapping, [managed, "goauthentik.io/providers/oauth2/scope-openid"]]
+            - !Find [authentik_providers_oauth2.scopemapping, [managed, "goauthentik.io/providers/oauth2/scope-email"]]
+            - !Find [authentik_providers_oauth2.scopemapping, [managed, "goauthentik.io/providers/oauth2/scope-profile"]]
+            - !Find [authentik_providers_oauth2.scopemapping, [managed, "goauthentik.io/providers/oauth2/scope-offline_access"]]
+      - model: authentik_core.application
+        identifiers:
+          slug: hermes
+        attrs:
+          name: Hermes Agent
+          slug: hermes
+          provider: !KeyOf hermes-provider
+          # LOAD-BEARING, same as wird. policy_engine_mode defaults to MODE_ANY
+          # ("any policy must pass"), and the companion policy file binds two:
+          # platform-admins membership and PKCE. At the default, passing either
+          # alone would grant access, so PKCE enforcement would be decorative.
+          policy_engine_mode: all
+          meta_launch_url: https://hermes.bnei.dev
+          meta_description: Hermes Agent dashboard on the hermesagent LXC — config, sessions, logs, and a PTY

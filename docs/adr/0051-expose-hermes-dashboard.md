@@ -1,0 +1,161 @@
+# ADR-0051: Expose the Hermes Agent dashboard at `hermes.bnei.dev` — two gates, not one
+
+**Status:** Accepted — decided 2026-10-02. The authentik behaviour reused here is
+the same shape ADR-0050 verified against goauthentik 2026.8 source; the Hermes
+dashboard behaviour below was verified against upstream's own documentation for
+`plugins/dashboard_auth/self_hosted`, not against a running instance, so the
+step-0 probes in `ansible/playbooks/hermes-dashboard-configure.yml` are part of
+the decision, not optional polish.
+**Date:** 2026-10-02
+**Related:** [ADR-0039](0039-authentik-identity-layer.md) (identity layer and its
+four tiers — this adds an app to the Native OIDC tier *and* to forwardAuth, which
+no other app does), [ADR-0050](0050-public-oidc-client-for-native-apps.md) (public
+clients + PKCE by policy — same mechanics, different justification),
+[ADR-0030](0030-expose-garage-s3-externally.md) (the redirector precedent for an
+off-cluster host), [ADR-0038](0038-cloudflare-proxy-dns01-and-origin-lock.md) (proxied
+wildcard + origin lock)
+
+## Context
+
+LXC 101 `hermesagent` (VMID 101 on `ex-laptop`, imported at
+`terraform/imported.tf:251`) runs NousResearch's Hermes Agent. Its web dashboard
+— config editor, API-key manager, session browser, logs, analytics, cron, skills,
+MCP, channels, and a **real PTY** on the Chat tab — listens on `127.0.0.1:9119`
+and has only ever been reachable through an SSH tunnel. The operator wants it at
+`https://hermes.bnei.dev`, behind authentik, the way `proxmox.bnei.dev` is
+already fronted by Traefik.
+
+**What is behind that login is not a dashboard.** Per
+`docs/infrastructure-actual.md` §9, LXC 101 holds a Proxmox API token with role
+`PVEVMAdmin`, SSH access to two of the three hypervisors, `~/.ssh/id_k8s_vm` for
+every Kubernetes node, a GitHub token, and — per
+`docs/runbook-k9s-ops-hub.md` — the Infisical machine identity.
+`DECISION.md` §2 names this box as where "operations live". A session on this
+dashboard is therefore an interactive shell holding hypervisor admin, cluster
+node keys and the secret-store identity. That is strictly more dangerous than
+`proxmox.bnei.dev`, which is only a login form, and ADR-0039 assigned *that* host
+to forwardAuth plus the origin lock.
+
+Two upstream properties shape everything else:
+
+1. **The dashboard's auth gate is not satisfiable by a proxy.** Any non-loopback
+   bind — and any non-loopback `public_url` — makes it refuse to start until an
+   auth provider is configured. A reverse proxy in front does not count.
+2. **`GET /api/status` is public by design.** It answers before any credential
+   check with version, gateway state, every connected messaging channel, active
+   session count, memory/swap/disk pressure and `last_boot_suspected_oom`.
+
+## Decision
+
+1. **Native OIDC *and* forwardAuth. Two independent gates.** The dashboard
+   authenticates against authentik itself (satisfying property 1), and
+   `gitops/redirectors/hermes.yaml` *also* attaches the existing
+   `authentik-forwardauth` middleware. The first draft of this work rejected
+   forwardAuth, on the grounds that it would force the bundled username/password
+   provider as well — true only if forwardAuth *replaced* native OIDC. As an
+   addition it needs no password, no second prompt (the user already holds the
+   authentik SSO cookie) and no new authentik object: the forwardAuth tier's
+   provider is `mode: forward_domain` with `cookie_domain: bnei.dev`, so it
+   covers any `*.bnei.dev` host, and `authentik-blueprint-previews-policy.yaml`
+   already restricts that application to `platform-admins`. It also closes
+   property 2, which a single-gate design would have published to the internet.
+2. **`platform-admins`, enforced in authentik, because Hermes has no roles.**
+   ArgoCD falls through to `role:readonly` and Grafana to `Viewer`; Hermes has no
+   equivalent, so the `policybinding` in
+   `gitops/bootstrap/authentik-blueprint-platform-apps-policy.yaml` is the entire
+   authorization decision. That is why gate 2 exists at all — the compound
+   failure the policy file itself documents (a `!Find` miss writing
+   `group_id = NULL`, plus a lost `core_default_app_access` flag, plus Wird's
+   open enrollment) would otherwise hand a PTY to a self-registered stranger.
+3. **Public client, for a reason that is NOT ADR-0050's.** ADR-0050 made public
+   clients an exception with a stated test: a secret shipped in an IPA, an APK or
+   a JS bundle is extractable. A FastAPI server reading `config.yaml` at mode
+   0600 fails that test — it *can* keep a secret. It is public only because
+   upstream's plugin refuses confidential clients outright. This is a new,
+   narrower precedent: *public client as an upstream gap*, with none of ADR-0050
+   Decision 2's compensating control (App Links / Universal Links domain
+   verification is meaningless for a server). The compensating controls here are
+   a single strict HTTPS redirect URI, PKCE S256 enforced by an authentik
+   expression policy, the group binding, forwardAuth, and the origin lock.
+4. **PKCE enforced by its own policy object, `hermes-require-pkce`, declared in
+   the policy file and bound with `!KeyOf`.** Not a `!Find` reference to
+   `wird-require-pkce`, even though the expression is identical and app-agnostic:
+   `!Find` returns `None` rather than failing, which writes a row with
+   `policy_id = NULL` that `PolicyEngine.build()` drops — PKCE silently
+   unenforced, nothing logged, and alphabetical blueprint ordering makes a cold
+   rebuild the likely trigger.
+5. **Auth configuration lives in a systemd drop-in, as environment variables.**
+   The dashboard's own Config page can rewrite `config.yaml` (Save / Reset to
+   defaults / Import), so anyone who logs in could delete `dashboard.oauth` and
+   fail the next start closed. Env wins over `config.yaml` and the UI cannot
+   write env. `trusted_proxies` is the exception — it has no env override
+   upstream — and it is the one setting whose loss breaks login rather than
+   locking the box.
+6. **Break-glass is the hypervisor console, not a local password provider.**
+   ADR-0039 Decision 6 calls break-glass "not optional", and its Decision 5 (the
+   LAN `ClientIP()` bypass) is still unbuilt. A shared password on this box would
+   be a second credential to a PTY holding hypervisor keys, so instead:
+   `pct enter 101`, remove the two drop-ins, `daemon-reload`, restart. Because
+   every OIDC setting lives in those drop-ins, that one step reverts the box to a
+   loopback bind with the gate off and the SSH tunnel working, with authentik out
+   of the path entirely. This is an argued deviation from Decision 6, not an
+   oversight: the recovery path exists, it just requires physical/hypervisor
+   access rather than a password.
+7. **`0.0.0.0` bind plus an `nftables` allow-list.** The bind is forced by
+   Hermes' peer-IP guard (a loopback bind rejects Traefik at the socket layer),
+   but on its own it would put a plain-HTTP root-equivalent admin surface on all
+   of `192.168.1.0/24` and the whole pod network, reachable with only gate 1. The
+   playbook installs the rule *before* flipping the bind, scoped to tcp/9119 with
+   `policy accept`, so nothing else on the box is affected.
+8. **Two-phase rollout, each phase with a rescue.** Phase A configures OIDC while
+   still bound to loopback — `public_url` alone engages the gate, so a wrong
+   issuer or client_id surfaces as an `/api/status` response rather than as an
+   unreachable box. Phase B firewalls, then binds. A failure in either phase
+   removes the drop-in it just wrote, restarts, and fails with the journal.
+9. **MFA deferred, with a trigger.** `ARCHITECTURE.md`'s Critical tier (a WebAuthn
+   policy) is not built, and ADR-0039 wants two devices enrolled before it is
+   enforced. Shipping without it is an accepted risk; the trigger is explicit —
+   enroll two passkeys, then bind a WebAuthn policy to `hermes` **and**
+   `proxmox` together, since both are hypervisor-adjacent.
+
+## Consequences
+
+- `hermes.bnei.dev` needs no DNS change: `*.bnei.dev` is a proxied Cloudflare
+  wildcard. The route is one new file in `gitops/redirectors/`, picked up by
+  `redirectors-application.yaml` with nothing to add to `registry.yaml`.
+- **The backend is pinned to a literal IP while the container's NIC is DHCP.**
+  `terraform/imported.tf` carries `ip_config: dhcp`, so the lease must be
+  reserved on the Freebox — operator-side, outside this repo. Pinning it in
+  Terraform instead is deliberately rejected: that resource has
+  `prevent_destroy` and a recorded near-miss where a config mistake planned a
+  CREATE onto the live VMID 101. The playbook prints the container's real address
+  so a drift is caught at run time.
+- **Cloudflare's Browser Integrity Check may block the plugin's server-side
+  calls.** The plugin fetches discovery, token, JWKS and revocation from
+  `authentik.bnei.dev` in Python, and that zone is proxied;
+  `.claude/skills/authentik-oidc/SKILL.md` records BIC rejecting `Python-urllib`
+  specifically. The playbook probes with both `curl` and `urllib` and fails
+  early. The remedy is a Pi-hole split-horizon entry for `authentik.bnei.dev` →
+  `192.168.1.233` (the same mechanism `pihole-configure.yml` already uses for
+  `stt.bnei.dev`, and the same blocker ADR-0039 Decision 5 waits on), or a
+  Cloudflare WAF exception.
+- **Grey-clouding is the likely end state, not an edge case.** `fleet.bnei.dev`
+  is already DNS-only because of Cloudflare's 100s timeout versus streaming. The
+  Chat tab is a WebSocket PTY; it sends a 20s keepalive and silently reattaches
+  after a drop, so a drop is easy to miss and must be checked at the `/api/ws`
+  close code rather than by watching the terminal. If `hermes.bnei.dev` goes
+  grey, `cloudflare-origin-lock` **must** be removed from the route in the same
+  commit — it 403s every non-Cloudflare source. Both authentik gates are
+  unaffected either way, which is most of why Decision 1 is worth its one extra
+  line.
+- **Logout is cosmetic.** Hermes clears its cookies and revokes the token, but
+  the authentik session survives and the authorization flow is
+  implicit-consent — so logging out and back in is instant and silent. On a box
+  with a PTY, treat "log out" as "closed the tab".
+- **The group has one member, and it is circular.** `platform-admins` contains
+  only `akadmin`, which is also the account that can edit the binding gating it.
+  Negative testing needs a throwaway non-member account. Widening the group is
+  the natural next step and it is also the moment Decision 9's trigger matters.
+- **Shrinking the blast radius is a separate change.** Moving the Proxmox token,
+  the k8s node key and the Infisical identity off this box would materially
+  reduce what one login buys. Out of scope here; worth its own issue.
