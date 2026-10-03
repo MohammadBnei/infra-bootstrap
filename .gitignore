@@ -36,6 +36,8 @@ pigsty/files/pg_id*
 *.tfstate
 *.tfstate.backup
 .terraform/
+# A saved plan (`plan -out`) embeds variable values, the PVE SSH key included.
+*.tfplan
 *.tfvars
 !*.tfvars.example
 
