@@ -199,7 +199,11 @@ sudo -u postgres psql wirddb -c '\dt *.root_senses' -c '\dt *.corpus_meta'
 
 ---
 
-## 2. The Wird agent's service account
+## 2. The Wird agent's service account — DONE 2026-10-03
+
+**Already minted**, with its app-password token in Infisical as
+`WIRD_AGENT_AUTHENTIK_TOKEN`, and the group-membership line committed. What
+follows is the procedure, kept for rotation and for a rebuilt directory.
 
 The agent calls `/reports.json` with `Authorization: Bearer`, which the proxy
 provider lets through because `intercept_header_auth` is on. The token comes from
@@ -229,11 +233,15 @@ Then add it to the group — **one line in git**, not a click:
             - !Find [authentik_core.user, [username, wird-agent]]
 ```
 
-**That line is already committed** (2026-10-03). It is inert until the account
-exists: `!Find` does not create the user, so authentik drops the unresolved entry
-from the m2m list and the group keeps `akadmin` alone. Minting the account is what
-activates it — which is why the `ak shell` step above comes first and this needs
-no further edit.
+**That line is committed as of 2026-10-03, after the account existed** — that
+order is mandatory, not tidy. `!Find` does not create the user, and an
+unresolved one does not get skipped: `GroupSerializer.users` is a
+`BulkPrimaryKeyRelatedField` whose `to_internal_value` fails the whole field, so
+the line landing first would have stopped `platform-admins` being reconciled
+entirely — including operator *removals* — and broken the ArgoCD/Grafana
+bindings that `!Find` this group.
+
+If the account is ever deleted, delete the line in the same change.
 
 The list is replaced on every apply, which is why membership lives there and not
 in the UI: a click would be erased by the next sync.
