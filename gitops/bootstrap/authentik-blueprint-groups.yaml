@@ -45,18 +45,20 @@ data:
           # of the account itself, which is not what is wanted.
           users:
             - !Find [authentik_core.user, [username, akadmin]]
-            # NO wird-agent LINE HERE YET, and that is deliberate (ADR-0052).
-            # The Wird agent's service account belongs in this group, but a
-            # !Find that matches nothing does NOT quietly skip the entry:
-            # GroupSerializer.users is a BulkPrimaryKeyRelatedField, and
-            # BulkManyRelatedField.to_internal_value fails the whole field when
-            # fewer rows come back than pks requested. That invalidates this
-            # blueprint, so platform-admins stops being reconciled entirely —
-            # adding an operator silently no-ops, REMOVING one silently no-ops,
-            # and on a rebuild the group is never created, which also breaks
-            # the !Find in authentik-blueprint-platform-apps-policy.yaml.
+            # The Wird agent's service account (ADR-0052), which calls
+            # wird-admin.bnei.dev/reports.json with a client-credentials token.
+            # In the group because adminweb authorises on the `groups` claim and
+            # makes no exception for machines — one rule for humans and agents.
             #
-            # So the line lands WITH the account, not before:
-            #   docs/runbook-wird-admin-db-role.md §2 mints it, then add
-            #   - !Find [authentik_core.user, [username, wird-agent]]
-            # in the same change and restart the worker.
+            # SAFE TO ADD ONLY NOW: the account was minted on 2026-10-03
+            # (docs/runbook-wird-admin-db-role.md §2), so this !Find resolves.
+            # Before it existed this line was deliberately absent, because
+            # GroupSerializer.users is a BulkPrimaryKeyRelatedField whose
+            # to_internal_value fails the WHOLE field when fewer rows come back
+            # than pks requested — an unresolved !Find here does not skip the
+            # entry, it stops platform-admins being reconciled at all, including
+            # removals, and breaks the bindings that !Find this group.
+            #
+            # So if this account is ever deleted, delete this line in the same
+            # change.
+            - !Find [authentik_core.user, [username, wird-agent]]

@@ -5,9 +5,10 @@
 2026-10-03, and the `wird-agent` group membership is declared in
 `authentik-blueprint-groups.yaml`. **The `wird_admin` role and its grants are live as of 2026-10-03**, applied
 through Pigsty's own playbooks and verified by privilege tests (see Verified
-live). **Still outstanding:** the `wird-agent` service account and its
-app-password token, plus the group-membership line that waits on it —
-[`docs/runbook-wird-admin-db-role.md`](../runbook-wird-admin-db-role.md) §2.
+live). **Fully rolled out 2026-10-03**: PR #268 merged, both Infisical rows read back
+from the generated provider, the `wird_admin` role and grants live, and the
+`wird-agent` service account minted with its membership committed. See Verified
+live.
 **Date:** 2026-10-03
 **Related:** [ADR-0039](0039-authentik-identity-layer.md) (the identity layer and
 its forwardAuth tier — this is the tier's second provider, where it had exactly
