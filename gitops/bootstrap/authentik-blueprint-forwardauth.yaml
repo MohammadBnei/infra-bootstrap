@@ -119,3 +119,19 @@ data:
         attrs:
           providers:
             - !KeyOf previews-proxy-provider
+            # wird-admin (ADR-0052) is declared in
+            # authentik-blueprint-wird-admin.yaml rather than here, because its
+            # client_secret is the HMAC key adminweb verifies with — so that file
+            # has to be an InfisicalSecret, and this one stays a ConfigMap.
+            #
+            # !Find, not !KeyOf, because !KeyOf resolves only within one
+            # blueprint. The cost is !Find's silent-None: if this file applies
+            # before that provider exists, the list is written with only
+            # previews in it and wird-admin.bnei.dev 302s into a loop with no
+            # provider behind it. It self-heals on the next discovery pass; if
+            # you are chasing that symptom, read the outpost's provider list
+            # before anything else:
+            #   ak shell -c "from authentik.outposts.models import Outpost; \
+            #     print([p.name for p in Outpost.objects.get( \
+            #     managed='goauthentik.io/outposts/embedded').providers.all()])"
+            - !Find [authentik_providers_proxy.proxyprovider, [name, wird-admin]]
