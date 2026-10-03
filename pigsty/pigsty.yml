@@ -30,9 +30,18 @@ all:
     # PGSQL : https://pigsty.io/docs/pgsql
     #----------------------------------------------#
     # this is an example single-node postgres cluster with pgvector installed, with one biz database & two biz users
-    # NOTE (2026-09-22): pg_role here now MATCHES the live cluster —
-    # .207 is Leader, .205 Replica, confirmed by `pg_is_in_recovery()` (f on
-    # .207, t on .205) and Patroni's /cluster endpoint.
+    # NOTE (2026-10-03): pg_role here MATCHES the live cluster — **.205 is
+    # Leader, .207 Replica**, confirmed by Patroni's /cluster endpoint
+    # (pg-proxmox-1 leader running, pg-proxmox-2 replica streaming).
+    #
+    # THIS IS THE SECOND TIME IT HAS BEEN CORRECTED, IN THE OPPOSITE DIRECTION.
+    # On 2026-09-22 this same note recorded the reverse — .207 Leader, .205
+    # Replica, confirmed by `pg_is_in_recovery()` — and the labels were set to
+    # match. By 2026-10-03 they disagreed with Patroni again, so a failover
+    # happened in between with nothing recording it. That is the standing
+    # lesson, not the current values: **this block is a label Pigsty never
+    # reconciles, and any failover silently invalidates it.** Re-check before
+    # every pgsql-* run; do not trust these two lines because they are dated.
     #
     # It did not always. From 2026-07-30 until 2026-09-22 this block claimed
     # .205 was primary, described as harmless stale metadata "left as-is
@@ -55,8 +64,16 @@ all:
     # fix this block when it disagrees.
     pg-proxmox:
       hosts:
-        192.168.1.205: { pg_seq: 1, pg_role: replica } # <---- read only replica for read-only online traffic
-        192.168.1.207: { pg_seq: 2, pg_role: primary } # <---- primary instance with read-write capability
+        # CORRECTED 2026-10-03 from Patroni, the only source that knows:
+        #   curl -s http://192.168.1.205:8008/cluster
+        #   pg-proxmox-1 leader  running   192.168.1.205
+        #   pg-proxmox-2 replica streaming 192.168.1.207
+        # The labels said the opposite — exactly the inversion the comment above
+        # warns about, and the reason a pgsql-* run would have aimed writes at
+        # the standby and still printed a green PLAY RECAP. Found while picking a
+        # target for ADR-0052's wird_admin role.
+        192.168.1.205: { pg_seq: 1, pg_role: primary } # <---- primary instance with read-write capability
+        192.168.1.207: { pg_seq: 2, pg_role: replica } # <---- read only replica for read-only online traffic
       vars:
         pg_cluster: pg-proxmox
 
@@ -205,6 +222,40 @@ all:
             comment: wird — Qur'an study backend + jidhr root-lookup service
             roles: [dbrole_readwrite]
 
+          # wird-adminweb's role (ADR-0052). The operations view reads six tables
+          # and writes three columns of one; wird-api above keeps dbrole_readwrite.
+          #
+          # roles: [] IS THE ENTRY. Every other business user here takes a
+          # dbrole_*, and taking dbrole_readonly would have been one word — it
+          # also grants SELECT on every table in every database this cluster
+          # holds, report_inbox included, which wird's ADR-0026 keeps out of
+          # adminweb's reach. So this role inherits nothing and its object
+          # privileges are enumerated in files/wird-admin-grants.sql, applied as
+          # wirddb's baseline.
+          #
+          # NAME BREAKS THE dbuser_* CONVENTION, deliberately: wird's ADR-0026,
+          # this repo's ADR-0052 and the DSN in
+          # gitops/bootstrap/wird-admin-secret.yaml all name it wird_admin, and
+          # three documents agreeing beats a prefix. It still matches Pigsty's
+          # identifier rule (^[a-z_][a-z0-9_@.-]{0,62}$).
+          #
+          # connlimit: 5 — a dashboard with one reader, not a service. Wird's own
+          # 20 stay Wird's; this cannot eat into them.
+          #
+          # pgbouncer: false, matching dbuser_wird: nothing about Wird goes
+          # through the pooler, and wirddb sets pgbouncer: false too, so 6432
+          # would not accept it anyway.
+          #
+          # The plaintext is Infisical's DBUSER_WIRD_ADMIN_PASSWORD; what is
+          # committed here is its SCRAM verifier, same arrangement as
+          # dbuser_wird and dbuser_authentik.
+          - name: wird_admin
+            password: 'SCRAM-SHA-256$4096:NmTXUWXvbxCxuNWRUqhtgQ==$r7zu5VZCPv1htFuL4R+ELbAQxP8FSCyMUSaNzE6gvcQ=:Dolfh1QS0u6ZgEJRuo/NIaoURe8Sm9WS3Do3sQSH+bM='
+            pgbouncer: false
+            connlimit: 5
+            roles: []
+            comment: wird-adminweb — read six tables, update three columns of reports (ADR-0052)
+
         # define business databases : https://pigsty.io/docs/pgsql/config/db
         pg_databases:
           - name: meta
@@ -283,6 +334,24 @@ all:
           - name: wirddb
             comment: wird — Qur'an corpus and user study state
             owner: dbuser_wird
+            # wird-adminweb's object privileges (ADR-0052). Pigsty's user model
+            # has no concept of a table grant — pg-user.sql emits attributes, a
+            # password, a comment and GRANTs of ROLES — so a baseline is the only
+            # declarative home for them.
+            #
+            # SAFE TO ADD TO AN ALREADY-EXISTING DATABASE: the "load database
+            # baseline" task (roles/pgsql/tasks/database.yml:100) is gated on
+            # `database.baseline is defined`, NOT on the database being new, and
+            # carries its own pg_db_baseline tag. So this re-applies on demand:
+            #   ./pgsql-db.yml -l pg-proxmox -e dbname=wirddb --tags pg_db_baseline
+            # and every statement in the file is idempotent.
+            #
+            # THE TRAP THAT APPLIES HERE: that task is `ignore_errors: true` and
+            # pipes psql's output to a log, so a failed grant still prints a
+            # green PLAY RECAP. Read
+            # /pg/tmp/pg-db-wirddb-baseline.log on the primary afterwards, and
+            # confirm with \dp — do not trust the recap.
+            baseline: wird-admin-grants.sql
             # jidhr is Wird's Arabic root-lookup engine: its own service, but it
             # joins against Wird's corpus tables, so it is a schema here rather
             # than a second database.

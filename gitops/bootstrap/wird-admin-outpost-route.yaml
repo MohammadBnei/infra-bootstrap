@@ -1,0 +1,55 @@
+# The callback leg for wird-adminweb's forwardAuth. ADR-0052.
+#
+# WHY THIS FILE EXISTS. wird-admin's proxy provider is `mode: forward_single`
+# (authentik-blueprint-wird-admin.yaml explains why it cannot be forward_domain),
+# and set_oauth_defaults() builds that provider's redirect URI from its
+# external_host — so authentik sends the browser back to
+# https://wird-admin.bnei.dev/outpost.goauthentik.io/callback. That path has to
+# reach the authentik Service, not adminweb: adminweb would 404 it, and the
+# sign-in loop would never terminate with nothing in either log naming the cause.
+#
+# The existing tier does not need this file because its provider is
+# forward_domain with external_host authentik.bnei.dev, so its callback already
+# lands on a host authentik-ingressroute.yaml serves. agent-fleet's provisioner
+# builds the same route in Go for preview hosts (provisioner/internal/k8s/expose.go,
+# priority 20 vs 10) — this is that pattern, declared.
+#
+# WHY NOT IN WIRD'S VALUES. common-app-chart's `ingress.middlewares` cannot
+# express a second route, so the alternative was `extraManifests` in Wird's own
+# helm/adminweb-values.yaml. Kept here instead: the route points at a Service in
+# the authentik namespace and exists for an infra-side design choice (the mode),
+# so it belongs in the repo that reviews infra changes. Wird's values file only
+# names the middleware.
+#
+# PRIORITY IS LOAD-BEARING. Traefik derives priority from rule length when none
+# is set, and `Host(...) && PathPrefix(...)` is longer than the app route's
+# `Host(...)` — so this would already win. It is set explicitly anyway, because
+# the moment anyone adds a priority to the app's route the implicit ordering
+# flips silently and the symptom is a login loop, not an error.
+#
+# NO MIDDLEWARES. Not cloudflare-origin-lock (this path must work for the same
+# browsers the proxied host serves, and the lock is already applied by the app's
+# own route for everything else), and emphatically not authentik-forwardauth:
+# gating the callback on being authenticated is the same circularity
+# authentik-ingressroute.yaml avoids for authentik's own host.
+#
+# Namespace authentik, so the Service reference is local; Traefik's
+# allowCrossNamespace is on, but a local reference needs no permission to be
+# correct.
+apiVersion: traefik.io/v1alpha1
+kind: IngressRoute
+metadata:
+  name: wird-admin-outpost
+  namespace: authentik
+spec:
+  entryPoints:
+    - websecure
+  routes:
+    - kind: Rule
+      match: Host(`wird-admin.bnei.dev`) && PathPrefix(`/outpost.goauthentik.io/`)
+      priority: 100
+      services:
+        - name: platform-authentik-server
+          port: 80
+  tls:
+    certResolver: le

@@ -1,0 +1,50 @@
+# Who may use the `wird-admin` application. ADR-0052.
+#
+# Its own file, separate from authentik-blueprint-wird-admin.yaml, for the reason
+# ADR-0051's implementation note measured the hard way: a blueprint applies as a
+# single transaction and PolicyBinding.target is a required FK, so a !Find miss
+# on a not-yet-registered application is a validation error that rolls the whole
+# file back. Split, that costs the gate and nothing else — the provider and the
+# application survive, and the binding lands on a later discovery pass. Folded
+# in, a bad shape here would take the provider down with it.
+#
+# Expect it to need that later pass on first sync: `wird-admin-policy` sorts
+# before `wird-admin` in /blueprints/mounted, so the first discovery run can see
+# the policy before the application exists. It fails CLOSED — no binding plus
+# core_default_app_access: false denies everyone — and self-heals on the next
+# worker restart. hermes needed three restarts for exactly this reason.
+#
+# platform-admins by !Find, never !KeyOf: the group is declared once in
+# authentik-blueprint-groups.yaml and re-declaring it here would make this file
+# own its membership and wipe it on apply.
+#
+# NOTE WHAT THIS BINDING DOES AND DOES NOT GATE. It gates the browser hop: the
+# outpost sends an unauthenticated visitor through /authorize, and this policy is
+# what denies a non-member there. It does NOT gate the `password` or
+# `client_credentials` grants, which set_oauth_defaults() force-enables on every
+# proxy provider — a token minted that way carries whatever groups its user has,
+# and adminweb's own platform-admins check on the claim is the control. Two
+# layers for two paths; see ADR-0052.
+#
+# A plain ConfigMap: no credential here, so no Infisical operator in the chain
+# (unlike the provider file, whose client_secret is the JWT's HMAC key).
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: authentik-blueprint-wird-admin-policy
+  namespace: authentik
+data:
+  wird-admin-policy.yaml: |
+    version: 1
+    metadata:
+      name: wird-admin-policy
+      labels:
+        blueprints.goauthentik.io/instantiate: "true"
+    entries:
+      - model: authentik_policies.policybinding
+        identifiers:
+          target: !Find [authentik_core.application, [slug, wird-admin]]
+          group: !Find [authentik_core.group, [name, platform-admins]]
+          order: 0
+        attrs:
+          enabled: true

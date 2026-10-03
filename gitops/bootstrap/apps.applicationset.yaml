@@ -141,6 +141,17 @@ spec:
         valuesPath: [helm/values.yaml]
         targetRevision: main
         hostname: wird.bnei.dev
+      # wird-adminweb: the operations view, same repo, its own values file and
+      # its own image (ADR-0052). Must stay in sync with gitops/apps/registry.yaml
+      # — see that file's entry for why the middleware ref and the outpost
+      # callback route are deliberately NOT here.
+      - name: wird-adminweb
+        namespace: wird
+        syncWave: "10"
+        repoURL: https://github.com/MohammadBnei/wird.git
+        valuesPath: [helm/adminweb-values.yaml]
+        targetRevision: main
+        hostname: wird-admin.bnei.dev
   template:
     metadata:
       name: '{{.name}}'
