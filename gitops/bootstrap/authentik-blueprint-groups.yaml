@@ -45,3 +45,15 @@ data:
           # of the account itself, which is not what is wanted.
           users:
             - !Find [authentik_core.user, [username, akadmin]]
+            # The Wird agent's service account (ADR-0052), which calls
+            # wird-admin.bnei.dev/reports.json with a client-credentials token.
+            # In the group because adminweb authorises on the `groups` claim and
+            # makes no exception for machines — one rule for humans and agents.
+            #
+            # !Find, same as akadmin: this file does not create the account. The
+            # service-account user and its app-password token are minted out of
+            # band (docs/runbook-wird-admin-db-role.md §2) because a token is a
+            # credential and must not pass through git. Before that account
+            # exists this resolves to None and authentik drops it from the m2m
+            # list, so the group simply stays as it was.
+            - !Find [authentik_core.user, [username, wird-agent]]

@@ -63,12 +63,16 @@ infisical run --projectId=8a3fa54f-be22-488a-bf51-55158f65c0f2 --env=dev -- \
     -c "\du wird_admin" -c "\dp reports"'
 ```
 
-### Create the password first
+### The password already exists — use it, do not regenerate it
 
-The DSN in `gitops/bootstrap/wird-admin-secret.yaml` reads
-`DBUSER_WIRD_ADMIN_PASSWORD` from Infisical, so that row must exist before the
-Secret resolves. 43 alphanumerics, so it needs no percent-encoding in a URL —
-the trap `wird-secret.yaml` records for `DBUSER_WIRD_PASSWORD`:
+**`DBUSER_WIRD_ADMIN_PASSWORD` was created in Infisical on 2026-10-03.** Read it
+from there; the `CREATE ROLE` below takes it as `:'pw'`. Regenerating it would
+mean the Secret and the role disagree and adminweb would fail authentication with
+nothing in the pod log naming the cause.
+
+It was generated as 43 alphanumerics so it needs no percent-encoding in a URL —
+the trap `wird-secret.yaml` records for `DBUSER_WIRD_PASSWORD`. For reference,
+this is how it was made:
 
 ```bash
 PROJ=8a3fa54f-be22-488a-bf51-55158f65c0f2
@@ -216,11 +220,16 @@ has no signing key — so adminweb verifies it with the same value it gets as
 
 ---
 
-## 3. The provider's client secret
+## 3. The provider's client secret — DONE
 
-`gitops/bootstrap/authentik-blueprint-wird-admin.yaml` and
-`gitops/bootstrap/wird-admin-secret.yaml` both interpolate
-`WIRD_ADMIN_OIDC_CLIENT_SECRET`, and neither resolves until the row exists:
+**`WIRD_ADMIN_OIDC_CLIENT_SECRET` was created in Infisical on 2026-10-03**, so
+both `gitops/bootstrap/authentik-blueprint-wird-admin.yaml` and
+`gitops/bootstrap/wird-admin-secret.yaml` resolve. Nothing to do here.
+
+**Do not rotate it casually.** It is the HMAC key on both sides: rotating it
+means the authentik blueprint and the app Secret must land in the same
+propagation pass, or every request 401s on a signature error. For reference, this
+is how it was made:
 
 ```bash
 PROJ=8a3fa54f-be22-488a-bf51-55158f65c0f2

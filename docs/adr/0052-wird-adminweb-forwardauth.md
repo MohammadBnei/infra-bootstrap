@@ -1,11 +1,13 @@
 # ADR-0052: `wird-admin.bnei.dev` — a second forwardAuth provider, and the HS256 token nobody expected
 
-**Status:** Accepted — decided 2026-10-03. Manifests merged; four steps are
-outstanding by design and live in
-[`docs/runbook-wird-admin-db-role.md`](../runbook-wird-admin-db-role.md): the
-`WIRD_ADMIN_OIDC_CLIENT_SECRET` and `DBUSER_WIRD_ADMIN_PASSWORD` rows, the
-`wird_admin` DB role, and the `wird-agent` service account plus its group
-membership.
+**Status:** Accepted — decided 2026-10-03. Manifests merged. Both Infisical rows
+(`WIRD_ADMIN_OIDC_CLIENT_SECRET`, `DBUSER_WIRD_ADMIN_PASSWORD`) were created
+2026-10-03, and the `wird-agent` group membership is declared in
+`authentik-blueprint-groups.yaml`. **Still outstanding:** the `wird_admin` DB role
+on `wirddb` and the `wird-agent` service account plus its app-password token —
+both in [`docs/runbook-wird-admin-db-role.md`](../runbook-wird-admin-db-role.md),
+both needing a hand that is allowed to write to production Postgres and to the
+authentik shell.
 **Date:** 2026-10-03
 **Related:** [ADR-0039](0039-authentik-identity-layer.md) (the identity layer and
 its forwardAuth tier — this is the tier's second provider, where it had exactly

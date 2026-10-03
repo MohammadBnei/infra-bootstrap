@@ -55,8 +55,16 @@ all:
     # fix this block when it disagrees.
     pg-proxmox:
       hosts:
-        192.168.1.205: { pg_seq: 1, pg_role: replica } # <---- read only replica for read-only online traffic
-        192.168.1.207: { pg_seq: 2, pg_role: primary } # <---- primary instance with read-write capability
+        # CORRECTED 2026-10-03 from Patroni, the only source that knows:
+        #   curl -s http://192.168.1.205:8008/cluster
+        #   pg-proxmox-1 leader  running   192.168.1.205
+        #   pg-proxmox-2 replica streaming 192.168.1.207
+        # The labels said the opposite — exactly the inversion the comment above
+        # warns about, and the reason a pgsql-* run would have aimed writes at
+        # the standby and still printed a green PLAY RECAP. Found while picking a
+        # target for ADR-0052's wird_admin role.
+        192.168.1.205: { pg_seq: 1, pg_role: primary } # <---- primary instance with read-write capability
+        192.168.1.207: { pg_seq: 2, pg_role: replica } # <---- read only replica for read-only online traffic
       vars:
         pg_cluster: pg-proxmox
 
