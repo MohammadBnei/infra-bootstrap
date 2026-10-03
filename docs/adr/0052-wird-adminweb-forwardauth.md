@@ -3,11 +3,11 @@
 **Status:** Accepted — decided 2026-10-03. Manifests merged. Both Infisical rows
 (`WIRD_ADMIN_OIDC_CLIENT_SECRET`, `DBUSER_WIRD_ADMIN_PASSWORD`) were created
 2026-10-03, and the `wird-agent` group membership is declared in
-`authentik-blueprint-groups.yaml`. **Still outstanding:** the `wird_admin` DB role
-on `wirddb` and the `wird-agent` service account plus its app-password token —
-both in [`docs/runbook-wird-admin-db-role.md`](../runbook-wird-admin-db-role.md),
-both needing a hand that is allowed to write to production Postgres and to the
-authentik shell.
+`authentik-blueprint-groups.yaml`. **The `wird_admin` role and its grants are live as of 2026-10-03**, applied
+through Pigsty's own playbooks and verified by privilege tests (see Verified
+live). **Still outstanding:** the `wird-agent` service account and its
+app-password token, plus the group-membership line that waits on it —
+[`docs/runbook-wird-admin-db-role.md`](../runbook-wird-admin-db-role.md) §2.
 **Date:** 2026-10-03
 **Related:** [ADR-0039](0039-authentik-identity-layer.md) (the identity layer and
 its forwardAuth tier — this is the tier's second provider, where it had exactly
@@ -195,19 +195,20 @@ adminweb does not authenticate against Wird's native client at all.
   header.** Harmless — they read none of it — but `X-authentik-jwt` is a signed
   credential in transit, so it reaches exactly the hosts the routes send it to and
   should not be logged.
-- **Pigsty runs cannot be driven from the maintainer's Mac, and that is a
-  standing gap this change surfaced rather than caused.** `pigsty/ansible.cfg`
-  pins `remote_user = vagrant` and
-  `private_key_file = /home/mohammad/.ssh/id_pigsty_rsa` — a Linux path that does
-  not exist on macOS, which resolves to
-  `/System/Volumes/Data/home/mohammad/.ssh/id_pigsty_rsa` and fails with "no such
-  identity". That key is also absent from the k9s ops hub and has no row in
-  `docs/secrets.md`, unlike every other target key (`SSH_PI4_KEY`,
-  `SSH_SERVER1_KEY`, …). So `pgsql-user.yml`/`pgsql-db.yml` are runnable from
-  exactly one machine, and which machine that is is not written down anywhere.
-  Fixing it is a separate change: add the key as `SSH_PIGSTY_KEY` in Infisical and
-  pass it per run, the way `pihole-configure.yml` already does, rather than
-  relying on an absolute path in a vendored config.
+- **Pigsty runs work from anywhere, but `pigsty/ansible.cfg` hides how.** It pins
+  `remote_user = vagrant` and
+  `private_key_file = /home/mohammad/.ssh/id_pigsty_rsa` — a Linux path that on
+  macOS resolves to `/System/Volumes/Data/home/mohammad/...` and fails with "no
+  such identity". The key itself is in Infisical, under
+  **`SSH_OLDPG_KEY`**: confirmed by deriving its public half and matching it
+  against the cloud-init key `terraform/imported.tf` records for pg01.
+  `docs/secrets.md` had already flagged that on 2026-07-30 ("appears to be a
+  shared Pigsty admin key reused across old and new clusters … Confirm before
+  assuming it's `.193`-only") — this ADR first claimed no such row existed, which
+  was a reading failure, not a gap. The run pattern is therefore
+  `-e ansible_ssh_private_key_file=<fetched path>`, as used for this change.
+  Renaming the row to `SSH_PIGSTY_*` would be clearer and is worth doing
+  deliberately rather than incidentally.
 - **The k9s ops hub is the nearest control node and is half-equipped**: it has
   the repo at `/opt/infra-bootstrap`, `infisical` and `psql`, but no
   `ansible-playbook` — the pinned venv from

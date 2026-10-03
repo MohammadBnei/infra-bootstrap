@@ -98,8 +98,17 @@ concept of a table grant. Object privileges therefore live in the database's
 `baseline`, and `roles/pgsql/tasks/database.yml:100` applies a baseline whenever
 one is *defined*, not only when the database is new.
 
-**Run both from `pigsty/`, in this order.** The repo's README is explicit that
-the human runs these:
+**Both of these were run for real on 2026-10-03 and are DONE** — this section is
+kept for the rebuild case and for rotation. They need `SSH_OLDPG_KEY` from
+Infisical, which despite its name is the live `pg-proxmox` key (`vagrant@.205`):
+
+```bash
+infisical run --projectId=8a3fa54f-be22-488a-bf51-55158f65c0f2 --env=dev -- \
+  bash -c 'umask 077; printf "%s\n" "$SSH_OLDPG_KEY" > /tmp/id_pigsty'
+# then add to each command: -e ansible_ssh_private_key_file=/tmp/id_pigsty
+```
+
+Run both from `pigsty/`, in this order:
 
 ```bash
 cd pigsty
@@ -108,13 +117,19 @@ cd pigsty
 ./pgsql-user.yml -l pg-proxmox -e username=wird_admin
 
 # 2. the object privileges, re-applied from files/wird-admin-grants.sql
-# BOTH tags. `pg_db_baseline` alone runs psql against a file that was never
-# uploaded: "copy baseline" (roles/pgsql/tasks/database.yml:44) is tagged
-# pg_db_config, while "load database baseline" (:100) is tagged
-# [pg_db_create, pg_db_baseline]. With only the latter, psql fails on a missing
-# /pg/tmp/pg-db-wirddb-baseline.sql, ignore_errors swallows it, the recap is
-# green, and wird_admin ends up with the role and none of its privileges.
-./pgsql-db.yml -l pg-proxmox -e dbname=wirddb --tags pg_db_config,pg_db_baseline
+# THREE tags, and all three are load-bearing — measured, not guessed:
+#   * `postgres` selects the `include_tasks: roles/pgsql/tasks/database.yml`
+#     statement in pgsql-db.yml. Without it nothing inside runs at all; the
+#     recap says ok=5 changed=0 and looks fine.
+#   * `pg_db_config` selects "copy baseline" (database.yml:44), which uploads
+#     /pg/tmp/pg-db-wirddb-baseline.sql.
+#   * `pg_db_baseline` selects "load database baseline" (:100), the psql call.
+# `--tags postgres` alone is NOT enough: this is a DYNAMIC include, and a
+# dynamic include does not pass its tag down to the included tasks — they are
+# filtered by their own. Omitting pg_db_config but keeping pg_db_baseline runs
+# psql against a file that was never uploaded, ignore_errors swallows it, and
+# the recap is green with zero grants applied.
+./pgsql-db.yml -l 192.168.1.205 -e dbname=wirddb --tags postgres,pg_db_config,pg_db_baseline
 ```
 
 Dry-run equivalents, if you want to see the shape first:
@@ -125,6 +140,14 @@ Dry-run equivalents, if you want to see the shape first:
 ```
 
 ### Then distrust the PLAY RECAP
+
+What the real run produced, for comparison: `pgsql-user.yml` → `changed=2` on
+`.205` and everything skipped on `.207` (the SQL is gated on
+`pg_role == 'primary'`, which is why the label correction mattered);
+`pgsql-db.yml` → `changed=3` with "render sql", "copy baseline" and "load
+database baseline", and a baseline log containing exactly four `GRANT` lines and
+no errors. Four GRANTs also proves all six tables are in `public` — a
+`jidhr`-schema table would have errored there.
 
 Both of those tasks are `ignore_errors: true` with the psql call ending in
 `|| true` — the same property that let the first `dbuser_wird`/`wirddb` attempt
