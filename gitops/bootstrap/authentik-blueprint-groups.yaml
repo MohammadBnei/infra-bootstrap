@@ -45,15 +45,18 @@ data:
           # of the account itself, which is not what is wanted.
           users:
             - !Find [authentik_core.user, [username, akadmin]]
-            # The Wird agent's service account (ADR-0052), which calls
-            # wird-admin.bnei.dev/reports.json with a client-credentials token.
-            # In the group because adminweb authorises on the `groups` claim and
-            # makes no exception for machines — one rule for humans and agents.
+            # NO wird-agent LINE HERE YET, and that is deliberate (ADR-0052).
+            # The Wird agent's service account belongs in this group, but a
+            # !Find that matches nothing does NOT quietly skip the entry:
+            # GroupSerializer.users is a BulkPrimaryKeyRelatedField, and
+            # BulkManyRelatedField.to_internal_value fails the whole field when
+            # fewer rows come back than pks requested. That invalidates this
+            # blueprint, so platform-admins stops being reconciled entirely —
+            # adding an operator silently no-ops, REMOVING one silently no-ops,
+            # and on a rebuild the group is never created, which also breaks
+            # the !Find in authentik-blueprint-platform-apps-policy.yaml.
             #
-            # !Find, same as akadmin: this file does not create the account. The
-            # service-account user and its app-password token are minted out of
-            # band (docs/runbook-wird-admin-db-role.md §2) because a token is a
-            # credential and must not pass through git. Before that account
-            # exists this resolves to None and authentik drops it from the m2m
-            # list, so the group simply stays as it was.
-            - !Find [authentik_core.user, [username, wird-agent]]
+            # So the line lands WITH the account, not before:
+            #   docs/runbook-wird-admin-db-role.md §2 mints it, then add
+            #   - !Find [authentik_core.user, [username, wird-agent]]
+            # in the same change and restart the worker.

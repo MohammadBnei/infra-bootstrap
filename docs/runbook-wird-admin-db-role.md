@@ -64,12 +64,16 @@ infisical run --projectId=8a3fa54f-be22-488a-bf51-55158f65c0f2 --env=dev -- \
     -c "\du wird_admin" -c "\dp reports"'
 ```
 
-### The password already exists — use it, do not regenerate it
+### The password already exists, and so does its verifier
 
-**`DBUSER_WIRD_ADMIN_PASSWORD` was created in Infisical on 2026-10-03.** Read it
-from there; the `CREATE ROLE` below takes it as `:'pw'`. Regenerating it would
-mean the Secret and the role disagree and adminweb would fail authentication with
-nothing in the pod log naming the cause.
+**`DBUSER_WIRD_ADMIN_PASSWORD` was created in Infisical on 2026-10-03**, and its
+SCRAM-SHA-256 verifier is committed in `pigsty/pigsty.yml`'s `pg_users` entry —
+the same arrangement as `dbuser_wird` and `dbuser_authentik`. `pgsql-user.yml`
+applies that verifier, so nothing below ever handles the plaintext.
+
+Regenerating the Infisical value without recomputing the verifier (or the other
+way round) means the Secret and the role disagree, and adminweb fails
+authentication with nothing in the pod log naming the cause.
 
 It was generated as 43 alphanumerics so it needs no percent-encoding in a URL —
 the trap `wird-secret.yaml` records for `DBUSER_WIRD_PASSWORD`. For reference,
@@ -81,35 +85,61 @@ PW=$(python3 -c "import secrets,string; print(''.join(secrets.choice(string.asci
 infisical secrets set "DBUSER_WIRD_ADMIN_PASSWORD=$PW" --projectId="$PROJ" --env=dev --type=shared
 ```
 
-### The SQL
+### Create it the Pigsty way — two playbooks, no hand-rolled SQL
 
-Run it as the superuser against the **primary**. `\set` keeps the password out of
-the statement log as a literal:
+The role and its grants are both **declared**, in `pigsty/pigsty.yml` and
+`pigsty/files/wird-admin-grants.sql`. Nothing here is typed into psql, because a
+role created by hand is invisible to the file that is supposed to describe the
+cluster.
+
+The split is forced by Pigsty's own model: `roles/pgsql/templates/pg-user.sql`
+emits role attributes, a password, a comment and GRANTs of **roles** — it has no
+concept of a table grant. Object privileges therefore live in the database's
+`baseline`, and `roles/pgsql/tasks/database.yml:100` applies a baseline whenever
+one is *defined*, not only when the database is new.
+
+**Run both from `pigsty/`, in this order.** The repo's README is explicit that
+the human runs these:
 
 ```bash
-infisical run --projectId=8a3fa54f-be22-488a-bf51-55158f65c0f2 --env=dev -- \
-  bash -c 'PGPASSWORD="$PG_SUPERUSER_PASSWORD" psql -h 192.168.1.205 -U postgres -d wirddb \
-    -v pw="$DBUSER_WIRD_ADMIN_PASSWORD" -f -' <<'SQL'
--- ADR-0052. Least privilege for wird-adminweb; wird-api keeps dbuser_wird.
-CREATE ROLE wird_admin LOGIN PASSWORD :'pw'
-  NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS;
+cd pigsty
 
-GRANT CONNECT ON DATABASE wirddb TO wird_admin;
-GRANT USAGE ON SCHEMA public TO wird_admin;
+# 1. the login role: attributes, SCRAM password, connlimit 5, roles: []
+./pgsql-user.yml -l pg-proxmox -e username=wird_admin
 
-GRANT SELECT ON public.users, public.set_prayers, public.sync_outcomes,
-                public.reports, public.root_senses, public.corpus_meta
-  TO wird_admin;
-
-GRANT UPDATE (category, status, issue_url) ON public.reports TO wird_admin;
-SQL
+# 2. the object privileges, re-applied from files/wird-admin-grants.sql
+# BOTH tags. `pg_db_baseline` alone runs psql against a file that was never
+# uploaded: "copy baseline" (roles/pgsql/tasks/database.yml:44) is tagged
+# pg_db_config, while "load database baseline" (:100) is tagged
+# [pg_db_create, pg_db_baseline]. With only the latter, psql fails on a missing
+# /pg/tmp/pg-db-wirddb-baseline.sql, ignore_errors swallows it, the recap is
+# green, and wird_admin ends up with the role and none of its privileges.
+./pgsql-db.yml -l pg-proxmox -e dbname=wirddb --tags pg_db_config,pg_db_baseline
 ```
 
-If `root_senses` or `corpus_meta` turn out to live in the `jidhr` schema rather
-than `public` (wird owns both), add `GRANT USAGE ON SCHEMA jidhr` and qualify
-those two names — check with
-`\dt *.root_senses` before assuming. This session could not check: direct queries
-against this database are blocked for it.
+Dry-run equivalents, if you want to see the shape first:
+
+```bash
+./pgsql-user.yml -l pg-proxmox -e username=wird_admin --check --diff
+./pgsql-user.yml --list-tasks
+```
+
+### Then distrust the PLAY RECAP
+
+Both of those tasks are `ignore_errors: true` with the psql call ending in
+`|| true` — the same property that let the first `dbuser_wird`/`wirddb` attempt
+report green having created nothing. A green recap is not evidence.
+
+```bash
+# on the primary (.205): did the baseline actually apply?
+sudo -u postgres cat /pg/tmp/pg-db-wirddb-baseline.log
+
+# and what the server now believes
+sudo -u postgres psql wirddb -c '\du wird_admin' -c '\dp reports' -c '\dp corpus_meta'
+```
+
+`\dp reports` must show `wird_admin=r*/dbuser_wird` plus the column-scoped
+`UPDATE`, and **not** `arwdDxt`.
 
 ### Verify, including the negatives
 
@@ -117,32 +147,31 @@ The positive test proves little on its own; the point of the role is what it
 *cannot* do.
 
 ```bash
-PGPASSWORD='<the password>' psql -h 192.168.1.205 -U wird_admin -d wirddb <<'SQL'
-SELECT count(*) FROM reports;                      -- expect a number
-SELECT corpus_version FROM corpus_meta WHERE id=1; -- expect a version
+PGPASSWORD='<DBUSER_WIRD_ADMIN_PASSWORD from Infisical>' \
+  psql -h 192.168.1.205 -U wird_admin -d wirddb <<'SQL'
+SELECT count(*) FROM reports;                       -- expect a number
+SELECT corpus_version FROM corpus_meta WHERE id=1;  -- expect a version
 UPDATE reports SET status='triaged' WHERE false;    -- expect UPDATE 0, not an error
-SELECT count(*) FROM report_inbox;                 -- EXPECT: permission denied
+SELECT count(*) FROM report_inbox;                  -- EXPECT: permission denied
 UPDATE reports SET body='x' WHERE false;            -- EXPECT: permission denied for column body
 CREATE TABLE t_should_fail(i int);                  -- EXPECT: permission denied for schema public
 SQL
 ```
 
-Three of those five must fail. If `report_inbox` returns a count, something
-granted `dbrole_readonly` or `PUBLIC` more than intended — check
-`\dp report_inbox` and `\du wird_admin` before going further.
+Three of those six must fail. If `report_inbox` returns a count, something
+granted `dbrole_readonly` or `PUBLIC` more than intended — check `\dp
+report_inbox` and `\du wird_admin` before going further.
 
-### Record the hash so Pigsty does not fight it
+### The one thing still unverified
 
-`pigsty/pigsty.yml` declares every other login role with its SCRAM hash
-committed and the plaintext in Infisical. A role created by hand is invisible to
-that file, so the next `pgsql-user` run neither knows nor resets it — but the
-file stops describing reality. Read the hash back and add a `pg_users` entry
-with `roles: []` (no `dbrole_readwrite`, no `dbrole_readonly`):
+`pigsty/files/wird-admin-grants.sql` qualifies every table as `public.*`. If
+`root_senses` or `corpus_meta` actually live in the `jidhr` schema, those two
+grants fail — visibly, in the baseline log, with the rest of the file applying
+fine. Check first and amend the file rather than adding a blanket `GRANT USAGE ON
+SCHEMA jidhr`:
 
 ```bash
-infisical run --projectId=8a3fa54f-be22-488a-bf51-55158f65c0f2 --env=dev -- \
-  bash -c 'PGPASSWORD="$PG_SUPERUSER_PASSWORD" psql -h 192.168.1.205 -U postgres -At \
-    -c "SELECT rolpassword FROM pg_authid WHERE rolname = '"'"'wird_admin'"'"'"'
+sudo -u postgres psql wirddb -c '\dt *.root_senses' -c '\dt *.corpus_meta'
 ```
 
 ---
@@ -224,7 +253,48 @@ has no signing key — so adminweb verifies it with the same value it gets as
 
 ---
 
-## 3. The provider's client secret — DONE
+## 3. Read the provider's generated client id and secret into Infisical
+
+**This step is not optional and it is not a convenience.** A proxy provider's
+`client_id` and `client_secret` cannot be declared: verified against the running
+2026.8.0, `ProxyProviderSerializer` exposes `client_id` as `read_only=True` and
+has **no `client_secret` field at all** (while `OAuth2ProviderSerializer` has
+both writable — which is why `authentik-blueprint-wird.yaml` and `-hermes.yaml`
+commit a `client_id` and this cannot). The blueprint importer validates through
+`model().serializer`, and DRF drops unknown keys without error, so declaring
+them succeeds, changes nothing, and leaves authentik's generated pair in place.
+
+adminweb needs both: the secret is the HS256 key for the forwarded JWT, the id is
+the `aud` it pins. Read them out after the blueprint has applied:
+
+```bash
+PROJ=8a3fa54f-be22-488a-bf51-55158f65c0f2
+read -r CID CSEC < <(kubectl -n authentik exec deploy/platform-authentik-server -- \
+  ak shell -c "
+from authentik.providers.proxy.models import ProxyProvider
+p = ProxyProvider.objects.get(name='wird-admin')
+print(p.client_id, p.client_secret)
+" | tail -1)
+
+infisical secrets set "WIRD_ADMIN_OIDC_CLIENT_ID=$CID"     --projectId="$PROJ" --env=dev --type=shared
+infisical secrets set "WIRD_ADMIN_OIDC_CLIENT_SECRET=$CSEC" --projectId="$PROJ" --env=dev --type=shared
+unset CID CSEC
+```
+
+`gitops/bootstrap/wird-admin-secret.yaml` delivers both into `wird-admin-config`
+as `OIDC_CLIENT_ID` and `OIDC_CLIENT_SECRET`. **Wird must read `OIDC_AUDIENCE`
+from that Secret rather than hardcoding it** — the id in their values file today
+(`5gOqSotRlzaM2moPIvlRiS6UQNqBJHnysQ0wKqhR`) was my invention and authentik will
+not use it.
+
+Rotating: delete the provider's secret in authentik and re-run this step; the
+blueprint will not fight you, because it never owned these values.
+
+## 3b. The old, wrong instruction — kept so nobody repeats it
+
+`WIRD_ADMIN_OIDC_CLIENT_SECRET` was originally generated here and declared in the
+blueprint. That is now the value authentik ignores; step 3 overwrites it with the
+real one. The row created on 2026-10-03 is therefore stale until that happens.
 
 **`WIRD_ADMIN_OIDC_CLIENT_SECRET` was created in Infisical on 2026-10-03**, so
 both `gitops/bootstrap/authentik-blueprint-wird-admin.yaml` and

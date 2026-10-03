@@ -106,17 +106,13 @@ blueprints:
   # `hermes` would roll the whole file back — taking argocd's and grafana's
   # bindings with it if they shared it (ADR-0051).
   - authentik-blueprint-hermes-policy
-  # wird-adminweb's access binding (ADR-0052). Its PROVIDER is a Secret, not a
-  # ConfigMap — see the `secrets:` list below — because a proxy provider's
-  # client_secret is the HMAC key the app verifies the forwarded JWT with.
+  # wird-adminweb's access binding (ADR-0052). Its provider and application live
+  # in authentik-blueprint-forwardauth above, not in a file of their own: the
+  # embedded outpost's provider list must reference them with !KeyOf, and a
+  # cross-file !Find on that field invalidates the whole tier rather than
+  # skipping the entry. Only the binding is separable.
   - authentik-blueprint-wird-admin-policy
   secrets:
-  # The only proxy provider here that is a Secret. A proxy provider has no
-  # signing key (set_oauth_defaults forces signing_key = None), so authentik
-  # signs its forwarded JWT HS256 with the client_secret — and wird-adminweb
-  # verifies with that same value. Two consumers, one Infisical row, so the
-  # blueprint has to interpolate it. ADR-0052.
-  - authentik-blueprint-wird-admin
   - authentik-blueprint-grafana
   - authentik-blueprint-argocd
   - authentik-blueprint-fleet

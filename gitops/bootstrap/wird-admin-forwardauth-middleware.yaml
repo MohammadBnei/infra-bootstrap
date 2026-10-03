@@ -1,0 +1,40 @@
+# wird-adminweb's own forwardAuth Middleware. ADR-0052.
+#
+# WHY NOT THE SHARED `authentik-forwardauth`. adminweb verifies the forwarded
+# token itself rather than trusting X-authentik-groups, so it needs
+# `X-authentik-jwt` in authResponseHeaders. That header is the SIGNED access
+# token — a bearer credential, not an identity hint — and the shared Middleware
+# is referenced by the e2e preview hosts, wedding.bnei.dev/admin and
+# hermes.bnei.dev. Preview pods run whatever code an agent session started, and
+# `intercept_header_auth` defaults to True on the previews provider, so handing
+# them the operator's token would let them replay it as `Authorization: Bearer`
+# against any other host that provider covers, bypassing login. One extra object
+# is cheaper than that.
+#
+# Everything else is copied from the shared Middleware deliberately, including
+# trustForwardHeader and the address: same embedded outpost, same endpoint. The
+# outpost picks the provider from the forwarded host, which is why one endpoint
+# serves both this provider and previews.
+#
+# Port 80, not 9000: this deployment's authentik Service exposes 80/443 only
+# (targetPort 9000) — see authentik-ingressroute.yaml.
+#
+# X-authentik-meta-jwks is NOT requested. A proxy provider has no signing key, so
+# its JWT is HS256 with the provider's client_secret and a JWKS is useless for
+# verifying it — adminweb holds that secret as OIDC_CLIENT_SECRET instead.
+apiVersion: traefik.io/v1alpha1
+kind: Middleware
+metadata:
+  name: wird-admin-forwardauth
+  namespace: default
+spec:
+  forwardAuth:
+    address: http://platform-authentik-server.authentik.svc.cluster.local/outpost.goauthentik.io/auth/traefik
+    trustForwardHeader: true
+    authResponseHeaders:
+      - X-authentik-username
+      - X-authentik-email
+      - X-authentik-groups
+      - X-authentik-uid
+      # The signed token adminweb verifies with HS256. Reaches only this one app.
+      - X-authentik-jwt

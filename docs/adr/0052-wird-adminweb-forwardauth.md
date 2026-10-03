@@ -49,7 +49,29 @@ adminweb does not authenticate against Wird's native client at all.
    an infra-side choice (the mode) and points at an infra-side Service. Wird's
    values file names only the middleware.
 
-3. **The forwarded token is HS256, signed with the provider's `client_secret`.**
+3. **A proxy provider's `client_id` and `client_secret` cannot be declared —
+   they are generated, read back, and delivered through Infisical.** Verified
+   against the running 2026.8.0: `ProxyProviderSerializer` exposes `client_id`
+   as `read_only=True` and has **no `client_secret` field at all**, while
+   `OAuth2ProviderSerializer` has both writable. That asymmetry is why
+   `authentik-blueprint-wird.yaml` and `-hermes.yaml` can commit a `client_id`
+   and this provider cannot. The blueprint importer validates through
+   `model().serializer` and DRF drops unknown keys without error, so declaring
+   them *succeeds and changes nothing*.
+
+   The first version of this change declared both. It would have shipped a
+   provider whose real `aud` and HMAC key were authentik's generated values while
+   adminweb pinned mine — a permanent 401 for every user, with nothing in any log
+   naming the cause. Caught in review before merge; recorded here because the
+   failure is invisible and the next person will reach for the same pattern.
+
+   So: the blueprint creates the provider, the runbook reads both values out into
+   Infisical as `WIRD_ADMIN_OIDC_CLIENT_ID`/`_SECRET`, and
+   `wird-admin-secret.yaml` delivers them as `OIDC_CLIENT_ID`/`OIDC_CLIENT_SECRET`.
+   **Wird reads the audience from that Secret rather than hardcoding it**, which
+   also survives a provider recreated on a rebuilt cluster.
+
+4. **The forwarded token is HS256, signed with the provider's `client_secret`.**
    This is the finding that changed the app's code, and it is not in the docs:
    `providers/proxy/models.py`'s `set_oauth_defaults()` forces `signing_key =
    None` on every proxy provider, and `providers/oauth2/models.py`'s `jwt_key()`
@@ -68,8 +90,16 @@ adminweb does not authenticate against Wird's native client at all.
      another's JWKS and only `aud` separates them. A per-provider HMAC key means
      a token from elsewhere is not merely wrong-audience, it is unverifiable.
 
-4. **The header is `X-authentik-jwt`,** added to the shared
-   `authentik-forwardauth` Middleware's `authResponseHeaders`. Taken from
+5. **The header is `X-authentik-jwt`, on a Middleware of its own —
+   `wird-admin-forwardauth` — not on the shared one.** The first version added it
+   to `authentik-forwardauth`, which previews, `wedding.bnei.dev/admin` and
+   `hermes.bnei.dev` all reference, on the reasoning that it was "additive and
+   inert because they read none of it". That was wrong in a way worth recording:
+   the header is a bearer credential, `intercept_header_auth` defaults to `True`
+   on the previews provider, and preview pods run whatever an agent session
+   started — so those pods would have received the operator's access token and
+   could replay it as `Authorization: Bearer` against any other host that
+   provider covers. One extra Middleware object buys that back. Taken from
    authentik's own Traefik middleware generator
    (`providers/proxy/controllers/k8s/traefik_3.py:120-133`), which forwards
    `X-authentik-username/groups/entitlements/email/name/uid/jwt` and
@@ -77,14 +107,14 @@ adminweb does not authenticate against Wird's native client at all.
    or `X-Forwarded-Access-Token`. The addition is additive and inert for the
    existing consumers, which read none of it.
 
-5. **No scope mapping was added, and none was needed.** `set_oauth_defaults()`
+6. **No scope mapping was added, and none was needed.** `set_oauth_defaults()`
    binds `openid`, `profile`, `email`, `entitlements` and `ak_proxy`
    automatically, and the stock `profile` mapping returns
    `"groups": [group.name for group in request.user.groups.all()]` — the same
    route ArgoCD and Grafana read `platform-admins` from. The handover asked for a
    custom mapping; it would have been dead weight.
 
-6. **Authorization is two checks for two paths, and that is deliberate.** The
+7. **Authorization is two checks for two paths, and that is deliberate.** The
    `policybinding` to `platform-admins` gates the browser hop at `/authorize`.
    It does **not** gate the `client_credentials` or `password` grants, which
    `set_oauth_defaults()` force-enables and which cannot be turned off — so any
@@ -93,7 +123,32 @@ adminweb does not authenticate against Wird's native client at all.
    **Accepted risk, with a named consequence:** that check must never be relaxed
    to "any valid token for my audience", and the app's tests pin it.
 
-7. **`wird_admin`, a role that can read six tables and update three columns.**
+8. **`wird_admin` is DECLARED, not hand-created — and the split is forced by
+   Pigsty's own model.** `roles/pgsql/templates/pg-user.sql` emits role
+   attributes, a password, a comment and GRANTs of *roles*; it has no concept of
+   a table grant. So the login role is a `pg_users` entry in `pigsty/pigsty.yml`
+   (SCRAM verifier committed, plaintext only in Infisical, `roles: []`,
+   `connlimit: 5`, `pgbouncer: false`) applied by
+   `./pgsql-user.yml -l pg-proxmox -e username=wird_admin`, and the object
+   privileges are `pigsty/files/wird-admin-grants.sql`, attached as wirddb's
+   `baseline` and applied by
+   `./pgsql-db.yml -l pg-proxmox -e dbname=wirddb --tags pg_db_baseline`.
+   A baseline works on an existing database because
+   `roles/pgsql/tasks/database.yml:100` gates that task on `database.baseline is
+   defined`, not on the database being new — so it re-applies on demand, and
+   every statement in the file is idempotent.
+
+   `CONNECT` is in that file and is not optional: wirddb sets `revokeconn: true`,
+   and `pg-db.sql` grants CONNECT back to only replicator, monitor, dba and the
+   owner. The revoke targets PUBLIC, not named roles, so the grant survives later
+   runs.
+
+   The name breaks the `dbuser_*` convention every other entry follows,
+   deliberately: wird's ADR-0026, this ADR and the DSN in
+   `wird-admin-secret.yaml` all say `wird_admin`, and three documents agreeing
+   beats a prefix.
+
+9. **The grant list itself: read six tables, update three columns.**
    `SELECT` on `users`, `set_prayers`, `sync_outcomes`, `reports`, `root_senses`,
    `corpus_meta`; `UPDATE (category, status, issue_url)` on `reports`; nothing
    else — no DDL, no `report_inbox`, no sequences. Deliberately **not**
@@ -103,7 +158,7 @@ adminweb does not authenticate against Wird's native client at all.
    than two more keys in `wird-config`, so the boundary between adminweb's role
    and wird-api's is an actual grant and not a naming convention.
 
-8. **The agent is a service account in the same group, not an exception.**
+10. **The agent is a service account in the same group, not an exception.**
    adminweb applies one authorization rule to humans and machines alike. The
    account and its app-password token are minted out of band; the group
    membership is one `!Find` line in `authentik-blueprint-groups.yaml`, because
@@ -114,7 +169,21 @@ adminweb does not authenticate against Wird's native client at all.
 
 ## Consequences
 
-- **Two cross-file `!Find`s have known, self-healing failure modes.** The outpost
+- **`!Find` returning None does NOT skip an entry — it invalidates the
+   blueprint.** The first version of this change leaned on "self-healing" twice
+   and both were wrong, verified against the serializers: `OutpostSerializer.providers`
+   is a `ManyRelatedField` of `PrimaryKeyRelatedField` with `allow_null=False`,
+   and `GroupSerializer.users` is a `BulkPrimaryKeyRelatedField` whose
+   `to_internal_value` fails the field when fewer rows return than pks requested.
+   So a cross-file `!Find` for the outpost list would have taken the **whole
+   forwardAuth tier** down — previews' provider, its application and the outpost
+   binding — and a premature `wird-agent` line in the groups blueprint would have
+   stopped `platform-admins` being reconciled at all, including *removals*, and
+   broken the ArgoCD/Grafana bindings that `!Find` it. Hence: the provider lives
+   in `authentik-blueprint-forwardauth.yaml` with `!KeyOf`, and the group line
+   lands with the account, not before. Only `PolicyBinding.target` keeps a
+   cross-file `!Find`, where a rollback costs one gate.
+- **The remaining cross-file `!Find` (the policy binding) is self-healing** The outpost
   list in `authentik-blueprint-forwardauth.yaml` references this provider by
   `!Find` (because `!KeyOf` resolves only within one blueprint), and the policy
   file references the application the same way. Both fail closed and both
@@ -126,10 +195,23 @@ adminweb does not authenticate against Wird's native client at all.
   header.** Harmless — they read none of it — but `X-authentik-jwt` is a signed
   credential in transit, so it reaches exactly the hosts the routes send it to and
   should not be logged.
-- **A fourth consumer of the Pigsty primary that is not described by
-  `pigsty.yml`.** `wird_admin` is created by SQL, not by a `pg_users` entry, so
-  the file stops being a complete description of who can log in. The runbook says
-  to read the SCRAM hash back and add the entry with `roles: []`.
+- **Pigsty runs cannot be driven from the maintainer's Mac, and that is a
+  standing gap this change surfaced rather than caused.** `pigsty/ansible.cfg`
+  pins `remote_user = vagrant` and
+  `private_key_file = /home/mohammad/.ssh/id_pigsty_rsa` — a Linux path that does
+  not exist on macOS, which resolves to
+  `/System/Volumes/Data/home/mohammad/.ssh/id_pigsty_rsa` and fails with "no such
+  identity". That key is also absent from the k9s ops hub and has no row in
+  `docs/secrets.md`, unlike every other target key (`SSH_PI4_KEY`,
+  `SSH_SERVER1_KEY`, …). So `pgsql-user.yml`/`pgsql-db.yml` are runnable from
+  exactly one machine, and which machine that is is not written down anywhere.
+  Fixing it is a separate change: add the key as `SSH_PIGSTY_KEY` in Infisical and
+  pass it per run, the way `pihole-configure.yml` already does, rather than
+  relying on an absolute path in a vendored config.
+- **The k9s ops hub is the nearest control node and is half-equipped**: it has
+  the repo at `/opt/infra-bootstrap`, `infisical` and `psql`, but no
+  `ansible-playbook` — the pinned venv from
+  `k9s-dashboard-configure.yml -e k9s_hub=true` has not been installed there.
 - **`pigsty.yml`'s `pg_role` labels were found inverted** while picking a target
   for that SQL: Patroni reports `.205` leader, the file said `.207` primary. The
   file's own comment predicts this and warns that a `pgsql-*` run against the

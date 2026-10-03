@@ -107,6 +107,65 @@ data:
           slug: e2e-previews
           provider: !KeyOf previews-proxy-provider
           meta_description: Per-session preview hosts, minted at runtime by the fleet provisioner
+      # ----------------------------------------------------------------
+      # wird-adminweb (ADR-0052). IN THIS FILE, not its own, and that is a
+      # correction: it was briefly a separate blueprint referencing this
+      # outpost by !Find, which would have taken the WHOLE tier down.
+      # OutpostSerializer.providers is a ManyRelatedField of
+      # PrimaryKeyRelatedField with allow_null=False (verified live), so a
+      # !Find that matches nothing raises does_not_exist and invalidates the
+      # entry — previews' provider, its application and the outpost binding
+      # included. !KeyOf resolves only within one blueprint, so sharing the
+      # file is what makes the reference safe.
+      #
+      # NO client_id AND NO client_secret HERE, and this is the whole reason
+      # the design changed. Verified against the running 2026.8.0:
+      #   ProxyProviderSerializer: client_id present, read_only=True
+      #                            client_secret NOT A FIELD AT ALL
+      #   OAuth2ProviderSerializer: both writable
+      # The blueprint importer validates through model().serializer and DRF
+      # drops unknown keys without error, so a declared client_id/secret here
+      # is silently ignored — the provider keeps its generated pair. That is
+      # why authentik-blueprint-wird.yaml and -hermes.yaml CAN commit a
+      # client_id (they are oauth2providers) and this cannot.
+      #
+      # Both values are therefore GENERATED and must be read back out of
+      # authentik into Infisical after this applies — see
+      # docs/runbook-wird-admin-db-role.md §3. adminweb needs both: the secret
+      # is the HS256 key for the forwarded JWT (a proxy provider has no
+      # signing key), and the id is the `aud` it pins.
+      - model: authentik_providers_proxy.proxyprovider
+        id: wird-admin-proxy-provider
+        identifiers:
+          name: wird-admin
+        attrs:
+          name: wird-admin
+          # forward_single, unlike previews above: wird-admin.bnei.dev is a
+          # static hostname, and a second forward_domain provider on
+          # cookie_domain bnei.dev would leave the outpost with two providers
+          # claiming one host mapping. The cost is the callback leg, which
+          # gitops/bootstrap/wird-admin-outpost-route.yaml serves.
+          mode: forward_single
+          external_host: https://wird-admin.bnei.dev
+          # Lets a request that already carries `Authorization: Bearer`
+          # through without a login redirect — how the Wird agent calls
+          # /reports.json with a client-credentials token. Default is already
+          # True; set explicitly because adminweb's agent path depends on it.
+          intercept_header_auth: true
+          basic_auth_enabled: false
+          access_token_validity: "hours=1"
+          authorization_flow: !Find [authentik_flows.flow, [slug, default-provider-authorization-implicit-consent]]
+          invalidation_flow: !Find [authentik_flows.flow, [slug, default-provider-invalidation-flow]]
+      - model: authentik_core.application
+        identifiers:
+          slug: wird-admin
+        attrs:
+          name: Wird Admin
+          slug: wird-admin
+          provider: !KeyOf wird-admin-proxy-provider
+          meta_launch_url: https://wird-admin.bnei.dev
+          meta_description: Wird operations view — reports triage, sync outcomes, corpus version
+      # ----------------------------------------------------------------
       # THE TRAP. A proxy provider does nothing at all until it is bound
       # to an outpost, and the embedded outpost ships with providers = [].
       # Verified live: `authentik Embedded Outpost :: proxy :: providers= []`.
@@ -119,19 +178,9 @@ data:
         attrs:
           providers:
             - !KeyOf previews-proxy-provider
-            # wird-admin (ADR-0052) is declared in
-            # authentik-blueprint-wird-admin.yaml rather than here, because its
-            # client_secret is the HMAC key adminweb verifies with — so that file
-            # has to be an InfisicalSecret, and this one stays a ConfigMap.
-            #
-            # !Find, not !KeyOf, because !KeyOf resolves only within one
-            # blueprint. The cost is !Find's silent-None: if this file applies
-            # before that provider exists, the list is written with only
-            # previews in it and wird-admin.bnei.dev 302s into a loop with no
-            # provider behind it. It self-heals on the next discovery pass; if
-            # you are chasing that symptom, read the outpost's provider list
-            # before anything else:
-            #   ak shell -c "from authentik.outposts.models import Outpost; \
-            #     print([p.name for p in Outpost.objects.get( \
-            #     managed='goauthentik.io/outposts/embedded').providers.all()])"
-            - !Find [authentik_providers_proxy.proxyprovider, [name, wird-admin]]
+            # wird-admin (ADR-0052), declared above in this same file so this
+            # is a !KeyOf and cannot be None. A cross-file !Find here would
+            # not "just skip the entry": allow_null=False on this field means
+            # an unresolved reference invalidates the whole blueprint and takes
+            # previews down with it.
+            - !KeyOf wird-admin-proxy-provider
