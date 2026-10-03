@@ -240,7 +240,7 @@ so a re-run is also the regression test.
 
 ## Disk is the thing that fills
 
-40GB, shared by every build repo. The failure mode is a build dying on
+70GB (40GB until 2026-10-03), shared by every build repo. The failure mode is a build dying on
 ENOSPC, which names nothing useful.
 
 The driver is `overlay`, pinned in `/etc/containers/storage.conf`. It was
