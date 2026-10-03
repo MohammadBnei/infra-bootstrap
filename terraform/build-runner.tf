@@ -62,9 +62,14 @@ resource "proxmox_virtual_environment_container" "build_runner" {
     dedicated = 4096
   }
 
+  # 40 -> 70 on 2026-10-03: agent-fleet's worker image (~2.5GB, rebuilt
+  # whole when its Go toolchain layer changes) died on ENOSPC committing a
+  # layer with 6.8GB free, next to an 8GB CUDA base kept for ukubi-stt.
+  # Growing is an in-place resize in bpg/proxmox (only a shrink recreates),
+  # and local-lvm is thin, so the extra 30GB is drawn only as it is written.
   disk {
     datastore_id = var.build_runner_container_storage
-    size         = 40
+    size         = 70
   }
 
   # nesting is required, not optional: podman/buildah inside an unprivileged
