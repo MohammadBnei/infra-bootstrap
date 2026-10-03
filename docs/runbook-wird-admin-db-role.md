@@ -29,9 +29,10 @@ or `pgsql-db` run aimed at the standby creates nothing and still prints a green
 `PLAY RECAP`. That is how the first attempt at `dbuser_wird`/`wirddb` silently did
 nothing (same file, line ~46).
 
-**Fix the labels in `pigsty/pigsty.yml` while you are here** — swap `pg_role`
-between `.205` and `.207` — or the next person reads a file that lies. (This
-session could not: editing that file is blocked for it.)
+The labels in `pigsty/pigsty.yml` were **corrected on 2026-10-03** to match. They
+are still only labels — Pigsty does not reconcile them and the next Patroni
+failover inverts them again with nothing to warn you — so re-run the `curl` above
+before any `pgsql-*` run rather than trusting the file.
 
 ---
 
@@ -176,11 +177,14 @@ Then add it to the group — **one line in git**, not a click:
             - !Find [authentik_core.user, [username, wird-agent]]
 ```
 
-That list is replaced on every apply, so it must be added there rather than
-granted in the UI. `!Find` does not create the account, which is why step 2 runs
-first; until it does, the `!Find` resolves to None and authentik drops it from the
-list, leaving the group as it was. (This session could not make that edit: adding
-a member to `platform-admins` is blocked for it, correctly.)
+**That line is already committed** (2026-10-03). It is inert until the account
+exists: `!Find` does not create the user, so authentik drops the unresolved entry
+from the m2m list and the group keeps `akadmin` alone. Minting the account is what
+activates it — which is why the `ak shell` step above comes first and this needs
+no further edit.
+
+The list is replaced on every apply, which is why membership lives there and not
+in the UI: a click would be erased by the next sync.
 
 ### Hand the token over without it touching a transcript
 
