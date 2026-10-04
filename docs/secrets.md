@@ -35,7 +35,7 @@ everything.
 | `LONGHORN_S3_ACCESS_KEY` / `LONGHORN_S3_SECRET` | Garage S3 credentials Longhorn uses as its snapshot backup target (ADR-0019) | agent (provisions Garage bucket + keys, same Garage instance as pgBackRest's) | `gitops/bootstrap/longhorn-backup-secret.yaml` (InfisicalSecret) → Longhorn `backupTargetCredentialSecret` |
 | `AGENTFLEET_FILES_S3_ACCESS_KEY` / `AGENTFLEET_FILES_S3_SECRET` | Garage S3 credentials for agent-fleet's fleet-wide shared file space (bucket: `agent-fleet-files`, CORS-enabled for `fleet.bnei.dev`) — `core` is the sole holder, mints short-lived presigned PUT/GET URLs (agent-fleet ADR-0031) | agent (`ansible/playbooks/garage-configure.yml`) | `agent-fleet-nygh` Infisical project (separate project — `core` never reads this repo's Infisical project directly) |
 | `WEDDING_WALL_S3_ACCESS_KEY` / `WEDDING_WALL_S3_SECRET` | Garage key for the `wedding-wall` bucket — guest photos on wedding.bnei.dev's projector wall. Written to the ROOT project by `garage-configure.yml`, and **must then be copied by hand into `wedding-2026-ih1x`**, which is the project the pod actually reads (same split as `AGENTFLEET_FILES_S3` above). Skip the copy and the app builds a Bun S3 client with an undefined access key: every upload and every wall image fails at runtime, with no error until a guest tries to post. |
-| `WIRD_ANDROID_KEYSTORE_P12` / `WIRD_ANDROID_KEYSTORE_PASSWORD` / `WIRD_ANDROID_KEY_ALIAS` / `WIRD_ANDROID_KEY_PASSWORD` | **These four rows also exist, by name, at the root of `wird-8k-fc`** — that copy is what `apk.yml` signs release builds with, and the `wird-ipa` CI identity can read it as a project Viewer (see Per-app Infisical projects, below). So this row is the original, not the only copy: **rotation must update both projects**, and the reachable copy is why that table calls the separate-project split current work. The Android release signing keystore for the Wird app and the three values needed to use it (PKCS12, RSA 4096, alias `wird`, valid to 2054-02-15). **Losing these is the one unrecoverable loss in this estate.** Android matches an update against the installed app's signing key, so without this keystore no future build can ever update an installed Wird on any phone — every user uninstalls, loses their local data and starts again, permanently, and there is no reissue from anyone. It is worth more than any password here, all of which can be rotated. The `.p12` is stored **base64-encoded** because an Infisical value is a string and a raw binary round-trip corrupts silently; the round-trip was verified by pulling the row back, `base64 -d`-ing it and comparing sha256 against the file on disk. `WIRD_ANDROID_KEY_ALIAS` is not secret but is required to sign and is exactly the sort of thing nobody writes down. The public half — the certificate fingerprint `97:D5:06:8B:…:02` — is NOT here: it ships in every copy of the APK, so it lives in the app's `helm/values.yaml` as plain config beside the debug key's `45:85:EA:…:5E`, and **both** stay listed on purpose so phones carrying older debug-signed builds keep authenticating | user (`keytool -genkeypair`, kept at `~/.wird/wird-release.p12` mode 0600) | Wird's own Gradle `signingConfig` at build time — nothing in this repo and nothing in the cluster consumes it; the API only ever sees the fingerprint |
+| `WIRD_ANDROID_KEYSTORE_P12` / `WIRD_ANDROID_KEYSTORE_PASSWORD` / `WIRD_ANDROID_KEY_ALIAS` / `WIRD_ANDROID_KEY_PASSWORD` | **These four rows also exist, by name, at the root of `wird-8k-fc`** — that copy is what `apk.yml` signs release builds with, so this row is the original, not the only copy, and **rotation must update both projects**. Reachability by the iOS CI identity was the reason the App Store Connect keys were split into their own project on 2026-10-04 (see Per-app Infisical projects, below); that only takes effect once `wird-ipa`'s grant on `wird-8k-fc` is actually revoked, which this repo cannot verify. The Android release signing keystore for the Wird app and the three values needed to use it (PKCS12, RSA 4096, alias `wird`, valid to 2054-02-15). **Losing these is the one unrecoverable loss in this estate.** Android matches an update against the installed app's signing key, so without this keystore no future build can ever update an installed Wird on any phone — every user uninstalls, loses their local data and starts again, permanently, and there is no reissue from anyone. It is worth more than any password here, all of which can be rotated. The `.p12` is stored **base64-encoded** because an Infisical value is a string and a raw binary round-trip corrupts silently; the round-trip was verified by pulling the row back, `base64 -d`-ing it and comparing sha256 against the file on disk. `WIRD_ANDROID_KEY_ALIAS` is not secret but is required to sign and is exactly the sort of thing nobody writes down. The public half — the certificate fingerprint `97:D5:06:8B:…:02` — is NOT here: it ships in every copy of the APK, so it lives in the app's `helm/values.yaml` as plain config beside the debug key's `45:85:EA:…:5E`, and **both** stay listed on purpose so phones carrying older debug-signed builds keep authenticating | user (`keytool -genkeypair`, kept at `~/.wird/wird-release.p12` mode 0600) | Wird's own Gradle `signingConfig` at build time — nothing in this repo and nothing in the cluster consumes it; the API only ever sees the fingerprint |
 | `WIRD_MODELS_S3_ACCESS_KEY` / `WIRD_MODELS_S3_SECRET` | Garage key for the `wird-models` bucket (2GB quota) — the ONNX speech model Wird's voice-follow downloads to the phone once, keyed by export digest (`base-ar-quran/<sha12>/...`). The bucket is **not** public: ADR-0030 Decision 2 keeps Garage SigV4-only, so wird-api answers an unauthenticated `GET /models/...` with a 302 to a 15-minute presigned URL and the bytes go straight from grey `s3.bnei.dev` to the device, never through the pod. The credential therefore **signs but never fetches**, which is why `WIRD_MODELS_S3_ENDPOINT` in `wird-config` is the public endpoint and not `garage.bnei.lan:3900` — the signature has to cover a host the phone can reach. Path-style addressing only; `garage-s3.yaml` holds a per-hostname cert for `s3.bnei.dev` alone. **The objects are third-party model weights, not ours**, and the route is unauthenticated by design, so anyone who learns a key can fetch them. The current `ar-phoneme/` model is `Quran-Lab/zipformer_p-arabic-v3` under the **Quran-Lab No-Profit License 1.2**, whose conditions are recorded in the Wird app's ADR 0009 and met on its Sources screen. One of them binds this side too: **nothing built on the model may be charged for, including access to it** — so these objects must never end up behind anything paid, and that is a constraint on the route, not only on the app. Still open, deliberately: the `LICENSE` file is itself inside the Hugging Face gate, so whether it permits *redistribution* — which is what this bucket does — has not been read by anyone; the public access prompt is not the licence text. Read it before publishing a *new* model here, and do not assume a later export inherits these terms: the weights are gated and access is granted to a person, not to a script. The bucket holds one prefix per model generation (`base-ar-quran/`, `ar-stream/`, `ar-phoneme/`, keyed by export digest) and nothing prunes them — an old prefix stays until phones on that build are gone | agent (`ansible/playbooks/garage-configure.yml`) | `gitops/bootstrap/wird-secret.yaml`, assembled into the `wird-config` Secret alongside `DATABASE_URL` |
 | `ZOT_S3_ACCESS_KEY` / `ZOT_S3_SECRET` | Garage S3 credentials for the in-cluster OCI registry's blob store (bucket: `zot-registry`, 40GB quota — ADR-0034) | agent (`ansible/playbooks/garage-configure.yml`) | `gitops/platform/values/zot/values.yaml` — via explicit `env:` `secretKeyRef` mapping them onto `AWS_ACCESS_KEY_ID`/`AWS_SECRET_ACCESS_KEY`, **not** the chart's `envFrom`, which injects keys verbatim and can't rename |
 | `ZOT_HTPASSWD` | Registry push credential, one `user:bcrypt-hash` line (user `ci`, bcrypt cost 12) — same shape as `BASIC_AUTH_HTPASSWD` below. Zot mounts it as a file and allows anonymous **read**, authenticated **push**; without it anything on the LAN could overwrite a live tag the nodes then run | agent (`htpasswd -nbB -C 12`, random 40-char password, 2026-08-13) | `gitops/platform/values/zot/values.yaml` `extraVolumes` → `/etc/zot/htpasswd`. The **plaintext** counterpart lives as `REGISTRY_USERNAME`/`REGISTRY_PASSWORD` in the GitHub Actions secrets of **every build repo** — `editable-blog`, `agent-fleet`, `wedding-2026` and `ukubi-stt` — for the build runner to log in with. The plaintext **now has a home**: as of 2026-09-16 it lives in the `platform-commons` project as `REGISTRY_USERNAME`/`REGISTRY_PASSWORD` (same key names the workflows already use, so adopting it needs no rename). Before that it was stored nowhere but those write-only GitHub slots, which meant onboarding a new build repo needed the password from wherever it happened to be kept, or a full rotation of all of them. Rotate all of them together: one bcrypt line here, N plaintext pairs there, and a missed repo fails at `buildah login` with a 401 that looks like a registry problem. Deliberately native GitHub secrets rather than the Infisical-CLI-at-job-time pattern `agent-fleet`'s workflows use elsewhere: the build LXC's sudoers grants `/usr/bin/buildah` only, so the Infisical CLI's `curl \| sudo -E bash` + `sudo apt-get` bootstrap cannot run there — and it would re-add a WAN round-trip mid-build, which is what ADR-0034 exists to remove |
@@ -110,10 +110,9 @@ keeps a compromised per-app grant from reaching PVE tokens/DB passwords.
 `universal-auth-credentials` needs a separate access grant per project
 below (Infisical UI), on top of its `infra-bootstrap-1-ge1` grant.
 
-**One of these projects is not read by the cluster at all.** `wird-8k-fc`'s
-`/ios` folder is read by GitHub Actions, not by an `InfisicalSecret`, through a
-**second machine identity that is not `universal-auth-credentials`** and does not
-use universal auth:
+**Two of these projects are not read by the cluster at all.** `wird-ios-b5-qc`
+and `wird-8k-fc` are read by GitHub Actions, through identities that are not
+`universal-auth-credentials` and do not use universal auth:
 
 | | |
 |---|---|
@@ -122,67 +121,45 @@ use universal auth:
 | Discovery / issuer | `https://token.actions.githubusercontent.com` |
 | Audience | `infisical.bnei.dev` |
 | Subject | `repo:MohammadBnei/wird:ref:refs/tags/v*` — a **pattern**, because every release carries a new tag. A subject pinned to one ref would break on the next release |
-| Wired in Wird as | repo *variables* (not secrets) `INFISICAL_IPA_IDENTITY_ID` and `INFISICAL_IPA_PROJECT_SLUG=wird-8k-fc` |
-| Project role | **Viewer** on all of `wird-8k-fc` |
+| Wired in Wird as | repo *variables* (not secrets) `INFISICAL_IPA_IDENTITY_ID` and `INFISICAL_IPA_PROJECT_SLUG=wird-ios-b5-qc` |
+| Project role | **Viewer** on `wird-ios-b5-qc` |
 
-**The Viewer role is a deviation, recorded because it is wider than the plan.**
-The intent was a custom role reading `/ios` only; Infisical's free plan has no
-custom roles, so the identity is a project-wide Viewer. It can therefore **read
-every row in `wird-8k-fc`, not just `/ios`** — and a third-party GitHub Action
-runs inside `ipa.yml` while that token is live. It can never write or delete.
+**Viewer, not a folder-scoped custom role, because Infisical's free plan has no
+custom roles.** That is why the containment is a project boundary instead: a
+Viewer reads everything in its project, so the project holds only the three App
+Store Connect rows. Verified by listing on 2026-10-04 — `wird-ios-b5-qc` root is
+exactly `ASC_KEY_P8`, `ASC_KEY_ID`, `ASC_ISSUER_ID`, and `wird-8k-fc` has no
+`/ios` folder any more.
 
-Two upgrade paths, neither urgent: a folder-scoped custom role on a paid plan, or
-move the three ASC rows into a project of their own where `wird-ipa` is Viewer
-and has no grant on `wird-8k-fc` at all. The second needs no paid plan and is the
-one to take if `wird-8k-fc` ever gains a row worth more than an App Store key.
+**Why the split happened, kept because the reasoning outlives it.** Until
+2026-10-04 the ASC rows were a folder in `wird-8k-fc`, whose root holds a **copy
+of the Android release keystore** — the one unrecoverable secret in this estate.
+A project-wide Viewer could therefore read it, and a third-party GitHub Action
+holds that token during every tagged release. An earlier revision of this file
+claimed it could not, reasoning from the original rows in
+`infra-bootstrap-1-ge1` without checking the second copy; the listing settled it.
 
-**What the Viewer role reaches, listed rather than reasoned about (2026-10-04).**
-`wird-8k-fc` env `dev`:
+**The remaining step is a revocation, and it is not verifiable from this repo.**
+`wird-ipa` must be *removed* from `wird-8k-fc`; adding it to the new project does
+not take the old grant away. Until that is done the split has changed nothing
+about reachability — the identity can still read the keystore copy. Infisical's
+CLI exposes secrets, not identity grants, so this file cannot confirm it: check
+it in the Infisical UI under `wird-8k-fc` → Access Control → Identities, and if
+`wird-ipa` is listed there, the containment above is aspirational rather than
+real.
 
-| Path | Rows |
-|---|---|
-| `/` | `WIRD_ANDROID_KEYSTORE_P12`, `WIRD_ANDROID_KEYSTORE_PASSWORD`, `WIRD_ANDROID_KEY_ALIAS`, `WIRD_ANDROID_KEY_PASSWORD`, `WIRD_MODELS_S3_ACCESS_KEY`, `WIRD_MODELS_S3_SECRET` |
-| `/ios` | `ASC_KEY_P8`, `ASC_KEY_ID`, `ASC_ISSUER_ID` |
+`wird-8k-fc` keeps the APK side: the four keystore rows, `WIRD_MODELS_S3_*`, and
+(planned) the Play upload key `WIRD_ANDROID_UPLOAD_*` plus
+`PLAY_SERVICE_ACCOUNT_JSON`, read by `apk.yml`'s own identity, which already
+reads the keystore and so gains nothing it did not have.
 
-**So `wird-ipa` can read the release keystore, and that changes the priority of
-the upgrade path.** An earlier revision of this file claimed it could not, on the
-grounds that those four rows live at the root of `infra-bootstrap-1-ge1` — they
-do, but **a second copy also sits at the root of `wird-8k-fc`**, which the listing
-above confirms and which `.github/workflows/apk.yml` has depended on since
-v0.0.9 (it reads them with `secret-path: /` and fails when any comes back empty).
-Checking one project and inferring the other was the mistake. A Viewer can read
-them; it can never write or delete them.
-
-Two consequences nobody had written down:
-
-- **The one unrecoverable secret in this estate now exists in two Infisical
-  projects**, so it has two grant surfaces and two places to update on rotation.
-  Rotating the keystore means both — and the copy in `wird-8k-fc` is the one CI
-  signs with, so missing it means release builds keep using the old key while
-  `infra-bootstrap-1-ge1` says otherwise.
-- `WIRD_MODELS_S3_ACCESS_KEY` / `_SECRET` are duplicated the same way, which is
-  the trade `STT_TOKEN_FLEET` already documents above: two copies to rotate,
-  because an identity's grant is per project and a `secretsScope` narrows a sync
-  rather than a grant.
-
-**Therefore the separate-project upgrade path is current work, not a
-contingency.** Moving the three `/ios` rows into their own project, with
-`wird-ipa` a Viewer there and no grant on `wird-8k-fc`, needs no paid plan and
-takes the keystore out of the reach of a token that a third-party GitHub Action
-holds during every tagged release. Pending rows that would widen this further if
-added to `/` rather than their own project: the Play upload key
-(`WIRD_ANDROID_UPLOAD_*`) and `PLAY_SERVICE_ACCOUNT_JSON`, neither present as of
-this listing.
-
-| Project | Slug / ID | Secrets | Consumed by |
-| --- | --- | --- | --- |
-| pgweb | `pgweb-p9-hy` | `DATABASE_URL` (pre-existing) | `gitops/platform/values/pgweb/values.yaml` (`infisical.enabled`) |
-| searxng | `searxng-l-dwt` / `5af3f87b-6d31-4c67-a8f2-435653a57412` | `SEARXNG_SECRET_KEY` | `gitops/platform/values/searxng/values.yaml` (InfisicalSecret, `template:`-rendered) |
-| actions-runner | `actions-runner-x-qbo` / `b9043dd5-2956-43e4-9f1b-e9bf7a8e1edc` | `ACCESS_TOKEN` (GitHub fine-grained PAT, `Administration: Read and write`, **the repo owner's** — registers/deregisters self-hosted runners via the Actions runners API). Scoped to `vos-monolith` **+ `editable-blog` + `agent-fleet`** — shared by the in-cluster runner and every runner instance on the `build-runner` LXC, so revoking it stops `oneOffJobs` as well as image builds. Widening this list is a **GitHub UI action**: `gh` cannot edit a fine-grained PAT's scopes, and a repo missing from it makes `build-runner-configure.yml`'s registration-token task fail with a 403 that reads like a bad token rather than a missing repo. It cannot be a bot's: runner registration needs the repo `admin` role, and personal-account repos have only owner + write-collaborator, with granular roles being an organization feature (ADR-0034) | `gitops/platform/actions-runner/infisicalsecret.yaml` → `deployment.yaml`'s `envFrom`; and `ansible/playbooks/build-runner-configure.yml`, which reads it **on the control machine only** — it mints a 1-hour registration token via the GitHub API and sends that to the LXC, so the PAT itself never lands on the build box that executes app-repo `Dockerfile`s |
-| agent-fleet | `agent-fleet-nygh` / `ae771c2c-5115-452a-8f1c-1e03fa0e2b9a` | `DISCORD_BOT_TOKEN`; `DISCORD_TRIGGER_CHANNEL_ID` (not secret, kept here anyway — one source of truth instead of splitting config between Infisical and gitops); `CLAUDE_CODE_OAUTH_TOKEN` (Claude Code authenticates via OAuth token here, not a raw Anthropic API key — mint with `claude setup-token`); `GH_TOKEN` (dedicated bot GitHub account, added as a collaborator on `dream-analyst`/`vos-monolith` — a deliberate deviation from ADR-0025's shared-PAT convention, Mohammad's explicit choice for this fleet; `gh auth setup-git` wires it into git's credential helper for push, and `gh pr create` reads it directly, so one token covers both); `AGENTFLEET_DB_HOST`/`_PORT`/`_NAME`/`_USER`/`_PASSWORD` (Pigsty `pg-proxmox` cluster, `dbuser_agentfleet`/`agentfleetdb` — **applied for real 2026-07-30**, verified via a live connection + schema apply); `REDIS_HOST`/`_PORT`/`REDIS_MAIN_PASSWORD` (shared Pigsty Redis, duplicated from the existing value); `DOCKERHUB_USERNAME`/`DOCKERHUB_TOKEN` (also pulled into agent-fleet's own CI via a dedicated read-only `INFISICAL_TOKEN` service token — see `docker.yml`) | `agent-fleet/k8s/core.yaml` (`infisical.enabled`, self-contained in the agent-fleet repo since 2026-07-31 — see `gitops/apps/registry.yaml`) and `agent-fleet/k8s/provisioner/infisicalsecret.yaml` (`GH_TOKEN` only, as of agent-fleet's docs/adr/0019 — the provisioner owns the shared workspace PVC's git clone/fetch lifecycle now, `dream-analyst-worker`/`vos-monolith-worker` no longer exist as their own Applications); `agent-fleet/.github/workflows/docker.yml` |
-| wird (iOS release + APK signing) | `wird-8k-fc` / `4da1abaa-3a51-4fed-9329-1b164f3c67cd` | **In a folder, `/ios`** — the first per-app project here to use one, and a deliberate contrast with this project's root-only rule (see the top of this file). Three rows, written by the operator 2026-10-04 (Wird PR #37, its ADR-0028): `ASC_KEY_P8` — the App Store Connect API key as **raw .p8 PEM text, not base64**, because `ipa.yml` writes it back verbatim to `AuthKey_<id>.p8`; `ASC_KEY_ID`; `ASC_ISSUER_ID` (issuer UUID). **The key must hold the App Store Connect `Admin` role** — Xcode cloud signing (`-allowProvisioningUpdates` with an API key) refuses anything lower, so this is not over-granting that can be trimmed. Rotation: revoke in App Store Connect → Users and Access → Integrations → Team Keys, create a new key, overwrite all three rows together (the id and issuer change with the key). Unlike the Android keystore two tables up, **losing these costs nothing permanent** — a new key can always be issued | Wird's `.github/workflows/ipa.yml` on a `macos-26` runner, via `Infisical/secrets-action` with `secret-path: /ios` |
-| **platform-commons** | `platform-commons-76pb` / `a01a7840-5ec3-465c-9727-667966109222` | Values genuinely needed by **more than one** consumer, read via `common-app-chart`'s `sharedSecrets.keys` (ADR-0049). `REDIS_URL` for the shared Pigsty Redis (`redis.bnei.lan:6379`) — the same credential `REDIS_MAIN_PASSWORD` carries at the project root for ArgoCD's `externalRedis` and that `agent-fleet-nygh` duplicates; `REGISTRY_USERNAME`/`REGISTRY_PASSWORD`, the **plaintext** counterpart of `ZOT_HTPASSWD`, for CI to `buildah login` with. **Read the warning:** because an `InfisicalSecret` grant is project-wide, the key list in an app's `values.yaml` is *not* an access boundary — any app that opts in can name `REGISTRY_PASSWORD` and receive it, and an app that can push to the registry can overwrite `latest` for any image the nodes then pull anonymously and unverified. Accepted deliberately (one project, one grant) and recorded in ADR-0049's Consequences; do not add a key here casually. Note `envSlug` is fixed at `dev` in the template — commons is environment-independent on purpose, even for apps like `editable-blog` whose own project is on `staging` | `gitops/platform/common-app-chart/templates/shared-infisicalsecret.yaml`, rendered into `<release>-commons` whenever an app sets `sharedSecrets.keys` |
-| ukubi-stt | `ukubi-stt-bhr-m` / `639e5437-3257-4694-8d73-dae647717b18` | **One token per client**, `STT_TOKEN_<NAME>` — `STT_TOKEN_DREAMER` (dream-analyst), `STT_TOKEN_FLEET` (agent-fleet `core`), plus the legacy `STT_AUTH_TOKEN`, which the service still accepts under the client name `default` so the browser test page at `stt.bnei.dev` keeps working. Each is 384 bits from `openssl rand -base64 48`, URL-safe alphabet, **generated not chosen**: rate limiting is per-IP with no failed-auth lockout, so a short token is brute-forceable from many source IPs, and `stt.bnei.dev` is in CT logs minutes after issuance. The service logs the matched client name (`client=dreamer`) on every request, which is the only reason a leak can be attributed to one consumer instead of all of them — see ADR-0044 Decision 5 as amended. **`STT_TOKEN_FLEET` is duplicated into `agent-fleet-nygh` / `ae771c2c-5115-452a-8f1c-1e03fa0e2b9a`** rather than granted cross-project: an `InfisicalSecret` syncs a whole project env, so pointing fleet at `ukubi-stt-bhr-m` would have put `REGISTRY_PASSWORD` in its namespace — that exact mistake was made and reverted for dream-analyst. Two copies to rotate is the price; a `secretsScope` narrows the sync but not the identity's read grant. **Rotating any of these restarts the pod** (`autoReload: true`) and drops every in-flight streaming session — the encoder cache is in-memory in a single replica, so a dictation in progress silently resumes mid-sentence in a fresh session. Browser clients hold their token in `localStorage` and must ship a 401 handler that clears it and re-prompts; the two backend consumers hold theirs server-side and are unaffected. Note the registry credential for this repo is **not** here: like every build repo it is a native GitHub Actions secret (`REGISTRY_PASSWORD`), for the reason recorded against `ZOT_HTPASSWD` above | `ukubi-stt`'s `helm/values.yaml` (`infisical.enabled`, `projectSlug: ukubi-stt-bhr-m`); `agent-fleet`'s `k8s/core.yaml` via its own project's `envFrom` |
+**Still true after the split, and worth its own line:** the Android release
+keystore exists in **two** Infisical projects — the original at
+`infra-bootstrap-1-ge1` root and the CI copy at `wird-8k-fc` root. Rotation must
+update both, and the `wird-8k-fc` copy is the one releases are signed with, so
+missing it leaves builds on the old key while this file says otherwise — silent
+until an installed app refuses an update. `WIRD_MODELS_S3_*` is duplicated the
+same way, the trade `STT_TOKEN_FLEET` already documents above.
 
 ## SSH access (per-host)
 
