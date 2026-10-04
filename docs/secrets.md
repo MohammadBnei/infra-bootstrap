@@ -166,6 +166,13 @@ Store Connect rows. Verified by listing on 2026-10-04 — `wird-ios-b5-qc` root 
 exactly `ASC_KEY_P8`, `ASC_KEY_ID`, `ASC_ISSUER_ID`, and `wird-8k-fc` has no
 `/ios` folder any more.
 
+**VERIFIED BY USE, 2026-10-04.** Wird `ipa.yml` run 37231870247 on tag `v0.0.12`
+completed `success` through `Upload to App Store Connect`, with the three
+Infisical steps green. That is end-to-end proof of the OIDC subject binding (in
+its immutable form), the audience, and the Viewer grant on `wird-ios-b5-qc` —
+a release was signed and uploaded with keys read through it. Note what it does
+**not** prove: see the revocation note below.
+
 **Why the split happened, kept because the reasoning outlives it.** Until
 2026-10-04 the ASC rows were a folder in `wird-8k-fc`, whose root holds a **copy
 of the Android release keystore** — the one unrecoverable secret in this estate.
@@ -184,10 +191,14 @@ UI under `wird-8k-fc` → Access Control → Identities, and `wird-ipa` appearin
 there means the containment is aspirational rather than real.
 
 **A successful `ipa.yml` run does NOT confirm the revocation**, which is the
-natural mistake to make: a Viewer grant on `wird-8k-fc` is not needed to read
-`wird-ios-b5-qc`, so the workflow succeeds either way. A green run confirms the
-OIDC subject binding and the Viewer grant on the **new** project, nothing about
-the old one. The two facts need two different checks.
+natural mistake to make and is why these two facts are recorded at different
+evidence levels. A Viewer grant on `wird-8k-fc` is not needed to read
+`wird-ios-b5-qc`, so the workflow succeeds either way — run 37231870247 proves
+the new project's grant and the subject, and says nothing about the old one.
+Status as of 2026-10-04: new project **verified by use**, old grant **removed per
+the operator, unverified**. The second needs the UI check above, and until
+someone does it the keystore copy in `wird-8k-fc` should be treated as still
+reachable by this identity.
 
 `wird-8k-fc` keeps the APK side: the four keystore rows, `WIRD_MODELS_S3_*`, and
 (planned) the Play upload key `WIRD_ANDROID_UPLOAD_*` plus
