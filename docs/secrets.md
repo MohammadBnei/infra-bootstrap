@@ -181,8 +181,10 @@ holds that token during every tagged release. An earlier revision of this file
 claimed it could not, reasoning from the original rows in
 `infra-bootstrap-1-ge1` without checking the second copy; the listing settled it.
 
-**The revocation that completes it: done 2026-10-04 per the operator, and
-deliberately recorded as attributed rather than verified.** `wird-ipa` had to be
+**The revocation that completes it: done and VERIFIED 2026-10-04** by listing
+`wird-8k-fc`'s identity memberships (`GET
+/api/v2/workspace/4da1abaa-3a51-4fed-9329-1b164f3c67cd/identity-memberships`,
+names and roles only) — `wird-ipa` is absent. `wird-ipa` had to be
 *removed* from `wird-8k-fc` — adding it to the new project does not take the old
 grant away, and until the grant was gone the split changed nothing about
 reachability. Infisical's CLI exposes secrets, not identity grants, so neither
@@ -195,10 +197,45 @@ natural mistake to make and is why these two facts are recorded at different
 evidence levels. A Viewer grant on `wird-8k-fc` is not needed to read
 `wird-ios-b5-qc`, so the workflow succeeds either way — run 37231870247 proves
 the new project's grant and the subject, and says nothing about the old one.
-Status as of 2026-10-04: new project **verified by use**, old grant **removed per
-the operator, unverified**. The second needs the UI check above, and until
-someone does it the keystore copy in `wird-8k-fc` should be treated as still
-reachable by this identity.
+Status as of 2026-10-04: new project **verified by use**, old grant **verified
+removed by listing the memberships**. Both facts now stand on evidence rather
+than report.
+
+**WHO ELSE CAN READ THE KEYSTORE COPY — three identities, and two of them have no
+reason to.** The same membership listing shows `wird-8k-fc` granting **Viewer** to:
+
+| Identity | What it is | Needs the keystore? |
+|---|---|---|
+| `wird-ci-github` (`21b8fe87…`) | `apk.yml`'s own identity | **Yes** — it signs the APK/AAB |
+| `ci-oidc` (`19807471-d73a-48d4-9e58-1dc34255ef77`) | the **shared platform-commons CI identity**, documented at `ansible/playbooks/build-runner-configure.yml:51` | No |
+| `k8s-cluster` (`69e0aed6…`) | the cluster's Infisical identity | No |
+
+Neither can write or delete — Viewer is read-only — but either being compromised
+exposes the one unrecoverable secret in this estate, and neither needs it:
+
+- **`ci-oidc` is worse than one identity.** Its `boundClaims.repository` is a
+  comma-separated **repo list**, so every repository named there can authenticate
+  as it from a workflow and read this project. The blast radius is "any build
+  repo on the list", not "one CI job", and the list grows whenever a build repo is
+  added — see that playbook's comment, which already records this identity as the
+  gate new build repos must be added to.
+- **`k8s-cluster`'s grant appears entirely unused.** Nothing in this repo
+  references `wird-8k-fc` (grep across `gitops/`, `ansible/`, `bin/`,
+  `terraform/`: no hits), and Wird's own charts take their secrets by
+  `envFrom: secretRef` from Secrets this repo builds out of
+  `infra-bootstrap-1-ge1` — its `helm/values.yaml` says explicitly that it does
+  **not** use `infisical.enabled` with a projectSlug. `WIRD_MODELS_S3_*` is read
+  from the root project, not from here. So this is a grant with no consumer on the
+  project holding the keystore.
+
+**Options, for the maintainer rather than an agent.** Revoking `k8s-cluster` looks
+free on the evidence above and should be confirmed against Wird's deploy path
+first. `ci-oidc` is load-bearing for build repos generally, so the move there is
+to separate the rows rather than the grant: either the four keystore rows go into
+a project only `wird-ci-github` reads, or `WIRD_MODELS_S3_*` and the planned Play
+rows go elsewhere and `wird-8k-fc` becomes keystore-only with a single member.
+The first is the smaller change and leaves `apk.yml` as the only reader of the
+unrecoverable secret.
 
 `wird-8k-fc` keeps the APK side: the four keystore rows, `WIRD_MODELS_S3_*`, and
 (planned) the Play upload key `WIRD_ANDROID_UPLOAD_*` plus
