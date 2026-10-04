@@ -120,9 +120,44 @@ and `wird-8k-fc` are read by GitHub Actions, through identities that are not
 | Auth method | **OIDC** — the first identity in this estate that is not universal-auth, so it has no client id/secret to leak or rotate |
 | Discovery / issuer | `https://token.actions.githubusercontent.com` |
 | Audience | `infisical.bnei.dev` |
-| Subject | `repo:MohammadBnei/wird:ref:refs/tags/v*` — a **pattern**, because every release carries a new tag. A subject pinned to one ref would break on the next release |
+| Subject | `repo:MohammadBnei@43962695/wird@1382108678:ref:refs/tags/v*` — note the numeric ids, and see the immutable-subject trap below. A **pattern**, because every release carries a new tag; a subject pinned to one ref would break on the next release. Our Infisical (v0.159.28) supports globs in `subject`/`audiences`/`claims`, so the wildcard is not the fragile part |
 | Wired in Wird as | repo *variables* (not secrets) `INFISICAL_IPA_IDENTITY_ID` and `INFISICAL_IPA_PROJECT_SLUG=wird-ios-b5-qc` |
 | Project role | **Viewer** on `wird-ios-b5-qc` |
+
+**THE IMMUTABLE-SUBJECT TRAP, and it costs a release to learn.** GitHub can issue
+OIDC tokens whose subject uses *immutable numeric ids* instead of names, and
+`MohammadBnei/wird` has that enabled. Its real subject is
+
+```
+repo:MohammadBnei@43962695/wird@1382108678:ref:refs/tags/v0.0.12
+```
+
+not `repo:MohammadBnei/wird:ref:refs/tags/v0.0.12`. An identity configured with
+the name form fails with:
+
+```
+##[error]Access denied: OIDC subject not allowed.
+##[error]Request failed with status code 403
+```
+
+— which is **misleading**, because the same log shows `identity-id`,
+`oidc-audience` and `project-slug` all correct, so the obvious suspects are all
+innocent (first hit: Wird `ipa.yml` run 37231870247 on v0.0.12).
+
+It is **per repository**, not per account, so it must be checked rather than
+assumed:
+
+```bash
+gh api repos/<owner>/<repo>/actions/oidc/customization/sub
+```
+
+Verified 2026-10-04: `MohammadBnei/wird` → `use_immutable_subject: true`,
+prefix `repo:MohammadBnei@43962695/wird@1382108678`; `MohammadBnei/infra-bootstrap`
+→ `false`, prefix `repo:MohammadBnei/infra-bootstrap`. So **any new GitHub OIDC
+identity in this estate needs that command run against its own repo first**, and
+a subject copied from another repo's row here will be wrong in one of the two
+directions. The numeric ids are the point of the feature — they survive a rename,
+where the name form silently starts matching a different repository.
 
 **Viewer, not a folder-scoped custom role, because Infisical's free plan has no
 custom roles.** That is why the containment is a project boundary instead: a
@@ -139,14 +174,20 @@ holds that token during every tagged release. An earlier revision of this file
 claimed it could not, reasoning from the original rows in
 `infra-bootstrap-1-ge1` without checking the second copy; the listing settled it.
 
-**The remaining step is a revocation, and it is not verifiable from this repo.**
-`wird-ipa` must be *removed* from `wird-8k-fc`; adding it to the new project does
-not take the old grant away. Until that is done the split has changed nothing
-about reachability — the identity can still read the keystore copy. Infisical's
-CLI exposes secrets, not identity grants, so this file cannot confirm it: check
-it in the Infisical UI under `wird-8k-fc` → Access Control → Identities, and if
-`wird-ipa` is listed there, the containment above is aspirational rather than
-real.
+**The revocation that completes it: done 2026-10-04 per the operator, and
+deliberately recorded as attributed rather than verified.** `wird-ipa` had to be
+*removed* from `wird-8k-fc` — adding it to the new project does not take the old
+grant away, and until the grant was gone the split changed nothing about
+reachability. Infisical's CLI exposes secrets, not identity grants, so neither
+this repo nor the agents working on it can confirm it; the check is the Infisical
+UI under `wird-8k-fc` → Access Control → Identities, and `wird-ipa` appearing
+there means the containment is aspirational rather than real.
+
+**A successful `ipa.yml` run does NOT confirm the revocation**, which is the
+natural mistake to make: a Viewer grant on `wird-8k-fc` is not needed to read
+`wird-ios-b5-qc`, so the workflow succeeds either way. A green run confirms the
+OIDC subject binding and the Viewer grant on the **new** project, nothing about
+the old one. The two facts need two different checks.
 
 `wird-8k-fc` keeps the APK side: the four keystore rows, `WIRD_MODELS_S3_*`, and
 (planned) the Play upload key `WIRD_ANDROID_UPLOAD_*` plus
