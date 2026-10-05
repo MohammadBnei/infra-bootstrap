@@ -126,7 +126,11 @@ metrics:
         # (Deliberately no attempt count here: Traefik documents the 30-day
         # threshold but not its check interval, so any number would be a guess.)
         - alert: TraefikCertExpiringSoon
-          expr: "(traefik_tls_certs_not_after - time()) < 21 * 24 * 3600"
+          # max by (cn, sans): Traefik never drops the gauge series of a
+          # superseded cert (new serial = new label set) until the pod
+          # restarts, so a successfully renewed host kept firing off its old
+          # serial. Only the newest cert per host counts.
+          expr: "(max by (cn, sans) (traefik_tls_certs_not_after) - time()) < 21 * 24 * 3600"
           # A scrape gap or a Traefik restart mid-reload must not page.
           for: 1h
           labels:
@@ -138,7 +142,7 @@ metrics:
           annotations:
             summary: "TLS certificate for {{ $labels.cn }} expires in under 21 days"
             description: >-
-              Traefik has not renewed {{ $labels.cn }} (serial {{ $labels.serial }}).
+              Traefik has not renewed {{ $labels.cn }} (newest cert expires within 21 days).
               Check CF_DNS_API_TOKEN first — ADR-0038 put every host in both
               zones behind that one token, so its revocation or expiry looks
               exactly like this. Then check the `le` / `le-dns` resolver logs
