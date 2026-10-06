@@ -52,8 +52,8 @@ Thumbs.db
 *.swo
 *~
 
-# graphify
-graphify-out/
+# CodeGraph local index (28M, regenerable via `codegraph init`)
+.codegraph/
 
 # kubespray credentials_dir (= inventory/<name>/credentials) — ADR-0040.
 # kubespray writes generated secrets here as *.creds via lookup('password', ...):
