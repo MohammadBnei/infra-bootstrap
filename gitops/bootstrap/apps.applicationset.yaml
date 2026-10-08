@@ -152,15 +152,6 @@ spec:
         valuesPath: [helm/adminweb-values.yaml]
         targetRevision: main
         hostname: wird-admin.bnei.dev
-      # hq: M BN's personal dashboard (ADR-0053). No forwardAuth — the app does
-      # OIDC bearer auth itself, see gitops/apps/registry.yaml's entry.
-      - name: hq
-        namespace: hq
-        syncWave: "10"
-        repoURL: https://github.com/MohammadBnei/hq.git
-        valuesPath: [app/helm/values.yaml]
-        targetRevision: main
-        hostname: hq.bnei.dev
   template:
     metadata:
       name: '{{.name}}'
