@@ -281,6 +281,32 @@
   targetRevision: main
   hostname: wird-admin.bnei.dev
 
+# hq: M BN's personal dashboard (ADR-0053) — a Go server with an embedded
+# Svelte SPA, an inbox of edits and comments in Postgres, and an MCP endpoint
+# at /mcp that Claude Code and claude.ai drain. hq's own docs/adr/0001 is the
+# app-side decision.
+#
+# NO forwardAuth middleware, unlike has-journal. The app authenticates every
+# request itself, as an OIDC client of authentik (authentik-blueprint-hq.yaml),
+# because /mcp is called by non-browser clients carrying a bearer token, and a
+# forwardAuth gate in front of them would answer with a login redirect. The
+# baseline chain (origin lock, rate limit, headers) still applies — hq's values
+# must not set ingress.baseline.enabled: false.
+#
+# DATABASE_URL comes from gitops/bootstrap/hq-secret.yaml as the Secret
+# `hq-config`, assembled from DBUSER_HQ_PASSWORD — wird's arrangement, for
+# wird's reasons (see the wird entry above). hq's values pick it up by envFrom.
+#
+# valuesPath is under app/ because the repo is mostly markdown; the app lives in
+# a subdirectory. Image tag bumped by hq's own CI on the build-runner LXC.
+- name: hq
+  namespace: hq
+  syncWave: "10"
+  repoURL: https://github.com/MohammadBnei/hq.git
+  valuesPath: [app/helm/values.yaml]
+  targetRevision: main
+  hostname: hq.bnei.dev
+
 # searxng and pgweb are NOT here: they're public-image tools with no
 # app-specific code, so they're driven as platform apps instead — see
 # gitops/bootstrap/platform-common-apps.applicationset.yaml and
