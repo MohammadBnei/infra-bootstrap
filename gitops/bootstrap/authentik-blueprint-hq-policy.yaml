@@ -30,12 +30,12 @@ data:
       labels:
         blueprints.goauthentik.io/instantiate: "true"
     entries:
-      # platform-admins, not a new group: hq is M BN's own dashboard, and
-      # platform-admins is the group that already means "the operator".
+      # platform-admins, not a new group: hq is a private dashboard for the
+      # operator, and platform-admins is the group that already means that.
       # Membership is in authentik-blueprint-groups.yaml — and it is not only
       # M BN: the wird-agent service account was added in #270. It cannot
-      # complete an interactive authorization_code flow, and explicit consent
-      # would stop it if it could, but it is a member.
+      # complete an interactive authorization_code flow, and hq's
+      # always-require consent would stop it if it could, but it is a member.
       - model: authentik_policies.policybinding
         identifiers:
           target: !Find [authentik_core.application, [slug, hq]]
@@ -48,6 +48,12 @@ data:
       # writes a policy_id = NULL row that PolicyEngine.build() drops — PKCE
       # silently unenforced. !KeyOf resolves within this file only, so the local
       # declaration is what buys the loud failure.
+      #
+      # THREE COPIES, KEEP THEM IN STEP: this expression's code, comments
+      # aside, matches wird-require-pkce (authentik-blueprint-wird-policy.yaml) and
+      # hermes-require-pkce (authentik-blueprint-hermes-policy.yaml). A fix to
+      # one is a fix to all three; a missed copy leaves that app's PKCE gate
+      # broken with nothing logged.
       - model: authentik_policies_expression.expressionpolicy
         id: hq-require-pkce
         identifiers:

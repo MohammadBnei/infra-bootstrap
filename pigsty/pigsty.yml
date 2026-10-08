@@ -262,12 +262,16 @@ all:
           # it is a Go/pgx server dialing 5432 direct; dbrole_readwrite because
           # owning hqdb is what lets it DDL.
           #
-          # connlimit: 5 — one reader, an MCP drain now and then. It shares this
-          # instance with authentik, and a runaway hq hits its own ceiling first.
+          # connlimit: 20 — wird's ceiling, and not 5 for a measured reason:
+          # pgxpool's default MaxConns is max(4, runtime.NumCPU()), so one pod on
+          # an 8-CPU node already wants 8, and a RollingUpdate runs two pods at
+          # once. Below that, the pool fails with `too many connections for role`
+          # on a busy page load. Still a ceiling that stops a runaway hq before
+          # it exhausts the pool authentik's logins depend on.
           - name: dbuser_hq
             password: 'SCRAM-SHA-256$4096:f9StBERwjkV16AIkqfs/Ng==$22EZmuKthKL3DeMvYjqMtUpnjxWfCRtcFsD5cqrYTHI=:1YJojhjgOZEffijxC3hMud9/EVIwEtnYhFkR0URYiuM='
             pgbouncer: false
-            connlimit: 5
+            connlimit: 20
             comment: hq — personal dashboard, inbox of edits and comments (ADR-0053)
             roles: [dbrole_readwrite]
 

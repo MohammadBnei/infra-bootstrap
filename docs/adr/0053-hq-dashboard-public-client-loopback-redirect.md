@@ -1,8 +1,10 @@
 # ADR-0053: `hq.bnei.dev` — a public OIDC client for an SPA and MCP clients, and its loopback-redirect exception to ADR-0050
 
-**Status:** Accepted — decided 2026-10-08, approved by M BN. Manifests on the
-first PR: the app registration, `hqdb`/`dbuser_hq` in `pigsty/pigsty.yml`, the
-provider and its policy, and the database Secret. **Not yet live:**
+**Status:** Accepted — decided 2026-10-08, approved by M BN. Shipped in two
+PRs: the authentik client, its own consent flow and policy, and
+`hqdb`/`dbuser_hq` first, so hq's OAuth spike can run before any app exists;
+the app registration, build runner and database Secret later, with hq's first
+build. **Not yet live:**
 `DBUSER_HQ_PASSWORD` exists in Infisical (2026-10-08), but the role and the
 database wait on the Pigsty playbook runs, and the Claude Code loopback and
 claude.ai connector callback are **not registered yet** — both wait on hq's
@@ -16,11 +18,9 @@ hq's own `docs/adr/0001-hq-dashboard.md` (the app-side decision)
 
 ## Context
 
-hq is M BN's personal dashboard. It is a Go server with an embedded Svelte SPA
-at `hq.bnei.dev`. It renders the hq repo's vision, project map and weekly
-reviews. Edits and comments made in the browser land in Postgres as an inbox.
-An MCP endpoint at `/mcp` lets Claude Code and claude.ai connectors drain that
-inbox.
+hq is a private dashboard for M BN: a Go server with an embedded Svelte SPA
+at `hq.bnei.dev`, a Postgres inbox written from the browser, and an MCP
+endpoint at `/mcp` that Claude Code and claude.ai connectors drain.
 
 That puts three kinds of caller on one host:
 
@@ -64,13 +64,23 @@ user interaction. Claude Code needs exactly that kind of redirect.
    until hq's spike fixes the port and the URL. Each one, when added, is a
    reviewed one-line change to the blueprint.
 
-3. **Explicit consent is the compensating control.** The provider uses
-   `default-provider-authorization-explicit-consent`. It is the first provider
-   on this cluster to do so; wird and hermes use implicit consent. A consent
-   screen puts M BN in the loop on every new grant. That is the control whose
-   absence ADR-0050 Decision 2 described: a crafted link can no longer finish
-   silently. It costs one click per new client, and refresh tokens (validity
-   `days=90`, threshold `days=3`) keep that rare.
+3. **A consent screen on every authorization is the compensating control,
+   and it needs hq's own flow.** The stock
+   `default-provider-authorization-explicit-consent` flow does **not** provide
+   it. Its consent stage runs in mode `expiring` (four weeks), and
+   `UserConsent` is keyed on user and application, not on redirect URI
+   (checked against 2026.8.0's source). Under it, one SPA login records
+   consent for hq, and a crafted loopback link then completes silently for
+   four weeks. So `authentik-blueprint-hq.yaml` declares its own flow,
+   `hq-authorization`, bound to its own consent stage with
+   `mode: always_require`. Its own, rather than retuning the shared stage,
+   which would change consent for every app using it. The provider references
+   it with `!KeyOf`, so a miss fails the blueprint loudly.
+
+   The cost is a click at **every** authorization, SPA logins included.
+   Refresh tokens (validity `days=90`, threshold `days=3`) keep that rare.
+   Relaxing the mode to cut the clicks removes the control; that change needs
+   this ADR amended first.
 
 4. **PKCE S256 and the access binding live in their own file,
    `authentik-blueprint-hq-policy.yaml`**, following the hermes convention
@@ -94,7 +104,7 @@ user interaction. Claude Code needs exactly that kind of redirect.
 
 7. **Database: Wird's pattern.**
    - `dbuser_hq` owns `hqdb`.
-   - Role settings: `dbrole_readwrite`, `connlimit: 5`, `pgbouncer: false`
+   - Role settings: `dbrole_readwrite`, `connlimit: 20`, `pgbouncer: false`
      (pgx and server-side prepared statements).
    - Only the SCRAM verifier is committed. The plaintext lives in Infisical as
      `DBUSER_HQ_PASSWORD`.
@@ -107,8 +117,9 @@ user interaction. Claude Code needs exactly that kind of redirect.
 - MCP clients need the `client_id` configured by hand. If claude.ai's
   connector cannot take a pre-registered client id, this design does not reach
   it. hq's spike exists to find that out before the redirect lands.
-- M BN clicks a consent screen on each new grant. That is the price of the
-  loopback, paid on purpose.
+- M BN clicks a consent screen at every authorization, including each SPA
+  login once its refresh token lapses. That is the price of the loopback, paid
+  on purpose.
 - `platform-admins` also contains the `wird-agent` service account (#270). It
   cannot complete an interactive code flow, and consent would stop it if it
   could. A dedicated group is the upgrade path if that group grows.

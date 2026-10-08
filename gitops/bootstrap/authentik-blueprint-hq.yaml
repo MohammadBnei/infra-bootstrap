@@ -1,4 +1,4 @@
-# hq's OIDC provider — M BN's personal dashboard at hq.bnei.dev (ADR-0053).
+# hq's OIDC provider — a private dashboard for M BN at hq.bnei.dev (ADR-0053).
 #
 # PUBLIC CLIENT, and the third one here. ADR-0050's test applies to two of its
 # three callers: the Svelte SPA (a JS bundle) and Claude Code (a CLI on a
@@ -17,12 +17,13 @@
 #      yet — both are waiting on hq's spike — and when they land, the localhost
 #      one is ADR-0053's exception to ADR-0050 Decision 2.
 #   2. PKCE S256, enforced by authentik-blueprint-hq-policy.yaml.
-#   3. EXPLICIT consent, unlike wird and hermes. This is the control that
-#      makes a localhost redirect tolerable: with implicit consent, a crafted
-#      /authorize link plus anything listening on that port yields a code with
-#      no user interaction (the reason authentik-blueprint-wird.yaml refuses
-#      localhost outright). A consent screen puts M BN in the loop on every
-#      new grant.
+#   3. A consent screen on EVERY authorization, unlike wird and hermes. This
+#      is the control that makes a localhost redirect tolerable: without it, a
+#      crafted /authorize link plus anything listening on that port yields a
+#      code with no user interaction (the reason authentik-blueprint-wird.yaml
+#      refuses localhost outright). hq has its OWN flow and consent stage,
+#      declared below, because the stock explicit-consent flow does not do
+#      this — see the entries' comment.
 #   4. Audience validation in hq's Go server. `signing_key` is the shared
 #      "authentik Self-signed Certificate", so a Grafana or Wird token verifies
 #      cleanly against hq's JWKS. The server MUST check aud == this client_id
@@ -50,6 +51,44 @@ data:
       labels:
         blueprints.goauthentik.io/instantiate: "true"
     entries:
+      # hq's OWN authorization flow, not default-provider-authorization-explicit-consent.
+      #
+      # The stock flow's consent stage runs in mode `expiring` (4 weeks), and
+      # UserConsent is keyed on user + APPLICATION, not on the redirect URI.
+      # Verified against 2026.8.0's source: blueprints/default/flow-default-
+      # provider-authorization-explicit-consent.yaml sets `mode: expiring`, and
+      # stages/consent/models.py's UserConsent has only user/application FKs.
+      # So under the stock flow, one SPA login records consent for hq, and for
+      # the next four weeks a crafted /authorize link to the loopback redirect
+      # completes silently — exactly what header point 3 is supposed to stop.
+      # Retuning that shared stage would also change it for every app using it.
+      #
+      # always_require: stages/consent/stage.py's should_always_prompt() is
+      # true for this mode, so no stored consent is ever consulted. The cost is
+      # a click at every authorization, SPA logins included. Refresh tokens
+      # (days=90 below) are what keep that rare; do NOT relax this mode to cut
+      # the clicks — that removes the control, with nothing else noticing.
+      - model: authentik_flows.flow
+        id: hq-authorization-flow
+        identifiers:
+          slug: hq-authorization
+        attrs:
+          name: hq authorization
+          title: Authorize hq
+          designation: authorization
+          authentication: require_authenticated
+      - model: authentik_stages_consent.consentstage
+        id: hq-consent-stage
+        identifiers:
+          name: hq-consent
+        attrs:
+          name: hq-consent
+          mode: always_require
+      - model: authentik_flows.flowstagebinding
+        identifiers:
+          target: !KeyOf hq-authorization-flow
+          stage: !KeyOf hq-consent-stage
+          order: 0
       - model: authentik_providers_oauth2.oauth2provider
         # `id` is what !KeyOf below resolves against. A typo does not fail
         # loudly — the blueprint logs and carries on.
@@ -94,11 +133,10 @@ data:
           # hq stores inbox rows against `sub`; User.email is mutable and not
           # unique.
           #
-          # EXPLICIT consent — header point 3. The one field that differs from
-          # wird and hermes, and the one that makes a loopback redirect
-          # acceptable later. Slug checked live: the flow executor answers 200
-          # for it and 404 for a nonexistent slug.
-          authorization_flow: !Find [authentik_flows.flow, [slug, default-provider-authorization-explicit-consent]]
+          # hq's own always-consent flow, declared above — header point 3.
+          # !KeyOf, not !Find: a miss fails this blueprint loudly instead of
+          # writing a provider with no authorization flow.
+          authorization_flow: !KeyOf hq-authorization-flow
           invalidation_flow: !Find [authentik_flows.flow, [slug, default-provider-invalidation-flow]]
           signing_key: !Find [authentik_crypto.certificatekeypair, [name, "authentik Self-signed Certificate"]]
           property_mappings:
@@ -119,4 +157,4 @@ data:
           # PKCE); at the MODE_ANY default, passing either alone grants access.
           policy_engine_mode: all
           meta_launch_url: https://hq.bnei.dev
-          meta_description: M BN's dashboard — vision, project map, weekly reviews, and an inbox Claude drains over MCP
+          meta_description: Private dashboard for M BN

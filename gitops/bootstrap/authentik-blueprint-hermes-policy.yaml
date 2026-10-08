@@ -67,6 +67,9 @@ data:
       # -wird-policy, so a cold rebuild is exactly when it would happen. !KeyOf
       # resolves only within one blueprint, so the local declaration is what buys
       # the loud failure.
+      # One of three copies with identical code — wird-require-pkce,
+      # hermes-require-pkce and hq-require-pkce in their own -policy files.
+      # Change all three together.
       - model: authentik_policies_expression.expressionpolicy
         id: hermes-require-pkce
         identifiers:

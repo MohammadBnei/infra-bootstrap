@@ -98,6 +98,9 @@ data:
       # This is enforceable only because views/authorize.py's
       # modify_policy_request() puts oauth_code_challenge and
       # oauth_code_challenge_method into the policy request context.
+      # One of three copies with identical code — wird-require-pkce,
+      # hermes-require-pkce and hq-require-pkce in their own -policy files.
+      # Change all three together.
       - model: authentik_policies_expression.expressionpolicy
         id: wird-require-pkce
         identifiers:
