@@ -6,9 +6,7 @@ PRs: the authentik client, its own consent flow and policy, and
 the app registration, build runner and database Secret later, with hq's first
 build. **Not yet live:**
 `DBUSER_HQ_PASSWORD` exists in Infisical (2026-10-08), but the role and the
-database wait on the Pigsty playbook runs, and the Claude Code loopback and
-claude.ai connector callback are **not registered yet** — both wait on hq's
-spike to settle the port and the URL.
+database wait on the Pigsty playbook runs.
 **Date:** 2026-10-08
 **Related:** [ADR-0050](0050-public-oidc-client-for-native-apps.md) (public
 clients, and the Decision 2 this makes an exception to),
@@ -57,12 +55,13 @@ user interaction. Claude Code needs exactly that kind of redirect.
    are configured with it, because there is no dynamic registration.
 
 2. **Exception to ADR-0050 Decision 2: one fixed-port loopback redirect.**
-   `http://localhost:<port>/callback` is registered with
-   `matching_mode: strict` on one fixed port. It is **never** a regex: a regex
-   over the port accepts every listener on the machine. The claude.ai
-   connector's callback is added alongside it, also strict. Both are omitted
-   until hq's spike fixes the port and the URL. Each one, when added, is a
-   reviewed one-line change to the blueprint.
+   `http://localhost:39871/callback`, Claude Code's `--callback-port` form,
+   registered with `matching_mode: strict`. It is **never** a regex: a regex
+   over the port accepts every listener on the machine. Alongside it, also
+   strict, is claude.ai's connector callback,
+   `https://claude.ai/api/mcp/auth_callback`. Both come from the vendors'
+   published docs. A client that sends `127.0.0.1` instead of `localhost`
+   gets a second strict entry, never a pattern.
 
 3. **A consent screen on every authorization is the compensating control,
    and it needs hq's own flow.** The stock

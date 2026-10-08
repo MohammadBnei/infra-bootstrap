@@ -12,10 +12,9 @@
 # HQ_OIDC_CLIENT_ID.
 #
 # WHAT REPLACES THE SECRET, same four controls as wird, one of them changed:
-#   1. Strict redirect URIs. ONE today, https://hq.bnei.dev/callback. The
-#      Claude Code loopback and the claude.ai connector callback are NOT here
-#      yet — both are waiting on hq's spike — and when they land, the localhost
-#      one is ADR-0053's exception to ADR-0050 Decision 2.
+#   1. Three strict redirect URIs: the SPA's, Claude Code's fixed-port
+#      loopback, and claude.ai's connector callback. The loopback is
+#      ADR-0053's exception to ADR-0050 Decision 2.
 #   2. PKCE S256, enforced by authentik-blueprint-hq-policy.yaml.
 #   3. A consent screen on EVERY authorization, unlike wird and hermes. This
 #      is the control that makes a localhost redirect tolerable: without it, a
@@ -104,15 +103,24 @@ data:
           # A list of OBJECTS, not strings, in 2026.x. The match is a fullmatch,
           # so a trailing slash or an appended query string is invalid_client.
           #
-          # TO ADD, once hq's spike settles them (ADR-0053):
-          #   - ONE fixed-port loopback for Claude Code, matching_mode: strict,
-          #     http://localhost:<port>/callback. Strict, not regex: a regex
-          #     over the port would accept any listener on the box.
-          #   - claude.ai's connector callback, strict, exactly as claude.ai
-          #     sends it.
+          # Every entry strict. Never a regex over the loopback port: that
+          # would accept any listener on the machine.
           redirect_uris:
+            # The SPA.
             - matching_mode: strict
               url: https://hq.bnei.dev/callback
+            # Claude Code with `--callback-port 39871`, which sends
+            # http://localhost:PORT/callback (code.claude.com/docs/en/mcp, "Use
+            # a fixed OAuth callback port"). `localhost`, not 127.0.0.1: only
+            # v2.1.229 sent the IP. A client that sends 127.0.0.1 fails here as
+            # invalid_client — add a second strict entry then, not a regex.
+            - matching_mode: strict
+              url: http://localhost:39871/callback
+            # claude.ai connectors, "Use your own OAuth client" with a blank
+            # secret (claude.com/docs/connectors/building/authentication,
+            # "Callback URLs").
+            - matching_mode: strict
+              url: https://claude.ai/api/mcp/auth_callback
           # Defaults to EMPTY, which permits nothing. Not optional. And never
           # client_credentials: there is no machine caller here, and a public
           # client has no secret to present for it anyway.
