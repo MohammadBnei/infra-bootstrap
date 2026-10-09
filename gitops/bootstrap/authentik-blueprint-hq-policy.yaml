@@ -1,0 +1,90 @@
+# Who may use the `hq` application, and the PKCE enforcement that makes its
+# public client safe. ADR-0053.
+#
+# SEPARATE FROM authentik-blueprint-hq.yaml, the hermes convention
+# (authentik-blueprint-hermes-policy.yaml): a blueprint applies as one
+# transaction and PolicyBinding.target is a required FK, so an unverified model
+# shape or a !Find miss on a not-yet-registered `hq` rolls back this file only —
+# the gate, not the provider. With core_default_app_access false, a missing
+# binding denies everyone, which is the visible failure direction.
+#
+# Two bindings, which is why authentik-blueprint-hq.yaml sets
+# `policy_engine_mode: all` on the application.
+#
+# Verify in the database, not the log — select the FKs explicitly, because the
+# NULL-FK row is the one that looks fine under SELECT *:
+#   psql -d authentik -tAc 'SELECT target_id, group_id, policy_id, enabled
+#                           FROM authentik_policies_policybinding'
+#
+# A plain ConfigMap: no credential to interpolate.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: authentik-blueprint-hq-policy
+  namespace: authentik
+data:
+  hq-policy.yaml: |
+    version: 1
+    metadata:
+      name: hq-policy
+      labels:
+        blueprints.goauthentik.io/instantiate: "true"
+    entries:
+      # platform-admins, not a new group: hq is a private dashboard for the
+      # operator, and platform-admins is the group that already means that.
+      # Membership is in authentik-blueprint-groups.yaml — and it is not only
+      # M BN: the wird-agent service account was added in #270. It cannot
+      # complete an interactive authorization_code flow, and hq's
+      # always-require consent would stop it if it could, but it is a member.
+      - model: authentik_policies.policybinding
+        identifiers:
+          target: !Find [authentik_core.application, [slug, hq]]
+          group: !Find [authentik_core.group, [name, platform-admins]]
+          order: 0
+        attrs:
+          enabled: true
+      # Declared here rather than reusing wird-require-pkce or
+      # hermes-require-pkce: !Find returns None when it matches nothing, which
+      # writes a policy_id = NULL row that PolicyEngine.build() drops — PKCE
+      # silently unenforced. !KeyOf resolves within this file only, so the local
+      # declaration is what buys the loud failure.
+      #
+      # THREE COPIES, KEEP THEM IN STEP: this expression's code, comments
+      # aside, matches wird-require-pkce (authentik-blueprint-wird-policy.yaml) and
+      # hermes-require-pkce (authentik-blueprint-hermes-policy.yaml). A fix to
+      # one is a fix to all three; a missed copy leaves that app's PKCE gate
+      # broken with nothing logged.
+      - model: authentik_policies_expression.expressionpolicy
+        id: hq-require-pkce
+        identifiers:
+          name: hq-require-pkce
+        attrs:
+          name: hq-require-pkce
+          # execution_logging left at the default (false): evaluated on every
+          # user-library refresh, not only at login.
+          expression: |
+            # THE GUARD IS NOT OPTIONAL. core/api/applications.py evaluates the
+            # same bindings with no OAuth request behind it to decide which
+            # tiles a user sees; unguarded, this returns False there and
+            # policy_engine_mode: all hides hq from the library while login
+            # still works.
+            #
+            # Key PRESENCE, not truthiness: modify_policy_request() always sets
+            # oauth_code_challenge at /authorize, to None when PKCE was skipped.
+            if "oauth_code_challenge" not in request.context:
+                return True
+            if not request.context["oauth_code_challenge"]:
+                ak_message("This application requires PKCE.")
+                return False
+            # authorize.py defaults the method to `plain` when it is omitted.
+            if request.context.get("oauth_code_challenge_method") != "S256":
+                ak_message("This application requires PKCE with S256.")
+                return False
+            return True
+      - model: authentik_policies.policybinding
+        identifiers:
+          target: !Find [authentik_core.application, [slug, hq]]
+          policy: !KeyOf hq-require-pkce
+          order: 1
+        attrs:
+          enabled: true

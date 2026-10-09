@@ -217,6 +217,18 @@ updated.
   own OIDC gate only. Accepted, because closing it needs a secret header or
   mTLS that the app cannot require. See
   [ADR-0051](docs/adr/0051-expose-hermes-dashboard.md).
+- **A loopback redirect on a public client needs consent on every
+  authorization** (ADR-0053, `hq.bnei.dev`). ADR-0050 bans `http://localhost`
+  redirects because, without consent, a crafted link plus a local listener
+  yields a code silently. hq's MCP clients (Claude Code) need one, so hq
+  registers a single fixed-port loopback — `strict`, never a regex over the
+  port — behind its **own** authorization flow whose consent stage is
+  `always_require`. The stock `default-provider-authorization-explicit-consent`
+  flow is not enough: its stage is `expiring` (four weeks) and consent is
+  remembered per user and application, so one login would silence every later
+  crafted link. authentik 2026.8 has no
+  dynamic client registration, so MCP clients are configured with the committed
+  `client_id`. See [ADR-0053](docs/adr/0053-hq-dashboard-public-client-loopback-redirect.md).
 - **Certificate renewal is one token, so it gets an alarm.** Since ADR-0038
   every host in both zones renews through a single `CF_DNS_API_TOKEN`; its
   revocation or expiry stops renewal everywhere with no error anyone sees, on a

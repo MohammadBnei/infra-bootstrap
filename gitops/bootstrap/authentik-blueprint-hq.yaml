@@ -1,0 +1,168 @@
+# hq's OIDC provider — a private dashboard for M BN at hq.bnei.dev (ADR-0053).
+#
+# PUBLIC CLIENT, and the third one here. ADR-0050's test applies to two of its
+# three callers: the Svelte SPA (a JS bundle) and Claude Code (a CLI on a
+# laptop) cannot hold a secret. claude.ai's connector could, but one client for
+# all three keeps a single `aud` for the Go server to pin.
+#
+# A plain ConfigMap, not an InfisicalSecret: a public client has no secret, and
+# the client_id below is committed deliberately — it ships in the SPA bundle
+# and in every MCP client's config, so treating it as a secret would be
+# theatre. docs/secrets.md says the same, in the row explaining why there is no
+# HQ_OIDC_CLIENT_ID.
+#
+# WHAT REPLACES THE SECRET, same four controls as wird, one of them changed:
+#   1. Three strict redirect URIs: the SPA's, Claude Code's fixed-port
+#      loopback, and claude.ai's connector callback. The loopback is
+#      ADR-0053's exception to ADR-0050 Decision 2.
+#   2. PKCE S256, enforced by authentik-blueprint-hq-policy.yaml.
+#   3. A consent screen on EVERY authorization, unlike wird and hermes. This
+#      is the control that makes a localhost redirect tolerable: without it, a
+#      crafted /authorize link plus anything listening on that port yields a
+#      code with no user interaction (the reason authentik-blueprint-wird.yaml
+#      refuses localhost outright). hq has its OWN flow and consent stage,
+#      declared below, because the stock explicit-consent flow does not do
+#      this — see the entries' comment.
+#   4. Audience validation in hq's Go server. `signing_key` is the shared
+#      "authentik Self-signed Certificate", so a Grafana or Wird token verifies
+#      cleanly against hq's JWKS. The server MUST check aud == this client_id
+#      AND iss == https://authentik.bnei.dev/application/o/hq/.
+#
+# NO DYNAMIC CLIENT REGISTRATION. authentik 2026.8.0 serves no
+# registration_endpoint (checked live, 2026-10-07), so MCP clients cannot
+# self-register: each is configured with the client_id below.
+#
+# PROPAGATION: listed under blueprints.configMaps in
+# gitops/platform/values/authentik/values.yaml. After ArgoCD syncs, confirm the
+# file is mounted in the WORKER (`find /blueprints/mounted`) and only then
+# restart it — discovery runs at worker boot, and a restart that beats the
+# kubelet volume sync registers nothing (docs/runbook-authentik-identity.md).
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: authentik-blueprint-hq
+  namespace: authentik
+data:
+  hq-oidc.yaml: |
+    version: 1
+    metadata:
+      name: hq-oidc
+      labels:
+        blueprints.goauthentik.io/instantiate: "true"
+    entries:
+      # hq's OWN authorization flow, not default-provider-authorization-explicit-consent.
+      #
+      # The stock flow's consent stage runs in mode `expiring` (4 weeks), and
+      # UserConsent is keyed on user + APPLICATION, not on the redirect URI.
+      # Verified against 2026.8.0's source: blueprints/default/flow-default-
+      # provider-authorization-explicit-consent.yaml sets `mode: expiring`, and
+      # stages/consent/models.py's UserConsent has only user/application FKs.
+      # So under the stock flow, one SPA login records consent for hq, and for
+      # the next four weeks a crafted /authorize link to the loopback redirect
+      # completes silently — exactly what header point 3 is supposed to stop.
+      # Retuning that shared stage would also change it for every app using it.
+      #
+      # always_require: stages/consent/stage.py's should_always_prompt() is
+      # true for this mode, so no stored consent is ever consulted. The cost is
+      # a click at every authorization, SPA logins included. Refresh tokens
+      # (days=90 below) are what keep that rare; do NOT relax this mode to cut
+      # the clicks — that removes the control, with nothing else noticing.
+      - model: authentik_flows.flow
+        id: hq-authorization-flow
+        identifiers:
+          slug: hq-authorization
+        attrs:
+          name: hq authorization
+          title: Authorize hq
+          designation: authorization
+          authentication: require_authenticated
+      - model: authentik_stages_consent.consentstage
+        id: hq-consent-stage
+        identifiers:
+          name: hq-consent
+        attrs:
+          name: hq-consent
+          mode: always_require
+      - model: authentik_flows.flowstagebinding
+        identifiers:
+          target: !KeyOf hq-authorization-flow
+          stage: !KeyOf hq-consent-stage
+          order: 0
+      - model: authentik_providers_oauth2.oauth2provider
+        # `id` is what !KeyOf below resolves against. A typo does not fail
+        # loudly — the blueprint logs and carries on.
+        id: hq-provider
+        identifiers:
+          name: hq
+        attrs:
+          name: hq
+          client_type: public
+          client_id: "gAtCcbIrijrGa8zrVXEfnDJXUKHsLTCMwURhfmvh"
+          # No client_secret. See the header.
+          #
+          # A list of OBJECTS, not strings, in 2026.x. The match is a fullmatch,
+          # so a trailing slash or an appended query string is invalid_client.
+          #
+          # Every entry strict. Never a regex over the loopback port: that
+          # would accept any listener on the machine.
+          redirect_uris:
+            # The SPA.
+            - matching_mode: strict
+              url: https://hq.bnei.dev/callback
+            # Claude Code with `--callback-port 39871`, which sends
+            # http://localhost:PORT/callback (code.claude.com/docs/en/mcp, "Use
+            # a fixed OAuth callback port"). `localhost`, not 127.0.0.1: only
+            # v2.1.229 sent the IP. A client that sends 127.0.0.1 fails here as
+            # invalid_client — add a second strict entry then, not a regex.
+            - matching_mode: strict
+              url: http://localhost:39871/callback
+            # claude.ai connectors, "Use your own OAuth client" with a blank
+            # secret (claude.com/docs/connectors/building/authentication,
+            # "Callback URLs").
+            - matching_mode: strict
+              url: https://claude.ai/api/mcp/auth_callback
+          # Defaults to EMPTY, which permits nothing. Not optional. And never
+          # client_credentials: there is no machine caller here, and a public
+          # client has no secret to present for it anyway.
+          grant_types:
+            - authorization_code
+            - refresh_token
+          # The defaults break "do not re-prompt": threshold seconds=0 rotates
+          # and revokes on every refresh, so one lost response is invalid_grant
+          # plus a SUSPICIOUS_REQUEST event (ADR-0050 Decision 7). An MCP client
+          # refreshing from two sessions at once hits exactly that.
+          refresh_token_threshold: "days=3"
+          refresh_token_validity: "days=90"
+          access_token_validity: "hours=1"
+          # Pinned: MCP clients compare the discovery document's issuer with the
+          # one /.well-known/oauth-protected-resource names.
+          issuer_mode: per_provider
+          # sub_mode OMITTED -> default hashed_user_id (ADR-0050 Decision 9).
+          # hq stores inbox rows against `sub`; User.email is mutable and not
+          # unique.
+          #
+          # hq's own always-consent flow, declared above — header point 3.
+          # !KeyOf, not !Find: a miss fails this blueprint loudly instead of
+          # writing a provider with no authorization flow.
+          authorization_flow: !KeyOf hq-authorization-flow
+          invalidation_flow: !Find [authentik_flows.flow, [slug, default-provider-invalidation-flow]]
+          signing_key: !Find [authentik_crypto.certificatekeypair, [name, "authentik Self-signed Certificate"]]
+          property_mappings:
+            - !Find [authentik_providers_oauth2.scopemapping, [managed, "goauthentik.io/providers/oauth2/scope-openid"]]
+            - !Find [authentik_providers_oauth2.scopemapping, [managed, "goauthentik.io/providers/oauth2/scope-email"]]
+            - !Find [authentik_providers_oauth2.scopemapping, [managed, "goauthentik.io/providers/oauth2/scope-profile"]]
+            # Without it no refresh token is ever issued, whatever grant_types
+            # says (ADR-0050 Decision 8).
+            - !Find [authentik_providers_oauth2.scopemapping, [managed, "goauthentik.io/providers/oauth2/scope-offline_access"]]
+      - model: authentik_core.application
+        identifiers:
+          slug: hq
+        attrs:
+          name: hq
+          slug: hq
+          provider: !KeyOf hq-provider
+          # LOAD-BEARING. The policy file binds two policies (platform-admins and
+          # PKCE); at the MODE_ANY default, passing either alone grants access.
+          policy_engine_mode: all
+          meta_launch_url: https://hq.bnei.dev
+          meta_description: Private dashboard for M BN

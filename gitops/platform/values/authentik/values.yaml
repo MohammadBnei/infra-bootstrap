@@ -112,6 +112,11 @@ blueprints:
   # cross-file !Find on that field invalidates the whole tier rather than
   # skipping the entry. Only the binding is separable.
   - authentik-blueprint-wird-admin-policy
+  # hq (ADR-0053): a public client for an SPA plus MCP clients, so a ConfigMap
+  # like wird and hermes. Its blueprint also declares hq's own authorization
+  # flow, whose consent stage is always_require (ADR-0053) — the first here. Its bindings sit in their own file, the hermes convention.
+  - authentik-blueprint-hq
+  - authentik-blueprint-hq-policy
   secrets:
   - authentik-blueprint-grafana
   - authentik-blueprint-argocd

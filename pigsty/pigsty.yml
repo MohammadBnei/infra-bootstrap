@@ -256,6 +256,25 @@ all:
             roles: []
             comment: wird-adminweb — read six tables, update three columns of reports (ADR-0052)
 
+          # hq — M BN's personal dashboard (ADR-0053). dbuser_wird's shape, field
+          # for field, for the same reasons: a SCRAM verifier committed and the
+          # plaintext in Infisical as DBUSER_HQ_PASSWORD; pgbouncer: false because
+          # it is a Go/pgx server dialing 5432 direct; dbrole_readwrite because
+          # owning hqdb is what lets it DDL.
+          #
+          # connlimit: 20 — wird's ceiling, and not 5 for a measured reason:
+          # pgxpool's default MaxConns is max(4, runtime.NumCPU()), so one pod on
+          # an 8-CPU node already wants 8, and a RollingUpdate runs two pods at
+          # once. Below that, the pool fails with `too many connections for role`
+          # on a busy page load. Still a ceiling that stops a runaway hq before
+          # it exhausts the pool authentik's logins depend on.
+          - name: dbuser_hq
+            password: 'SCRAM-SHA-256$4096:f9StBERwjkV16AIkqfs/Ng==$22EZmuKthKL3DeMvYjqMtUpnjxWfCRtcFsD5cqrYTHI=:1YJojhjgOZEffijxC3hMud9/EVIwEtnYhFkR0URYiuM='
+            pgbouncer: false
+            connlimit: 20
+            comment: hq — personal dashboard, inbox of edits and comments (ADR-0053)
+            roles: [dbrole_readwrite]
+
         # define business databases : https://pigsty.io/docs/pgsql/config/db
         pg_databases:
           - name: meta
@@ -399,6 +418,16 @@ all:
             # trust domain, and the ceiling that matters (Wird vs authentik)
             # still holds. Upgrade path is a second dbuser_jidhr with its own
             # connlimit and dbrole_readonly on Wird's tables.
+
+          # hq (ADR-0053). wirddb's switches, for wirddb's reasons: revokeconn so
+          # the shared dbrole_readwrite cannot reach in from another app,
+          # pgbouncer off to match the user, no Grafana datasource.
+          - name: hqdb
+            comment: hq — personal dashboard inbox
+            owner: dbuser_hq
+            revokeconn: true
+            pgbouncer: false
+            register_datasource: false
 
         pg_hba_rules:   # https://pigsty.io/docs/pgsql/config/hba
           - { user: all ,db: all ,addr: intra ,auth: pwd ,title: 'everyone intranet access with password' ,order: 800 }
