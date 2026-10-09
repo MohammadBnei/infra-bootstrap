@@ -5,8 +5,11 @@ PRs: the authentik client, its own consent flow and policy, and
 `hqdb`/`dbuser_hq` first, so hq's OAuth spike can run before any app exists;
 the app registration, build runner and database Secret later, with hq's first
 build. **Not yet live:**
-`DBUSER_HQ_PASSWORD` exists in Infisical (2026-10-08), but the role and the
-database wait on the Pigsty playbook runs.
+`dbuser_hq`/`hqdb` **live 2026-10-09** (`pgsql-user.yml`, `pgsql-db.yml`
+against `.205`, Patroni leader; `ignored=0` both). Verified past the recap:
+`connlimit` 20, `dbrole_readwrite`, `hqdb` owned by `dbuser_hq` with PUBLIC
+connect revoked, and a login with the Infisical plaintext through the `.232`
+VIP that could create and drop a table.
 **Date:** 2026-10-08
 **Related:** [ADR-0050](0050-public-oidc-client-for-native-apps.md) (public
 clients, and the Decision 2 this makes an exception to),
