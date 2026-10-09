@@ -36,6 +36,8 @@ data:
       # M BN: the wird-agent service account was added in #270. It cannot
       # complete an interactive authorization_code flow, and hq's
       # always-require consent would stop it if it could, but it is a member.
+      # A dedicated hq-users group was declined (ADR-0053, 2026-10-09); revisit
+      # if this client ever gains client_credentials.
       - model: authentik_policies.policybinding
         identifiers:
           target: !Find [authentik_core.application, [slug, hq]]

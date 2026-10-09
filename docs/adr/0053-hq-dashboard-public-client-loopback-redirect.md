@@ -5,8 +5,11 @@ PRs: the authentik client, its own consent flow and policy, and
 `hqdb`/`dbuser_hq` first, so hq's OAuth spike can run before any app exists;
 the app registration, build runner and database Secret later, with hq's first
 build. **Not yet live:**
-`DBUSER_HQ_PASSWORD` exists in Infisical (2026-10-08), but the role and the
-database wait on the Pigsty playbook runs.
+`dbuser_hq`/`hqdb` **live 2026-10-09** (`pgsql-user.yml`, `pgsql-db.yml`
+against `.205`, Patroni leader; `ignored=0` both). Verified past the recap:
+`connlimit` 20, `dbrole_readwrite`, `hqdb` owned by `dbuser_hq` with PUBLIC
+connect revoked, and a login with the Infisical plaintext through the `.232`
+VIP that could create and drop a table.
 **Date:** 2026-10-08
 **Related:** [ADR-0050](0050-public-oidc-client-for-native-apps.md) (public
 clients, and the Decision 2 this makes an exception to),
@@ -121,7 +124,10 @@ user interaction. Claude Code needs exactly that kind of redirect.
   on purpose.
 - `platform-admins` also contains the `wird-agent` service account (#270). It
   cannot complete an interactive code flow, and consent would stop it if it
-  could. A dedicated group is the upgrade path if that group grows.
+  could. A dedicated `hq-users` group was considered and declined by M BN
+  (2026-10-09): `platform-admins` stays the binding. Revisit only if a
+  machine grant (`client_credentials`) is ever added to this client, since
+  that would make wird-agent's membership a usable path into hq.
 - The plaintext-password drift in Pigsty is unchanged: this entry adds a
   verifier, not a plaintext.
 
