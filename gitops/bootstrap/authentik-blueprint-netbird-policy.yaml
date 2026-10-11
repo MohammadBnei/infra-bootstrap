@@ -19,8 +19,9 @@
 #
 # Verify in the database, not the log, selecting the FKs explicitly:
 #   SELECT target_id, group_id, enabled FROM authentik_policies_policybinding
-# A NULL target_id means the !Find below ran before the application existed;
-# restart the worker once more.
+# Seen on the first apply (2026-10-11): this file ran before the `netbird`
+# application existed, the !Find missed, and the blueprint went to `error`
+# with no binding at all. One more worker restart applied it.
 #
 # A plain ConfigMap for authentik-blueprint-groups.yaml's reason: membership
 # carries no credential.
