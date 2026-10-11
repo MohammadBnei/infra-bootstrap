@@ -793,10 +793,10 @@ hosts/VMs.
 
 **Rolling out (ADR-0055), spike and k8s stages enrolled 2026-10-11:** every host
 becomes a NetBird SSH peer in group `infra-nodes` (`<name>.bnei.mesh`),
-meant to be reached from `platform-admins` with a per-session authentik JWT; no posture
+reached from `platform-admins` with a per-session authentik JWT; no posture
 check. Enrolled so far: `pg-etcd-witness`, `build-runner` and all five k8s nodes.
-SSH over the mesh is **not yet verified end-to-end**, and nothing below has
-moved yet. Model and procedures: `docs/runbook-netbird.md`. Target:
+Human SSH over the mesh works (verified 2026-10-11); ansible over it is not yet
+verified, and nothing below has moved yet. Model and procedures: `docs/runbook-netbird.md`. Target:
 `sshd` stays key-based, restricted to `192.168.1.0/24`; heavy runs stay on
 the LAN from the k9s hub; the public `:49222` forward to the hub accepts only
 the break-glass key.

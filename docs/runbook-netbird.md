@@ -6,10 +6,13 @@
 > - `k8s`: `k8s-worker-01` and `k8s-cp-01`/`-02`/`-03`.
 >
 > Still to enroll: `pg`, `lxc`, `pve`, `pi`, `storage`. From the laptop,
-> `<node>.bnei.mesh:22022` is reachable. **An SSH login over the mesh has
-> not been tested end-to-end yet.** Until it has, and until the
-> cutover (ADR-0055 rollout step 7), keys over the LAN and the k9s hub
-> remain the way in. Nothing below changes that.
+> `<node>.bnei.mesh:22022` is reachable. **Human SSH over the mesh works:**
+> on 2026-10-11 `ssh root@k8s-worker-02.bnei.mesh` from the laptop asked for
+> an authentik login in the browser, then opened a shell. Not yet verified:
+> ansible over the mesh and how many JWT prompts it costs, behaviour during a
+> netbird-server restart, and N MG's laptop being denied. Until the cutover
+> (ADR-0055 rollout step 7), keys over the LAN and the k9s hub stay the
+> default way in.
 
 ## The model in five lines
 
@@ -24,7 +27,7 @@
 4. **One policy connects them.** `platform-admins-ssh-infra-nodes` (protocol
    `netbird-ssh`, port 22 only) lets `platform-admins` reach `infra-nodes`. By design, each
    SSH session asks for an authentik login (a JWT) in the browser and needs
-   no SSH key. This is not yet verified on our hosts.
+   no SSH key. Verified 2026-10-11 on `k8s-worker-02`.
 5. **Two playbooks keep it declared.** `netbird-configure.yml` talks to the
    API from your laptop. `netbird-client.yml` installs the client on the
    hosts over the LAN. The dashboard stays a first-class editor beside them.
@@ -53,7 +56,7 @@
                                | --disable-dns: no *.bnei.mesh |
                                +-------------------------------+
 
-   intended flow, NOT yet verified (spike step 4):
+   verified 2026-10-11 (k8s-worker-02):
    ssh root@k8s-worker-02.bnei.mesh
      -> browser: authentik login -> JWT -> NetBird SSH server on the host
      -> local user root (allowed by the policy's user mapping)
@@ -188,7 +191,7 @@ joins the group.
 
 | Use | Path | State |
 |---|---|---|
-| Human SSH, light runs (ad-hoc, app playbooks) | laptop over the mesh: `ssh root@<peer>.bnei.mesh` | spike, **not verified** |
+| Human SSH, light runs (ad-hoc, app playbooks) | laptop over the mesh: `ssh root@<peer>.bnei.mesh` | human SSH **verified** 2026-10-11; ansible over the mesh not yet |
 | Heavy runs (kubespray, pigsty `node`/`pgsql`/`infra`, `gpu-node-configure.yml`, `pihole-configure.yml`) | the k9s hub, over the LAN ([`runbook-k9s-ops-hub.md`](runbook-k9s-ops-hub.md)) | unchanged |
 | Off-LAN recovery | public `:49222` to the k9s hub | unchanged. Narrowed to one break-glass key at cutover |
 | Enrollment itself | keys over the LAN | it has to be: the host is not a peer yet |
@@ -313,7 +316,7 @@ ansible-playbook ansible/playbooks/netbird-configure.yml
 netbird status            # Management: Connected, SSH server on
 # from the laptop
 netbird status -d         # the host peers appear, with *.bnei.mesh names
-ssh root@k8s-worker-02.bnei.mesh   # spike check, not yet done
+ssh root@k8s-worker-02.bnei.mesh   # browser JWT login, then a shell
 ```
 
 Monitoring: Prometheus scrapes the server's `:9090`. The blackbox exporter

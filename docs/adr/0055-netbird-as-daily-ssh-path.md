@@ -2,8 +2,8 @@
 
 **Status:** Accepted — decided 2026-10-11, approved by M BN after an
 architecture interview and two adversarial review cycles. **Rolling out —
-spike and k8s stages enrolled 2026-10-11** (7 hosts); an SSH login over the
-mesh is not yet verified end-to-end. Operator view:
+spike and k8s stages enrolled 2026-10-11** (7 hosts); human SSH over the
+mesh verified end-to-end the same day. Operator view:
 [`docs/runbook-netbird.md`](../runbook-netbird.md). Rollout past the spike is
 gated on it (Rollout step 4). If the spike fails on the
 automation half, Decision 3's light runs fall back to keys over the LAN and
@@ -252,8 +252,13 @@ blackbox probe.
 the critical alerts are live; NetBird's Grafana dashboards and the degraded =
 warning rule are not); `netbird-configure.yml` part 1 run
 for real. Step 4 in progress: the three spike hosts are enrolled, reach
-management through the hairpin and show up on the laptop; the SSH,
-ansible-over-mesh checks are not done. The geo pass criterion is
+management through the hairpin and show up on the laptop. **Human SSH
+passes:** on 2026-10-11 ~22:10, `ssh root@k8s-worker-02.bnei.mesh` from the
+laptop did a browser JWT login, then opened a shell. This was after the geo
+check was dropped and the laptop left `infra-nodes`; the port-22 firewall was
+rechecked at ~22:25. Not done: ansible over the mesh (`-f 10`, `become`, JWT
+prompt count), a netbird pod restart during a session, and propagation
+denying N MG's laptop. The geo pass criterion is
 moot (Decision 2 amendment). Spike results so far:
 - **Passed:** systemd-resolved is untouched (`--disable-dns`, no `wt0`
   link). LXC tun works. Infra peers reach management from the LAN. The
