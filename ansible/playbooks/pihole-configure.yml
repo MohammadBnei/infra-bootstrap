@@ -64,6 +64,8 @@
   hosts: pihole
   become: true
   gather_facts: false
+  vars_files:
+    - vars/bnei-lan-records.yml
   vars:
     infisical_project_id: "{{ lookup('env', 'INFISICAL_PROJECT_ID') | default('8a3fa54f-be22-488a-bf51-55158f65c0f2', true) }}"
     infisical_env: "{{ lookup('env', 'INFISICAL_ENV') | default('dev', true) }}"
@@ -76,65 +78,11 @@
       - "1.0.0.1"
     pihole_query_logging: true
     pihole_privacy_level: 0
-    # bnei.lan zone — ARCHITECTURE.md §3's target record set, filled in
-    # with real, currently-assigned IPs (never guessed/placeholder — add
-    # a line here as each new host actually gets provisioned).
-    pihole_hosts_records:
-      - "192.168.1.165 proxmox.bnei.lan"
-      - "192.168.1.200 server1.bnei.lan"
-      - "192.168.1.161 ex-laptop.bnei.lan"
-      - "192.168.1.165 pve.bnei.lan" # round-robin across all 3 corosync cluster members, any one of which manages the whole cluster's web UI/API — DNS-level convenience, NOT a health-aware VIP (no failover logic, a dead member's IP is still returned; client retry-on-failure behavior varies). Added 2026-07-30 during a live .165-down test.
-      - "192.168.1.200 pve.bnei.lan"
-      - "192.168.1.161 pve.bnei.lan"
-      - "192.168.1.55 pi4.bnei.lan"
-      - "192.168.1.205 postgres-1.bnei.lan"
-      - "192.168.1.207 postgres-2.bnei.lan"
-      - "192.168.1.232 postgres.bnei.lan" # Pigsty HA floating VIP (vip-manager) — the address apps/tests should actually use, follows whichever node is primary
-      - "192.168.1.197 pg-etcd-witness.bnei.lan" # 3rd Patroni DCS/etcd-only member, ex-laptop — ADR-0029
-      - "192.168.1.205 redis.bnei.lan" # shared Pigsty Redis (redis-main) — deliberately NOT a static VM IP reference anywhere else (ArgoCD's externalRedis, etc.); relocated off .207/.165 2026-07-30 (single point of failure on the gaming-reboot host) — update this record, not consumers, next time Redis moves host
-      - "192.168.1.199 garage.bnei.lan"
-      - "192.168.1.234 registry.bnei.lan" # zot, in-cluster OCI registry (ADR-0034) — a MetalLB LoadBalancer address, pinned via metallb.universe.tf/loadBalancerIPs in gitops/platform/values/zot/values.yaml. Both ends have to move together: every node's containerd config names this host, so a drifting address breaks every image pull in the cluster at once.
-      - "192.168.1.198 nfs-storage.bnei.lan"
-      - "192.168.1.110 k9s-dashboard.bnei.lan"
-      - "192.168.1.111 build-runner.bnei.lan" # image build runner LXC (ADR-0034) — builds and pushes to registry.bnei.lan; an LXC rather than a pod because buildah cannot extract layers unprivileged
-      # SPLIT HORIZON — the only .bnei.dev record here, and the only one that
-      # shadows a PUBLIC name rather than naming a private one.
-      #
-      # stt.bnei.dev resolves publicly to the WAN address (82.65.231.50), so a
-      # client that resolves it publicly reaches the service the long way round
-      # instead of crossing the LAN. Measured 2026-08-31 from a workstation:
-      # 54.4ms via the WAN address against 4.8ms to the MetalLB VIP, on every
-      # request — and a streaming STT session makes ~2 requests a second.
-      #
-      # On that machine the ~50ms was the VPN, not the Freebox: `route -n get`
-      # put 192.168.1.233 on en0 and 82.65.231.50 on utun22, with the exit node
-      # in Switzerland. The first write-up of this called it hairpin NAT, which
-      # was wrong — worth stating because the fix is the same either way, and
-      # the reason it is the same is that BOTH failure modes come from resolving
-      # a LAN-reachable service to its public address.
-      #
-      # Note the corollary: a VPN'd client sends DNS to the VPN's resolvers, so
-      # it never asks the Pi and this record cannot help it. That one needs
-      # split-DNS on the VPN, or no VPN. This record is for everything else.
-      #
-      # Safe here specifically because stt is GREY (DNS-only, ADR-0044
-      # Decision 6): there is no Cloudflare in the public path either, so
-      # pointing LAN clients at the origin bypasses nothing that exists. Do NOT
-      # extend this pattern to a PROXIED host without an ADR — for those it
-      # would take LAN clients off the WAF and rate limiting, and ADR-0038's
-      # origin-lock middleware would see a LAN peer instead of a Cloudflare IP.
-      #
-      # Caveat: this only helps clients that actually query the Pi. Anything
-      # using a different resolver — a VPN's, or a hardcoded 1.1.1.1 — gets the
-      # public answer and the slow path. Pointing LAN DHCP at 192.168.1.55 is
-      # what makes this record apply broadly, and that is a Freebox setting this
-      # playbook cannot reach (noted in the final debug task too).
-      - "192.168.1.233 stt.bnei.dev" # Traefik VIP — see ADR-0044/0046
-      - "192.168.1.180 k8s.bnei.lan" # kube-vip control-plane VIP, ADR-0016 — use this, not any individual node below, for anything that needs the API server
-      - "192.168.1.201 k8s-cp-01.bnei.lan"
-      - "192.168.1.202 k8s-worker-01.bnei.lan"
-      - "192.168.1.203 k8s-worker-02.bnei.lan"
-      - "192.168.1.204 k8s-cp-02.bnei.lan"
+    # bnei.lan zone: ansible/playbooks/vars/bnei-lan-records.yml (vars_files
+    # below) — machines by their one name, then service names.
+    pihole_hosts_records: >-
+      {{ bnei_lan_hosts.values() | zip(bnei_lan_hosts.keys() | map('regex_replace', '$', '.bnei.lan'))
+         | map('join', ' ') | list + bnei_lan_service_records }}
       - "192.168.1.206 k8s-cp-03.bnei.lan"
 
   tasks:
@@ -307,6 +255,18 @@
       ansible.builtin.command:
         argv: [pihole-FTL, --config, dns.upstreams, "{{ pihole_upstream_dns | to_json }}"]
       changed_when: true
+
+    # One name per machine (vars/bnei-lan-records.yml): the Pi is `pihole`
+    # everywhere, its hostname included. It shipped as `raspberry`.
+    - name: Set the hostname
+      ansible.builtin.hostname:
+        name: pihole
+
+    - name: Point 127.0.1.1 at the hostname
+      ansible.builtin.lineinfile:
+        path: /etc/hosts
+        regexp: '^127\.0\.1\.1\s'
+        line: "127.0.1.1 pihole"
 
     - name: Set dns.hosts (bnei.lan zone)
       ansible.builtin.command:

@@ -1,0 +1,81 @@
+---
+# The bnei.lan zone, read by pihole-configure.yml (records) and the NetBird
+# playbooks (names). Two kinds of record, kept apart on purpose:
+#
+# bnei_lan_hosts — ONE NAME PER MACHINE. The name is the OS hostname, the
+#   Proxmox VM/LXC name, the k8s node name, the ansible inventory alias, the
+#   NetBird peer name (<name>.bnei.mesh) and the Pi-hole record
+#   (<name>.bnei.lan). Add a machine here and nowhere else gets a different
+#   name for it. netbird-client.yml refuses to enroll a host missing from
+#   this map; netbird-configure.yml reports a peer whose name is not in it.
+#   Pigsty is the one exception: pigsty/pigsty.yml keys hosts by IP.
+#
+# bnei_lan_service_records — names for a SERVICE, not a machine (a VIP, an
+#   endpoint). They can move between machines; consumers use these, never a
+#   host name, for anything that is not "this exact box".
+#
+# Real, currently-assigned IPs only — never a placeholder.
+bnei_lan_hosts:
+  bnei: 192.168.1.165 # PVE node (.165); its cluster name, kept rather than renamed
+  server1: 192.168.1.200
+  ex-laptop: 192.168.1.161
+  pihole: 192.168.1.55 # the Pi 4 running this Pi-hole
+  pg01: 192.168.1.205 # Pigsty infra + Patroni member pg-proxmox-1
+  pg02: 192.168.1.207 # Patroni member pg-proxmox-2
+  pg-etcd-witness: 192.168.1.197 # 3rd Patroni DCS/etcd-only member, on ex-laptop (ADR-0029)
+  garage-storage: 192.168.1.199
+  nfs-storage: 192.168.1.198
+  k9s-dashboard: 192.168.1.110
+  build-runner: 192.168.1.111 # image build runner LXC (ADR-0034)
+  hermesagent: 192.168.1.72 # Hermes agent LXC 101 on ex-laptop
+  k8s-cp-01: 192.168.1.201
+  k8s-cp-02: 192.168.1.204
+  k8s-cp-03: 192.168.1.206
+  k8s-worker-01: 192.168.1.202
+  k8s-worker-02: 192.168.1.203
+
+bnei_lan_service_records:
+  # round-robin across the 3 corosync members, any of which serves the whole
+  # cluster's web UI/API — DNS convenience, NOT a health-aware VIP.
+  - "192.168.1.165 pve.bnei.lan"
+  - "192.168.1.200 pve.bnei.lan"
+  - "192.168.1.161 pve.bnei.lan"
+  - "192.168.1.232 postgres.bnei.lan" # Pigsty HA floating VIP (vip-manager), follows the primary — what apps use
+  - "192.168.1.205 pigsty.bnei.lan" # Pigsty infra portal on pg01: VictoriaMetrics (/vmetrics) and its Grafana (/ui), used by the cluster Grafana
+  - "192.168.1.205 redis.bnei.lan" # shared Pigsty Redis (redis-main) — update this record, not consumers, when Redis moves host
+  - "192.168.1.199 garage.bnei.lan" # Garage S3 endpoint (:3900), used by Longhorn backups, zot and pgBackRest
+  - "192.168.1.234 registry.bnei.lan" # zot (ADR-0034), MetalLB address pinned in gitops/platform/values/zot/values.yaml; every node's containerd names it
+  - "192.168.1.180 k8s.bnei.lan" # kube-vip control-plane VIP (ADR-0016): use this for the API server, not a node
+    # SPLIT HORIZON — the only .bnei.dev record here, and the only one that
+    # shadows a PUBLIC name rather than naming a private one.
+    #
+    # stt.bnei.dev resolves publicly to the WAN address (82.65.231.50), so a
+    # client that resolves it publicly reaches the service the long way round
+    # instead of crossing the LAN. Measured 2026-08-31 from a workstation:
+    # 54.4ms via the WAN address against 4.8ms to the MetalLB VIP, on every
+    # request — and a streaming STT session makes ~2 requests a second.
+    #
+    # On that machine the ~50ms was the VPN, not the Freebox: `route -n get`
+    # put 192.168.1.233 on en0 and 82.65.231.50 on utun22, with the exit node
+    # in Switzerland. The first write-up of this called it hairpin NAT, which
+    # was wrong — worth stating because the fix is the same either way, and
+    # the reason it is the same is that BOTH failure modes come from resolving
+    # a LAN-reachable service to its public address.
+    #
+    # Note the corollary: a VPN'd client sends DNS to the VPN's resolvers, so
+    # it never asks the Pi and this record cannot help it. That one needs
+    # split-DNS on the VPN, or no VPN. This record is for everything else.
+    #
+    # Safe here specifically because stt is GREY (DNS-only, ADR-0044
+    # Decision 6): there is no Cloudflare in the public path either, so
+    # pointing LAN clients at the origin bypasses nothing that exists. Do NOT
+    # extend this pattern to a PROXIED host without an ADR — for those it
+    # would take LAN clients off the WAF and rate limiting, and ADR-0038's
+    # origin-lock middleware would see a LAN peer instead of a Cloudflare IP.
+    #
+    # Caveat: this only helps clients that actually query the Pi. Anything
+    # using a different resolver — a VPN's, or a hardcoded 1.1.1.1 — gets the
+    # public answer and the slow path. Pointing LAN DHCP at 192.168.1.55 is
+    # what makes this record apply broadly, and that is a Freebox setting this
+    # playbook cannot reach (noted in the final debug task too).
+  - "192.168.1.233 stt.bnei.dev" # Traefik VIP — see ADR-0044/0046

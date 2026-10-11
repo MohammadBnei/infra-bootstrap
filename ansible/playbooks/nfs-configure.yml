@@ -30,14 +30,14 @@
 #   /dev/disk/by-id/...drive-scsiN, which matches terraform/nfs.tf's
 #   `interface` regardless of how the kernel ordered /dev/sdX.
 # - Run with BOTH inventories so the second play below (PVE storage
-#   registration) can resolve the `proxmox` host alias:
+#   registration) can resolve the `bnei` host alias:
 #     ansible-playbook -i ansible/inventories/nfs/hosts.yml \
 #       -i ansible/inventories/proxmox/hosts.yml \
 #       ansible/playbooks/nfs-configure.yml
 #
 # Registers the export as a PVE storage pool (`pvesm add nfs ...`) itself
 # — storage.cfg is cluster-shared (ADR-0020), so this only ever needs to
-# run against one cluster member (`proxmox`/.165, same alias
+# run against one cluster member (`bnei`/.165, same alias
 # pve-postinstall.yml uses), regardless of how many PVE nodes exist.
 - name: Configure NFS export on nfs-storage
   hosts: nfs-storage
@@ -191,7 +191,7 @@
 # (ADR-0020), so this runs once against any single member.
 # -------------------------------------------------------------------
 - name: Register shared-templates PVE storage
-  hosts: proxmox
+  hosts: bnei
   gather_facts: false
   vars:
     nfs_server: "192.168.1.198" # matches terraform.tfvars' nfs_ip
