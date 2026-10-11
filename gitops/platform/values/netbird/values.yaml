@@ -1,0 +1,169 @@
+# NetBird control plane — netbird-server (management + signal + relay + STUN
+# in one binary since v0.65). ADR-0054: the cluster HOSTS the control plane for
+# an external mesh (two laptops, one Raspberry Pi at a partner's home); no
+# node, pod or PVE host joins the mesh. The dashboard is its own release,
+# values/netbird-dashboard.
+#
+# Platform-common app (public image, no per-app repo), same reasoning as zot.
+
+image:
+  repository: netbirdio/netbird-server
+  # No `v`: Docker Hub tags this image `0.80.0`, unlike the dashboard's
+  # `v2.94.0`. Digest for 0.80.0 was sha256:05b3d8d6…a261 on 2026-10-11.
+  tag: "0.80.0"
+
+# Recreate, single replica. Management and signal HA is NetBird's commercial
+# tier, and two pods would split the relay and STUN anyway. A rollout is a
+# short outage, which established P2P tunnels ride through (ADR-0054).
+replicaCount: 1
+strategy:
+  type: Recreate
+
+service:
+  port: 80
+
+# No chart IngressRoute: this release serves five path prefixes, two of them
+# gRPC needing h2c to the backend, which the chart's one-route template cannot
+# express. The route is hand-written in extraManifests below. hostname is
+# empty-but-present for zot's reason (see platform-common-apps).
+ingress:
+  enabled: false
+
+# Restarts the pod when gitops/bootstrap/netbird-config-secret.yaml's Secret
+# changes. Set as a raw annotation, not `infisical.autoReload`, because that
+# flag also turns on the chart's own InfisicalSecret, which would mount every
+# root secret here (zot's ponytail note).
+annotations:
+  secrets.infisical.com/auto-reload: "true"
+
+resources:
+  requests:
+    cpu: 50m
+    memory: 128Mi
+  limits:
+    cpu: "1"
+    memory: 512Mi
+
+# Both gorm pools (management, activity) default to runtime.NumCPU() open
+# connections — the HOST's CPUs, not the container's limit (v0.80.0
+# management/server/store/sql_store.go:83, activity/store/sql_store.go:286).
+# On a big node that alone exceeds dbuser_netbird's connlimit of 20, and Dex
+# holds a third pool. 5 each leaves room for Dex. Recreate means no second pod.
+env:
+  - name: NB_SQL_MAX_OPEN_CONNS
+    value: "5"
+
+# /health on the healthcheck port, per NetBird's configuration reference.
+# Liveness is generous because a first boot migrates three empty databases;
+# the chart's ~40s to a kill could land mid-migration and loop.
+livenessProbe:
+  enabled: true
+  type: http
+  path: /health
+  port: 9000
+  initialDelaySeconds: 30
+  failureThreshold: 6
+readinessProbe:
+  enabled: true
+  type: http
+  path: /health
+  port: 9000
+
+extraVolumes:
+  - name: config
+    secret:
+      secretName: netbird-config
+  # dataDir is required by the server even with every store on Postgres
+  # (config.go's Validate). ponytail: emptyDir, because all three stores are
+  # in Pigsty and nothing written here was found to need surviving a restart.
+  # If a restart ever loses state, it is this: swap for persistence: (the
+  # strategy above is already Recreate, so an RWO PVC cannot deadlock it).
+  - name: data
+    emptyDir: {}
+
+extraVolumeMounts:
+  - name: config
+    mountPath: /etc/netbird
+    readOnly: true
+  - name: data
+    mountPath: /var/lib/netbird
+
+extraManifests:
+  # The one route for netbird.bnei.dev's server paths. The dashboard's
+  # catch-all Host() route comes from its own release; Traefik ranks rules
+  # by length, so these longer Host()&&PathPrefix() rules always win.
+  #
+  # The rate limit and headers on the HTTP routes are the dashboard release's
+  # baseline middlewares, borrowed by name (both releases share the `netbird`
+  # namespace). ente-web's album route set the precedent. On a fresh install
+  # this route can sync before those Middlewares exist and error until they
+  # do. That is one sync interval, not a broken state.
+  #
+  # The gRPC and relay routes deliberately get no middlewares: every peer
+  # behind one home NAT would share a limiter bucket, and a stream is one
+  # long request that a limiter buys nothing against.
+  #
+  # These streams also need Traefik's websecure readTimeout at 0. That is a
+  # separate Traefik change (ADR-0054), not something a route can set.
+  - |
+    apiVersion: traefik.io/v1alpha1
+    kind: IngressRoute
+    metadata:
+      name: netbird
+      namespace: {{ .Release.Namespace }}
+    spec:
+      entryPoints:
+        - websecure
+      routes:
+        - kind: Rule
+          match: Host(`netbird.bnei.dev`) && (PathPrefix(`/signalexchange.SignalExchange/`) || PathPrefix(`/management.ManagementService/`))
+          services:
+            - name: {{ .Release.Name }}
+              port: 80
+              scheme: h2c
+        - kind: Rule
+          match: Host(`netbird.bnei.dev`) && (PathPrefix(`/relay`) || PathPrefix(`/ws-proxy/`))
+          services:
+            - name: {{ .Release.Name }}
+              port: 80
+        - kind: Rule
+          match: Host(`netbird.bnei.dev`) && (PathPrefix(`/api`) || PathPrefix(`/oauth2`))
+          services:
+            - name: {{ .Release.Name }}
+              port: 80
+          middlewares:
+            - name: netbird-dashboard-baseline-ratelimit
+              namespace: {{ .Release.Namespace }}
+            - name: netbird-dashboard-baseline-headers
+              namespace: {{ .Release.Namespace }}
+      tls:
+        certResolver: le
+  # STUN, UDP 3478. It cannot go through Traefik or Cloudflare, so it gets
+  # its own MetalLB address, which the Freebox forwards UDP 3478 to.
+  #
+  # externalTrafficPolicy: Local is load-bearing. STUN's whole job is to tell
+  # a peer its public address as seen from here; under Cluster, kube-proxy
+  # SNATs the packet to a node IP and STUN answers with that instead. Local
+  # keeps the source, and with one replica MetalLB announces the address from
+  # the pod's node. The address stops answering ARP during each Recreate
+  # rollout; peers fall back to the relay meanwhile.
+  #
+  # Pinned for zot's reason: the Freebox forward names this address.
+  - |
+    apiVersion: v1
+    kind: Service
+    metadata:
+      name: {{ .Release.Name }}-stun
+      namespace: {{ .Release.Namespace }}
+      annotations:
+        metallb.universe.tf/loadBalancerIPs: 192.168.1.235
+    spec:
+      type: LoadBalancer
+      externalTrafficPolicy: Local
+      selector:
+        {{- include "common-app-chart.selectorLabels" . | nindent 8 }}
+      ports:
+        - name: stun
+          port: 3478
+          targetPort: 3478
+          protocol: UDP

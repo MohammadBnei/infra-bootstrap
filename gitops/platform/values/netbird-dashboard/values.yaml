@@ -1,0 +1,75 @@
+# NetBird dashboard — the web UI for the control plane in values/netbird.
+# ADR-0054. A separate release because it is a separate image; the chart runs
+# one container per release.
+#
+# It owns the catch-all route for netbird.bnei.dev. values/netbird's longer
+# Host()&&PathPrefix() routes take the API, gRPC, relay and OIDC paths first.
+
+image:
+  repository: netbirdio/dashboard
+  tag: "v2.94.0"
+
+service:
+  port: 80
+
+ingress:
+  enabled: true
+  # netbird.bnei.dev is GREY at Cloudflare (ADR-0038's table): the server's
+  # STUN URI uses the same name and Cloudflare's proxy cannot carry UDP. So
+  # the TCP peer is the real client, and the two settings below follow,
+  # exactly as for ente-web.
+  baseline:
+    # The origin lock admits only Cloudflare and the LAN; on a grey host it
+    # would 403 everyone else.
+    originLock:
+      enabled: false
+    rateLimit:
+      # CF-Connecting-IP never arrives on a grey host, so keying on it would
+      # put every client into one empty-key bucket. "" keys on the TCP peer.
+      sourceHeader: ""
+
+# The values the quickstart's getting-started.sh writes for the embedded IdP
+# (Dex at /oauth2). Client id and audience are hard-coded on the server side
+# as `netbird-dashboard`. authentik is added later as an upstream of Dex, so
+# none of these change when it is.
+env:
+  - name: NETBIRD_MGMT_API_ENDPOINT
+    value: https://netbird.bnei.dev
+  - name: NETBIRD_MGMT_GRPC_API_ENDPOINT
+    value: https://netbird.bnei.dev
+  - name: AUTH_AUDIENCE
+    value: netbird-dashboard
+  - name: AUTH_CLIENT_ID
+    value: netbird-dashboard
+  - name: AUTH_CLIENT_SECRET
+    value: ""
+  - name: AUTH_AUTHORITY
+    value: https://netbird.bnei.dev/oauth2
+  - name: USE_AUTH0
+    value: "false"
+  - name: AUTH_SUPPORTED_SCOPES
+    value: openid profile email groups
+  - name: AUTH_REDIRECT_URI
+    value: /nb-auth
+  - name: AUTH_SILENT_REDIRECT_URI
+    value: /nb-silent-auth
+  - name: NGINX_SSL_PORT
+    value: "443"
+  # Plain HTTP on 80; TLS ends at Traefik.
+  - name: LETSENCRYPT_DOMAIN
+    value: none
+
+resources:
+  requests:
+    cpu: 10m
+    memory: 32Mi
+  limits:
+    cpu: 200m
+    memory: 128Mi
+
+livenessProbe:
+  enabled: true
+  type: tcp
+readinessProbe:
+  enabled: true
+  type: tcp

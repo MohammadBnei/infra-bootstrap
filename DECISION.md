@@ -229,6 +229,14 @@ updated.
   crafted link. authentik 2026.8 has no
   dynamic client registration, so MCP clients are configured with the committed
   `client_id`. See [ADR-0053](docs/adr/0053-hq-dashboard-public-client-loopback-redirect.md).
+- **The cluster hosts a NetBird control plane, and never joins the mesh**
+  (ADR-0054). `netbird-server` + dashboard at `netbird.bnei.dev` (a grey
+  record, because STUN on UDP 3478 shares the name and Cloudflare carries no
+  UDP; STUN on MetalLB `.235`, `externalTrafficPolicy: Local`). Its peers are
+  two laptops and a Pi off-site. authentik becomes the only login, through
+  the server's embedded Dex, once its client lands (ADR-0054's PR 2). All three stores live on Pigsty. ADR-0009 still
+  forbids any cluster host as a peer. See
+  [ADR-0054](docs/adr/0054-netbird-control-plane-hosting-only.md).
 - **Certificate renewal is one token, so it gets an alarm.** Since ADR-0038
   every host in both zones renews through a single `CF_DNS_API_TOKEN`; its
   revocation or expiry stops renewal everywhere with no error anyone sees, on a
@@ -268,7 +276,10 @@ Never propose these without an explicit user greenlight, even as a
 - ❌ **Infisical as SSH CA / TLS CA** — [ADR-0006](docs/adr/0006-reject-infisical-as-ssh-tls-ca.md)
 - ❌ **Vagrant for Proxmox provisioning** — [ADR-0007](docs/adr/0007-reject-vagrant-for-proxmox.md)
 - ❌ **Flatcar as VM OS** — [ADR-0008](docs/adr/0008-reject-flatcar-vm-os.md)
-- ❌ **Wireguard / Tailscale** — [ADR-0009](docs/adr/0009-reject-wireguard-tailscale.md)
+- ❌ **Wireguard / Tailscale as cluster access** — [ADR-0009](docs/adr/0009-reject-wireguard-tailscale.md).
+  No cluster node, pod or PVE host joins a mesh. Hosting a NetBird control
+  plane for an *external* mesh is the one carve-out —
+  [ADR-0054](docs/adr/0054-netbird-control-plane-hosting-only.md).
 - ❌ **External managed Postgres** — [ADR-0010](docs/adr/0010-reject-external-managed-postgres.md)
 - ❌ **Multi-region / DR / GPU multi-tenancy / service mesh** — [ADR-0011](docs/adr/0011-reject-multi-region-dr-service-mesh.md)
 - ❌ **GitOps-managed Proxmox** — [ADR-0012](docs/adr/0012-reject-gitops-for-proxmox.md)

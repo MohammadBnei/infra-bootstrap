@@ -1,0 +1,45 @@
+# Who may log in to NetBird (ADR-0054) — the `netbird-users` group.
+#
+# A NetBird login is not just an account: it lets a laptop join the mesh that
+# reaches the partner's Pi over SSH. So membership is declared here, in git,
+# like platform-admins in authentik-blueprint-groups.yaml — not clicked, and
+# not runtime state the way wird-users is (Wird has public self-enrollment;
+# this must never).
+#
+# Its own file, not a second entry in authentik-blueprint-groups.yaml: a
+# blueprint applies as one transaction, and an unresolved `!Find` fails it
+# (see that file's wird-agent note). A typo'd or deleted username here must
+# not stop platform-admins from reconciling.
+#
+# The application binding that makes this group the gate lands with the
+# netbird OAuth2 client (ADR-0054's PR 2), in this same file — the hermes and
+# hq `-policy` convention. Until then the group exists and gates nothing.
+#
+# A plain ConfigMap for authentik-blueprint-groups.yaml's reason: membership
+# carries no credential.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: authentik-blueprint-netbird-policy
+  namespace: authentik
+data:
+  netbird-policy.yaml: |
+    version: 1
+    metadata:
+      name: netbird-policy
+      labels:
+        blueprints.goauthentik.io/instantiate: "true"
+    entries:
+      - model: authentik_core.group
+        id: netbird-users
+        identifiers:
+          name: netbird-users
+        attrs:
+          name: netbird-users
+          # REPLACED on every apply: this list is the whole membership.
+          # Deleting either account means deleting its line in the same change.
+          users:
+            # M BN.
+            - !Find [authentik_core.user, [username, akadmin]]
+            # N MG. Account created 2026-10-11, before this line was added.
+            - !Find [authentik_core.user, [username, nicozlat]]
