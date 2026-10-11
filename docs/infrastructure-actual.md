@@ -171,9 +171,9 @@ attached to only one VM at a time. Once `k8s-worker-01` holds it,
 Proxmox refuses to start any other VM/LXC against the same mapping — this
 is deliberately not vGPU-style sharing across multiple VMs.
 
-### Pi 4 (raspberry) details
+### Pi 4 (pihole) details
 
-- Hostname: `raspberry`
+- Hostname: `pihole` (was `raspberry` until 2026-10-11, renamed by `pihole-configure.yml`)
 - IP: `192.168.1.55` (DHCP-assigned, NOT `.170` as initially planned)
 - OS: **Debian 13 (trixie)** on aarch64
 - Kernel: 6.12.62+rpt-rpi-v8 (Raspberry Pi kernel)

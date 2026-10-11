@@ -360,10 +360,10 @@ applies them, and the NetBird playbooks refuse or report a name not in it.
 Machines (`bnei_lan_hosts`):
 
 ```text
-A    bnei.bnei.lan           → 192.168.1.165  (PVE node; "bnei" is its corosync node name, kept rather than renamed)
+A    bnei.bnei.lan           → 192.168.1.165  (PVE node; "bnei" is its PVE node name, kept rather than renamed)
 A    server1.bnei.lan        → 192.168.1.200
 A    ex-laptop.bnei.lan      → 192.168.1.161
-A    pihole.bnei.lan         → 192.168.1.55   (the Pi 4; its hostname moves from `raspberry` to `pihole`)
+A    pihole.bnei.lan         → 192.168.1.55   (the Pi 4; hostname `pihole` since 2026-10-11, was `raspberry`)
 A    pg01.bnei.lan           → 192.168.1.205  (Pigsty infra + Patroni member pg-proxmox-1; names never track roles, confirm with patronictl)
 A    pg02.bnei.lan           → 192.168.1.207  (Patroni member pg-proxmox-2)
 A    pg-etcd-witness.bnei.lan → 192.168.1.197 (ex-laptop — 3rd etcd DCS member, ADR-0029)
@@ -393,8 +393,9 @@ A    stt.bnei.dev            → 192.168.1.233  (split horizon, Traefik VIP — 
 ```
 
 *Renamed 2026-10-11 (one-name rule): `proxmox` → `bnei`, `postgres-1`/`-2` →
-`pg01`/`pg02`, `pi4` → `pihole`. The old names are gone from Pi-hole after
-the next `pihole-configure.yml` run; update anything still using them.*
+`pg01`/`pg02`, `pi4` → `pihole`. Applied by `pihole-configure.yml` the same
+night: `postgres-1`, `pi4` and `proxmox` no longer resolve, and the cluster
+Grafana reads Pigsty through `pigsty.bnei.lan`.*
 
 `bnei.dev` is hosted at **Cloudflare** (registration stays at Squarespace),
 with **wildcard A records** all pointing at the public IP the Freebox

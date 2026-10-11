@@ -113,7 +113,10 @@ carries an explicit `mesh_name` per host, which is a Pi-hole short name such as
 `postgres-1` or `proxmox`. `netbird-configure.yml` fails if a `mesh_name` is not
 in the records file. It sets each peer's name through the API,
 compare-before-write, so `postgres-1.bnei.mesh` resolves on every NetBird
-client **that manages DNS — the laptops**.
+client **that manages DNS — the laptops**. Infra peers have DNS
+management off (Decision 1), so they cannot resolve `*.bnei.mesh`; nothing
+run from an infra host may use the mesh overlay inventory. Peer DNS domain: `bnei.mesh`, never `netbird.bnei.dev` (that is the
+management URL; claiming it would cut clients off from it).
 
 > **Amended 2026-10-11 — one name per machine; the API rename is dropped.**
 > A machine's name is its OS hostname, and that same string is its Proxmox
@@ -121,15 +124,15 @@ client **that manages DNS — the laptops**.
 > peer name. So peers keep the hostname they enroll with, and there is no
 > `mesh_name` and no rename through the API: `postgres-1.bnei.mesh` above is
 > `pg01.bnei.mesh`. Pi-hole records were renamed to match (`proxmox` → `bnei`,
-> `postgres-1`/`-2` → `pg01`/`pg02`, `pi4` → `pihole`); service names (VIPs,
+> `postgres-1`/`-2` → `pg01`/`pg02`, `pi4` → `pihole`; live since the
+> 2026-10-11 `pihole-configure.yml` run); service names (VIPs,
 > endpoints) are a separate list. The records moved to
 > `ansible/playbooks/vars/bnei-lan-records.yml` as planned. `netbird-client.yml`
-> refuses a host not in it under the same name and IP; `netbird-configure.yml`
-> reports a user-less peer whose name is not a known host. Pigsty stays keyed
-> by IP. The rest of this Decision stands: laptops only, `bnei.mesh`. Infra peers have DNS
-management off (Decision 1), so they cannot resolve `*.bnei.mesh`; nothing
-run from an infra host may use the mesh overlay inventory. Peer DNS domain: `bnei.mesh`, never `netbird.bnei.dev` (that is the
-management URL; claiming it would cut clients off from it).
+> refuses a host whose inventory alias and IP are not in it (it does not
+> check the OS hostname itself); `netbird-configure.yml` reports a user-less
+> peer in `infra-nodes` whose name is not a known host, which is where a
+> drifted OS hostname shows up. Pigsty stays keyed
+> by IP. The rest of this Decision stands: laptops only, `bnei.mesh`.
 
 ### 5. Break-glass and off-LAN recovery
 
@@ -195,8 +198,8 @@ the next run create a duplicate. Everything it does not name is never written.
 > true in `/var/lib/netbird/default.json`).
 >
 > **Cilium and `wt0`:** Cilium auto-detects `wt0` and lowers its MTUs to match
-> it. The pin `cilium_extra_values: {devices: [eth0]}` is **committed, not
-> applied**; see the progress note under Rollout.
+> it. The pin `cilium_extra_values: {devices: [eth0]}` is applied
+> (2026-10-11); see the progress note under Rollout.
 
 ### 7. Observability
 

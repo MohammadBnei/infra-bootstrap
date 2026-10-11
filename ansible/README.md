@@ -381,7 +381,10 @@ endpoints) that may point at any machine. Real currently-assigned IPs only.
 Add a machine there as it is provisioned — it's a declared,
 reconciled-every-run list, not a one-time seed, and the NetBird playbooks
 read the same file. The playbook also sets the Pi's own hostname to `pihole`
-(it shipped as `raspberry`).
+(it shipped as `raspberry`). **Run for real 2026-10-11** with the renamed
+records (ok=15 changed=7, after the #289 fix): `bnei`, `pg01`, `pg02`,
+`pihole`, `pigsty`, `garage-storage` and `hermesagent` resolve, and
+`postgres-1`, `pi4` and `proxmox` are gone.
 
 **Static IP:** the Pi's `192.168.1.55` was confirmed live (2026-07-30) to
 be a DHCP-dynamic lease, not static — a real risk once the whole LAN's DNS
@@ -455,8 +458,8 @@ ansible-playbook ansible/playbooks/netbird-configure.yml \
 Task output is hidden play-wide (the PAT sits in the `uri` headers, which
 Ansible doesn't mask); `-e netbird_debug=true` shows it. The final report has
 two lines: drift on owned fields, and what needs a human (user-owned peers in
-`infra-nodes`, admin emails with no NetBird user yet, user-less peers whose
-name is not a host in `vars/bnei-lan-records.yml`). The setup key goes to
+`infra-nodes`, admin emails with no NetBird user yet, user-less peers in
+`infra-nodes` whose name is not a host in `vars/bnei-lan-records.yml`). The setup key goes to
 Infisical as `NETBIRD_INFRA_SETUP_KEY_<STAGE>` from a 0600 file; if that
 write fails the new key is revoked.
 
@@ -479,8 +482,9 @@ the stage's setup key (passed by file) and `--management-url=https://netbird.bne
 Guards: the stage must be a real stage group (not `all`, `ungrouped` or
 `pve_hosts`); an LXC whose `netbird_pve_node` is not in `pve_hosts` fails
 up front; and every host must be in `vars/bnei-lan-records.yml`'s
-`bnei_lan_hosts` under the same name and IP, because the inventory alias is
-the hostname and becomes the NetBird peer name.
+`bnei_lan_hosts` under the same alias and IP. The peer itself takes the OS
+hostname, which the guard does not check; a drifted hostname is caught
+afterwards by `netbird-configure.yml`'s report.
 
 **Run for real 2026-10-11** against `spike` (`pg-etcd-witness`,
 `k8s-worker-02`, `build-runner` LXC 103 on server1).
@@ -507,8 +511,8 @@ ansible-playbook ansible/playbooks/netbird-configure.yml -e netbird_enforce=true
 Safe to re-run: `netbird up` is skipped on a host already connected to
 management (install and hold still run). To
 apply changed `netbird up` flags, pass `-e netbird_reup=true`: down, then up
-without a setup key, so no key use is spent. The spike hosts still need one
-such run for the route flags. A version bump is `netbird_version` plus a
+without a setup key, so no key use is spent. The spike hosts got the route
+flags this way on 2026-10-11. A version bump is `netbird_version` plus a
 re-run: the hold is released only when the installed version differs, and
 is always re-applied. Move laptops and the server in lockstep. Under Claude Code's `!` prefix, append `2>&1 | cat`.
 

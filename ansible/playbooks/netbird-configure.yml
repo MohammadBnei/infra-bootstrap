@@ -50,8 +50,9 @@
 # WHAT IT DOESN'T (yet)
 # - The existing `laptop`/`All` groups and the Pi policies (`SSH Access`,
 #   `pi-lab-443-policy`) stay as clicked in the dashboard.
-# - Peer names from Pi-hole records and the mesh overlay inventory come
-#   after the spike (ADR-0055 rollout step 5), once real peers exist.
+# - Peer names: never set. A peer keeps its OS hostname, which is the
+#   machine's one name (vars/bnei-lan-records.yml, ADR-0055 Decision 4
+#   amendment).
 # - The authentik `groups` JWT claim (jwt_groups_*). Whether Dex passes it
 #   through is a spike question; until then membership is the NetBird-local
 #   auto_groups above.

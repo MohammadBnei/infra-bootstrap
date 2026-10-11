@@ -524,7 +524,7 @@ alerting:
             for: 10m
             # Same reasoning as monitoring-blind directly below: this rule's
             # datasource is Pigsty's own VictoriaMetrics, which runs on
-            # postgres-1 (.205). If .205 is the node that died, the query
+            # pg01 (.205). If .205 is the node that died, the query
             # errors — and that is itself the alert, not a reason to stay quiet.
             noDataState: Alerting
             execErrState: Alerting

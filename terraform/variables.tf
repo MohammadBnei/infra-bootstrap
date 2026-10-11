@@ -287,7 +287,7 @@ variable "build_runner_container_storage" {
 }
 
 variable "build_runner_ip" {
-  description = "Static IP for build-runner. 192.168.1.111 is unused (ARCHITECTURE.md §3's .100-.199 LXC range) and suggested; treat as provisional, same precedent as garage_ip/k9s_dashboard_ip. Must also be added to pihole_hosts_records if anything needs to resolve it by name."
+  description = "Static IP for build-runner. 192.168.1.111 is unused (ARCHITECTURE.md §3's .100-.199 LXC range) and suggested; treat as provisional, same precedent as garage_ip/k9s_dashboard_ip. Must also be added to ansible/playbooks/vars/bnei-lan-records.yml if anything needs to resolve it by name."
   type        = string
 }
 

@@ -16,7 +16,7 @@
 #
 # Real, currently-assigned IPs only — never a placeholder.
 bnei_lan_hosts:
-  bnei: 192.168.1.165 # PVE node (.165); its cluster name, kept rather than renamed
+  bnei: 192.168.1.165 # PVE node (.165); its PVE node name, kept rather than renamed
   server1: 192.168.1.200
   ex-laptop: 192.168.1.161
   pihole: 192.168.1.55 # the Pi 4 running this Pi-hole

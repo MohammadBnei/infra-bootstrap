@@ -88,7 +88,7 @@ You can use the dashboard, the playbook, or both. They do not fight:
   - **Differs / Fixed:** drift on the fields the playbook owns.
   - **Needs a human (never changed by this playbook):** user-owned peers in
     `infra-nodes`, admin emails with no NetBird user yet, and user-less peers
-    whose name is not a host in `bnei-lan-records.yml`.
+    in `infra-nodes` whose name is not a host in `bnei-lan-records.yml`.
 - **Task output is hidden play-wide**, because the PAT sits in the `uri`
   headers and Ansible does not mask it there. Asserts and the report stay
   visible. `-e netbird_debug=true` shows everything; never paste that
@@ -121,12 +121,11 @@ Left alone, Cilium auto-detects NetBird's `wt0` as one of its devices when
 a k8s node joins the mesh (`Devices: [eth0 wt0]`, seen on `k8s-worker-02`
 during the spike). That was harmless (no kube-proxy replacement, no host firewall, iptables
 masquerade). Still, the mesh is for SSH only and must never carry cluster
-traffic. `wt0` also has MTU 1280, and Cilium lowered its own MTUs to match.
-On k8s-worker-02, `cilium_host` and `cilium_vxlan` are 1280 and `cilium_wg0`
-is 1200. On k8s-worker-01 they are 1500, 1500 and 1420. So worker-02 runs a
-different tunnel MTU from the rest of the cluster. That is the silent
-large-packet-hang hazard already noted in `k8s-net-cilium.yml`, which makes
-the fix urgent.
+traffic. `wt0` also has MTU 1280, and Cilium lowered its own MTUs to match:
+on k8s-worker-02, `cilium_host` and `cilium_vxlan` went to 1280 and
+`cilium_wg0` to 1200, against 1500, 1500 and 1420 on k8s-worker-01. A node
+on a different tunnel MTU from the rest of the cluster is the silent
+large-packet-hang hazard noted in `k8s-net-cilium.yml`.
 
 **Fixed 2026-10-11.** `inventory/ukubi/group_vars/k8s_cluster/k8s-net-cilium.yml`
 pins `cilium_extra_values: {devices: [eth0]}` (eth0 is the uplink on all
@@ -142,8 +141,12 @@ k8s-cp-01, the way the role would. Repeat this for any later change to
 ```bash
 # on k8s-cp-01, after writing /etc/kubernetes/cilium-extra-values.yaml
 # from cilium_extra_values (what the role renders)
+# both files live in /etc/kubernetes on kube_control_plane[0] (k8s-cp-01)
+cd /etc/kubernetes
+helm get values -n kube-system cilium -o yaml > /tmp/cilium-live.yaml
 cilium upgrade --version 1.19.3 --dry-run-helm-values \
-  -f cilium-values.yaml -f cilium-extra-values.yaml   # diff first: expect only your change
+  -f cilium-values.yaml -f cilium-extra-values.yaml > /tmp/cilium-new.yaml
+diff /tmp/cilium-live.yaml /tmp/cilium-new.yaml   # expect only your change
 cilium upgrade --version 1.19.3 -f cilium-values.yaml -f cilium-extra-values.yaml
 kubectl -n kube-system rollout restart ds/cilium   # rollOutCiliumPods is unset: agents won't reload the configmap alone
 ```
@@ -208,9 +211,11 @@ name.
 Proxmox name, k8s node name, inventory alias and Pi-hole record (`pg01` is
 `pg01.bnei.lan` and `pg01.bnei.mesh`). Nothing renames peers. The list is
 `ansible/playbooks/vars/bnei-lan-records.yml` (`bnei_lan_hosts`):
-`netbird-client.yml` refuses a host that is not there under the same name and
-IP, and `netbird-configure.yml` reports a user-less peer whose name is not
-there. Service names (`postgres`, `pve`, `garage`, …) are a separate list.
+`netbird-client.yml` refuses a host whose inventory alias and IP are not
+there. It does not check the OS hostname, and the peer takes the OS
+hostname: a host whose hostname drifted from its alias passes the guard and
+shows up afterwards in `netbird-configure.yml`'s report (user-less peers in
+`infra-nodes` whose name is not there). Service names (`postgres`, `pve`, `garage`, …) are a separate list.
 
 ## Prereqs
 
