@@ -75,6 +75,8 @@
   # not mask: hide task arguments and results by default. Asserts and the
   # report opt back in. -e netbird_debug=true shows everything.
   no_log: "{{ not (netbird_debug | default(false) | bool) }}"
+  vars_files:
+    - vars/bnei-lan-records.yml
   vars:
     infisical_project_id: "{{ lookup('env', 'INFISICAL_PROJECT_ID') | default('8a3fa54f-be22-488a-bf51-55158f65c0f2', true) }}"
     infisical_env: "{{ lookup('env', 'INFISICAL_ENV') | default('dev', true) }}"
@@ -342,6 +344,19 @@
       loop_control:
         label: "{{ item.json.name }}"
       when: item.json.user_id | default('', true) != ''
+
+    # A peer takes its OS hostname as its name, and every host has one name
+    # (vars/bnei-lan-records.yml). A name outside that map means a host
+    # nobody registered, or a hostname that drifted from it.
+    - name: Note infra peers whose name is not a known host
+      ansible.builtin.set_fact:
+        netbird_notes: "{{ netbird_notes | default([]) + ['peer ' ~ item.json.name ~ ': not a host in ansible/playbooks/vars/bnei-lan-records.yml'] }}"
+      loop: "{{ infra_peers.results }}"
+      loop_control:
+        label: "{{ item.json.name }}"
+      when:
+        - item.json.user_id | default('', true) == ''
+        - item.json.name not in bnei_lan_hosts
 
     # -------------------------------------------------------------------
     # 6. Setup key for one rollout stage (opt-in)

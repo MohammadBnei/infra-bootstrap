@@ -42,6 +42,8 @@
   hosts: localhost
   connection: local
   gather_facts: false
+  vars_files:
+    - vars/bnei-lan-records.yml
   vars:
     infisical_args:
       - --projectId={{ lookup('env', 'INFISICAL_PROJECT_ID') | default('8a3fa54f-be22-488a-bf51-55158f65c0f2', true) }}
@@ -56,6 +58,18 @@
           - netbird_stage in groups
           - netbird_stage not in ['all', 'ungrouped', 'pve_hosts']
         fail_msg: "Pass -e netbird_stage=<stage group from ansible/inventories/mesh/hosts.yml>"
+
+    # One name per machine: the inventory alias is the hostname and becomes
+    # the NetBird peer name, so it must be a host in bnei-lan-records.yml,
+    # at the same address.
+    - name: Fail if a host is not in bnei-lan-records.yml under that name and IP
+      ansible.builtin.assert:
+        that: bnei_lan_hosts[item] | default('') == hostvars[item].ansible_host
+        fail_msg: >-
+          {{ item }} ({{ hostvars[item].ansible_host }}) must be in
+          ansible/playbooks/vars/bnei-lan-records.yml as `{{ item }}: {{ hostvars[item].ansible_host }}`
+          (found: {{ bnei_lan_hosts[item] | default('nothing') }})
+      loop: "{{ groups[netbird_stage] }}"
 
     - name: Fail if an LXC's PVE node is not in pve_hosts
       ansible.builtin.assert:

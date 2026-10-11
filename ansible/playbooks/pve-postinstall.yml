@@ -16,19 +16,19 @@
 # filesystem, so a future `vm-provision.yml` can do `qm clone 9001 <newid>
 # --target <node> --full` directly at VM-creation time — no need to
 # pre-stage a local copy of the golden template (VMID 9001, stays on
-# proxmox) on every new node ahead of time. An earlier version of this
+# bnei) on every new node ahead of time. An earlier version of this
 # playbook tried to pre-stage it via `qm migrate`, which actually *relocates*
 # a VM rather than copying it (a VMID is cluster-wide unique in PVE's
 # pmxcfs) — confirmed live when "propagating" the template this way silently
-# moved it off proxmox entirely instead of leaving a copy behind.
+# moved it off bnei entirely instead of leaving a copy behind.
 #
 # Requires: ansible.posix collection — ansible-galaxy collection install -r
 # ansible/requirements.yml
 #
 # The corosync-join play (tag: corosync) also needs PVE_SSH_PRIVATE_KEY in
 # its environment (e.g. via `infisical run --projectId=<id> --env=dev --`) —
-# it reuses the same shared PVE root key already trusted for root@proxmox to
-# pre-establish trust FROM the new node TO proxmox, so `pvecm add` never
+# it reuses the same shared PVE root key already trusted for root@bnei to
+# pre-establish trust FROM the new node TO bnei, so `pvecm add` never
 # blocks on an interactive password prompt.
 #
 # Run order matters — see docs/runbook-pve-postinstall.md. Plays are tagged
@@ -295,22 +295,22 @@
     # ADR-0020: "`.165` stays the founding member" — but nothing ever actually
     # ran `pvecm create` on it, so every `pvecm add`/addnode attempt failed
     # with "invalid corosync.conf" / "error0: no nodes found" (confirmed live
-    # via the task log: proxmox had no corosync cluster to add a node *to*).
+    # via the task log: bnei had no corosync cluster to add a node *to*).
     # Guarded the same way as the ZFS-pool/join checks below: only creates
     # once, safe to leave in place permanently. `run_once` because this only
     # ever needs to happen a single time regardless of how many pve_new hosts
     # this play targets.
-    - name: Check whether proxmox (.165) is already a corosync cluster
+    - name: Check whether bnei (.165) is already a corosync cluster
       ansible.builtin.command: pvecm status
-      delegate_to: proxmox
+      delegate_to: bnei
       run_once: true
       register: proxmox_pvecm_status
       changed_when: false
       failed_when: false
 
-    - name: Bootstrap the corosync cluster on proxmox (.165), if not already done
+    - name: Bootstrap the corosync cluster on bnei (.165), if not already done
       ansible.builtin.command: "pvecm create {{ pve_cluster_name }}"
-      delegate_to: proxmox
+      delegate_to: bnei
       run_once: true
       when: >-
         proxmox_pvecm_status.rc != 0 or
@@ -318,13 +318,13 @@
 
     # `pvecm create` returns before corosync/pmxcfs actually reach quorum —
     # confirmed live: the very next task (the join attempt below) ran too
-    # soon after and got "cluster not ready - no quorum?" from proxmox, even
+    # soon after and got "cluster not ready - no quorum?" from bnei, even
     # though `pvecm create` itself had already succeeded. Same guard
     # condition as the bootstrap task above: only need to wait right after
     # we were the one who just created it.
-    - name: Wait for proxmox (.165) to reach quorum after cluster bootstrap
+    - name: Wait for bnei (.165) to reach quorum after cluster bootstrap
       ansible.builtin.command: pvecm status
-      delegate_to: proxmox
+      delegate_to: bnei
       run_once: true
       register: proxmox_quorum_wait
       until: "'Quorate:' in proxmox_quorum_wait.stdout and 'Yes' in proxmox_quorum_wait.stdout"
@@ -341,24 +341,24 @@
       changed_when: false
       failed_when: false
 
-    # `pvecm add` connects FROM this node TO proxmox over SSH as root — pre-seed
+    # `pvecm add` connects FROM this node TO bnei over SSH as root — pre-seed
     # its known_hosts so the first contact doesn't hang on an unattended
     # fingerprint prompt.
-    - name: Pre-trust proxmox's SSH host key (avoid an unattended fingerprint prompt)
+    - name: Pre-trust bnei's SSH host key (avoid an unattended fingerprint prompt)
       ansible.builtin.shell: |
-        ssh-keyscan -H {{ hostvars['proxmox'].ansible_host }} >> ~/.ssh/known_hosts
+        ssh-keyscan -H {{ hostvars['bnei'].ansible_host }} >> ~/.ssh/known_hosts
       changed_when: true
       when: >-
         pvecm_status.rc != 0 or
         'Cluster information' not in pvecm_status.stdout
 
-    # `pvecm add` also needs root-SSH auth FROM this node TO proxmox — a
+    # `pvecm add` also needs root-SSH auth FROM this node TO bnei — a
     # *separate* trust relationship from the ansible-control-node -> PVE-host
     # trust this playbook's own connection relies on. Without it, `pvecm add`
     # blocks on an interactive password prompt that a non-tty ansible task can
     # never answer (confirmed live: it just sits there running indefinitely).
     # Reusing the same shared PVE_SSH_PRIVATE_KEY that's already trusted for
-    # root@proxmox (terraform/ansible use it there too) makes this fully
+    # root@bnei (terraform/ansible use it there too) makes this fully
     # unattended and idempotent instead — same fix covers ex-laptop's join
     # later for free. Value comes from the calling shell's environment
     # (`infisical run` sets it), never written to this repo.
@@ -382,14 +382,14 @@
         pvecm_status.rc != 0 or
         'Cluster information' not in pvecm_status.stdout
 
-    - name: Point outbound SSH to proxmox at that key
+    - name: Point outbound SSH to bnei at that key
       ansible.builtin.blockinfile:
         path: /root/.ssh/config
         create: true
         mode: "0600"
         marker: "# {mark} ANSIBLE MANAGED BLOCK - pve cluster trust"
         block: |
-          Host {{ hostvars['proxmox'].ansible_host }}
+          Host {{ hostvars['bnei'].ansible_host }}
             IdentityFile /root/.ssh/id_pve_cluster
       when: >-
         pvecm_status.rc != 0 or
@@ -399,15 +399,15 @@
     # join (PVE::CLI::pvecm's `code` sub always calls
     # PVE::PTY::read_password("Please enter superuser (root) password for
     # ...") first when `use_ssh` isn't set — confirmed by reading
-    # /usr/share/perl5/PVE/CLI/pvecm.pm live) and prompts for proxmox's root
+    # /usr/share/perl5/PVE/CLI/pvecm.pm live) and prompts for bnei's root
     # password unconditionally, ignoring any SSH key trust entirely. That's
     # what was actually hanging the join, not a missing/broken key (the
     # trust tasks above are correct and necessary, just for the *other* join
     # path). `--use_ssh 1` forces the old SSH-based method, which does
     # respect the key trust (PVE's own ssh calls for this path use `-o
     # BatchMode=yes`).
-    - name: Join the cluster hosted at proxmox (.165)
-      ansible.builtin.command: "pvecm add {{ hostvars['proxmox'].ansible_host }} --use_ssh 1"
+    - name: Join the cluster hosted at bnei (.165)
+      ansible.builtin.command: "pvecm add {{ hostvars['bnei'].ansible_host }} --use_ssh 1"
       when: >-
         pvecm_status.rc != 0 or
         'Cluster information' not in pvecm_status.stdout
