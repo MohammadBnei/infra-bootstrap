@@ -145,6 +145,10 @@
 
 - name: Install and enroll the NetBird client
   hosts: "{{ netbird_stage | default('netbird_stage_unset') }}" # the first play fails without it; default only for --syntax-check
+  # -e netbird_serial=1 enrolls one host at a time and stops at the first
+  # failure (control-plane nodes, Patroni members).
+  serial: "{{ netbird_serial | default('100%') }}"
+  any_errors_fatal: "{{ netbird_serial is defined }}"
   gather_facts: false
   vars:
     netbird_version: 0.80.0 # = the laptops' client and the server; bump together
