@@ -106,6 +106,10 @@ then here. When in doubt, open those files.
   `local-path` is a node-pinned RWO fallback. Opting out of `longhorn` is
   always an explicit `storageClassName`.
 - Greenfield cluster runs use `cluster.yml`, never `scale.yml`.
+- One name per machine: OS hostname = Proxmox name = k8s node = inventory
+  alias = `<name>.bnei.lan` = NetBird `<name>.bnei.mesh`. Machines and
+  service names (VIPs/endpoints) are two lists in
+  `ansible/playbooks/vars/bnei-lan-records.yml`; Pigsty alone keys by IP.
 - Secrets only via Infisical, fetched at run time — never committed.
 
 ## Forbidden patterns (quick check — full list + reasons in `DECISION.md` §3 and `docs/adr/`)

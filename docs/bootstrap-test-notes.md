@@ -4687,3 +4687,31 @@ then, and no more k8s nodes enroll before it.
   `--disable-server-routes`. The spike hosts still need a
   `-e netbird_reup=true` run to pick these up. That run no longer spends a
   setup key.
+
+## 2026-10-11 — `cluster.yml --tags cilium` installs nothing on kubespray v2.31.0
+
+Applying the Cilium `devices: [eth0]` pin (ADR-0055 spike, see the entry
+above) with `cluster.yml --tags cilium` ran **no install or upgrade**. The
+cilium role's `main.yml` pulls `install.yml`/`apply.yml` in with
+`include_tasks`. A dynamic include does not pass its tag to the tasks it
+includes, so only the static `check.yml` ran. This is the same trap as the
+Pigsty `pg_db_baseline` include (2026-10-03).
+
+Applied by hand on k8s-cp-01, exactly as the role would:
+1. Write `/etc/kubernetes/cilium-extra-values.yaml` from `cilium_extra_values`.
+2. Run `cilium upgrade --version 1.19.3 -f cilium-values.yaml -f cilium-extra-values.yaml`.
+   A `--dry-run-helm-values` diff beforehand showed only `devices: [eth0]`.
+3. Run `kubectl -n kube-system rollout restart ds/cilium`. The chart's
+   `rollOutCiliumPods` is unset, so the agents don't reload the configmap on
+   their own.
+
+Result: configmap `devices: eth0`, and worker-02's MTUs are back to
+1500/1500/1420. cp-03 → worker-02 endpoint health flapped for about a minute
+after the restart, then went 5/5 everywhere. The spike criterion "devices
+exclude `wt0`" now **passes**. The `--tags cilium` command written in the
+entry above is wrong; the runbook carries the manual procedure.
+
+The NetBird route flags are on all three spike hosts, via
+`-e netbird_reup=true` with no setup key spent. Verified on k8s-worker-02:
+`DisableClientRoutes` and `DisableServerRoutes` are `true` in
+`/var/lib/netbird/default.json`.

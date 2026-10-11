@@ -346,27 +346,55 @@ stays authoritative for `bnei.lan` and holds no mesh records. Never
 
 ### Records
 
+**One name per machine.** A machine's name is its OS hostname, and the same
+string is its Proxmox VM/LXC name, k8s node name, ansible inventory alias,
+Pi-hole record `<name>.bnei.lan` and NetBird peer `<name>.bnei.mesh`.
+**Service names** (VIPs, endpoints) are a separate list and may point at any
+machine; consumers use them for anything that is not "this exact box".
+Pigsty is the one exception: `pigsty/pigsty.yml` keys hosts by IP, and
+Patroni member names (`pg-proxmox-1`/`-2`) are database identity, not host
+names. Both lists live in `ansible/playbooks/vars/bnei-lan-records.yml`
+(`bnei_lan_hosts`, `bnei_lan_service_records`); `pihole-configure.yml`
+applies them, and the NetBird playbooks refuse or report a name not in it.
+
+Machines (`bnei_lan_hosts`):
+
 ```text
-A    proxmox.bnei.lan        → 192.168.1.165
+A    bnei.bnei.lan           → 192.168.1.165  (PVE node; "bnei" is its corosync node name, kept rather than renamed)
 A    server1.bnei.lan        → 192.168.1.200
 A    ex-laptop.bnei.lan      → 192.168.1.161
-A    pi4.bnei.lan            → 192.168.1.55
-A    postgres-1.bnei.lan     → 192.168.1.205  (pg01 VM — current live Leader/Primary as of 2026-08-15; on server1, migrated 2026-07-30, ADR-0029/patronictl)
-A    postgres-2.bnei.lan     → 192.168.1.207  (pg02 VM — current live Replica, on .165, ADR-0029. Names never tracked roles; always confirm with patronictl)
-A    postgres.bnei.lan       → 192.168.1.232  (Pigsty HA floating VIP — apps/tests should use this, not postgres-1/2 directly)
-A    pg-etcd-witness.bnei.lan → 192.168.1.197  (ex-laptop — 3rd etcd DCS member, live 2026-07-30, ADR-0029)
-A    garage.bnei.lan         → 192.168.1.199
-A    registry.bnei.lan       → 192.168.1.234  (zot OCI registry — a MetalLB LoadBalancer address, not a host; pinned in gitops/platform/values/zot/values.yaml and named by every node's containerd config, so both ends move together — ADR-0034)
+A    pihole.bnei.lan         → 192.168.1.55   (the Pi 4; its hostname moves from `raspberry` to `pihole`)
+A    pg01.bnei.lan           → 192.168.1.205  (Pigsty infra + Patroni member pg-proxmox-1; names never track roles, confirm with patronictl)
+A    pg02.bnei.lan           → 192.168.1.207  (Patroni member pg-proxmox-2)
+A    pg-etcd-witness.bnei.lan → 192.168.1.197 (ex-laptop — 3rd etcd DCS member, ADR-0029)
+A    garage-storage.bnei.lan → 192.168.1.199
 A    nfs-storage.bnei.lan    → 192.168.1.198
 A    k9s-dashboard.bnei.lan  → 192.168.1.110
 A    build-runner.bnei.lan   → 192.168.1.111  (image build runner LXC — ADR-0034)
-A    k8s.bnei.lan            → 192.168.1.180  (kube-vip control-plane VIP, confirmed live — see ADR-0016)
+A    hermesagent.bnei.lan    → 192.168.1.72   (Hermes agent LXC 101 on ex-laptop)
 A    k8s-cp-01.bnei.lan      → 192.168.1.201
 A    k8s-cp-02.bnei.lan      → 192.168.1.204
 A    k8s-cp-03.bnei.lan      → 192.168.1.206
 A    k8s-worker-01.bnei.lan  → 192.168.1.202
 A    k8s-worker-02.bnei.lan  → 192.168.1.203
 ```
+
+Services (`bnei_lan_service_records`):
+
+```text
+A    pve.bnei.lan            → .165 / .200 / .161  (round-robin over the corosync members — DNS convenience, not a health-aware VIP)
+A    postgres.bnei.lan       → 192.168.1.232  (Pigsty HA floating VIP — what apps and tests use)
+A    pigsty.bnei.lan         → 192.168.1.205  (Pigsty infra portal: VictoriaMetrics /vmetrics, its Grafana /ui — used by the cluster Grafana; Pigsty's nginx answers 200 for this Host)
+A    redis.bnei.lan          → 192.168.1.205  (shared Pigsty Redis)
+A    garage.bnei.lan         → 192.168.1.199  (Garage S3 endpoint :3900 — Longhorn backups, zot, pgBackRest)
+A    registry.bnei.lan       → 192.168.1.234  (zot — a MetalLB address, pinned in gitops/platform/values/zot/values.yaml and named by every node's containerd — ADR-0034)
+A    k8s.bnei.lan            → 192.168.1.180  (kube-vip control-plane VIP — ADR-0016)
+A    stt.bnei.dev            → 192.168.1.233  (split horizon, Traefik VIP — ADR-0044/0046)
+```
+
+*Renamed 2026-10-11 (one-name rule): `proxmox` → `bnei`, `postgres-1`/`-2` →
+`pg01`/`pg02`, `pi4` → `pihole`. The old names are gone from Pi-hole after
+the next `pihole-configure.yml` run; update anything still using them.*
 
 `bnei.dev` is hosted at **Cloudflare** (registration stays at Squarespace),
 with **wildcard A records** all pointing at the public IP the Freebox
@@ -417,9 +445,9 @@ answered queries.*
 Endpoint naming (`k8s-proxmox-gpu.bnei.lan` vs `k8s.bnei.lan`) is resolved
 in favor of `k8s.bnei.lan` — see
 [ADR-0016](docs/adr/0016-k8s-endpoint-naming.md). This list is declared,
-reconciled-every-run state (`pihole_hosts_records` in
-`ansible/playbooks/pihole-configure.yml`) — add a line there (and here)
-as each new host is actually provisioned, never speculatively.
+reconciled-every-run state (`ansible/playbooks/vars/bnei-lan-records.yml`,
+applied by `pihole-configure.yml`) — add a line there (and here) as each new
+host is actually provisioned, never speculatively.
 
 ---
 

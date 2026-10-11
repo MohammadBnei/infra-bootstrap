@@ -93,7 +93,8 @@ being locked out abroad until then is accepted (Decision 5 is the way in).
 
 - **Light** — ad-hoc commands, app playbooks — from the laptop over NetBird SSH,
   through a separate overlay inventory `ansible/inventories/mesh/hosts.yml`
-  (`ansible_host: <mesh_name>.bnei.mesh`).
+  (~~`ansible_host: <mesh_name>.bnei.mesh`~~ `<name>.bnei.mesh`, the host's
+  one name — see the Decision 4 amendment).
 - **Heavy** — kubespray `cluster.yml` and upgrades, pigsty `node`/`pgsql`/`infra`,
   `gpu-node-configure.yml` (reboots a node), `pihole-configure.yml` (reapplies
   its only uplink) — from the **k9s hub over the LAN**, where the toolchain
@@ -112,7 +113,20 @@ carries an explicit `mesh_name` per host, which is a Pi-hole short name such as
 `postgres-1` or `proxmox`. `netbird-configure.yml` fails if a `mesh_name` is not
 in the records file. It sets each peer's name through the API,
 compare-before-write, so `postgres-1.bnei.mesh` resolves on every NetBird
-client **that manages DNS — the laptops**. Infra peers have DNS
+client **that manages DNS — the laptops**.
+
+> **Amended 2026-10-11 — one name per machine; the API rename is dropped.**
+> A machine's name is its OS hostname, and that same string is its Proxmox
+> name, k8s node name, ansible inventory alias, Pi-hole record and NetBird
+> peer name. So peers keep the hostname they enroll with, and there is no
+> `mesh_name` and no rename through the API: `postgres-1.bnei.mesh` above is
+> `pg01.bnei.mesh`. Pi-hole records were renamed to match (`proxmox` → `bnei`,
+> `postgres-1`/`-2` → `pg01`/`pg02`, `pi4` → `pihole`); service names (VIPs,
+> endpoints) are a separate list. The records moved to
+> `ansible/playbooks/vars/bnei-lan-records.yml` as planned. `netbird-client.yml`
+> refuses a host not in it under the same name and IP; `netbird-configure.yml`
+> reports a user-less peer whose name is not a known host. Pigsty stays keyed
+> by IP. The rest of this Decision stands: laptops only, `bnei.mesh`. Infra peers have DNS
 management off (Decision 1), so they cannot resolve `*.bnei.mesh`; nothing
 run from an infra host may use the mesh overlay inventory. Peer DNS domain: `bnei.mesh`, never `netbird.bnei.dev` (that is the
 management URL; claiming it would cut clients off from it).
@@ -176,8 +190,9 @@ the next run create a duplicate. Everything it does not name is never written.
 > **Amended 2026-10-11: the mesh is SSH only, enforced client-side.** Hosts
 > run `netbird up` with `--disable-client-routes --disable-server-routes`, so a
 > route, network resource or exit node added in the dashboard never reaches
-> a host. (The three spike hosts get the flags at their next
-> `-e netbird_reup=true`.)
+> a host. Applied to the three spike hosts with `-e netbird_reup=true`
+> (verified on k8s-worker-02: `DisableClientRoutes`/`DisableServerRoutes`
+> true in `/var/lib/netbird/default.json`).
 >
 > **Cilium and `wt0`:** Cilium auto-detects `wt0` and lowers its MTUs to match
 > it. The pin `cilium_extra_values: {devices: [eth0]}` is **committed, not
@@ -220,8 +235,10 @@ blackbox probe.
    - The Freebox LAN IPv6 prefix, and which address family LAN SSH uses.
    - Pod → Postgres connections arrive from node IPs (so 5432 can leave the
      public zone).
-5. `netbird-configure.yml`, second part: peer names, the records move, the
-   overlay inventory.
+5. ~~`netbird-configure.yml`, second part: peer names,~~ the records move, the
+   overlay inventory. *(2026-10-11: peer renames dropped — Decision 4
+   amendment. The records move is done; what remains is using the mesh
+   inventory as the light-run overlay.)*
 6. Enrollment, staged: witness → k8s workers one at a time → control plane →
    Patroni replica (from `patronictl list`, not the name) → leader →
    non-storage LXCs → PVE → Pi-hole → garage/nfs in a window.
@@ -233,7 +250,7 @@ the critical alerts are live; NetBird's Grafana dashboards and the degraded =
 warning rule are not); `netbird-configure.yml` part 1 run
 for real. Step 4 in progress: the three spike hosts are enrolled, reach
 management through the hairpin and show up on the laptop; the SSH,
-ansible-over-mesh and Cilium checks are not done. The geo pass criterion is
+ansible-over-mesh checks are not done. The geo pass criterion is
 moot (Decision 2 amendment). Spike results so far:
 - **Passed:** systemd-resolved is untouched (`--disable-dns`, no `wt0`
   link). LXC tun works. Infra peers reach management from the LAN. The
@@ -241,13 +258,16 @@ moot (Decision 2 amendment). Spike results so far:
 - **Found and fixed:** a `netbird-ssh` rule with no ports is an any-port
   rule (`ip saddr <peer> accept`, no dport). The policy now has
   `ports: ["22"]` (ee291339).
-- **Failed until applied:** "devices exclude `wt0`". Cilium auto-detected
+- **Passed after a fix:** "devices exclude `wt0`". Cilium had auto-detected
   `wt0` on k8s-worker-02 and lowered its MTUs there (`cilium_host`/`cilium_vxlan`
   1280, `cilium_wg0` 1200, against 1500/1500/1420 on worker-01). The pin
-  `cilium_extra_values: {devices: [eth0]}` is committed, not applied: it needs
-  `cluster.yml --tags cilium` from the laptop on the LAN, then
-  `kubectl -n kube-system rollout restart ds/cilium`. No more k8s
-  nodes enroll before that run.
+  `cilium_extra_values: {devices: [eth0]}` was applied 2026-10-11 by hand on
+  k8s-cp-01 the way kubespray's role would (`cluster.yml --tags cilium`
+  installs nothing on v2.31.0 — see `docs/bootstrap-test-notes.md`), then
+  `rollout restart ds/cilium`. Configmap `devices: eth0`, worker-02 back to
+  1500/1500/1420, endpoint health 5/5.
+- **Found and fixed:** the route flags (`--disable-client-routes`,
+  `--disable-server-routes`) are on all three spike hosts.
 
 ## Consequences
 

@@ -372,10 +372,16 @@ for local A records — format `"IP HOSTNAME"`, a JSON string array, per
 `pi-hole/FTL`'s `config.c` — plus `dns.upstreams`, `dns.interface`,
 `dns.queryLogging`, `misc.privacylevel`) and `pihole setpassword`.
 
-The `bnei.lan` record set (`pihole_hosts_records` var) mirrors
-`ARCHITECTURE.md` §3's target list, filled in with real currently-assigned
-IPs. Add a line there as each new host actually gets provisioned — it's a
-declared, reconciled-every-run list, not a one-time seed.
+The `bnei.lan` zone lives in `playbooks/vars/bnei-lan-records.yml`, loaded
+through `vars_files` (it used to be the `pihole_hosts_records` var inside this
+playbook). It has two lists. `bnei_lan_hosts` maps each machine's **one name**
+(its OS hostname, Proxmox name, k8s node name, inventory alias and NetBird
+peer name) to its IP. `bnei_lan_service_records` holds service names (VIPs,
+endpoints) that may point at any machine. Real currently-assigned IPs only.
+Add a machine there as it is provisioned — it's a declared,
+reconciled-every-run list, not a one-time seed, and the NetBird playbooks
+read the same file. The playbook also sets the Pi's own hostname to `pihole`
+(it shipped as `raspberry`).
 
 **Static IP:** the Pi's `192.168.1.55` was confirmed live (2026-07-30) to
 be a DHCP-dynamic lease, not static — a real risk once the whole LAN's DNS
@@ -449,7 +455,8 @@ ansible-playbook ansible/playbooks/netbird-configure.yml \
 Task output is hidden play-wide (the PAT sits in the `uri` headers, which
 Ansible doesn't mask); `-e netbird_debug=true` shows it. The final report has
 two lines: drift on owned fields, and what needs a human (user-owned peers in
-`infra-nodes`, admin emails with no NetBird user yet). The setup key goes to
+`infra-nodes`, admin emails with no NetBird user yet, user-less peers whose
+name is not a host in `vars/bnei-lan-records.yml`). The setup key goes to
 Infisical as `NETBIRD_INFRA_SETUP_KEY_<STAGE>` from a 0600 file; if that
 write fails the new key is revoked.
 
@@ -470,8 +477,10 @@ the stage's setup key (passed by file) and `--management-url=https://netbird.bne
 --allow-server-ssh --enable-ssh-root --enable-ssh-sftp --disable-dns
 --disable-client-routes --disable-server-routes` (the mesh is SSH only).
 Guards: the stage must be a real stage group (not `all`, `ungrouped` or
-`pve_hosts`), and an LXC whose `netbird_pve_node` is not in `pve_hosts` fails
-up front.
+`pve_hosts`); an LXC whose `netbird_pve_node` is not in `pve_hosts` fails
+up front; and every host must be in `vars/bnei-lan-records.yml`'s
+`bnei_lan_hosts` under the same name and IP, because the inventory alias is
+the hostname and becomes the NetBird peer name.
 
 **Run for real 2026-10-11** against `spike` (`pg-etcd-witness`,
 `k8s-worker-02`, `build-runner` LXC 103 on server1).

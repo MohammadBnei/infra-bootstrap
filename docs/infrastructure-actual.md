@@ -527,8 +527,9 @@ non-default class on the purpose-built `nfs-storage` VM.*
   forwarding to Pi-hole first (`policy: sequential`, not the default
   random — random upstream selection silently broke this once, see
   `docs/bootstrap-test-notes.md` 2026-07-30).
-- **Records** (`pihole_hosts_records` in `pihole-configure.yml`, mirrors
-  `ARCHITECTURE.md` §3): all PVE hosts, Postgres nodes + HA VIP
+- **Records** (`ansible/playbooks/vars/bnei-lan-records.yml` since
+  2026-10-11, applied by `pihole-configure.yml`, mirrors `ARCHITECTURE.md`
+  §3; one name per machine, service names kept apart): all PVE hosts, Postgres nodes + HA VIP
   (`postgres.bnei.lan` → `.232`), `pg-etcd-witness.bnei.lan`,
   `redis.bnei.lan` (added 2026-07-30, so future Redis host moves are a
   DNS-record change only — see §4/§6), `garage.bnei.lan`,
