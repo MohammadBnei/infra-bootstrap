@@ -165,6 +165,12 @@ the next run create a duplicate. Everything it does not name is never written.
 > only on peers with no owning user, and reports user-owned peers in
 > `infra-nodes` as drift.
 
+> **Amended 2026-10-11: the SSH rule needs ports.** A `netbird-ssh` rule
+> without `ports` renders on the host as `ip saddr <source> accept` with no
+> destination port, which opens every TCP port. The policy carries
+> `ports: ["22"]` (NetBird redirects 22 to 22022). Cilium's devices are
+> pinned to `eth0` so it never attaches to `wt0`.
+
 ### 7. Observability
 
 Scrape `metricsPort: 9090` with a ServiceMonitor (zot's pattern), and add
@@ -215,7 +221,17 @@ warning rule are not); `netbird-configure.yml` part 1 run
 for real. Step 4 in progress: the three spike hosts are enrolled, reach
 management through the hairpin and show up on the laptop; the SSH,
 ansible-over-mesh and Cilium checks are not done. The geo pass criterion is
-moot (Decision 2 amendment).
+moot (Decision 2 amendment). Spike results so far:
+- **Passed:** systemd-resolved is untouched (`--disable-dns`, no `wt0`
+  link). LXC tun works. Infra peers reach management from the LAN. The
+  Freebox LAN IPv6 prefix is `2a01:e0a:126d:910::/64`.
+- **Found and fixed:** a `netbird-ssh` rule with no ports is an any-port
+  rule (`ip saddr <peer> accept`, no dport). The policy now has
+  `ports: ["22"]` (ee291339).
+- **Failed until applied:** "devices exclude `wt0`". Cilium auto-detected
+  `wt0` on k8s-worker-02. The pin `cilium_extra_values: {devices: [eth0]}` is
+  committed but needs a kubespray Cilium run from the hub. No more k8s
+  nodes enroll before that run.
 
 ## Consequences
 

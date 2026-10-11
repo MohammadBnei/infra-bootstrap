@@ -18,7 +18,7 @@
 3. **Your laptop is a peer in `platform-admins`.** That group is in your
    user's auto groups. Group propagation copies it onto your peers.
 4. **One policy connects them.** `platform-admins-ssh-infra-nodes` (protocol
-   `netbird-ssh`) lets `platform-admins` reach `infra-nodes`. By design, each
+   `netbird-ssh`, port 22 only) lets `platform-admins` reach `infra-nodes`. By design, each
    SSH session asks for an authentik login (a JWT) in the browser and needs
    no SSH key. This is not yet verified on our hosts.
 5. **Two playbooks keep it declared.** `netbird-configure.yml` talks to the
@@ -96,6 +96,29 @@ You can use the dashboard, the playbook, or both. They do not fight:
 - **Everything else is never touched**: other groups, other policies, peers
   outside `infra-nodes`.
 
+## A `netbird-ssh` rule without ports opens every port
+
+NetBird renders a policy rule with no `ports` on the host as `ip saddr
+<source peer> accept`, with no destination port. That opens every TCP port
+of the host to the source peers. The spike found this on 2026-10-11. The
+policy now carries `ports: ["22"]`, and the playbook reports anything else
+as drift. On `k8s-worker-02`, NetBird's nftables chain
+`netbird-acl-input-rules` (table `ip netbird`) now allows only tcp 22 and
+22022 from the laptop. NetBird redirects 22 to its SSH server on 22022.
+Never save this policy without ports in the dashboard.
+
+## Cilium must not use `wt0`
+
+When a k8s node joins the mesh, Cilium auto-detects NetBird's `wt0` as one
+of its devices (`Devices: [eth0 wt0]`, seen on `k8s-worker-02`). It is
+harmless today (no kube-proxy replacement, no host firewall, iptables
+masquerade). Still, the mesh is for SSH only and must never carry cluster
+traffic. `inventory/ukubi/group_vars/k8s_cluster/k8s-net-cilium.yml` pins
+`cilium_extra_values: {devices: [eth0]}`. **It is not applied yet.** It
+needs a kubespray Cilium run from the k9s hub, done by the operator.
+**Enroll no more k8s nodes until that run is done.** After the run,
+`cilium status --verbose` on a peer node must list only `eth0`.
+
 ## The rule that matters: only setup keys put peers in `infra-nodes`
 
 **Never add `infra-nodes` to a user's auto groups.** With propagation on,
@@ -161,7 +184,8 @@ Pi-hole short names (`mesh_name`).
 ## Steps: enroll a stage
 
 A stage is one group in `ansible/inventories/mesh/hosts.yml`. Today only
-`spike` exists. ADR-0055 step 6 sets the order of later stages: witness →
+`spike` exists. **Before any stage with k8s nodes, apply the Cilium
+`devices` pin (see above).** ADR-0055 step 6 sets the order of later stages: witness →
 k8s workers one at a time → control plane → Patroni replica → leader →
 non-storage LXCs → PVE → Pi-hole → garage/nfs in a window.
 

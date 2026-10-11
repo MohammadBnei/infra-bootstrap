@@ -4633,3 +4633,24 @@ put the laptop in `infra-nodes`, and an enforce run switched on the laptop's
 enables SSH only on peers with no owning user (setup-key hosts), and reports
 user-owned peers in `infra-nodes` as drift. Rule: only setup keys put peers in
 `infra-nodes`.
+
+**A `netbird-ssh` rule without ports opened every port.** With `ports` unset,
+NetBird rendered the policy rule on the hosts as `ip saddr <laptop> accept`,
+with no dport. Every TCP port of an infra host was open to `platform-admins`
+peers. The fix is `ports: ["22"]` on the rule; NetBird redirects 22 to 22022
+(ee291339). Verified on k8s-worker-02: `netbird-acl-input-rules` now allows
+only tcp 22 and 22022 from the laptop. NetBird uses nftables tables
+`ip netbird` and `ip6 netbird`, not iptables.
+
+**Cilium picked up `wt0`.** On k8s-worker-02 `cilium status --verbose` showed
+`Devices: [eth0 wt0]`. Node IPs were unaffected, encryption was OK, and cluster
+health was 5/5. With no KPR, no host firewall and iptables masquerade, this is
+benign today. Pinned with `cilium_extra_values: {devices: [eth0]}` in
+`inventory/ukubi/group_vars/k8s_cluster/k8s-net-cilium.yml` (eth0 is the
+uplink on all five VMs). **Not applied yet.** It needs a kubespray Cilium run
+from the hub. The spike criterion "devices exclude `wt0`" stays FAILED until
+then, and no more k8s nodes enroll before it.
+
+**Other spike checks.** systemd-resolved is untouched: no `wt0` link,
+`--disable-dns` works. The Freebox LAN IPv6 prefix is
+`2a01:e0a:126d:910::/64` (eth0 on .203).
