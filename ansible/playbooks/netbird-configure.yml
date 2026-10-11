@@ -235,11 +235,12 @@
         label: "{{ item.email }}"
       when: group_ids['platform-admins'] not in item.auto_groups
 
-    # Agents: a NetBird user appears on the agent's first token exchange
-    # (account setting user_approval_required, so pending approval).
+    # Agents: a NetBird user appears on the agent's first management API call
+    # with its JWT, not at the token exchange (account setting
+    # user_approval_required, so it starts pending approval).
     - name: Note agents with no NetBird user yet
       ansible.builtin.set_fact:
-        netbird_notes: "{{ netbird_notes | default([]) + [item ~ ' has no NetBird user yet: run ansible/scripts/node.sh once, then re-run'] }}"
+        netbird_notes: "{{ netbird_notes | default([]) + [item ~ ' has no NetBird user yet: curl -H "Authorization: Bearer $(ansible/scripts/node.sh --token)" https://netbird.bnei.dev/api/users/current (expect 403 pending approval), then re-run with -e netbird_enforce=true'] }}"
       loop: "{{ netbird_agent_emails }}"
       when: users.json | selectattr('email', 'equalto', item) | list | length == 0
 

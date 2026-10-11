@@ -17,9 +17,11 @@
 >   window. From the laptop,
 > `<node>.bnei.mesh:22022` is reachable. **Human SSH over the mesh works:**
 > on 2026-10-11 `ssh root@k8s-worker-02.bnei.mesh` from the laptop asked for
-> an authentik login in the browser, then opened a shell. Not yet verified:
-> ansible over the mesh and how many JWT prompts it costs, behaviour during a
-> netbird-server restart, and N MG's laptop being denied. Until the cutover
+> an authentik login in the browser, then opened a shell. **Agents** reach
+> every mesh host with no browser through `ansible/scripts/node.sh`, as
+> `netbird-agent` (since 2026-10-12, see below). Not yet verified: an ansible
+> inventory over the mesh, behaviour during a netbird-server restart, and
+> N MG's laptop being denied. Until the cutover
 > (ADR-0055 rollout step 7), keys over the LAN and the k9s hub stay the
 > default way in.
 
@@ -92,6 +94,8 @@ cluster, Traefik and Pigsty to be up.
 | Client install and enrollment on the hosts | the hosts | `netbird-client.yml` |
 | Which hosts are in which stage | git: `ansible/inventories/mesh/hosts.yml` | PR |
 | Groups `laptop`, `All`; policies `SSH Access`, `pi-lab-443-policy`, `Default` (disabled) | NetBird API | **dashboard only**. The playbook never reads them for writing |
+| authentik service account `netbird-agent`, its app password, `client_credentials` on the `netbird` provider | git: `gitops/bootstrap/authentik-blueprint-netbird.yaml` (file `netbird-agent.yaml`); key in Infisical as `NETBIRD_AGENT_APP_PASSWORD` | PR + ArgoCD |
+| NetBird user `netbird-agent@bnei.dev`: group `agent-ssh`, role `user`, approved | NetBird API | `netbird-configure.yml -e netbird_enforce=true` (`netbird_agent_emails`) |
 | Service user `ukubi` and its PAT | NetBird, PAT in Infisical as `NETBIRD_API_TOKEN` | **by hand, once**. Nothing can call the API before it exists |
 | `NETBIRD_INFRA_SETUP_KEY_<STAGE>` (one per stage), `NETBIRD_API_TOKEN`, `PVE_SSH_PRIVATE_KEY` | Infisical `infra-bootstrap-1-ge1`, env `dev` | see [`secrets.md`](secrets.md) |
 
@@ -190,6 +194,7 @@ peer found in `infra-nodes` is reported as drift and left alone.
 | `account@bnei.dev` | admin | The local account from the first boot ([ADR-0054](adr/0054-netbird-control-plane-hosting-only.md) §4). It is break-glass and owns no peers. Local login is off (`localAuthDisabled`); reverting that one line in the server config restores it. Password: `NETBIRD_OWNER_PASSWORD` |
 | `nicolasmaigre@gmail.com` | admin | N MG, in `laptop`, deliberately **not** in `platform-admins` |
 | `ukubi` | admin (service user) | Holds the PAT the playbook uses |
+| `netbird-agent@bnei.dev` | user, group `agent-ssh` | The agents' SSH identity (authentik service account). Must stay role `user`: its JWT also works on the management API for 24 h |
 
 `account@bnei.dev` is also the operator's general email, so it is easy to
 put it in `netbird_admin_emails` by mistake. An early draft of the playbook
@@ -200,7 +205,8 @@ joins the group.
 
 | Use | Path | State |
 |---|---|---|
-| Human SSH, light runs (ad-hoc, app playbooks) | laptop over the mesh: `ssh root@<peer>.bnei.mesh` | human SSH **verified** 2026-10-11; ansible over the mesh not yet |
+| Human SSH, light runs (ad-hoc, app playbooks) | laptop over the mesh: `ssh root@<peer>.bnei.mesh` | human SSH **verified** 2026-10-11; an ansible inventory over the mesh not yet |
+| Agents (Claude; Hermes later) | `ansible/scripts/node.sh <name> [cmd]`, over the mesh as `netbird-agent` | **live** 2026-10-12, all 14 hosts |
 | Heavy runs (kubespray, pigsty `node`/`pgsql`/`infra`, `gpu-node-configure.yml`, `pihole-configure.yml`) | the k9s hub, over the LAN ([`runbook-k9s-ops-hub.md`](runbook-k9s-ops-hub.md)) | unchanged |
 | Off-LAN recovery | public `:49222` to the k9s hub | unchanged. Narrowed to one break-glass key at cutover |
 | Enrollment itself | keys over the LAN | it has to be: the host is not a peer yet |
@@ -210,8 +216,51 @@ NetBird pod. Over the mesh, such a run would cut its own connection. The
 kubespray and pigsty inventories keep their LAN IPs and are never repointed.
 
 Not done yet: the sshd `Match` blocks that refuse keys from outside the LAN,
-the break-glass key, the narrowing of `:49222`, and the skills' default
-paths. All of these are ADR-0055 rollout step 7.
+the break-glass key, and the narrowing of `:49222`. All of these are ADR-0055
+rollout step 7. The skills (`k8s-ops`, `ansible-ops`, `run-ukubi-ops`)
+already reach nodes through `node.sh`.
+
+## Agents: `node.sh` and the `netbird-agent` identity
+
+```bash
+ansible/scripts/node.sh k8s-cp-01 uptime             # mesh, as root
+ansible/scripts/node.sh -l core k8s-cp-01 sudo -n id  # another local user
+ansible/scripts/node.sh --lan pg01 uptime            # fallback: LAN + inventory keys
+ansible/scripts/node.sh ex-laptop pct exec 101 -- uptime   # hermesagent (no inbound SSH)
+ansible/scripts/node.sh --token                      # a fresh JWT for another client; a secret
+```
+
+- **The mesh path (the default)** mints a NetBird SSH token with no
+  browser: authentik `client_credentials` as `netbird-agent` (app password
+  `NETBIRD_AGENT_APP_PASSWORD`), then a Dex token exchange. The NetBird SSH
+  server accepts that token as the SSH password. One mint is cached for
+  540 s. ADR-0055 Decision 8 has the details.
+- **`--lan`** uses the address, user and key from the mesh, garage and nfs
+  inventories. A stage whose key is in Infisical names it in
+  `node_ssh_key_secret`; the key goes to a 0600 temp file. Use `--lan` when
+  NetBird or authentik is down, and for `garage-storage` and `nfs-storage`,
+  which are not on the mesh yet.
+- **Never `ssh <bare-name>` yourself.** NetBird's managed ssh_config routes
+  bare peer names through `netbird ssh proxy`, which waits for a browser.
+  `node.sh` uses `ssh -F none` (mesh) or the IP (`--lan`).
+- **The caller must be a NetBird peer in a policy source group.** Today that
+  is only the operator's laptop. Hermes needs its LXC enrolled plus a source
+  group.
+
+**Adding an agent identity:**
+1. Add an authentik service account and app password in the blueprint.
+2. Add its email to `netbird_agent_emails`.
+3. Make its first management API call with the token:
+   `curl -H "Authorization: Bearer $(ansible/scripts/node.sh --token)" https://netbird.bnei.dev/api/users/current`. This creates the NetBird user, as **pending
+   approval**, and the call returns 403 "user is pending approval".
+   Exchanging the token alone does not create the user.
+4. Run `netbird-configure.yml -e netbird_enforce=true`. It approves the user
+   and sets `agent-ssh`, role `user`.
+
+**Revoking:** delete the authentik token or deactivate the account; either
+is enough. Blocking the NetBird user also works, but the next
+`netbird_enforce=true` run unblocks it. So also remove the email from
+`netbird_agent_emails`.
 
 ## DNS: `bnei.mesh` is for laptops only
 
