@@ -4508,3 +4508,11 @@ the pod CIDR.
 Also seen: the in-cluster resolver kept serving the old proxied Cloudflare
 answer for `netbird.bnei.dev` for some minutes after the record turned grey.
 Public resolvers had the new address immediately.
+
+**Later the same day: owner login → 500.** `owner.password` takes a bcrypt
+hash, not a password — upstream's `config.yaml.example` shows
+`"initial-password"`, but v0.80.0 `combined/cmd/config.go:636` assigns it to
+Dex's `OwnerConfig.Hash`. The server booted happily; every login failed with
+`parsing bcrypt hash: crypto/bcrypt: hashedSecret too short`, which the
+dashboard showed as an internal server error. Now
+`NETBIRD_OWNER_PASSWORD_HASH`.
