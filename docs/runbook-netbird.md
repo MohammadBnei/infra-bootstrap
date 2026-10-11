@@ -1,9 +1,13 @@
 # Runbook: NetBird SSH mesh (ADR-0054, ADR-0055)
 
-> **Status, 2026-10-11:** rolling out, spike stage. Three hosts are enrolled:
-> `pg-etcd-witness` (.197), `k8s-worker-02` (.203) and the `build-runner` LXC
-> (.111). The laptop sees all three as `<name>.bnei.mesh`. **SSH over the
-> mesh has not been tested end-to-end yet.** Until it has, and until the
+> **Status, 2026-10-11:** rolling out. Two stages are enrolled, 7 hosts:
+> - `spike`: `pg-etcd-witness` (.197), `k8s-worker-02` (.203) and the
+>   `build-runner` LXC (.111);
+> - `k8s`: `k8s-worker-01` and `k8s-cp-01`/`-02`/`-03`.
+>
+> Still to enroll: `pg`, `lxc`, `pve`, `pi`, `storage`. From the laptop,
+> `<node>.bnei.mesh:22022` is reachable. **An SSH login over the mesh has
+> not been tested end-to-end yet.** Until it has, and until the
 > cutover (ADR-0055 rollout step 7), keys over the LAN and the k9s hub
 > remain the way in. Nothing below changes that.
 
@@ -228,8 +232,8 @@ shows up afterwards in `netbird-configure.yml`'s report (user-less peers in
 
 ## Steps: enroll a stage
 
-A stage is one group in `ansible/inventories/mesh/hosts.yml`. Today only
-`spike` exists. ADR-0055 step 6 sets the order of later stages: witness →
+A stage is one group in `ansible/inventories/mesh/hosts.yml` (`spike` and `k8s`
+so far). ADR-0055 step 6 sets the order of later stages: witness →
 k8s workers one at a time → control plane → Patroni replica → leader →
 non-storage LXCs → PVE → Pi-hole → garage/nfs in a window.
 
@@ -266,6 +270,9 @@ non-storage LXCs → PVE → Pi-hole → garage/nfs in a window.
    ansible-playbook -i ansible/inventories/mesh/hosts.yml \
      ansible/playbooks/netbird-client.yml -e netbird_stage=<stage>
    ```
+   For control-plane nodes and Patroni members, add `-e netbird_serial=1`:
+   the playbook then enrolls one host at a time and stops at the first
+   failure. The `k8s` stage ran this way.
 
 4. **Switch SSH on, management side.** The client flag alone is not enough.
    The peer's `ssh_enabled` (the dashboard's per-peer "SSH Access" toggle)

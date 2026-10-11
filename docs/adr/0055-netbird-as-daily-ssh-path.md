@@ -2,8 +2,8 @@
 
 **Status:** Accepted — decided 2026-10-11, approved by M BN after an
 architecture interview and two adversarial review cycles. **Rolling out —
-spike stage enrolled 2026-10-11** (`pg-etcd-witness`, `k8s-worker-02`,
-`build-runner`); SSH over the mesh not yet verified end-to-end. Operator view:
+spike and k8s stages enrolled 2026-10-11** (7 hosts); an SSH login over the
+mesh is not yet verified end-to-end. Operator view:
 [`docs/runbook-netbird.md`](../runbook-netbird.md). Rollout past the spike is
 gated on it (Rollout step 4). If the spike fails on the
 automation half, Decision 3's light runs fall back to keys over the LAN and
@@ -271,6 +271,15 @@ moot (Decision 2 amendment). Spike results so far:
   1500/1500/1420, endpoint health 5/5.
 - **Found and fixed:** the route flags (`--disable-client-routes`,
   `--disable-server-routes`) are on all three spike hosts.
+
+**Step 6 started (2026-10-11 ~23:23):** the `k8s` stage is enrolled with
+`NETBIRD_INFRA_SETUP_KEY_K8S` (limit 6) and `-e netbird_serial=1`. The hosts
+were `k8s-worker-01`, then `k8s-cp-01`/`-02`/`-03`, one at a time, with 0
+failures. Then `-e netbird_enforce=true` turned on `ssh_enabled`. After the
+run: 5/5 nodes Ready, every Cilium agent saw 5/5 healthy, and etcd was ok
+through `/readyz`. `wt0` is up on all four and the Cilium MTUs stayed
+1500/1500/1420, so the eth0 pin holds. `<node>.bnei.mesh:22022` is reachable
+from the laptop. Remaining stages: `pg`, `lxc`, `pve`, `pi`, `storage`.
 
 ## Consequences
 
