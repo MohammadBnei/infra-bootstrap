@@ -137,6 +137,16 @@ the upstream's redirect URI when the provider is added in its dashboard, and
 4. The first authentik login is verified.
 5. `localAuthDisabled` is flipped.
 
+**Done 2026-10-11.** authentik login worked, NetBird ownership moved to the
+authentik-backed user, and `localAuthDisabled` was set.
+
+**Break-glass, an argued deviation from ADR-0039 Decision 6.** That decision
+keeps an app's local admin for when authentik is down. Here the local login
+would be a password form on the internet. So it is off. The `owner` block stays
+in `config.yaml`, and reverting that one line to `false` restores it with the
+same password. Established tunnels keep running meanwhile (§7), so the cost of
+an authentik outage is only that nobody can start a new session.
+
 Group sync through Dex is unverified. NetBird groups (`laptops`, `pi`) are
 assigned in NetBird until it is tested.
 
