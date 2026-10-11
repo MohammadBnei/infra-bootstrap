@@ -240,7 +240,7 @@
     # user_approval_required, so it starts pending approval).
     - name: Note agents with no NetBird user yet
       ansible.builtin.set_fact:
-        netbird_notes: "{{ netbird_notes | default([]) + [item ~ ' has no NetBird user yet: curl -H "Authorization: Bearer $(ansible/scripts/node.sh --token)" https://netbird.bnei.dev/api/users/current (expect 403 pending approval), then re-run with -e netbird_enforce=true'] }}"
+        netbird_notes: "{{ netbird_notes | default([]) + [item ~ ' has no NetBird user yet: GET https://netbird.bnei.dev/api/users/current once with the JWT from ansible/scripts/node.sh --token as a Bearer token (expect 403 pending approval), then re-run with -e netbird_enforce=true'] }}"
       loop: "{{ netbird_agent_emails }}"
       when: users.json | selectattr('email', 'equalto', item) | list | length == 0
 
