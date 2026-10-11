@@ -29,6 +29,7 @@ Custom playbooks for things kubespray and pigsty don't cover:
 | `inventories/build-runner/hosts.yml` | Single-host inventory for `build-runner-configure.yml` (`build-runner` LXC) |
 | `inventories/pihole/hosts.yml` | Single-host inventory for `pihole-configure.yml` (Pi 4, physical hardware) |
 | `inventories/mesh/hosts.yml` | NetBird enrollment inventory for `netbird-client.yml`: one group per ADR-0055 rollout stage (today only `spike`), LAN addresses, plus `pve_hosts` for the `pct` step. The kubespray and pigsty inventories are never repointed at the mesh |
+| `scripts/node.sh` | Reach any machine by its one name: NetBird SSH as the `netbird-agent` identity by default (no browser, ADR-0055 Decision 8), `--lan` for the inventory keys, `--token` for a raw JWT. See `docs/runbook-netbird.md` |
 | `requirements.yml` | Ansible collections needed by these playbooks (`ansible-galaxy collection install -r ansible/requirements.yml`) |
 | `tests/build-runner-expressions.yml` | Localhost-only check for `build-runner-configure.yml`'s two silent-failure Jinja expressions (`rejectattr` instance filtering, `zip` token pairing). No infra, no connection: `ansible-playbook -i localhost, ansible/tests/build-runner-expressions.yml` |
 
@@ -462,6 +463,11 @@ two lines: drift on owned fields, and what needs a human (user-owned peers in
 `infra-nodes` whose name is not a host in `vars/bnei-lan-records.yml`). The setup key goes to
 Infisical as `NETBIRD_INFRA_SETUP_KEY_<STAGE>` from a 0600 file; if that
 write fails the new key is revoked.
+
+Agent identities: `netbird_agent_emails` (today `netbird-agent@bnei.dev`).
+Under `-e netbird_enforce=true` each one is approved if pending and set to
+group `agent-ssh` only, role `user`, unblocked. The NetBird user appears only
+after the agent's first management API call with its token.
 
 Safe to re-run. A default run only creates missing objects and reports
 drift; it never overwrites a dashboard edit. Objects are matched by name —

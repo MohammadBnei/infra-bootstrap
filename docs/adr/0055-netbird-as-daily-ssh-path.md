@@ -213,6 +213,77 @@ path. Rules: down 5m = critical, degraded = warning. `PVEHostUnreachable` and
 `PVEHostProbeStale` are scoped to PVE targets first — today both match every
 blackbox probe.
 
+### 8. Agents: the `netbird-agent` identity (amendment, 2026-10-12)
+
+*Approved by the user 2026-10-12. Live through #294/#295.*
+
+Agents (Claude now, Hermes later) reach hosts over NetBird SSH as an
+authentik **service account, `netbird-agent`**. The agent may log in as the
+same local users as a human (`root`, `core`, `vagrant`, `mohammad`) on every
+`infra-nodes` peer.
+
+**How it authenticates.** NetBird's SSH server (`client/ssh/server/server.go`)
+takes a JWT as the SSH password. The token must meet four conditions:
+- The issuer is `https://netbird.bnei.dev/oauth2`, checked against its JWKS.
+- `aud` is `netbird-cli` or `netbird-dashboard`.
+- `iat` is less than 600 s old.
+- The hashed `sub` resolves to a non-service, unblocked NetBird user whose
+  auto groups are in the policy's `authorized_groups`.
+
+`ansible/scripts/node.sh` mints that token without a browser, in two steps:
+1. authentik `client_credentials` on the `netbird` provider, with username
+   `netbird-agent` and its app password `NETBIRD_AGENT_APP_PASSWORD`. This
+   gives an authentik id_token.
+2. An RFC 8693 token exchange at Dex (`/oauth2/token`, public client
+   `netbird-cli`, the authentik connector id, `subject_token_type=…:id_token`).
+   This gives a Dex JWT whose `sub` is the agent's NetBird user.
+
+The JWT is cached in a 0600 file for 540 s, so a loop of calls mints once.
+`node.sh` passes it through `SSH_ASKPASS`, with `ssh -F none` so that
+NetBird's managed ssh_config (`netbird ssh proxy`, which needs a browser) is
+bypassed. Host keys are not pinned, as in NetBird's own config: WireGuard
+already authenticates the peer. Dex already advertised `token-exchange`, so
+netbird-server did not change.
+
+**Objects.**
+- **authentik:** `client_credentials` in the `netbird` provider's grants. A
+  second blueprint file, `netbird-agent.yaml`, in the
+  `authentik-blueprint-netbird` Secret holds three objects: the service
+  account; a non-expiring `app_password` token whose key comes from
+  Infisical; and a user policy binding on the application (order 10).
+- **NetBird:** a user group `agent-ssh`. The policy's `authorized_groups` maps
+  both `platform-admins` and `agent-ssh` to `[root, core, vagrant, mohammad]`.
+  `netbird-configure.yml` lists `netbird_agent_emails`. Under
+  `netbird_enforce` it approves pending agent users and gives them only
+  `agent-ssh`, role `user`, unblocked.
+
+**Rejected,** checked against the netbird v0.80.0, Dex (`netbirdio/dex@a163de3129e5`)
+and authentik 2026.8.0 sources:
+- **A NetBird service user and PAT.** Service users are excluded from SSH
+  authorization (`account.go:1005,1532`), and a PAT is not a Dex JWT.
+- **The Dex password grant.** `PasswordConnector` is never mapped
+  (`idp/dex/config.go:588-638`), and `localAuthDisabled` removes the local
+  connector.
+- **Dex `client_credentials`.** Both static clients are public, and `sub`/`aud`
+  would not match a NetBird user.
+- **`--disable-ssh-auth`.** It removes the identity check for humans too.
+
+**Security.**
+- The app password is a long-lived bearer secret. Revoke it by deleting the
+  authentik token or deactivating the account. Blocking the NetBird user
+  works too, but the next enforce run unblocks it, unless the email is also
+  removed from `netbird_agent_emails`.
+- The exchanged JWT is valid for 24 h against the management API too, with
+  the agent's role. So the agent must stay role `user`: an enforce run
+  restores it, and a default run reports drift.
+- Recorded, not new: Dex's token exchange accepts any valid authentik
+  id_token for the `netbird` provider, which makes it equivalent to a login.
+  Closing it (netbird-server `auth.grantTypes: [authorization_code,
+  refresh_token, device_code]`) would break this route.
+- The caller must itself be a NetBird peer in a policy source group. Today
+  that is only the operator's laptop (`platform-admins`). Hermes needs its
+  LXC enrolled, plus a source group of its own.
+
 ## Rollout
 
 1. This ADR and the docs it changes.
@@ -258,9 +329,12 @@ management through the hairpin and show up on the laptop. **Human SSH
 passes:** on 2026-10-11 ~22:10, `ssh root@k8s-worker-02.bnei.mesh` from the
 laptop did a browser JWT login, then opened a shell. This was after the geo
 check was dropped and the laptop left `infra-nodes`; the port-22 firewall was
-rechecked at ~22:25. Not done: ansible over the mesh (`-f 10`, `become`, JWT
-prompt count), a netbird pod restart during a session, and propagation
-denying N MG's laptop. The geo pass criterion is
+rechecked at ~22:25. **Agents pass with no prompt** (Decision 8,
+2026-10-12): one mint of `node.sh` reached all 14 mesh hosts as root in 12 s,
+and `-l core` on k8s-cp-01 has working sudo. Humans still get the browser
+login. Not done: an ansible inventory over the
+mesh (`-f 10`, `become`), a netbird pod restart during a session, and
+propagation denying N MG's laptop. The geo pass criterion is
 moot (Decision 2 amendment). Spike results so far:
 - **Passed:** systemd-resolved is untouched (`--disable-dns`, no `wt0`
   link). LXC tun works. Infra peers reach management from the LAN. The
@@ -325,7 +399,7 @@ enrolled:
   certain. The spike tests it from home. If home is denied, the geo check
   goes, not the reverse.
 - The public `:49222` forward stays, narrowed to one key.
-- Infisical gains `NETBIRD_INFRA_SETUP_KEY_<STAGE>` (one per stage), `NETBIRD_API_TOKEN` and the
+- Infisical gains `NETBIRD_INFRA_SETUP_KEY_<STAGE>` (one per stage), `NETBIRD_API_TOKEN`, `NETBIRD_AGENT_APP_PASSWORD` and the
   break-glass key. Per-host human keys are removed once cutover is verified.
 
 ## Alternatives considered

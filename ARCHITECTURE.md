@@ -797,7 +797,10 @@ reached from `platform-admins` with a per-session authentik JWT; no posture
 check. Enrolled: the three PVE hosts, all five k8s nodes, `pg01`, `pg02`,
 `pg-etcd-witness`, `build-runner`, `k9s-dashboard` and `pihole`. Not yet:
 `hermesagent`, `garage-storage`, `nfs-storage`.
-Human SSH over the mesh works (verified 2026-10-11); ansible over it is not yet
+Human SSH over the mesh works (verified 2026-10-11). Agents reach every mesh
+host with no browser through `ansible/scripts/node.sh`, as the authentik
+service account `netbird-agent` (ADR-0055 Decision 8, 2026-10-12). An ansible
+inventory over it is not yet
 verified, and nothing below has moved yet. Model and procedures: `docs/runbook-netbird.md`. Target:
 `sshd` stays key-based, restricted to `192.168.1.0/24`; heavy runs stay on
 the LAN from the k9s hub; the public `:49222` forward to the hub accepts only

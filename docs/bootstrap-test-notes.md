@@ -4740,3 +4740,35 @@ Live after the rerun:
 - `platform-grafana` is Synced/Healthy, and its datasource is
   `http://pigsty.bnei.lan/vmetrics`. A query from the grafana pod returns
   data.
+
+## 2026-10-12 — Agentic NetBird SSH: a newline, a silent curl, and a user that appears late
+
+`ansible/scripts/node.sh` mints a NetBird SSH JWT for the `netbird-agent`
+service account (ADR-0055 Decision 8, #294/#295). Three things bit on the
+first runs.
+
+**`infisical secrets get --plain` ends with a newline.**
+`curl --data-urlencode password@-` posted `<key>\n`. authentik answered
+`invalid_grant` and logged nothing explaining why. Fixed in #295 with
+`tr -d '\n'`. Any secret piped into a form field needs the same.
+
+**`curl -f` under `set -o pipefail` exits silently.** The script died on the
+failing curl before it reached its own error message, so a refused grant
+looked like a hang that ended with no output. Fixed in #295: no `-f`, and an
+explicit check that the response field is non-empty.
+
+**The NetBird user is created late.** Neither the authentik grant nor the
+Dex token exchange creates it. It appears on the agent's first management
+API call with the JWT (`GET /api/users/current`). With
+`user_approval_required: true` it starts pending, and that call returns 403
+"user is pending approval". `netbird-configure.yml -e netbird_enforce=true`
+then approves it and sets `agent-ssh`, role `user`.
+
+Verified 2026-10-12 ~00:20:
+- The decoded JWT: issuer Dex, `aud` `netbird-cli`, `sub` the Dex-encoded
+  authentik id, email `netbird-agent@bnei.dev`, `exp` 24 h.
+- One mint reached all 14 mesh hosts as root in 12 s.
+- `-l core` on k8s-cp-01 has working sudo.
+- `--lan` worked on pg01 (vagrant), bnei (root), pihole (mohammad),
+  k8s-cp-01 (core), garage-storage (root), nfs-storage (core) and
+  build-runner (root).

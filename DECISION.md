@@ -251,7 +251,10 @@ updated.
   `infra`) stay on the LAN from the k9s hub, whose inventories never change.
   `sshd` stays key-based on the LAN; `:49222` → hub stays as break-glass,
   one key. See [ADR-0055](docs/adr/0055-netbird-as-daily-ssh-path.md) and
-  [`docs/runbook-netbird.md`](docs/runbook-netbird.md).
+  [`docs/runbook-netbird.md`](docs/runbook-netbird.md). Agents use the authentik
+  service account `netbird-agent` (NetBird group `agent-ssh`, role `user`)
+  through `ansible/scripts/node.sh`: a token exchange at Dex, no browser
+  (Decision 8, 2026-10-12).
 - **Certificate renewal is one token, so it gets an alarm.** Since ADR-0038
   every host in both zones renews through a single `CF_DNS_API_TOKEN`; its
   revocation or expiry stops renewal everywhere with no error anyone sees, on a
