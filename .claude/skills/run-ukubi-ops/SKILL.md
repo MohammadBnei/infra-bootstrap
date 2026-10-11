@@ -43,7 +43,18 @@ tool result.
 
 ## Run (agent path)
 
-> **NetBird SSH is rolling out (ADR-0055, `docs/runbook-netbird.md`).** Until cutover (rollout step 7) the access paths below stay the default; don't switch to `*.bnei.mesh` on your own.
+> **Reaching a node: `ansible/scripts/node.sh <name> [command]`** (ADR-0055, `docs/runbook-netbird.md`).
+> `<name>` is the machine's one name (`ansible/playbooks/vars/bnei-lan-records.yml`): `pg01`, `bnei`,
+> `k8s-cp-02`, `pihole`… Never hunt for a key, user or IP.
+> - Default: NetBird SSH as the `netbird-agent` identity — no browser, works off-LAN, `root` unless `-l <user>`.
+>   It mints a Dex JWT (authentik client_credentials → token exchange) and caches it ~9 min.
+> - `--lan`: LAN address + key from the inventories (Infisical keys fetched to a 0600 temp file) — when
+>   NetBird or authentik is down.
+> - Not on the mesh yet: `garage-storage`, `nfs-storage` (use `--lan`); `hermesagent`: `node.sh ex-laptop pct exec 101 -- <cmd>`.
+> - Don't `ssh <bare-name>` yourself: NetBird's managed ssh_config routes bare peer names through
+>   `netbird ssh proxy`, which opens a browser login and stalls a non-interactive run.
+> - Humans at the laptop can just `ssh root@<name>` (browser login, cached ~10 min).
+> The heavy runs below (kubespray, pigsty, gpu-node, pihole-configure) still go over the LAN by IP — unchanged.
 
 ```bash
 # discover what's available

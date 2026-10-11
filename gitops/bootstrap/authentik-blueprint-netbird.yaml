@@ -66,9 +66,14 @@ spec:
                     url: https://netbird.bnei.dev/oauth2/logout/callback
                     redirect_uri_type: logout
                 # Required — empty permits no grant (see grafana's note).
+                # client_credentials is the agent's: username + app password
+                # of the netbird-agent service account (netbird-agent.yaml
+                # below), no client secret. Dex then exchanges that id_token
+                # for a NetBird SSH JWT (ADR-0055, agentic SSH).
                 grant_types:
                   - authorization_code
                   - refresh_token
+                  - client_credentials
                 # Implicit consent: the user already chose NetBird's login
                 # button, and Dex is the only caller.
                 authorization_flow: !Find [authentik_flows.flow, [slug, default-provider-authorization-implicit-consent]]
@@ -90,3 +95,58 @@ spec:
                 provider: !KeyOf netbird-provider
                 meta_launch_url: https://netbird.bnei.dev
                 meta_description: Mesh for the off-site Pi (ADR-0054)
+        # The agent identity for NetBird SSH (ADR-0055 amendment, 2026-10-12).
+        # A second file in this Secret, so a second blueprint and transaction:
+        # a miss here cannot roll back the provider above.
+        #
+        # NetBird's SSH server only accepts a JWT from its embedded Dex. An
+        # agent gets one without a browser:
+        #   1. client_credentials on the `netbird` provider with this user's
+        #      username + app password -> an authentik id_token;
+        #   2. RFC 8693 token exchange at https://netbird.bnei.dev/oauth2/token
+        #      (public client netbird-cli, the authentik connector) -> a Dex JWT
+        #      whose sub is this user's NetBird user id;
+        #   3. that JWT as the SSH password, within 600s of minting.
+        # ansible/scripts/node.sh does all three.
+        #
+        # name and email are not decoration: Dex's OIDC connector requires a
+        # `name` claim and requests `email`.
+        netbird-agent.yaml: |
+          version: 1
+          metadata:
+            name: netbird-agent
+            labels:
+              blueprints.goauthentik.io/instantiate: "true"
+          entries:
+            - model: authentik_core.user
+              id: netbird-agent
+              identifiers:
+                username: netbird-agent
+              attrs:
+                username: netbird-agent
+                name: NetBird agent
+                email: netbird-agent@bnei.dev
+                type: service_account
+                path: goauthentik.io/service-accounts
+                is_active: true
+            - model: authentik_core.token
+              identifiers:
+                identifier: netbird-agent-app-password
+              attrs:
+                identifier: netbird-agent-app-password
+                user: !KeyOf netbird-agent
+                intent: app_password
+                expiring: false
+                description: NetBird SSH for agents (ADR-0055). Rotate in Infisical, NETBIRD_AGENT_APP_PASSWORD.
+                key: "{{ .NETBIRD_AGENT_APP_PASSWORD.Value }}"
+            # The application is gated by netbird-users
+            # (authentik-blueprint-netbird-policy.yaml); this user gets its
+            # own binding rather than a line in that group, so this file owns
+            # the agent end to end.
+            - model: authentik_policies.policybinding
+              identifiers:
+                target: !Find [authentik_core.application, [slug, netbird]]
+                user: !KeyOf netbird-agent
+                order: 10
+              attrs:
+                enabled: true

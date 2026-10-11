@@ -89,6 +89,11 @@
     # kept as break-glass (ADR-0054 §4) and owns no peers.
     netbird_admin_emails:
       - mohammad@bnei.dev
+    # Agent identities (authentik service accounts, ADR-0055 amendment): no
+    # browser, they SSH with a token-exchanged Dex JWT (ansible/scripts/node.sh).
+    # Each is approved and put in agent-ssh under -e netbird_enforce=true.
+    netbird_agent_emails:
+      - netbird-agent@bnei.dev
     # Local users a platform-admin may log in as. kubespray and pigsty
     # hosts use root/core/vagrant; the Pi and the LXCs use mohammad.
     netbird_ssh_local_users: [root, core, vagrant, mohammad]
@@ -164,7 +169,7 @@
         url: "{{ netbird_api }}/groups?name={{ item }}"
         headers: "{{ netbird_headers }}"
         status_code: [200, 404] # a missing name is a 404, not an empty list
-      loop: [infra-nodes, platform-admins]
+      loop: [infra-nodes, platform-admins, agent-ssh]
       register: group_lookup
 
     - name: Create missing groups
@@ -230,6 +235,53 @@
         label: "{{ item.email }}"
       when: group_ids['platform-admins'] not in item.auto_groups
 
+    # Agents: a NetBird user appears on the agent's first token exchange
+    # (account setting user_approval_required, so pending approval).
+    - name: Note agents with no NetBird user yet
+      ansible.builtin.set_fact:
+        netbird_notes: "{{ netbird_notes | default([]) + [item ~ ' has no NetBird user yet: run ansible/scripts/node.sh once, then re-run'] }}"
+      loop: "{{ netbird_agent_emails }}"
+      when: users.json | selectattr('email', 'equalto', item) | list | length == 0
+
+    - name: Approve pending agent users
+      ansible.builtin.uri:
+        url: "{{ netbird_api }}/users/{{ item.id }}/approve"
+        method: POST
+        headers: "{{ netbird_headers }}"
+      loop: "{{ users.json | selectattr('email', 'in', netbird_agent_emails) | list }}"
+      loop_control:
+        label: "{{ item.email }}"
+      when: item.pending_approval | default(false) and netbird_enforce | bool
+      changed_when: true
+
+    - name: Put agent users in agent-ssh
+      ansible.builtin.uri:
+        url: "{{ netbird_api }}/users/{{ item.id }}"
+        method: PUT
+        headers: "{{ netbird_headers }}"
+        body_format: json
+        body:
+          role: user
+          is_blocked: false
+          auto_groups: ["{{ group_ids['agent-ssh'] }}"]
+      loop: "{{ users.json | selectattr('email', 'in', netbird_agent_emails) | list }}"
+      loop_control:
+        label: "{{ item.email }}"
+      when: >-
+        (item.auto_groups != [group_ids['agent-ssh']] or item.role != 'user' or item.is_blocked)
+        and netbird_enforce | bool
+      changed_when: true
+
+    - name: Record agent user drift
+      ansible.builtin.set_fact:
+        netbird_drift: "{{ netbird_drift | default([]) + ['agent ' ~ item.email ~ ': pending approval, not exactly in agent-ssh, not role user, or blocked'] }}"
+      loop: "{{ users.json | selectattr('email', 'in', netbird_agent_emails) | list }}"
+      loop_control:
+        label: "{{ item.email }}"
+      when: >-
+        item.pending_approval | default(false) or item.auto_groups != [group_ids['agent-ssh']]
+        or item.role != 'user' or item.is_blocked
+
     # -------------------------------------------------------------------
     # 4. Node SSH policy
     # -------------------------------------------------------------------
@@ -259,7 +311,8 @@
               ports: ["22"]
               sources: ["{{ group_ids['platform-admins'] }}"]
               destinations: ["{{ group_ids['infra-nodes'] }}"]
-              authorized_groups: "{{ {group_ids['platform-admins']: netbird_ssh_local_users} }}"
+              # Humans and agents may become the same local users.
+              authorized_groups: "{{ {group_ids['platform-admins']: netbird_ssh_local_users, group_ids['agent-ssh']: netbird_ssh_local_users} }}"
 
     # GET returns sources/destinations as group objects; compare on ids.
     # The description is free to edit in the UI.
