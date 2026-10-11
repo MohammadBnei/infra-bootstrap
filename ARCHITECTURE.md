@@ -360,10 +360,10 @@ applies them, and the NetBird playbooks refuse or report a name not in it.
 Machines (`bnei_lan_hosts`):
 
 ```text
-A    bnei.bnei.lan           → 192.168.1.165  (PVE node; "bnei" is its corosync node name, kept rather than renamed)
+A    bnei.bnei.lan           → 192.168.1.165  (PVE node; "bnei" is its PVE node name, kept rather than renamed)
 A    server1.bnei.lan        → 192.168.1.200
 A    ex-laptop.bnei.lan      → 192.168.1.161
-A    pihole.bnei.lan         → 192.168.1.55   (the Pi 4; its hostname moves from `raspberry` to `pihole`)
+A    pihole.bnei.lan         → 192.168.1.55   (the Pi 4; hostname `pihole` since 2026-10-11, was `raspberry`)
 A    pg01.bnei.lan           → 192.168.1.205  (Pigsty infra + Patroni member pg-proxmox-1; names never track roles, confirm with patronictl)
 A    pg02.bnei.lan           → 192.168.1.207  (Patroni member pg-proxmox-2)
 A    pg-etcd-witness.bnei.lan → 192.168.1.197 (ex-laptop — 3rd etcd DCS member, ADR-0029)
@@ -393,8 +393,9 @@ A    stt.bnei.dev            → 192.168.1.233  (split horizon, Traefik VIP — 
 ```
 
 *Renamed 2026-10-11 (one-name rule): `proxmox` → `bnei`, `postgres-1`/`-2` →
-`pg01`/`pg02`, `pi4` → `pihole`. The old names are gone from Pi-hole after
-the next `pihole-configure.yml` run; update anything still using them.*
+`pg01`/`pg02`, `pi4` → `pihole`. Applied by `pihole-configure.yml` the same
+night: `postgres-1`, `pi4` and `proxmox` no longer resolve, and the cluster
+Grafana reads Pigsty through `pigsty.bnei.lan`.*
 
 `bnei.dev` is hosted at **Cloudflare** (registration stays at Squarespace),
 with **wildcard A records** all pointing at the public IP the Freebox
@@ -790,12 +791,14 @@ after PVE install).
 Per-host keys for each VM/LXC. Bastion pattern: hermesagent LXC → all
 hosts/VMs.
 
-**Rolling out (ADR-0055), spike stage enrolled 2026-10-11:** every host
+**Rolling out (ADR-0055), 14 hosts enrolled 2026-10-11:** every host
 becomes a NetBird SSH peer in group `infra-nodes` (`<name>.bnei.mesh`),
-meant to be reached from `platform-admins` with a per-session authentik JWT; no posture
-check. Enrolled so far: `pg-etcd-witness`, `k8s-worker-02`, `build-runner`.
-SSH over the mesh is **not yet verified end-to-end**, and nothing below has
-moved yet. Model and procedures: `docs/runbook-netbird.md`. Target:
+reached from `platform-admins` with a per-session authentik JWT; no posture
+check. Enrolled: the three PVE hosts, all five k8s nodes, `pg01`, `pg02`,
+`pg-etcd-witness`, `build-runner`, `k9s-dashboard` and `pihole`. Not yet:
+`hermesagent`, `garage-storage`, `nfs-storage`.
+Human SSH over the mesh works (verified 2026-10-11); ansible over it is not yet
+verified, and nothing below has moved yet. Model and procedures: `docs/runbook-netbird.md`. Target:
 `sshd` stays key-based, restricted to `192.168.1.0/24`; heavy runs stay on
 the LAN from the k9s hub; the public `:49222` forward to the hub accepts only
 the break-glass key.

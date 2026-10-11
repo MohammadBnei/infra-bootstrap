@@ -2,8 +2,8 @@
 
 **Status:** Accepted — decided 2026-10-11, approved by M BN after an
 architecture interview and two adversarial review cycles. **Rolling out —
-spike stage enrolled 2026-10-11** (`pg-etcd-witness`, `k8s-worker-02`,
-`build-runner`); SSH over the mesh not yet verified end-to-end. Operator view:
+14 hosts enrolled 2026-10-11** (all but hermesagent, garage-storage and nfs-storage); human SSH over the
+mesh verified end-to-end the same day. Operator view:
 [`docs/runbook-netbird.md`](../runbook-netbird.md). Rollout past the spike is
 gated on it (Rollout step 4). If the spike fails on the
 automation half, Decision 3's light runs fall back to keys over the LAN and
@@ -55,10 +55,12 @@ the LXCs (k9s hub, hermesagent, build-runner, garage, nfs) and Pi-hole `.55`.
 - LXCs are unprivileged: `/dev/net/tun` is passed with `pct set <id> --dev0
   /dev/net/tun` from the PVE host, which needs a container restart. garage
   (zot blobs, backups) and nfs (RWX pods) restart last, in a maintenance window.
-- Pigsty's firewall (`node_firewall_mode: zone`, re-applied on every
-  `node.yml`) gets **port 22022** in `node_firewall_public_port`. Trusting
-  `100.64.0.0/10` would open Patroni 8008 and etcd 2379 to every peer,
-  including the off-site Pi.
+- ~~Pigsty's firewall (`node_firewall_mode: zone`, re-applied on every
+  `node.yml`) gets **port 22022** in `node_firewall_public_port`.~~
+  *Not needed (2026-10-11): `<host>.bnei.mesh:22022` is reachable on the
+  witness, pg01 and pg02 with their firewall active and unchanged.* Trusting
+  `100.64.0.0/10` would still open Patroni 8008 and etcd 2379 to every peer,
+  including the off-site Pi, so don't.
 - **5432 is already public** on every Pigsty node (`all.vars`
   `node_firewall_public_port: [22, 80, 443, 5432]`, commented "remove in
   production!"), so on `wt0` it would be reachable by every mesh peer with only
@@ -113,7 +115,10 @@ carries an explicit `mesh_name` per host, which is a Pi-hole short name such as
 `postgres-1` or `proxmox`. `netbird-configure.yml` fails if a `mesh_name` is not
 in the records file. It sets each peer's name through the API,
 compare-before-write, so `postgres-1.bnei.mesh` resolves on every NetBird
-client **that manages DNS — the laptops**.
+client **that manages DNS — the laptops**. Infra peers have DNS
+management off (Decision 1), so they cannot resolve `*.bnei.mesh`; nothing
+run from an infra host may use the mesh overlay inventory. Peer DNS domain: `bnei.mesh`, never `netbird.bnei.dev` (that is the
+management URL; claiming it would cut clients off from it).
 
 > **Amended 2026-10-11 — one name per machine; the API rename is dropped.**
 > A machine's name is its OS hostname, and that same string is its Proxmox
@@ -121,15 +126,15 @@ client **that manages DNS — the laptops**.
 > peer name. So peers keep the hostname they enroll with, and there is no
 > `mesh_name` and no rename through the API: `postgres-1.bnei.mesh` above is
 > `pg01.bnei.mesh`. Pi-hole records were renamed to match (`proxmox` → `bnei`,
-> `postgres-1`/`-2` → `pg01`/`pg02`, `pi4` → `pihole`); service names (VIPs,
+> `postgres-1`/`-2` → `pg01`/`pg02`, `pi4` → `pihole`; live since the
+> 2026-10-11 `pihole-configure.yml` run); service names (VIPs,
 > endpoints) are a separate list. The records moved to
 > `ansible/playbooks/vars/bnei-lan-records.yml` as planned. `netbird-client.yml`
-> refuses a host not in it under the same name and IP; `netbird-configure.yml`
-> reports a user-less peer whose name is not a known host. Pigsty stays keyed
-> by IP. The rest of this Decision stands: laptops only, `bnei.mesh`. Infra peers have DNS
-management off (Decision 1), so they cannot resolve `*.bnei.mesh`; nothing
-run from an infra host may use the mesh overlay inventory. Peer DNS domain: `bnei.mesh`, never `netbird.bnei.dev` (that is the
-management URL; claiming it would cut clients off from it).
+> refuses a host whose inventory alias and IP are not in it (it does not
+> check the OS hostname itself); `netbird-configure.yml` reports a user-less
+> peer in `infra-nodes` whose name is not a known host, which is where a
+> drifted OS hostname shows up. Pigsty stays keyed
+> by IP. The rest of this Decision stands: laptops only, `bnei.mesh`.
 
 ### 5. Break-glass and off-LAN recovery
 
@@ -195,8 +200,8 @@ the next run create a duplicate. Everything it does not name is never written.
 > true in `/var/lib/netbird/default.json`).
 >
 > **Cilium and `wt0`:** Cilium auto-detects `wt0` and lowers its MTUs to match
-> it. The pin `cilium_extra_values: {devices: [eth0]}` is **committed, not
-> applied**; see the progress note under Rollout.
+> it. The pin `cilium_extra_values: {devices: [eth0]}` is applied
+> (2026-10-11); see the progress note under Rollout.
 
 ### 7. Observability
 
@@ -249,8 +254,13 @@ blackbox probe.
 the critical alerts are live; NetBird's Grafana dashboards and the degraded =
 warning rule are not); `netbird-configure.yml` part 1 run
 for real. Step 4 in progress: the three spike hosts are enrolled, reach
-management through the hairpin and show up on the laptop; the SSH,
-ansible-over-mesh checks are not done. The geo pass criterion is
+management through the hairpin and show up on the laptop. **Human SSH
+passes:** on 2026-10-11 ~22:10, `ssh root@k8s-worker-02.bnei.mesh` from the
+laptop did a browser JWT login, then opened a shell. This was after the geo
+check was dropped and the laptop left `infra-nodes`; the port-22 firewall was
+rechecked at ~22:25. Not done: ansible over the mesh (`-f 10`, `become`, JWT
+prompt count), a netbird pod restart during a session, and propagation
+denying N MG's laptop. The geo pass criterion is
 moot (Decision 2 amendment). Spike results so far:
 - **Passed:** systemd-resolved is untouched (`--disable-dns`, no `wt0`
   link). LXC tun works. Infra peers reach management from the LAN. The
@@ -268,6 +278,39 @@ moot (Decision 2 amendment). Spike results so far:
   1500/1500/1420, endpoint health 5/5.
 - **Found and fixed:** the route flags (`--disable-client-routes`,
   `--disable-server-routes`) are on all three spike hosts.
+
+**Step 6 started (2026-10-11 ~23:23):** the `k8s` stage is enrolled with
+`NETBIRD_INFRA_SETUP_KEY_K8S` (limit 6) and `-e netbird_serial=1`. The hosts
+were `k8s-worker-01`, then `k8s-cp-01`/`-02`/`-03`, one at a time, with 0
+failures. Then `-e netbird_enforce=true` turned on `ssh_enabled`. After the
+run: 5/5 nodes Ready, every Cilium agent saw 5/5 healthy, and etcd was ok
+through `/readyz`. `wt0` is up on all four and the Cilium MTUs stayed
+1500/1500/1420, so the eth0 pin holds. `<node>.bnei.mesh:22022` is reachable
+from the laptop.
+
+**`pg` stage (2026-10-11 ~23:40):** `NETBIRD_INFRA_SETUP_KEY_PG` (limit 4),
+`-e netbird_serial=1` with Pigsty's key (`SSH_OLDPG_KEY`). pg02, the replica,
+enrolled first, then pg01, the leader, with 0 failures; enforce turned on
+`ssh_enabled`. Patroni is unchanged: pg-proxmox-1 is leader, pg-proxmox-2 is
+streaming with lag 0. The postgres VIP :5432, pigsty :80 and redis :6379
+answer. `:22022` is reachable through the active host firewall, so the
+Pigsty firewall change in Decision 1 is not needed.
+
+**`lxc`, `pve`, `pi` stages (2026-10-11 ~23:55):** keys `_LXC` (3), `_PVE`
+(5) and `_PI` (3), with 0 failures and no drift on the report run after
+enforce.
+- `k9s-dashboard`: LXC 102 got `/dev/net/tun` and a reboot.
+- PVE hosts: `bnei`, `server1` and `ex-laptop`, serial, with
+  `PVE_SSH_PRIVATE_KEY`. `pvecm status` stays Quorate at 3/3. pve-firewall
+  was already disabled on all three.
+- `pihole`: arm64, Debian trixie. Pi-hole still answers local and upstream
+  queries.
+
+`:22022` is reachable on all five. **14 infra peers** are enrolled. Not yet
+enrolled:
+- `hermesagent` (LXC 101): it has no recorded SSH key, so it needs a
+  `pct exec` path.
+- `garage-storage` and `nfs-storage`: they wait for a maintenance window.
 
 ## Consequences
 

@@ -40,7 +40,7 @@ Custom playbooks for things kubespray and pigsty don't cover:
 - [x] `nfs-configure.yml` drafted — see below
 - [x] `k9s-dashboard-configure.yml` drafted — see below
 - [x] `pihole-configure.yml` drafted — see below
-- [x] `netbird-configure.yml` + `netbird-client.yml` drafted **and run** 2026-10-11, spike stage (3 hosts enrolled) — see below and `docs/runbook-netbird.md`
+- [x] `netbird-configure.yml` + `netbird-client.yml` drafted **and run** 2026-10-11, 14 hosts enrolled across 6 stages — see below and `docs/runbook-netbird.md`
 - [x] `hermes-dashboard-configure.yml` drafted **and run** 2026-10-02 — its step-0 probes earned their place: the container was at `192.168.1.72` not `.181`, and Hermes was `0.15.1`, which ships no self-hosted OIDC plugin at all (upgraded to `0.21.5`). Cloudflare's BIC blocks `urllib` but not the `httpx` the plugin actually uses
 - [x] `self-drain-configure.yml` drafted and run (2026-07-30) — see below
 - [x] `build-runner-configure.yml` drafted and run (2026-08-13) — image build LXC, ADR-0034
@@ -381,7 +381,10 @@ endpoints) that may point at any machine. Real currently-assigned IPs only.
 Add a machine there as it is provisioned — it's a declared,
 reconciled-every-run list, not a one-time seed, and the NetBird playbooks
 read the same file. The playbook also sets the Pi's own hostname to `pihole`
-(it shipped as `raspberry`).
+(it shipped as `raspberry`). **Run for real 2026-10-11** with the renamed
+records (ok=15 changed=7, after the #289 fix): `bnei`, `pg01`, `pg02`,
+`pihole`, `pigsty`, `garage-storage` and `hermesagent` resolve, and
+`postgres-1`, `pi4` and `proxmox` are gone.
 
 **Static IP:** the Pi's `192.168.1.55` was confirmed live (2026-07-30) to
 be a DHCP-dynamic lease, not static — a real risk once the whole LAN's DNS
@@ -433,7 +436,7 @@ model (what lives where, the per-stage procedure, troubleshooting) is in
 [`docs/runbook-netbird.md`](../docs/runbook-netbird.md); the playbook's
 header comment lists what it owns.
 
-**Run for real 2026-10-11, spike stage.** The geo posture check it first
+**Run for real 2026-10-11, every stage so far (14 hosts).** The geo posture check it first
 created was removed the same day (hairpin: management sees no country).
 
 ### Prerequisites
@@ -455,8 +458,8 @@ ansible-playbook ansible/playbooks/netbird-configure.yml \
 Task output is hidden play-wide (the PAT sits in the `uri` headers, which
 Ansible doesn't mask); `-e netbird_debug=true` shows it. The final report has
 two lines: drift on owned fields, and what needs a human (user-owned peers in
-`infra-nodes`, admin emails with no NetBird user yet, user-less peers whose
-name is not a host in `vars/bnei-lan-records.yml`). The setup key goes to
+`infra-nodes`, admin emails with no NetBird user yet, user-less peers in
+`infra-nodes` whose name is not a host in `vars/bnei-lan-records.yml`). The setup key goes to
 Infisical as `NETBIRD_INFRA_SETUP_KEY_<STAGE>` from a 0600 file; if that
 write fails the new key is revoked.
 
@@ -479,11 +482,19 @@ the stage's setup key (passed by file) and `--management-url=https://netbird.bne
 Guards: the stage must be a real stage group (not `all`, `ungrouped` or
 `pve_hosts`); an LXC whose `netbird_pve_node` is not in `pve_hosts` fails
 up front; and every host must be in `vars/bnei-lan-records.yml`'s
-`bnei_lan_hosts` under the same name and IP, because the inventory alias is
-the hostname and becomes the NetBird peer name.
+`bnei_lan_hosts` under the same alias and IP. The peer itself takes the OS
+hostname, which the guard does not check; a drifted hostname is caught
+afterwards by `netbird-configure.yml`'s report.
 
 **Run for real 2026-10-11** against `spike` (`pg-etcd-witness`,
-`k8s-worker-02`, `build-runner` LXC 103 on server1).
+`k8s-worker-02`, `build-runner` LXC 103 on server1), then `k8s`
+(`k8s-worker-01`, `k8s-cp-01`/`-02`/`-03`) with `-e netbird_serial=1`, which
+enrolls one host at a time and stops at the first failure. Use it for
+control-plane nodes and Patroni members. Then `pg` (`pg02`, then `pg01`), serial too, with
+`-e ansible_ssh_private_key_file=` pointing at a temp copy of `SSH_OLDPG_KEY`;
+then `lxc` (`k9s-dashboard`), `pve` (serial, `PVE_SSH_PRIVATE_KEY`) and `pi`
+(`SSH_PI4_KEY`). `hermesagent` has no recorded SSH key and needs a `pct exec`
+path; garage/nfs wait for a maintenance window.
 
 ### Prerequisites
 
@@ -507,8 +518,8 @@ ansible-playbook ansible/playbooks/netbird-configure.yml -e netbird_enforce=true
 Safe to re-run: `netbird up` is skipped on a host already connected to
 management (install and hold still run). To
 apply changed `netbird up` flags, pass `-e netbird_reup=true`: down, then up
-without a setup key, so no key use is spent. The spike hosts still need one
-such run for the route flags. A version bump is `netbird_version` plus a
+without a setup key, so no key use is spent. The spike hosts got the route
+flags this way on 2026-10-11. A version bump is `netbird_version` plus a
 re-run: the hold is released only when the installed version differs, and
 is always re-applied. Move laptops and the server in lockstep. Under Claude Code's `!` prefix, append `2>&1 | cat`.
 

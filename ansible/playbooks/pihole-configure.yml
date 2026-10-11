@@ -283,4 +283,4 @@
           - ""
           - "Still manual, out of scope for this playbook:"
           - "  - Point LAN devices/DHCP at 192.168.1.55 for DNS (Freebox config, not automatable from here)."
-          - "  - Add a new pihole_hosts_records entry here as each new host is actually provisioned."
+          - "  - Add each new host to vars/bnei-lan-records.yml as it is actually provisioned."

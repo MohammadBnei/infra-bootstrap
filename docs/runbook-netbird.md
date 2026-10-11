@@ -1,11 +1,27 @@
 # Runbook: NetBird SSH mesh (ADR-0054, ADR-0055)
 
-> **Status, 2026-10-11:** rolling out, spike stage. Three hosts are enrolled:
-> `pg-etcd-witness` (.197), `k8s-worker-02` (.203) and the `build-runner` LXC
-> (.111). The laptop sees all three as `<name>.bnei.mesh`. **SSH over the
-> mesh has not been tested end-to-end yet.** Until it has, and until the
-> cutover (ADR-0055 rollout step 7), keys over the LAN and the k9s hub
-> remain the way in. Nothing below changes that.
+> **Status, 2026-10-11:** rolling out. Six stages are enrolled, 14 hosts, all
+> on client 0.80.0, connected, with `ssh_enabled` on:
+> - `spike`: `pg-etcd-witness` (.197), `k8s-worker-02` (.203) and the
+>   `build-runner` LXC (.111);
+> - `k8s`: `k8s-worker-01` and `k8s-cp-01`/`-02`/`-03`;
+> - `pg`: `pg02` (replica), then `pg01` (leader);
+> - `lxc`: `k9s-dashboard` (LXC 102);
+> - `pve`: `bnei`, `server1`, `ex-laptop`;
+> - `pi`: `pihole`.
+>
+> Still to enroll:
+> - `hermesagent` (LXC 101): no recorded SSH key, so it needs a `pct exec`
+>   path.
+> - `garage-storage` and `nfs-storage` (`storage`): waiting for a maintenance
+>   window. From the laptop,
+> `<node>.bnei.mesh:22022` is reachable. **Human SSH over the mesh works:**
+> on 2026-10-11 `ssh root@k8s-worker-02.bnei.mesh` from the laptop asked for
+> an authentik login in the browser, then opened a shell. Not yet verified:
+> ansible over the mesh and how many JWT prompts it costs, behaviour during a
+> netbird-server restart, and N MG's laptop being denied. Until the cutover
+> (ADR-0055 rollout step 7), keys over the LAN and the k9s hub stay the
+> default way in.
 
 ## The model in five lines
 
@@ -20,7 +36,7 @@
 4. **One policy connects them.** `platform-admins-ssh-infra-nodes` (protocol
    `netbird-ssh`, port 22 only) lets `platform-admins` reach `infra-nodes`. By design, each
    SSH session asks for an authentik login (a JWT) in the browser and needs
-   no SSH key. This is not yet verified on our hosts.
+   no SSH key. Verified 2026-10-11 on `k8s-worker-02`.
 5. **Two playbooks keep it declared.** `netbird-configure.yml` talks to the
    API from your laptop. `netbird-client.yml` installs the client on the
    hosts over the LAN. The dashboard stays a first-class editor beside them.
@@ -49,7 +65,7 @@
                                | --disable-dns: no *.bnei.mesh |
                                +-------------------------------+
 
-   intended flow, NOT yet verified (spike step 4):
+   verified 2026-10-11 (k8s-worker-02):
    ssh root@k8s-worker-02.bnei.mesh
      -> browser: authentik login -> JWT -> NetBird SSH server on the host
      -> local user root (allowed by the policy's user mapping)
@@ -88,7 +104,7 @@ You can use the dashboard, the playbook, or both. They do not fight:
   - **Differs / Fixed:** drift on the fields the playbook owns.
   - **Needs a human (never changed by this playbook):** user-owned peers in
     `infra-nodes`, admin emails with no NetBird user yet, and user-less peers
-    whose name is not a host in `bnei-lan-records.yml`.
+    in `infra-nodes` whose name is not a host in `bnei-lan-records.yml`.
 - **Task output is hidden play-wide**, because the PAT sits in the `uri`
   headers and Ansible does not mask it there. Asserts and the report stay
   visible. `-e netbird_debug=true` shows everything; never paste that
@@ -121,12 +137,11 @@ Left alone, Cilium auto-detects NetBird's `wt0` as one of its devices when
 a k8s node joins the mesh (`Devices: [eth0 wt0]`, seen on `k8s-worker-02`
 during the spike). That was harmless (no kube-proxy replacement, no host firewall, iptables
 masquerade). Still, the mesh is for SSH only and must never carry cluster
-traffic. `wt0` also has MTU 1280, and Cilium lowered its own MTUs to match.
-On k8s-worker-02, `cilium_host` and `cilium_vxlan` are 1280 and `cilium_wg0`
-is 1200. On k8s-worker-01 they are 1500, 1500 and 1420. So worker-02 runs a
-different tunnel MTU from the rest of the cluster. That is the silent
-large-packet-hang hazard already noted in `k8s-net-cilium.yml`, which makes
-the fix urgent.
+traffic. `wt0` also has MTU 1280, and Cilium lowered its own MTUs to match:
+on k8s-worker-02, `cilium_host` and `cilium_vxlan` went to 1280 and
+`cilium_wg0` to 1200, against 1500, 1500 and 1420 on k8s-worker-01. A node
+on a different tunnel MTU from the rest of the cluster is the silent
+large-packet-hang hazard noted in `k8s-net-cilium.yml`.
 
 **Fixed 2026-10-11.** `inventory/ukubi/group_vars/k8s_cluster/k8s-net-cilium.yml`
 pins `cilium_extra_values: {devices: [eth0]}` (eth0 is the uplink on all
@@ -142,8 +157,12 @@ k8s-cp-01, the way the role would. Repeat this for any later change to
 ```bash
 # on k8s-cp-01, after writing /etc/kubernetes/cilium-extra-values.yaml
 # from cilium_extra_values (what the role renders)
+# both files live in /etc/kubernetes on kube_control_plane[0] (k8s-cp-01)
+cd /etc/kubernetes
+helm get values -n kube-system cilium -o yaml > /tmp/cilium-live.yaml
 cilium upgrade --version 1.19.3 --dry-run-helm-values \
-  -f cilium-values.yaml -f cilium-extra-values.yaml   # diff first: expect only your change
+  -f cilium-values.yaml -f cilium-extra-values.yaml > /tmp/cilium-new.yaml
+diff /tmp/cilium-live.yaml /tmp/cilium-new.yaml   # expect only your change
 cilium upgrade --version 1.19.3 -f cilium-values.yaml -f cilium-extra-values.yaml
 kubectl -n kube-system rollout restart ds/cilium   # rollOutCiliumPods is unset: agents won't reload the configmap alone
 ```
@@ -181,7 +200,7 @@ joins the group.
 
 | Use | Path | State |
 |---|---|---|
-| Human SSH, light runs (ad-hoc, app playbooks) | laptop over the mesh: `ssh root@<peer>.bnei.mesh` | spike, **not verified** |
+| Human SSH, light runs (ad-hoc, app playbooks) | laptop over the mesh: `ssh root@<peer>.bnei.mesh` | human SSH **verified** 2026-10-11; ansible over the mesh not yet |
 | Heavy runs (kubespray, pigsty `node`/`pgsql`/`infra`, `gpu-node-configure.yml`, `pihole-configure.yml`) | the k9s hub, over the LAN ([`runbook-k9s-ops-hub.md`](runbook-k9s-ops-hub.md)) | unchanged |
 | Off-LAN recovery | public `:49222` to the k9s hub | unchanged. Narrowed to one break-glass key at cutover |
 | Enrollment itself | keys over the LAN | it has to be: the host is not a peer yet |
@@ -208,9 +227,11 @@ name.
 Proxmox name, k8s node name, inventory alias and Pi-hole record (`pg01` is
 `pg01.bnei.lan` and `pg01.bnei.mesh`). Nothing renames peers. The list is
 `ansible/playbooks/vars/bnei-lan-records.yml` (`bnei_lan_hosts`):
-`netbird-client.yml` refuses a host that is not there under the same name and
-IP, and `netbird-configure.yml` reports a user-less peer whose name is not
-there. Service names (`postgres`, `pve`, `garage`, …) are a separate list.
+`netbird-client.yml` refuses a host whose inventory alias and IP are not
+there. It does not check the OS hostname, and the peer takes the OS
+hostname: a host whose hostname drifted from its alias passes the guard and
+shows up afterwards in `netbird-configure.yml`'s report (user-less peers in
+`infra-nodes` whose name is not there). Service names (`postgres`, `pve`, `garage`, …) are a separate list.
 
 ## Prereqs
 
@@ -223,8 +244,10 @@ there. Service names (`postgres`, `pve`, `garage`, …) are a separate list.
 
 ## Steps: enroll a stage
 
-A stage is one group in `ansible/inventories/mesh/hosts.yml`. Today only
-`spike` exists. ADR-0055 step 6 sets the order of later stages: witness →
+A stage is one group in `ansible/inventories/mesh/hosts.yml` (`spike`, `k8s`,
+`pg`, `lxc`, `pve` and `pi` so far). Some stages need a different SSH key,
+passed as `-e ansible_ssh_private_key_file=<temp file>`: `SSH_OLDPG_KEY` for
+`pg`, `PVE_SSH_PRIVATE_KEY` for `pve`, `SSH_PI4_KEY` for `pi`. ADR-0055 step 6 sets the order of later stages: witness →
 k8s workers one at a time → control plane → Patroni replica → leader →
 non-storage LXCs → PVE → Pi-hole → garage/nfs in a window.
 
@@ -261,6 +284,9 @@ non-storage LXCs → PVE → Pi-hole → garage/nfs in a window.
    ansible-playbook -i ansible/inventories/mesh/hosts.yml \
      ansible/playbooks/netbird-client.yml -e netbird_stage=<stage>
    ```
+   For control-plane nodes and Patroni members, add `-e netbird_serial=1`:
+   the playbook then enrolls one host at a time and stops at the first
+   failure. The `k8s` stage ran this way.
 
 4. **Switch SSH on, management side.** The client flag alone is not enough.
    The peer's `ssh_enabled` (the dashboard's per-peer "SSH Access" toggle)
@@ -301,7 +327,7 @@ ansible-playbook ansible/playbooks/netbird-configure.yml
 netbird status            # Management: Connected, SSH server on
 # from the laptop
 netbird status -d         # the host peers appear, with *.bnei.mesh names
-ssh root@k8s-worker-02.bnei.mesh   # spike check, not yet done
+ssh root@k8s-worker-02.bnei.mesh   # browser JWT login, then a shell
 ```
 
 Monitoring: Prometheus scrapes the server's `:9090`. The blackbox exporter

@@ -4699,8 +4699,9 @@ Pigsty `pg_db_baseline` include (2026-10-03).
 
 Applied by hand on k8s-cp-01, exactly as the role would:
 1. Write `/etc/kubernetes/cilium-extra-values.yaml` from `cilium_extra_values`.
-2. Run `cilium upgrade --version 1.19.3 -f cilium-values.yaml -f cilium-extra-values.yaml`.
-   A `--dry-run-helm-values` diff beforehand showed only `devices: [eth0]`.
+2. In `/etc/kubernetes`, run `cilium upgrade --version 1.19.3 -f cilium-values.yaml -f cilium-extra-values.yaml`.
+   Beforehand, the `--dry-run-helm-values` output (full computed values) was
+   compared with the live values; it differed only by `devices: [eth0]`.
 3. Run `kubectl -n kube-system rollout restart ds/cilium`. The chart's
    `rollOutCiliumPods` is unset, so the agents don't reload the configmap on
    their own.
@@ -4715,3 +4716,27 @@ The NetBird route flags are on all three spike hosts, via
 `-e netbird_reup=true` with no setup key spent. Verified on k8s-worker-02:
 `DisableClientRoutes` and `DisableServerRoutes` are `true` in
 `/var/lib/netbird/default.json`.
+
+## 2026-10-11 — Pi-hole records: a list that rendered as one string
+
+The first real run of `pihole-configure.yml` after the one-name-per-machine
+rename (#288) failed at `Set dns.hosts`. #288 had left the old list's last
+entry (`- "192.168.1.206 k8s-cp-03.bnei.lan"`) after the new folded `>-`
+expression. So `pihole_hosts_records` rendered as one string, not a list.
+pihole-FTL rejected it with "not a valid string array". The Pi kept its
+previous records, so nothing broke. Fixed in #289; the rerun ended
+ok=15 changed=7 failed=0.
+
+**The gotcha:** rendering the expression in a scratch playbook did not catch
+this. Only rendering the playbook's real `vars:` block shows what the task
+receives.
+
+Live after the rerun:
+- `dig @192.168.1.55` answers for `bnei`, `pg01`, `pg02`, `pihole`, `pigsty`,
+  `garage-storage` and `hermesagent`.
+- `postgres-1`, `pi4` and `proxmox` are gone.
+- The service names `postgres` and `garage` are unchanged.
+- The Pi's hostname is `pihole`.
+- `platform-grafana` is Synced/Healthy, and its datasource is
+  `http://pigsty.bnei.lan/vmetrics`. A query from the grafana pod returns
+  data.
