@@ -55,8 +55,17 @@ serviceMonitor:
     # public IP, so this goes out and back through the Freebox (NAT hairpin)
     # and Traefik. It proves the hairpin path ADR-0055's LAN peers depend on,
     # not the outside path. http_2xx is the chart's stock module.
+    #
+    # Dex's discovery document, NOT `/`: `/` is the netbird-dashboard
+    # release's catch-all route and stays 200 while netbird-server's own
+    # IngressRoute (/api, /oauth2, gRPC, relay) is broken. /oauth2 is served
+    # by netbird-server itself.
+    #
+    # If ADR-0054's hairpin fallback is ever applied (a Pi-hole override of
+    # netbird.bnei.dev to .233), this stops testing the hairpin and only
+    # tests Traefik — update the comment and the alert text then.
     - name: netbird
-      url: https://netbird.bnei.dev/
+      url: https://netbird.bnei.dev/oauth2/.well-known/openid-configuration
       module: http_2xx
 
 prometheusRule:
@@ -94,17 +103,21 @@ prometheusRule:
       annotations:
         summary: "PVE host probes have stopped reporting"
         description: >-
-          No probe_success series for 10m — blackbox-exporter is likely down,
-          so the PVEHostUnreachable alert above is currently blind.
+          No PVE probe_success series for 10m — blackbox-exporter is likely
+          down, so PVEHostUnreachable and NetBirdUnreachable are both blind.
     - alert: NetBirdUnreachable
-      expr: probe_success{job=~".*blackbox.*", target="netbird"} == 0
+      # `or absent()`: a dropped or renamed target removes the series, and
+      # `== 0` cannot fire on a series that does not exist.
+      expr: probe_success{job=~".*blackbox.*", target="netbird"} == 0 or absent(probe_success{job=~".*blackbox.*", target="netbird"})
       for: 5m
       labels:
         severity: critical
       annotations:
-        summary: "netbird.bnei.dev unreachable from inside the cluster for 5m"
+        summary: "netbird.bnei.dev/oauth2 unreachable from inside the cluster for 5m"
         description: >-
-          HTTPS to netbird.bnei.dev ({{ $labels.instance }}) fails through the
-          Freebox hairpin and Traefik. If NetBirdServerDown is not also firing,
-          the pod is fine and the path is not: Traefik, the certificate, or
-          the Freebox's NAT loopback. LAN peers (ADR-0055) use this path.
+          HTTPS to netbird-server's /oauth2 discovery document fails through
+          the Freebox hairpin and Traefik (or the probe series is missing).
+          If NetBirdServerDown is not also firing, the server pod answers its
+          metrics and the path is at fault: netbird-server's IngressRoute,
+          Traefik, the certificate, or the Freebox's NAT loopback. LAN peers
+          (ADR-0055) use this path.

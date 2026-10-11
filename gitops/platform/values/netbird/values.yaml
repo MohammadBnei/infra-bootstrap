@@ -141,7 +141,7 @@ extraManifests:
         - name: netbird
           rules:
             - alert: NetBirdServerDown
-              expr: up{namespace="netbird", endpoint="metrics"} == 0 or absent(up{namespace="netbird", endpoint="metrics"})
+              expr: up{namespace="{{ .Release.Namespace }}", endpoint="metrics"} == 0 or absent(up{namespace="{{ .Release.Namespace }}", endpoint="metrics"})
               for: 5m
               labels:
                 severity: critical
