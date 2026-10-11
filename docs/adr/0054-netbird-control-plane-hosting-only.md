@@ -58,10 +58,13 @@ each would need its own ADR:
 - **No NetBird route, network resource or exit node points into
   `192.168.1.0/24`** or any cluster CIDR.
 - **Cluster remote access stays SSH/bastion**, exactly as ADR-0009 left it.
+  *(Amended by ADR-0055: it is SSH over NetBird, with the bastion pattern kept
+  for heavy runs and break-glass.)*
 
 The mesh's peers are the two laptops and the Pi, and its one policy allows
 `laptops → pi` on SSH. If a later request wants a cluster host in the mesh,
-that is ADR-0009's question again, not this ADR's.
+that is ADR-0009's question again, not this ADR's. *(It was asked:
+[ADR-0055](0055-netbird-as-daily-ssh-path.md) answers it for SSH.)*
 
 ### 2. Shape: the combined `netbird-server`, two common-app-chart releases
 

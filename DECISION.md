@@ -282,12 +282,13 @@ Never propose these without an explicit user greenlight, even as a
 - ❌ **Infisical as SSH CA / TLS CA** — [ADR-0006](docs/adr/0006-reject-infisical-as-ssh-tls-ca.md)
 - ❌ **Vagrant for Proxmox provisioning** — [ADR-0007](docs/adr/0007-reject-vagrant-for-proxmox.md)
 - ❌ **Flatcar as VM OS** — [ADR-0008](docs/adr/0008-reject-flatcar-vm-os.md)
-- ❌ **Mesh routes into the LAN / pods as mesh peers** — [ADR-0009](docs/adr/0009-reject-wireguard-tailscale.md).
-  No NetBird route, network resource or exit node into `192.168.1.0/24` or a
-  cluster CIDR, and no pod joins a mesh. Hosts joining as NetBird **SSH**
-  peers is allowed since [ADR-0055](docs/adr/0055-netbird-as-daily-ssh-path.md);
-  hosting the control plane since
-  [ADR-0054](docs/adr/0054-netbird-control-plane-hosting-only.md).
+- ❌ **Wireguard / Tailscale / any mesh as cluster access** — [ADR-0009](docs/adr/0009-reject-wireguard-tailscale.md).
+  Two exceptions only: hosts join NetBird as **SSH** peers
+  ([ADR-0055](docs/adr/0055-netbird-as-daily-ssh-path.md)), and the cluster
+  hosts NetBird's control plane
+  ([ADR-0054](docs/adr/0054-netbird-control-plane-hosting-only.md)). Still
+  forbidden: any other mesh or VPN, any NetBird route, network resource or
+  exit node into `192.168.1.0/24` or a cluster CIDR, and any pod as a peer.
 - ❌ **External managed Postgres** — [ADR-0010](docs/adr/0010-reject-external-managed-postgres.md)
 - ❌ **Multi-region / DR / GPU multi-tenancy / service mesh** — [ADR-0011](docs/adr/0011-reject-multi-region-dr-service-mesh.md)
 - ❌ **GitOps-managed Proxmox** — [ADR-0012](docs/adr/0012-reject-gitops-for-proxmox.md)

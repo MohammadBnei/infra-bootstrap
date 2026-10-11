@@ -113,9 +113,10 @@ then here. When in doubt, open those files.
 cert-manager (still banned — ADR-0038 amended only the DNS-01 half of
 ADR-0001's rejection, not this) · Gateway API / Ingress-NGINX / plain
 `Ingress` · Cilium Gateway API · per-app Helm chart · per-app Applications
-spawned one-by-one bypassing the registry · Ceph · mesh routes/network
-resources/exit nodes into the LAN, or pods as mesh peers (hosts as NetBird
-SSH peers are allowed, ADR-0055; hosting the control plane, ADR-0054) ·
+spawned one-by-one bypassing the registry · Ceph · Wireguard/Tailscale/any
+mesh as cluster access — sole exceptions: hosts as NetBird **SSH** peers
+(ADR-0055) and hosting NetBird's control plane (ADR-0054); never a route,
+network resource or exit node into the LAN, never a pod as a peer ·
 Infisical as SSH/TLS CA · Vagrant for Proxmox · Flatcar · external managed
 Postgres · ArgoCD as a kubespray addon · GitOps-managed Proxmox ·
 secrets/keys/tokens committed to this repo.

@@ -34,9 +34,12 @@ reasoning, so there was no argument to weigh against these two pains.
 
 ### 1. Every host is a peer
 
-Group `infra-nodes`, enrolled by a reusable setup key (usage limit = host
-count, 7-day expiry, Infisical `NETBIRD_INFRA_SETUP_KEY`, `no_log`):
-the three k8s VMs, `.205`/`.207`, the etcd witness `.197`, the three PVE hosts,
+Group `infra-nodes`, enrolled by setup keys — **one per rollout stage**
+(the spike, each step-5 batch), reusable, usage limit = that stage's host
+count + 2 (the spike re-enrolls on purpose), 7-day expiry, `no_log`, current
+one in Infisical as `NETBIRD_INFRA_SETUP_KEY`. A single key sized to the whole
+fleet would run out or expire mid-rollout. Peers: the five k8s VMs (three
+control plane, two workers), `.205`/`.207`, the etcd witness `.197`, the three PVE hosts,
 the LXCs (k9s hub, hermesagent, build-runner, garage, nfs) and Pi-hole `.55`.
 
 - Client **pinned**, upgraded in lockstep with the laptops (NetBird SSH is not
@@ -50,9 +53,15 @@ the LXCs (k9s hub, hermesagent, build-runner, garage, nfs) and Pi-hole `.55`.
   /dev/net/tun` from the PVE host, which needs a container restart. garage
   (zot blobs, backups) and nfs (RWX pods) restart last, in a maintenance window.
 - Pigsty's firewall (`node_firewall_mode: zone`, re-applied on every
-  `node.yml`) gets **port 22022 only** in `node_firewall_public_port`. Trusting
-  `100.64.0.0/10` would open Patroni 8008, etcd 2379 and 5432 to every peer,
+  `node.yml`) gets **port 22022** in `node_firewall_public_port`. Trusting
+  `100.64.0.0/10` would open Patroni 8008 and etcd 2379 to every peer,
   including the off-site Pi.
+- **5432 is already public** on every Pigsty node (`all.vars`
+  `node_firewall_public_port: [22, 80, 443, 5432]`, commented "remove in
+  production!"), so on `wt0` it would be reachable by every mesh peer with only
+  NetBird's ACL in the way. The enrollment PR removes it, after the spike
+  confirms pod → Postgres traffic arrives from node IPs (the trusted intranet
+  zone) rather than from a public-zone source.
 
 ### 2. Access: `platform-admins`, propagated to peers
 
@@ -92,7 +101,9 @@ carries an explicit `mesh_name` per host, which is a Pi-hole short name such as
 `postgres-1` or `proxmox`. `netbird-configure.yml` fails if a `mesh_name` is not
 in the records file. It sets each peer's name through the API,
 compare-before-write, so `postgres-1.bnei.mesh` resolves on every NetBird
-client. Peer DNS domain: `bnei.mesh`, never `netbird.bnei.dev` (that is the
+client **that manages DNS — the laptops**. Infra peers have DNS
+management off (Decision 1), so they cannot resolve `*.bnei.mesh`; nothing
+run from an infra host may use the mesh overlay inventory. Peer DNS domain: `bnei.mesh`, never `netbird.bnei.dev` (that is the
 management URL; claiming it would cut clients off from it).
 
 ### 5. Break-glass and off-LAN recovery
@@ -101,7 +112,11 @@ The control plane, authentik, Traefik and Pigsty all live in the cluster. When
 any of them is down, no new NetBird session can start. So:
 
 - `sshd` stays on :22, key-based, everywhere. On every host but the hub:
-  `Match Address *,!192.168.1.0/24` → `AuthorizedKeysFile none`.
+  `Match Address *,!192.168.1.0/24,!fe80::/10,!<Freebox LAN /64>` →
+  `AuthorizedKeysFile none`. The IPv6 entries matter: the Freebox hands out
+  IPv6, and a LAN client that connects over v6 would otherwise lose key auth —
+  heavy runs and break-glass included. The spike reads the real prefix and
+  checks which family LAN SSH actually uses.
 - **The Freebox forward `:49222` → k9s hub stays**, as the off-LAN recovery
   path only. On the hub the same `Match` points at
   `/etc/ssh/breakglass.pub`, so from outside it accepts **one break-glass key**
@@ -124,10 +139,11 @@ runs it, like every playbook here.
 ### 7. Observability
 
 Scrape `metricsPort: 9090` with a ServiceMonitor (zot's pattern), and add
-NetBird's dashboards. Add an `http_2xx` blackbox probe on
-`https://netbird.bnei.dev`; from inside the cluster it tests NAT hairpin, not
-the outside path. Rules: down 5m = critical, degraded = warning.
-`PVEHostUnreachable` is scoped to PVE targets first — today it matches every
+NetBird's dashboards. Add an `http_2xx` blackbox probe on a server-owned
+path of `https://netbird.bnei.dev` (not `/`, which is the dashboard's
+catch-all); from inside the cluster it tests NAT hairpin, not the outside
+path. Rules: down 5m = critical, degraded = warning. `PVEHostUnreachable` and
+`PVEHostProbeStale` are scoped to PVE targets first — today both match every
 blackbox probe.
 
 ## Rollout
@@ -149,6 +165,9 @@ blackbox probe.
      `cilium-dbg encrypt status` is clean, cross-node pod traffic works, and
      systemd-resolved is untouched.
    - LXC tun works.
+   - The Freebox LAN IPv6 prefix, and which address family LAN SSH uses.
+   - Pod → Postgres connections arrive from node IPs (so 5432 can leave the
+     public zone).
 4. `netbird-configure.yml`, the records move, the overlay inventory.
 5. Enrollment, staged: witness → k8s workers one at a time → control plane →
    Patroni replica (from `patronictl list`, not the name) → leader →
@@ -161,10 +180,12 @@ blackbox probe.
 - **One NetBird client update reaches every hypervisor, Patroni node and DNS at
   once.** Pinned and staged for that reason.
 - Each k8s node runs two WireGuard stacks (Cilium's and NetBird's).
-- **The geo check and ADR-0054's hairpin fallback cannot both be used.** The
-  fallback (a Pi-hole override of `netbird.bnei.dev` to `.233`) makes management
-  see a `192.168.x` source with no country, and the check would deny it. If
-  hairpin fails, the geo check goes, not the reverse — to be decided then.
+- **The geo check may deny laptops at home.** Through NAT loopback the Freebox
+  may SNAT to its LAN address, and Traefik trusts forwarded headers from
+  Cloudflare only, so management can see a `192.168.x` source with no country.
+  ADR-0054's hairpin fallback (a Pi-hole override to `.233`) makes that
+  certain. The spike tests it from home. If home is denied, the geo check
+  goes, not the reverse.
 - The public `:49222` forward stays, narrowed to one key.
 - Infisical gains `NETBIRD_INFRA_SETUP_KEY`, `NETBIRD_API_TOKEN` and the
   break-glass key. Per-host human keys are removed once cutover is verified.
