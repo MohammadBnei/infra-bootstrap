@@ -239,6 +239,10 @@
               action: accept
               bidirectional: false
               protocol: netbird-ssh
+              # Without ports the rule opens every TCP port of the host to
+              # the source peers (seen on the spike: `ip saddr <laptop>
+              # accept`, no dport). 22 is what NetBird redirects to 22022.
+              ports: ["22"]
               sources: ["{{ group_ids['platform-admins'] }}"]
               destinations: ["{{ group_ids['infra-nodes'] }}"]
               authorized_groups: "{{ {group_ids['platform-admins']: netbird_ssh_local_users} }}"
@@ -252,6 +256,7 @@
              or (policy_existing.source_posture_checks | default([])) != []
              or policy_existing.rules | length != 1
              or policy_existing.rules[0].protocol != 'netbird-ssh'
+             or (policy_existing.rules[0].ports | default([], true)) != ['22']
              or policy_existing.rules[0].action != 'accept'
              or policy_existing.rules[0].bidirectional != false
              or policy_existing.rules[0].sources | map(attribute='id') | list != [group_ids['platform-admins']]
