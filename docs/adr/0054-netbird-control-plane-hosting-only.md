@@ -6,7 +6,11 @@ PRs:
 2. The authentik client and its access policy.
 3. Traefik's websecure timeouts, merged in a maintenance window.
 
-**Not yet live.**
+**PR 1 live 2026-10-11** (#276, #277): server Ready, dashboard and Dex
+served at `netbird.bnei.dev` with the `*.bnei.dev` certificate, all three
+stores on Pigsty, STUN answering on the public IP through the Freebox UDP
+forward. Not yet: the authentik client (PR 2), any peer, and the Traefik
+timeout measurement.
 **Date:** 2026-10-11
 **Related:**
 - [ADR-0009](0009-reject-wireguard-tailscale.md): the rejection this narrows.
