@@ -53,21 +53,24 @@ env:
   - name: NB_SQL_MAX_OPEN_CONNS
     value: "5"
 
-# /health on the healthcheck port, per NetBird's configuration reference.
+# TCP on the main port, NOT /health. Measured on first deploy (2026-10-11):
+# /health includes the relay's self-check, which dials
+# rels://netbird.bnei.dev:443/relay — through Traefik, back to this pod. Traefik
+# only routes to Ready endpoints, so it answers 503, /health fails, the pod
+# never becomes Ready: a deadlock. On liveness it was a restart loop too.
+# A process accepting on :80 is the honest liveness signal; whether the public
+# path works is the blackbox probe's job, not the kubelet's.
+#
 # Liveness is generous because a first boot migrates three empty databases;
 # the chart's ~40s to a kill could land mid-migration and loop.
 livenessProbe:
   enabled: true
-  type: http
-  path: /health
-  port: 9000
+  type: tcp
   initialDelaySeconds: 30
   failureThreshold: 6
 readinessProbe:
   enabled: true
-  type: http
-  path: /health
-  port: 9000
+  type: tcp
 
 extraVolumes:
   - name: config
