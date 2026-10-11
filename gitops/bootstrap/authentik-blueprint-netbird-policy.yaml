@@ -11,9 +11,16 @@
 # (see that file's wird-agent note). A typo'd or deleted username here must
 # not stop platform-admins from reconciling.
 #
-# The application binding that makes this group the gate lands with the
-# netbird OAuth2 client (ADR-0054's PR 2), in this same file — the hermes and
-# hq `-policy` convention. Until then the group exists and gates nothing.
+# The binding below makes this group the gate on the `netbird` application
+# (authentik-blueprint-netbird.yaml). Separate from that provider blueprint,
+# the hq/hermes convention: a blueprint is one transaction, so a miss here
+# rolls back the gate, not the provider — and with core_default_app_access
+# false a missing binding denies everyone, the visible failure direction.
+#
+# Verify in the database, not the log, selecting the FKs explicitly:
+#   SELECT target_id, group_id, enabled FROM authentik_policies_policybinding
+# A NULL target_id means the !Find below ran before the application existed;
+# restart the worker once more.
 #
 # A plain ConfigMap for authentik-blueprint-groups.yaml's reason: membership
 # carries no credential.
@@ -43,3 +50,10 @@ data:
             - !Find [authentik_core.user, [username, akadmin]]
             # N MG. Account created 2026-10-11, before this line was added.
             - !Find [authentik_core.user, [username, nicozlat]]
+      - model: authentik_policies.policybinding
+        identifiers:
+          target: !Find [authentik_core.application, [slug, netbird]]
+          group: !KeyOf netbird-users
+          order: 0
+        attrs:
+          enabled: true
