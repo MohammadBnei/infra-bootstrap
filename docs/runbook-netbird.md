@@ -1,13 +1,20 @@
 # Runbook: NetBird SSH mesh (ADR-0054, ADR-0055)
 
-> **Status, 2026-10-11:** rolling out. Three stages are enrolled, 9 hosts:
+> **Status, 2026-10-11:** rolling out. Six stages are enrolled, 14 hosts, all
+> on client 0.80.0, connected, with `ssh_enabled` on:
 > - `spike`: `pg-etcd-witness` (.197), `k8s-worker-02` (.203) and the
 >   `build-runner` LXC (.111);
 > - `k8s`: `k8s-worker-01` and `k8s-cp-01`/`-02`/`-03`;
-> - `pg`: `pg02` (replica), then `pg01` (leader).
+> - `pg`: `pg02` (replica), then `pg01` (leader);
+> - `lxc`: `k9s-dashboard` (LXC 102);
+> - `pve`: `bnei`, `server1`, `ex-laptop`;
+> - `pi`: `pihole`.
 >
-> Still to enroll: `lxc` (`k9s-dashboard`, `hermesagent`), `pve`, `pi`,
-> `storage`. From the laptop,
+> Still to enroll:
+> - `hermesagent` (LXC 101): no recorded SSH key, so it needs a `pct exec`
+>   path.
+> - `garage-storage` and `nfs-storage` (`storage`): waiting for a maintenance
+>   window. From the laptop,
 > `<node>.bnei.mesh:22022` is reachable. **Human SSH over the mesh works:**
 > on 2026-10-11 `ssh root@k8s-worker-02.bnei.mesh` from the laptop asked for
 > an authentik login in the browser, then opened a shell. Not yet verified:
@@ -237,9 +244,10 @@ shows up afterwards in `netbird-configure.yml`'s report (user-less peers in
 
 ## Steps: enroll a stage
 
-A stage is one group in `ansible/inventories/mesh/hosts.yml` (`spike`, `k8s` and
-`pg` so far). The pg hosts take Pigsty's key: pass
-`-e ansible_ssh_private_key_file=<SSH_OLDPG_KEY in a temp file>`. ADR-0055 step 6 sets the order of later stages: witness →
+A stage is one group in `ansible/inventories/mesh/hosts.yml` (`spike`, `k8s`,
+`pg`, `lxc`, `pve` and `pi` so far). Some stages need a different SSH key,
+passed as `-e ansible_ssh_private_key_file=<temp file>`: `SSH_OLDPG_KEY` for
+`pg`, `PVE_SSH_PRIVATE_KEY` for `pve`, `SSH_PI4_KEY` for `pi`. ADR-0055 step 6 sets the order of later stages: witness →
 k8s workers one at a time → control plane → Patroni replica → leader →
 non-storage LXCs → PVE → Pi-hole → garage/nfs in a window.
 

@@ -2,7 +2,7 @@
 
 **Status:** Accepted — decided 2026-10-11, approved by M BN after an
 architecture interview and two adversarial review cycles. **Rolling out —
-spike, k8s and pg stages enrolled 2026-10-11** (9 hosts); human SSH over the
+14 hosts enrolled 2026-10-11** (all but hermesagent, garage-storage and nfs-storage); human SSH over the
 mesh verified end-to-end the same day. Operator view:
 [`docs/runbook-netbird.md`](../runbook-netbird.md). Rollout past the spike is
 gated on it (Rollout step 4). If the spike fails on the
@@ -294,8 +294,23 @@ enrolled first, then pg01, the leader, with 0 failures; enforce turned on
 `ssh_enabled`. Patroni is unchanged: pg-proxmox-1 is leader, pg-proxmox-2 is
 streaming with lag 0. The postgres VIP :5432, pigsty :80 and redis :6379
 answer. `:22022` is reachable through the active host firewall, so the
-Pigsty firewall change in Decision 1 is not needed. Remaining stages: `lxc`
-(k9s-dashboard, hermesagent), `pve`, `pi`, `storage`.
+Pigsty firewall change in Decision 1 is not needed.
+
+**`lxc`, `pve`, `pi` stages (2026-10-11 ~23:55):** keys `_LXC` (3), `_PVE`
+(5) and `_PI` (3), with 0 failures and no drift on the report run after
+enforce.
+- `k9s-dashboard`: LXC 102 got `/dev/net/tun` and a reboot.
+- PVE hosts: `bnei`, `server1` and `ex-laptop`, serial, with
+  `PVE_SSH_PRIVATE_KEY`. `pvecm status` stays Quorate at 3/3. pve-firewall
+  was already disabled on all three.
+- `pihole`: arm64, Debian trixie. Pi-hole still answers local and upstream
+  queries.
+
+`:22022` is reachable on all five. **14 infra peers** are enrolled. Not yet
+enrolled:
+- `hermesagent` (LXC 101): it has no recorded SSH key, so it needs a
+  `pct exec` path.
+- `garage-storage` and `nfs-storage`: they wait for a maintenance window.
 
 ## Consequences
 

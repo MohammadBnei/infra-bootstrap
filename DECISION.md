@@ -237,7 +237,8 @@ updated.
   the server's embedded Dex. All three stores live on Pigsty. See
   [ADR-0054](docs/adr/0054-netbird-control-plane-hosting-only.md).
 - **NetBird is the daily SSH path to every host** (ADR-0055, accepted,
-  rolling out — spike, k8s and pg stages enrolled 2026-10-11, human SSH over the
+  rolling out — 14 hosts enrolled 2026-10-11, all but
+  hermesagent/garage-storage/nfs-storage, human SSH over the
   mesh verified, ansible over it not yet). Every host is a peer in `infra-nodes`; access is
   `platform-admins` through authentik, with no posture check (the FR geo
   check was dropped during the spike: through the Freebox hairpin management

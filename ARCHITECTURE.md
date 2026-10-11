@@ -791,10 +791,12 @@ after PVE install).
 Per-host keys for each VM/LXC. Bastion pattern: hermesagent LXC → all
 hosts/VMs.
 
-**Rolling out (ADR-0055), spike, k8s and pg stages enrolled 2026-10-11:** every host
+**Rolling out (ADR-0055), 14 hosts enrolled 2026-10-11:** every host
 becomes a NetBird SSH peer in group `infra-nodes` (`<name>.bnei.mesh`),
 reached from `platform-admins` with a per-session authentik JWT; no posture
-check. Enrolled so far: `pg-etcd-witness`, `build-runner`, all five k8s nodes, `pg01` and `pg02`.
+check. Enrolled: the three PVE hosts, all five k8s nodes, `pg01`, `pg02`,
+`pg-etcd-witness`, `build-runner`, `k9s-dashboard` and `pihole`. Not yet:
+`hermesagent`, `garage-storage`, `nfs-storage`.
 Human SSH over the mesh works (verified 2026-10-11); ansible over it is not yet
 verified, and nothing below has moved yet. Model and procedures: `docs/runbook-netbird.md`. Target:
 `sshd` stays key-based, restricted to `192.168.1.0/24`; heavy runs stay on
