@@ -6,15 +6,15 @@
 # UI AND PLAYBOOK COEXIST
 # The dashboard stays a first-class way to change things. Either use both,
 # or only the UI — this file never fights it:
-# - A default run only CREATES what is missing (groups, posture check,
-#   policy, setup key) and REPORTS drift on everything else. It never
+# - A default run only CREATES what is missing (groups, policy, setup
+#   key) and REPORTS drift on everything else. It never
 #   overwrites an edit made in the UI.
 # - `-e netbird_enforce=true` writes this file's values back over drift,
 #   and only on the fields named below. Use it on the first run, or when
 #   you want the file to win.
 # - Objects are matched by NAME. Renaming one of them in the UI makes the
 #   next run create a second copy: don't rename `infra-nodes`,
-#   `platform-admins`, `geo-fr-only` or `platform-admins-ssh-infra-nodes`.
+#   `platform-admins` or `platform-admins-ssh-infra-nodes`.
 # - Anything else in the account (other groups, policies, peers, the
 #   laptops/pi setup) is never read for writing, never touched.
 #
@@ -27,8 +27,12 @@
 # - `platform-admins` in the auto_groups of `netbird_admin_emails`. With
 #   propagation on, that puts the admin's own peers in the group, so the
 #   policy source is the admin's laptop and nothing else.
-# - Posture check `geo-fr-only` and policy `platform-admins-ssh-infra-nodes`
-#   (protocol `netbird-ssh`, group → local-user mapping).
+# - Policy `platform-admins-ssh-infra-nodes` (protocol `netbird-ssh`,
+#   group → local-user mapping), with no posture check. A geo check was
+#   tried and dropped: at home the laptop reaches management through the
+#   Freebox hairpin, management sees 192.168.1.254, no country, and the
+#   check can never pass. Access rests on the authentik JWT per SSH
+#   session plus platform-admins membership.
 # - `ssh_enabled` on every peer in `infra-nodes` (the dashboard's per-peer
 #   "SSH Access" toggle; the client's --allow-server-ssh alone isn't enough).
 # - A setup key, only when `-e netbird_setup_key_stage=<name>` is passed.
@@ -76,7 +80,6 @@
     # Local users a platform-admin may log in as. kubespray and pigsty
     # hosts use root/core/vagrant; the Pi and the LXCs use mohammad.
     netbird_ssh_local_users: [root, core, vagrant, mohammad]
-    netbird_posture_countries: [FR] # add one before travelling (ADR-0055)
     netbird_setup_key_usage_limit: 0 # set per stage: host count + 2
     netbird_setup_key_expires_in: 604800 # 7 days
     netbird_headers:
@@ -213,57 +216,7 @@
       when: group_ids['platform-admins'] not in item.auto_groups
 
     # -------------------------------------------------------------------
-    # 4. Posture check
-    # -------------------------------------------------------------------
-    - name: List posture checks
-      ansible.builtin.uri:
-        url: "{{ netbird_api }}/posture-checks"
-        headers: "{{ netbird_headers }}"
-      register: posture_checks
-
-    - name: Build the wanted posture check
-      ansible.builtin.set_fact:
-        posture_existing: "{{ posture_checks.json | selectattr('name', 'equalto', 'geo-fr-only') | first | default({}, true) }}"
-        posture_wanted:
-          name: geo-fr-only
-          description: "Node SSH from these countries only (ADR-0055). Managed by netbird-configure.yml"
-          checks:
-            geo_location_check:
-              action: allow
-              locations: "{{ netbird_posture_countries | map('community.general.dict_kv', 'country_code') | list }}"
-
-    # Only the countries and the action count as drift; the description is
-    # free to edit in the UI.
-    - name: Compare the existing posture check
-      ansible.builtin.set_fact:
-        posture_drift: >-
-          {{ posture_existing | length > 0
-             and ((posture_existing.checks.geo_location_check | default({})).action | default('') != 'allow'
-                  or ((posture_existing.checks.geo_location_check | default({})).locations | default([])
-                      | map(attribute='country_code') | sort | list) != (netbird_posture_countries | sort | list)) }}
-
-    - name: Create or update the posture check
-      ansible.builtin.uri:
-        url: "{{ netbird_api }}/posture-checks{{ '/' ~ posture_existing.id if posture_existing | length > 0 else '' }}"
-        method: "{{ 'PUT' if posture_existing | length > 0 else 'POST' }}"
-        headers: "{{ netbird_headers }}"
-        body_format: json
-        body: "{{ posture_wanted }}"
-      when: posture_existing | length == 0 or (posture_drift | bool and netbird_enforce | bool)
-      register: posture_write
-      changed_when: true
-
-    - name: Record posture check drift
-      ansible.builtin.set_fact:
-        netbird_drift: "{{ netbird_drift | default([]) + ['posture check geo-fr-only'] }}"
-      when: posture_existing | length > 0 and posture_drift | bool
-
-    - name: Keep the posture check id
-      ansible.builtin.set_fact:
-        posture_id: "{{ posture_write.json.id if posture_write.json is defined else posture_existing.id }}"
-
-    # -------------------------------------------------------------------
-    # 5. Node SSH policy
+    # 4. Node SSH policy
     # -------------------------------------------------------------------
     - name: List policies
       ansible.builtin.uri:
@@ -278,7 +231,7 @@
           name: platform-admins-ssh-infra-nodes
           description: "NetBird SSH from platform-admins' peers to every ukubi host (ADR-0055). Managed by netbird-configure.yml"
           enabled: true
-          source_posture_checks: ["{{ posture_id }}"]
+          source_posture_checks: []
           rules:
             - name: platform-admins-ssh-infra-nodes
               enabled: true
@@ -295,7 +248,7 @@
       ansible.builtin.set_fact:
         policy_drift: >-
           {{ policy_existing | length > 0 and (policy_existing.enabled != true
-             or (policy_existing.source_posture_checks | default([])) != [posture_id]
+             or (policy_existing.source_posture_checks | default([])) != []
              or policy_existing.rules | length != 1
              or policy_existing.rules[0].protocol != 'netbird-ssh'
              or policy_existing.rules[0].action != 'accept'
@@ -320,7 +273,7 @@
       when: policy_existing | length > 0 and policy_drift | bool
 
     # -------------------------------------------------------------------
-    # 6. SSH server switched on, management side, for every infra peer
+    # 5. SSH server switched on, management side, for every infra peer
     # -------------------------------------------------------------------
     - name: Read infra-nodes members
       ansible.builtin.uri:
@@ -351,7 +304,7 @@
       loop: "{{ infra_peers.results }}"
       loop_control:
         label: "{{ item.json.name }}"
-      when: not item.json.ssh_enabled and netbird_enforce | bool
+      when: not item.json.ssh_enabled and item.json.user_id | default('', true) == '' and netbird_enforce | bool
       changed_when: true
 
     - name: Record peers with SSH off
@@ -360,10 +313,21 @@
       loop: "{{ infra_peers.results }}"
       loop_control:
         label: "{{ item.json.name }}"
-      when: not item.json.ssh_enabled
+      when: not item.json.ssh_enabled and item.json.user_id | default('', true) == ''
+
+    # Infra hosts enroll with a setup key and have no owning user. A user's
+    # peer here means someone added infra-nodes to a user's auto groups and
+    # propagation pulled a laptop in: never switch its SSH server on.
+    - name: Record user-owned peers in infra-nodes
+      ansible.builtin.set_fact:
+        netbird_drift: "{{ netbird_drift | default([]) + ['peer ' ~ item.json.name ~ ': owned by a user, should not be in infra-nodes (check user auto groups)'] }}"
+      loop: "{{ infra_peers.results }}"
+      loop_control:
+        label: "{{ item.json.name }}"
+      when: item.json.user_id | default('', true) != ''
 
     # -------------------------------------------------------------------
-    # 7. Setup key for one rollout stage (opt-in)
+    # 6. Setup key for one rollout stage (opt-in)
     # -------------------------------------------------------------------
     - name: Setup key
       when: netbird_setup_key_stage is defined
@@ -420,7 +384,7 @@
           changed_when: true
 
     # -------------------------------------------------------------------
-    # 8. Drift report
+    # 7. Drift report
     # -------------------------------------------------------------------
     - name: Report drift
       ansible.builtin.debug:
