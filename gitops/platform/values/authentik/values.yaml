@@ -117,15 +117,16 @@ blueprints:
   # flow, whose consent stage is always_require (ADR-0053) — the first here. Its bindings sit in their own file, the hermes convention.
   - authentik-blueprint-hq
   - authentik-blueprint-hq-policy
-  # NetBird (ADR-0054). For now only the netbird-users group and its declared
-  # membership; the OAuth2 client and the binding that makes the group the gate
-  # follow once NetBird has generated its redirect URI. Its own file so a stale
-  # username cannot stop platform-admins reconciling.
+  # NetBird (ADR-0054): the netbird-users group, its declared membership, and
+  # the binding that gates the `netbird` application on it. Its own file so a
+  # stale username cannot stop platform-admins reconciling. The provider is
+  # under `secrets:` below — it carries a client secret.
   - authentik-blueprint-netbird-policy
   secrets:
   - authentik-blueprint-grafana
   - authentik-blueprint-argocd
   - authentik-blueprint-fleet
+  - authentik-blueprint-netbird
 
 server:
   replicas: 1
