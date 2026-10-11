@@ -4536,10 +4536,15 @@ The flip was a single bit in a single sample, so it was not clock skew. All five
 node clocks were in sync (`node_timex_sync_status 1`, offset under 1 ms), and a
 clock jump would have stamped every series in that scrape, not one. No
 `honorTimestamps` is set anywhere in `gitops/`. Prometheus runs on
-`k8s-worker-01`, hosted on `.165`, so the suspect is that host's RAM — **not
-verified**: the `gpu-server` SSH alias was refused, so no MCE/EDAC check yet.
-`k8s-cp-01` and `k8s-worker-01`, both on `.165`, had rebooted at 23:45 the
-night before.
+`k8s-worker-01`, hosted on `.165`, so the suspect is that host's RAM.
+`dmidecode -t 16` there reports `Error Correction Type: None`, there is no
+`/sys/devices/system/edac/mc/mc*`, and the kernel log since 2026-10-09 has only
+the boot-time `EDAC MC`/`MCE` banners — no errors. On non-ECC RAM that silence
+proves nothing: a flipped bit is neither corrected nor reported. So a RAM flip
+stays the best fit, unproven; memtest86+ on a drained `.165` is the only real
+test. `.165` itself rebooted at about 23:45 UTC the night before (`uptime -s`);
+`k8s-cp-01` and `k8s-worker-01` came up with it. The reason for that reboot is
+not recorded.
 
 **Fix.** A restart replayed the WAL but did **not** bring the poisoned sample
 back. `wal/` held a stray `checkpoint.00000622`, dated 2026-09-28, beside the
@@ -4552,8 +4557,8 @@ not-yet-compacted head**, up to about 2h of samples.
 After that restart `wal/` and `chunks_head/` were renamed to
 `*.poisoned-20261011` from inside the running container and the pod was
 deleted. That cost about a minute of fresh samples and left a clean WAL with no
-stale checkpoint. Delete the two `*.poisoned-20261011` directories once no one
-wants to inspect them. Nothing was lost before 11:07: block `01M4NABC` already
+stale checkpoint. The two `*.poisoned-20261011` directories were deleted
+afterwards. Nothing was lost before 11:07: block `01M4NABC` already
 held 10:00–11:07.
 
 **Pausing it is a three-controller fight.** Scaling the StatefulSet to 0 is
@@ -4565,6 +4570,16 @@ undone, the only offline path left touches all platform apps. Renaming the
 directories under the live process works instead: open file descriptors follow
 the inode, and a head rejecting every append writes nothing in between.
 
-**Open.** Memory check on `.165`. The `failed: true` compaction flag on blocks
-`01M4MEEA`/`01M4MNA1`/`01M4MW5R` and the old `quarantined-01M20RHC…` directory
-were seen but not investigated.
+**Also checked.** Blocks `01M4MEEA`/`01M4MNA1`/`01M4MW5R` (00:00–06:00 on
+2026-10-11) carry `compaction.failed: true`. Prometheus sets that flag when
+merging a block into a larger one fails, and then never retries the merge. The
+data stays queryable; it just takes three level-1 blocks until retention ages
+them out. No action needed. `quarantined-01M20RHC…`, a 50MB block from
+2026-09-08 that Prometheus never loaded because its name is not a valid block
+ID, was deleted.
+
+**Open.** memtest86+ on `.165`, and the reason for its 2026-10-10 reboot.
+Reaching `.165` was harder than it should be: the `gpu-server` alias (user
+`mohammad`) is refused, the `server` alias's port 2222 on `.200` is refused,
+and `SSH_PROXMOX_KEY` from Infisical fails `ssh` with `invalid format`. The
+check above ran with a password login.
