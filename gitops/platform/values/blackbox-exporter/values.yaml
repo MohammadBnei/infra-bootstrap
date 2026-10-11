@@ -51,6 +51,22 @@ serviceMonitor:
     - name: pve-ex-laptop
       url: 192.168.1.161:8006
       module: pve_tcp
+    # NetBird's public name, from inside the cluster: Pi-hole answers with the
+    # public IP, so this goes out and back through the Freebox (NAT hairpin)
+    # and Traefik. It proves the hairpin path ADR-0055's LAN peers depend on,
+    # not the outside path. http_2xx is the chart's stock module.
+    #
+    # Dex's discovery document, NOT `/`: `/` is the netbird-dashboard
+    # release's catch-all route and stays 200 while netbird-server's own
+    # IngressRoute (/api, /oauth2, gRPC, relay) is broken. /oauth2 is served
+    # by netbird-server itself.
+    #
+    # If ADR-0054's hairpin fallback is ever applied (a Pi-hole override of
+    # netbird.bnei.dev to .233), this stops testing the hairpin and only
+    # tests Traefik — update the comment and the alert text then.
+    - name: netbird
+      url: https://netbird.bnei.dev/oauth2/.well-known/openid-configuration
+      module: http_2xx
 
 prometheusRule:
   enabled: true
@@ -62,7 +78,9 @@ prometheusRule:
       # ServiceMonitor relabels __param_target onto it. severity: critical
       # also fans this out to thot via the Alertmanager route in
       # values/prometheus/values.yaml.
-      expr: probe_success{job=~".*blackbox.*"} == 0
+      # Scoped to the pve-* targets: unscoped, every other probe here (netbird)
+      # would page as a dead hypervisor.
+      expr: probe_success{job=~".*blackbox.*", target=~"pve-.*"} == 0
       for: 3m
       labels:
         severity: critical
@@ -78,12 +96,28 @@ prometheusRule:
       # probe_success == 0 cannot fire if the series stops existing, which is
       # what happens when blackbox-exporter itself is unschedulable. Without
       # this, losing the prober looks identical to everything being healthy.
-      expr: absent(probe_success{job=~".*blackbox.*"})
+      expr: absent(probe_success{job=~".*blackbox.*", target=~"pve-.*"})
       for: 10m
       labels:
         severity: warning
       annotations:
         summary: "PVE host probes have stopped reporting"
         description: >-
-          No probe_success series for 10m — blackbox-exporter is likely down,
-          so the PVEHostUnreachable alert above is currently blind.
+          No PVE probe_success series for 10m — blackbox-exporter is likely
+          down, so PVEHostUnreachable and NetBirdUnreachable are both blind.
+    - alert: NetBirdUnreachable
+      # `or absent()`: a dropped or renamed target removes the series, and
+      # `== 0` cannot fire on a series that does not exist.
+      expr: probe_success{job=~".*blackbox.*", target="netbird"} == 0 or absent(probe_success{job=~".*blackbox.*", target="netbird"})
+      for: 5m
+      labels:
+        severity: critical
+      annotations:
+        summary: "netbird.bnei.dev/oauth2 unreachable from inside the cluster for 5m"
+        description: >-
+          HTTPS to netbird-server's /oauth2 discovery document fails through
+          the Freebox hairpin and Traefik (or the probe series is missing).
+          If NetBirdServerDown is not also firing, the server pod answers its
+          metrics and the path is at fault: netbird-server's IngressRoute,
+          Traefik, the certificate, or the Freebox's NAT loopback. LAN peers
+          (ADR-0055) use this path.
