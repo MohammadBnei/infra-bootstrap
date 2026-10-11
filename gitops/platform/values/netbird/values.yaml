@@ -21,6 +21,12 @@ strategy:
 
 service:
   port: 80
+  # config.yaml's metricsPort (gitops/bootstrap/netbird-config-secret.yaml):
+  # one /metrics for management, signal and relay. Unauthenticated, so it is
+  # only ever a ClusterIP port — never added to the IngressRoute below.
+  extraPorts:
+    - name: metrics
+      port: 9090
 
 # No chart IngressRoute: this release serves five path prefixes, two of them
 # gRPC needing h2c to the backend, which the chart's one-route template cannot
@@ -98,6 +104,54 @@ extraVolumeMounts:
     readOnly: true
 
 extraManifests:
+  # Scrape for the metrics port above, zot's pattern (common-app-chart has no
+  # ServiceMonitor template). ADR-0055 makes NetBird the daily SSH path to
+  # every host, so it is alerted on like one.
+  - |
+    apiVersion: monitoring.coreos.com/v1
+    kind: ServiceMonitor
+    metadata:
+      name: netbird
+      namespace: {{ .Release.Namespace }}
+      labels:
+        {{- include "common-app-chart.labels" . | nindent 8 }}
+    spec:
+      selector:
+        matchLabels:
+          {{- include "common-app-chart.selectorLabels" . | nindent 10 }}
+      endpoints:
+        - port: metrics
+          path: /metrics
+          interval: 30s
+  # Rendered through tpl like every extraManifest, so the annotations carry no
+  # {{ $labels }} — Helm would try to evaluate them. The outside path is the
+  # blackbox NetBirdUnreachable rule's job (values/blackbox-exporter).
+  # ponytail: down/absent only; add degraded rules (relay share, login errors)
+  # once real metric names are visible in Prometheus.
+  - |
+    apiVersion: monitoring.coreos.com/v1
+    kind: PrometheusRule
+    metadata:
+      name: netbird
+      namespace: {{ .Release.Namespace }}
+      labels:
+        {{- include "common-app-chart.labels" . | nindent 8 }}
+    spec:
+      groups:
+        - name: netbird
+          rules:
+            - alert: NetBirdServerDown
+              expr: up{namespace="netbird", endpoint="metrics"} == 0 or absent(up{namespace="netbird", endpoint="metrics"})
+              for: 5m
+              labels:
+                severity: critical
+              annotations:
+                summary: "netbird-server metrics unreachable for 5m"
+                description: >-
+                  The NetBird control plane is down or not scraped. Established
+                  P2P tunnels keep working; new SSH sessions to every host
+                  (ADR-0055) and relayed sessions do not. Recovery from off-LAN
+                  is the :49222 break-glass path.
   # The one route for netbird.bnei.dev's server paths. The dashboard's
   # catch-all Host() route comes from its own release; Traefik ranks rules
   # by length, so these longer Host()&&PathPrefix() rules always win.

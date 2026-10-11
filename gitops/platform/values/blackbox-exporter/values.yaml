@@ -51,6 +51,13 @@ serviceMonitor:
     - name: pve-ex-laptop
       url: 192.168.1.161:8006
       module: pve_tcp
+    # NetBird's public name, from inside the cluster: Pi-hole answers with the
+    # public IP, so this goes out and back through the Freebox (NAT hairpin)
+    # and Traefik. It proves the hairpin path ADR-0055's LAN peers depend on,
+    # not the outside path. http_2xx is the chart's stock module.
+    - name: netbird
+      url: https://netbird.bnei.dev/
+      module: http_2xx
 
 prometheusRule:
   enabled: true
@@ -62,7 +69,9 @@ prometheusRule:
       # ServiceMonitor relabels __param_target onto it. severity: critical
       # also fans this out to thot via the Alertmanager route in
       # values/prometheus/values.yaml.
-      expr: probe_success{job=~".*blackbox.*"} == 0
+      # Scoped to the pve-* targets: unscoped, every other probe here (netbird)
+      # would page as a dead hypervisor.
+      expr: probe_success{job=~".*blackbox.*", target=~"pve-.*"} == 0
       for: 3m
       labels:
         severity: critical
@@ -78,7 +87,7 @@ prometheusRule:
       # probe_success == 0 cannot fire if the series stops existing, which is
       # what happens when blackbox-exporter itself is unschedulable. Without
       # this, losing the prober looks identical to everything being healthy.
-      expr: absent(probe_success{job=~".*blackbox.*"})
+      expr: absent(probe_success{job=~".*blackbox.*", target=~"pve-.*"})
       for: 10m
       labels:
         severity: warning
@@ -87,3 +96,15 @@ prometheusRule:
         description: >-
           No probe_success series for 10m — blackbox-exporter is likely down,
           so the PVEHostUnreachable alert above is currently blind.
+    - alert: NetBirdUnreachable
+      expr: probe_success{job=~".*blackbox.*", target="netbird"} == 0
+      for: 5m
+      labels:
+        severity: critical
+      annotations:
+        summary: "netbird.bnei.dev unreachable from inside the cluster for 5m"
+        description: >-
+          HTTPS to netbird.bnei.dev ({{ $labels.instance }}) fails through the
+          Freebox hairpin and Traefik. If NetBirdServerDown is not also firing,
+          the pod is fine and the path is not: Traefik, the certificate, or
+          the Freebox's NAT loopback. LAN peers (ADR-0055) use this path.
