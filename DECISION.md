@@ -233,8 +233,8 @@ updated.
   (ADR-0054). `netbird-server` + dashboard at `netbird.bnei.dev` (a grey
   record, because STUN on UDP 3478 shares the name and Cloudflare carries no
   UDP; STUN on MetalLB `.235`, `externalTrafficPolicy: Local`). Its peers are
-  two laptops and a Pi off-site. authentik is the only login, through the
-  server's embedded Dex. All three stores live on Pigsty. ADR-0009 still
+  two laptops and a Pi off-site. authentik becomes the only login, through
+  the server's embedded Dex, once its client lands (ADR-0054's PR 2). All three stores live on Pigsty. ADR-0009 still
   forbids any cluster host as a peer. See
   [ADR-0054](docs/adr/0054-netbird-control-plane-hosting-only.md).
 - **Certificate renewal is one token, so it gets an alarm.** Since ADR-0038

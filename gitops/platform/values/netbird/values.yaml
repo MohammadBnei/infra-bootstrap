@@ -44,12 +44,25 @@ resources:
     cpu: "1"
     memory: 512Mi
 
+# Both gorm pools (management, activity) default to runtime.NumCPU() open
+# connections — the HOST's CPUs, not the container's limit (v0.80.0
+# management/server/store/sql_store.go:83, activity/store/sql_store.go:286).
+# On a big node that alone exceeds dbuser_netbird's connlimit of 20, and Dex
+# holds a third pool. 5 each leaves room for Dex. Recreate means no second pod.
+env:
+  - name: NB_SQL_MAX_OPEN_CONNS
+    value: "5"
+
 # /health on the healthcheck port, per NetBird's configuration reference.
+# Liveness is generous because a first boot migrates three empty databases;
+# the chart's ~40s to a kill could land mid-migration and loop.
 livenessProbe:
   enabled: true
   type: http
   path: /health
   port: 9000
+  initialDelaySeconds: 30
+  failureThreshold: 6
 readinessProbe:
   enabled: true
   type: http
