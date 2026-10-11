@@ -75,7 +75,8 @@ into scope.
    existing `/etc/containerd/certs.d/docker.io/hosts.toml` is orphaned.
 
 7. **DNS is repo-managed**, not manual: `registry.bnei.lan` goes in
-   `pihole_hosts_records` in `pihole-configure.yml`. That playbook applies
+   `pihole_hosts_records` in `pihole-configure.yml` (now `bnei_lan_service_records` in
+   `ansible/playbooks/vars/bnei-lan-records.yml`, 2026-10-11). That playbook applies
    the list wholesale via `pihole-FTL --config dns.hosts` on every run, so a
    hand-added record would be silently wiped on the next run — producing
    cluster-wide `ImagePullBackOff` with no config change to blame it on.

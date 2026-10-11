@@ -87,7 +87,8 @@ You can use the dashboard, the playbook, or both. They do not fight:
   creates missing objects and reports at the end, on two lines:
   - **Differs / Fixed:** drift on the fields the playbook owns.
   - **Needs a human (never changed by this playbook):** user-owned peers in
-    `infra-nodes`, and admin emails with no NetBird user yet.
+    `infra-nodes`, admin emails with no NetBird user yet, and user-less peers
+    whose name is not a host in `bnei-lan-records.yml`.
 - **Task output is hidden play-wide**, because the PAT sits in the `uri`
   headers and Ansible does not mask it there. Asserts and the report stay
   visible. `-e netbird_debug=true` shows everything; never paste that
@@ -116,9 +117,9 @@ Never save this policy without ports in the dashboard.
 
 ## Cilium must not use `wt0`
 
-When a k8s node joins the mesh, Cilium auto-detects NetBird's `wt0` as one
-of its devices (`Devices: [eth0 wt0]`, seen on `k8s-worker-02`). It is
-harmless today (no kube-proxy replacement, no host firewall, iptables
+Left alone, Cilium auto-detects NetBird's `wt0` as one of its devices when
+a k8s node joins the mesh (`Devices: [eth0 wt0]`, seen on `k8s-worker-02`
+during the spike). That was harmless (no kube-proxy replacement, no host firewall, iptables
 masquerade). Still, the mesh is for SSH only and must never carry cluster
 traffic. `wt0` also has MTU 1280, and Cilium lowered its own MTUs to match.
 On k8s-worker-02, `cilium_host` and `cilium_vxlan` are 1280 and `cilium_wg0`
@@ -127,21 +128,29 @@ different tunnel MTU from the rest of the cluster. That is the silent
 large-packet-hang hazard already noted in `k8s-net-cilium.yml`, which makes
 the fix urgent.
 
-`inventory/ukubi/group_vars/k8s_cluster/k8s-net-cilium.yml` pins
-`cilium_extra_values: {devices: [eth0]}` (eth0 is the uplink on all five
-VMs). **It is committed, not applied.** **Enroll no more k8s nodes until it
-is.** The operator applies it from the laptop on the home LAN, with the local
-`id_k8s_vms` key and `kubespray-venv`. The k9s hub has no k8s VM key, and its
-checkout is behind.
+**Fixed 2026-10-11.** `inventory/ukubi/group_vars/k8s_cluster/k8s-net-cilium.yml`
+pins `cilium_extra_values: {devices: [eth0]}` (eth0 is the uplink on all
+five VMs), and it is applied: configmap `devices: eth0`, worker-02's MTUs
+back to 1500/1500/1420, endpoint health 5/5. Later k8s stages can enroll.
+
+**`cluster.yml --tags cilium` does not apply it.** On kubespray v2.31.0 that
+tag runs no install or upgrade (the role's install/apply tasks come in through
+`include_tasks`, which doesn't pass the tag on). It was applied by hand on
+k8s-cp-01, the way the role would. Repeat this for any later change to
+`cilium_extra_values`:
 
 ```bash
-cd kubespray && ../kubespray-venv/bin/ansible-playbook -i ../inventory/ukubi/hosts.yaml \
-  cluster.yml --become --diff --tags cilium
+# on k8s-cp-01, after writing /etc/kubernetes/cilium-extra-values.yaml
+# from cilium_extra_values (what the role renders)
+cilium upgrade --version 1.19.3 --dry-run-helm-values \
+  -f cilium-values.yaml -f cilium-extra-values.yaml   # diff first: expect only your change
+cilium upgrade --version 1.19.3 -f cilium-values.yaml -f cilium-extra-values.yaml
 kubectl -n kube-system rollout restart ds/cilium   # rollOutCiliumPods is unset: agents won't reload the configmap alone
 ```
 
-After the restart, `cilium status --verbose` on k8s-worker-02 must list only
-`eth0`, and its `cilium_host`/`cilium_vxlan` MTU must be back to 1500.
+Check: `cilium status --verbose` on a peer node lists only `eth0`, and its
+`cilium_host`/`cilium_vxlan` MTU is 1500. Endpoint health can flap for about
+a minute after the restart.
 
 ## The rule that matters: only setup keys put peers in `infra-nodes`
 
@@ -193,8 +202,15 @@ NetBird manage DNS, which means the laptops. The hosts run with
 `--disable-dns`, so the client never touches systemd-resolved. That
 resolver is the upstream of nodelocaldns and CoreDNS. Pi-hole stays
 authoritative for `bnei.lan`, and nothing on a host may use a `.bnei.mesh`
-name. Peer names are the hostnames for now. Rollout step 5 renames them to
-Pi-hole short names (`mesh_name`).
+name.
+
+**One name per machine.** A peer's name is its OS hostname, which is also its
+Proxmox name, k8s node name, inventory alias and Pi-hole record (`pg01` is
+`pg01.bnei.lan` and `pg01.bnei.mesh`). Nothing renames peers. The list is
+`ansible/playbooks/vars/bnei-lan-records.yml` (`bnei_lan_hosts`):
+`netbird-client.yml` refuses a host that is not there under the same name and
+IP, and `netbird-configure.yml` reports a user-less peer whose name is not
+there. Service names (`postgres`, `pve`, `garage`, …) are a separate list.
 
 ## Prereqs
 
@@ -208,12 +224,13 @@ Pi-hole short names (`mesh_name`).
 ## Steps: enroll a stage
 
 A stage is one group in `ansible/inventories/mesh/hosts.yml`. Today only
-`spike` exists. **Before any stage with k8s nodes, apply the Cilium
-`devices` pin (see above).** ADR-0055 step 6 sets the order of later stages: witness →
+`spike` exists. ADR-0055 step 6 sets the order of later stages: witness →
 k8s workers one at a time → control plane → Patroni replica → leader →
 non-storage LXCs → PVE → Pi-hole → garage/nfs in a window.
 
-1. **Add the stage to the inventory.** The host name is the hostname, and
+1. **Add the stage to the inventory.** The alias must be the host's one name
+   (its OS hostname) and be in `ansible/playbooks/vars/bnei-lan-records.yml`
+   at the same IP — add it there first if it is new.
    `ansible_host` is the **LAN IP**. Copy the user and key from the host's
    own inventory, and keep it in sync with `inventory/ukubi/hosts.yaml`,
    `pigsty/pigsty.yml` or `terraform.tfvars`. For an LXC, add
@@ -271,9 +288,8 @@ the server, the laptops and the hosts together.
 `-e netbird_reup=true` is a separate tool. It runs `netbird down`, then
 `netbird up <flags>` **without** a setup key, to apply new flags on an
 enrolled host. The peer is already registered and logs back in with its own
-WireGuard key, so no setup-key use is spent. **Pending:** the three spike
-hosts were enrolled before `--disable-client-routes`/`--disable-server-routes`
-existed and need one `-e netbird_reup=true` run to get them.
+WireGuard key, so no setup-key use is spent. It was used this way on
+2026-10-11 to give the three spike hosts the route flags.
 
 ## Verification
 

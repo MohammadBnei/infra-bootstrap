@@ -83,7 +83,6 @@
     pihole_hosts_records: >-
       {{ bnei_lan_hosts.values() | zip(bnei_lan_hosts.keys() | map('regex_replace', '$', '.bnei.lan'))
          | map('join', ' ') | list + bnei_lan_service_records }}
-      - "192.168.1.206 k8s-cp-03.bnei.lan"
 
   tasks:
     # -------------------------------------------------------------------
