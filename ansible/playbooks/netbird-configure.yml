@@ -38,7 +38,11 @@
 #   client's --allow-server-ssh alone isn't enough).
 # - A setup key, only when `-e netbird_setup_key_stage=<name>` is passed.
 #   Its plaintext is returned on create only, so it goes straight to
-#   Infisical as NETBIRD_INFRA_SETUP_KEY.
+#   Infisical as NETBIRD_INFRA_SETUP_KEY_<STAGE> (one secret per stage),
+#   through a 0600 file. If that write fails, the key is revoked.
+#
+# Task output is hidden by default: every API call carries the admin PAT.
+# Add -e netbird_debug=true to see it while debugging.
 #
 # Field names checked against the v0.80.0 OpenAPI spec
 # (netbirdio/netbird shared/management/http/api/openapi.yml).
@@ -47,7 +51,7 @@
 # - The existing `laptop`/`All` groups and the Pi policies (`SSH Access`,
 #   `pi-lab-443-policy`) stay as clicked in the dashboard.
 # - Peer names from Pi-hole records and the mesh overlay inventory come
-#   after the spike (ADR-0055 rollout steps 4-5), once real peers exist.
+#   after the spike (ADR-0055 rollout step 5), once real peers exist.
 # - The authentik `groups` JWT claim (jwt_groups_*). Whether Dex passes it
 #   through is a spike question; until then membership is the NetBird-local
 #   auto_groups above.
@@ -67,6 +71,10 @@
   hosts: localhost
   connection: local
   gather_facts: false
+  # Every uri task sends the admin PAT in its headers, which Ansible does
+  # not mask: hide task arguments and results by default. Asserts and the
+  # report opt back in. -e netbird_debug=true shows everything.
+  no_log: "{{ not (netbird_debug | default(false) | bool) }}"
   vars:
     infisical_project_id: "{{ lookup('env', 'INFISICAL_PROJECT_ID') | default('8a3fa54f-be22-488a-bf51-55158f65c0f2', true) }}"
     infisical_env: "{{ lookup('env', 'INFISICAL_ENV') | default('dev', true) }}"
@@ -83,6 +91,9 @@
     netbird_ssh_local_users: [root, core, vagrant, mohammad]
     netbird_setup_key_usage_limit: 0 # set per stage: host count + 2
     netbird_setup_key_expires_in: 604800 # 7 days
+    # One secret per stage: re-running an older stage must never spend a
+    # newer stage's key.
+    netbird_setup_key_secret: "NETBIRD_INFRA_SETUP_KEY_{{ netbird_setup_key_stage | default('') | upper | replace('-', '_') }}"
     netbird_headers:
       Authorization: "Token {{ netbird_api_token }}"
       Accept: application/json
@@ -186,11 +197,11 @@
         headers: "{{ netbird_headers }}"
       register: users
 
-    - name: Fail if an admin email has no NetBird user yet
-      ansible.builtin.assert:
-        that: users.json | selectattr('email', 'equalto', item) | list | length > 0
-        fail_msg: "{{ item }} has never logged in to netbird.bnei.dev — log in once, then re-run"
+    - name: Note admin emails with no NetBird user yet
+      ansible.builtin.set_fact:
+        netbird_notes: "{{ netbird_notes | default([]) + [item ~ ' has never logged in to netbird.bnei.dev: log in once, then re-run'] }}"
       loop: "{{ netbird_admin_emails }}"
+      when: users.json | selectattr('email', 'equalto', item) | list | length == 0
 
     - name: Add platform-admins to admin users' auto groups
       ansible.builtin.uri:
@@ -324,9 +335,9 @@
     # Infra hosts enroll with a setup key and have no owning user. A user's
     # peer here means someone added infra-nodes to a user's auto groups and
     # propagation pulled a laptop in: never switch its SSH server on.
-    - name: Record user-owned peers in infra-nodes
+    - name: Note user-owned peers in infra-nodes
       ansible.builtin.set_fact:
-        netbird_drift: "{{ netbird_drift | default([]) + ['peer ' ~ item.json.name ~ ': user-owned, must not be in infra-nodes (check user auto groups)'] }}"
+        netbird_notes: "{{ netbird_notes | default([]) + ['peer ' ~ item.json.name ~ ': user-owned, must not be in infra-nodes (check user auto groups)'] }}"
       loop: "{{ infra_peers.results }}"
       loop_control:
         label: "{{ item.json.name }}"
@@ -339,6 +350,7 @@
       when: netbird_setup_key_stage is defined
       block:
         - name: Fail without a usage limit
+          no_log: false
           ansible.builtin.assert:
             that: netbird_setup_key_usage_limit | int > 0
             fail_msg: "Pass -e netbird_setup_key_usage_limit=<stage host count + 2> (ADR-0055)"
@@ -350,13 +362,14 @@
           register: setup_keys
 
         - name: Fail if this stage already has a valid key
+          no_log: false
           ansible.builtin.assert:
             that: >-
               setup_keys.json | selectattr('name', 'equalto', 'infra-' ~ netbird_setup_key_stage)
               | selectattr('valid') | list | length == 0
             fail_msg: >-
               infra-{{ netbird_setup_key_stage }} is still valid and its plaintext is only
-              shown on create. Use NETBIRD_INFRA_SETUP_KEY, or revoke it and re-run.
+              shown on create. Use {{ netbird_setup_key_secret }}, or revoke it and re-run.
 
         - name: Create the setup key
           no_log: true
@@ -375,26 +388,69 @@
           register: setup_key
           changed_when: true
 
-        - name: Write NETBIRD_INFRA_SETUP_KEY to Infisical
-          no_log: true
-          ansible.builtin.command:
-            argv:
-              - infisical
-              - secrets
-              - set
-              - --projectId={{ infisical_project_id }}
-              - --env={{ infisical_env }}
-              - --domain={{ infisical_domain }}
-              - --type=shared
-              - NETBIRD_INFRA_SETUP_KEY={{ setup_key.json.key }}
-          changed_when: true
+        # The plaintext exists only in this response. Hand it to Infisical
+        # through a 0600 file (never argv, where `ps` shows it); if that
+        # fails, revoke the key rather than leave a live key nobody holds.
+        - name: Store the setup key
+          block:
+            - name: Make a temp file for the key
+              ansible.builtin.tempfile:
+                suffix: .env
+              register: key_env
+
+            - name: Write the key to the temp file
+              ansible.builtin.copy:
+                content: "{{ netbird_setup_key_secret }}={{ setup_key.json.key }}\n"
+                dest: "{{ key_env.path }}"
+                mode: "0600"
+
+            - name: Write the stage key to Infisical as {{ netbird_setup_key_secret }}
+              ansible.builtin.command:
+                argv:
+                  - infisical
+                  - secrets
+                  - set
+                  - --projectId={{ infisical_project_id }}
+                  - --env={{ infisical_env }}
+                  - --domain={{ infisical_domain }}
+                  - --type=shared
+                  - --file={{ key_env.path }}
+              changed_when: true
+          rescue:
+            - name: Revoke the key nobody holds
+              ansible.builtin.uri:
+                url: "{{ netbird_api }}/setup-keys/{{ setup_key.json.id }}"
+                method: PUT
+                headers: "{{ netbird_headers }}"
+                body_format: json
+                body:
+                  revoked: true
+                  auto_groups: ["{{ group_ids['infra-nodes'] }}"]
+
+            - name: Fail after revoking
+              no_log: false
+              ansible.builtin.fail:
+                msg: "Could not store the setup key in Infisical; infra-{{ netbird_setup_key_stage }} was revoked. Fix the Infisical session and re-run."
+          always:
+            - name: Remove the temp file
+              ansible.builtin.file:
+                path: "{{ key_env.path }}"
+                state: absent
+              when: key_env.path is defined
 
     # -------------------------------------------------------------------
     # 7. Drift report
     # -------------------------------------------------------------------
     - name: Report drift
+      no_log: false
       ansible.builtin.debug:
         msg: >-
           {{ 'Fixed (netbird_enforce=true): ' if netbird_enforce | bool
              else 'Differs from this file, left as is (re-run with -e netbird_enforce=true to overwrite): ' }}
           {{ netbird_drift | default([]) | join('; ') if netbird_drift is defined else 'none' }}
+
+    - name: Report what needs a human (never changed by this playbook)
+      no_log: false
+      ansible.builtin.debug:
+        msg: "{{ netbird_notes | join('; ') }}"
+      when: netbird_notes is defined

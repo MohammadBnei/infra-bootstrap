@@ -15,6 +15,9 @@
 # - `netbird up` with the stage's setup key (read from a 0600 file, never on
 #   the command line) and the ADR-0055 flags. Peers land in `infra-nodes`
 #   through the key's auto group.
+# - The flags refuse routes both ways (--disable-client-routes,
+#   --disable-server-routes): the mesh is SSH only (ADR-0055), so a route or
+#   exit node added in the dashboard later never reaches a host.
 #
 # AFTERWARDS
 # Re-run netbird-configure.yml -e netbird_enforce=true: it switches on
@@ -22,13 +25,19 @@
 #
 # CHANGING FLAGS ON AN ENROLLED HOST
 # `netbird up` only runs on hosts that aren't connected. To apply new flags,
-# pass -e netbird_reup=true (down, then up with the same key; the key must
-# still be valid and have uses left).
+# pass -e netbird_reup=true: down, then up WITHOUT a setup key. The peer is
+# already registered, so it logs back in with its own WireGuard key and no
+# setup-key use is spent.
 #
 # PREREQUISITES
 # - Infisical CLI session authenticated (source ~/.hermes/cache/inf-env.sh).
-# - NETBIRD_INFRA_SETUP_KEY for this stage, from
+# - NETBIRD_INFRA_SETUP_KEY_<STAGE> (e.g. _SPIKE), from
 #   netbird-configure.yml -e netbird_setup_key_stage=<stage>.
+#
+# KNOWN GAP
+# A stage with LXCs writes PVE_SSH_PRIVATE_KEY to a 0600 temp file on the
+# controller; the last play deletes it. Interrupted runs (Ctrl-C, a failed
+# play) leave it behind: check $TMPDIR for *.pve.
 - name: Fetch secrets for this stage
   hosts: localhost
   connection: local
@@ -40,15 +49,25 @@
       - --domain={{ lookup('env', 'INFISICAL_DOMAIN') | default('https://infisical.bnei.dev', true) }}
       - --plain
   tasks:
-    - name: Fail without a stage
+    - name: Fail without a real stage
       ansible.builtin.assert:
-        that: netbird_stage is defined and netbird_stage in groups
-        fail_msg: "Pass -e netbird_stage=<group from ansible/inventories/mesh/hosts.yml>"
+        that:
+          - netbird_stage is defined
+          - netbird_stage in groups
+          - netbird_stage not in ['all', 'ungrouped', 'pve_hosts']
+        fail_msg: "Pass -e netbird_stage=<stage group from ansible/inventories/mesh/hosts.yml>"
 
-    - name: Read NETBIRD_INFRA_SETUP_KEY
+    - name: Fail if an LXC's PVE node is not in pve_hosts
+      ansible.builtin.assert:
+        that: hostvars[item].netbird_pve_node | default('') in groups['pve_hosts']
+        fail_msg: "{{ item }}: netbird_pve_node '{{ hostvars[item].netbird_pve_node | default('') }}' is not in pve_hosts, so it would never get /dev/net/tun"
+      loop: "{{ groups[netbird_stage] | select('in', hostvars) | list }}"
+      when: hostvars[item].netbird_lxc_ctid is defined
+
+    - name: Read this stage's setup key
       no_log: true
       ansible.builtin.command:
-        argv: "{{ ['infisical', 'secrets', 'get', 'NETBIRD_INFRA_SETUP_KEY'] + infisical_args }}"
+        argv: "{{ ['infisical', 'secrets', 'get', 'NETBIRD_INFRA_SETUP_KEY_' ~ (netbird_stage | upper | replace('-', '_'))] + infisical_args }}"
       register: setup_key_read
       changed_when: false
       failed_when: setup_key_read.rc != 0 or setup_key_read.stdout | trim | length == 0
@@ -121,6 +140,8 @@
       - --enable-ssh-root
       - --enable-ssh-sftp
       - --disable-dns # the hosts resolve through Pi-hole; bnei.mesh is for laptops only
+      - --disable-client-routes # SSH only: never accept a route or exit node
+      - --disable-server-routes # ... and never act as a router for one
     netbird_reup: false
   tasks:
     - name: Wait for the host (an LXC may be rebooting)
@@ -142,23 +163,34 @@
         components: main
         signed_by: https://pkgs.netbird.io/debian/public.key
 
-    - name: Release the hold, so a version bump can apply
-      ansible.builtin.dpkg_selections:
-        name: netbird
-        selection: install
+    - name: Read the installed client version
+      ansible.builtin.command: dpkg-query -W -f=${Version} netbird
+      register: nb_installed
       changed_when: false
       failed_when: false # not installed yet on the first run
 
     - name: Install the pinned client
-      ansible.builtin.apt:
-        name: "netbird={{ netbird_version }}"
-        update_cache: true
-        allow_downgrade: true
+      when: nb_installed.stdout != netbird_version
+      block:
+        - name: Release the hold, so the version change can apply
+          ansible.builtin.dpkg_selections:
+            name: netbird
+            selection: install
+          when: nb_installed.rc == 0
 
-    - name: Hold the client
-      ansible.builtin.dpkg_selections:
-        name: netbird
-        selection: hold
+        - name: Install netbird={{ netbird_version }}
+          ansible.builtin.apt:
+            name: "netbird={{ netbird_version }}"
+            update_cache: true
+            allow_downgrade: true
+      always:
+        # Re-held even if the install failed, so unattended-upgrades can
+        # never move an installed client off the pin.
+        - name: Hold the client
+          ansible.builtin.dpkg_selections:
+            name: netbird
+            selection: hold
+          failed_when: false # nothing to hold if the first install failed
 
     - name: Install the client service
       ansible.builtin.command: netbird service install
@@ -183,13 +215,20 @@
           {{ nb_status.rc == 0
              and ((nb_status.stdout | from_json).management | default({})).connected | default(false) }}
 
-    - name: Bring the client down for a re-up
-      ansible.builtin.command: netbird down
+    - name: Re-up with new flags, no setup key
       when: nb_connected | bool and netbird_reup | bool
-      changed_when: true
+      block:
+        - name: Bring the client down
+          ansible.builtin.command: netbird down
+          changed_when: true
+
+        - name: Bring it back up with the current flags
+          ansible.builtin.command:
+            argv: "{{ ['netbird', 'up'] + netbird_up_flags }}"
+          changed_when: true
 
     - name: Enroll
-      when: not nb_connected | bool or netbird_reup | bool
+      when: not nb_connected | bool
       block:
         - name: Write the setup key
           no_log: true
