@@ -4474,3 +4474,37 @@ For any app whose CI commits its own tag, the deploy is complete when the
 Deployment's image matches `values.yaml` — not when ArgoCD says `Synced`. The
 same trap applies to a hand-pushed gitops change watched too soon after the
 push.
+
+## 2026-10-11 — NetBird first deploy: a probe that dialed itself, and a stale hub
+
+ADR-0054's PR 1 (#276). Three things, none caught by `helm template`.
+
+**`/health` deadlocked the pod.** Readiness and liveness pointed at
+netbird-server's `/health` on `:9000`. That endpoint includes the relay's
+self-check, which dials `rels://netbird.bnei.dev:443/relay` — out through
+Traefik and back into the same pod. Traefik routes only to Ready endpoints, so
+it answered `503`; `/health` failed; the pod never became Ready. Liveness on the
+same path made it a restart loop. Log line:
+`failed to WebSocket dial: expected handshake response status code 101 but got 503`.
+Fixed in #277 with TCP probes on `:80`. General shape: **never probe an
+endpoint whose health depends on the pod's own public route.**
+
+**The k9s hub's checkout was stale, and its shell has no ansible.**
+`/opt/infra-bootstrap` sat at #254, weeks behind, clean tree, so `git pull
+--ff-only` was safe. Non-interactive SSH has no `ansible-playbook` on `PATH`; it
+lives in `/opt/infra-bootstrap/kubespray-venv/bin`. And `pigsty/ansible.cfg`'s
+`private_key_file` names a key that does not exist on the hub — the first
+`pgsql-user.yml` run reported `unreachable=1`, `changed=0` on `.205`. Run with
+`SSH_OLDPG_KEY` (docs/secrets.md) streamed into a `mktemp` file and passed as
+`-e ansible_ssh_private_key_file=…`, removed on exit. `pg_role` was checked
+against Patroni's REST (`:8008/patroni`) first — `.205` primary, matching —
+because of the 2026-09-22 entry above.
+
+**NetBird trusts every X-Forwarded-For by default.** Boot warned
+`TrustedPeers contains the default route 0.0.0.0/0`. `trustedHTTPProxies` alone
+does not cover it; `reverseProxy.trustedPeers` is a separate key. Set both to
+the pod CIDR.
+
+Also seen: the in-cluster resolver kept serving the old proxied Cloudflare
+answer for `netbird.bnei.dev` for some minutes after the record turned grey.
+Public resolvers had the new address immediately.
