@@ -4516,3 +4516,55 @@ Dex's `OwnerConfig.Hash`. The server booted happily; every login failed with
 `parsing bcrypt hash: crypto/bcrypt: hashedSecret too short`, which the
 dashboard showed as an internal server error. Now
 `NETBIRD_OWNER_PASSWORD_HASH`.
+
+## 2026-10-11 — Prometheus blind for 6.7h: one bit-flipped timestamp
+
+**Symptom.** From 11:07 UTC every scrape and rule evaluation was rejected with
+`out of bounds`; 54/56 targets showed that as `lastError`, and `count(up)`
+returned empty. It was noticed at about 17:28 while checking the NetBird
+targets from #284, which were unrelated. `monitoring-blind` *did* fire, from
+11:23:30, as designed.
+
+**Cause.** `/api/v1/status/tsdb` showed a head of exactly **one** series —
+apiserver `.201:6443` `etcd_request_duration_seconds_bucket{group="hub.traefik.io",resource="apiplans",le="15"}`
+— at `1791783972935` (2026-10-12 05:46:12.935). Subtract 2^26 ms (clear bit 26)
+and it is `1791716864071`, 2026-10-11 11:07:44.071. That matches the last WAL
+write (11:07:48) and an early head compaction at 11:07:47. Prometheus then
+accepted nothing older than `maxt - 1h`, i.e. nothing until 04:46 the next day.
+
+The flip was a single bit in a single sample, so it was not clock skew. All five
+node clocks were in sync (`node_timex_sync_status 1`, offset under 1 ms), and a
+clock jump would have stamped every series in that scrape, not one. No
+`honorTimestamps` is set anywhere in `gitops/`. Prometheus runs on
+`k8s-worker-01`, hosted on `.165`, so the suspect is that host's RAM — **not
+verified**: the `gpu-server` SSH alias was refused, so no MCE/EDAC check yet.
+`k8s-cp-01` and `k8s-worker-01`, both on `.165`, had rebooted at 23:45 the
+night before.
+
+**Fix.** A restart replayed the WAL but did **not** bring the poisoned sample
+back. `wal/` held a stray `checkpoint.00000622`, dated 2026-09-28, beside the
+live `checkpoint.00000404` and segments `00000405`–`00000408`. Replay starts
+from the highest-numbered checkpoint and reads only the segments after it, so
+`405`–`408`, and the bad sample with them, were skipped. The flip side is a
+latent bug: since 2026-09-28, **every restart silently dropped the
+not-yet-compacted head**, up to about 2h of samples.
+
+After that restart `wal/` and `chunks_head/` were renamed to
+`*.poisoned-20261011` from inside the running container and the pod was
+deleted. That cost about a minute of fresh samples and left a clean WAL with no
+stale checkpoint. Delete the two `*.poisoned-20261011` directories once no one
+wants to inspect them. Nothing was lost before 11:07: block `01M4NABC` already
+held 10:00–11:07.
+
+**Pausing it is a three-controller fight.** Scaling the StatefulSet to 0 is
+undone by the operator. `spec.paused: true` on the `Prometheus` CR is undone by
+ArgoCD selfHeal within about 20s. The `skip-reconcile` annotation on
+`platform-prometheus` is stripped by `ApplicationSet/platform`, which has no
+`ignoreApplicationDifferences`. With `.spec.paused` and `skip-reconcile` both
+undone, the only offline path left touches all platform apps. Renaming the
+directories under the live process works instead: open file descriptors follow
+the inode, and a head rejecting every append writes nothing in between.
+
+**Open.** Memory check on `.165`. The `failed: true` compaction flag on blocks
+`01M4MEEA`/`01M4MNA1`/`01M4MW5R` and the old `quarantined-01M20RHC…` directory
+were seen but not investigated.
