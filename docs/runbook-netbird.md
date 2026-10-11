@@ -77,14 +77,21 @@ cluster, Traefik and Pigsty to be up.
 | Which hosts are in which stage | git: `ansible/inventories/mesh/hosts.yml` | PR |
 | Groups `laptop`, `All`; policies `SSH Access`, `pi-lab-443-policy`, `Default` (disabled) | NetBird API | **dashboard only**. The playbook never reads them for writing |
 | Service user `ukubi` and its PAT | NetBird, PAT in Infisical as `NETBIRD_API_TOKEN` | **by hand, once**. Nothing can call the API before it exists |
-| `NETBIRD_INFRA_SETUP_KEY`, `NETBIRD_API_TOKEN`, `PVE_SSH_PRIVATE_KEY` | Infisical `infra-bootstrap-1-ge1`, env `dev` | see [`secrets.md`](secrets.md) |
+| `NETBIRD_INFRA_SETUP_KEY_<STAGE>` (one per stage), `NETBIRD_API_TOKEN`, `PVE_SSH_PRIVATE_KEY` | Infisical `infra-bootstrap-1-ge1`, env `dev` | see [`secrets.md`](secrets.md) |
 
 ## UI and playbook coexist
 
 You can use the dashboard, the playbook, or both. They do not fight:
 
 - **A default run of `netbird-configure.yml` changes nothing that exists.** It
-  creates missing objects and reports drift at the end.
+  creates missing objects and reports at the end, on two lines:
+  - **Differs / Fixed:** drift on the fields the playbook owns.
+  - **Needs a human (never changed by this playbook):** user-owned peers in
+    `infra-nodes`, and admin emails with no NetBird user yet.
+- **Task output is hidden play-wide**, because the PAT sits in the `uri`
+  headers and Ansible does not mask it there. Asserts and the report stay
+  visible. `-e netbird_debug=true` shows everything; never paste that
+  output anywhere.
 - **`-e netbird_enforce=true` makes the file win**, and only on the fields it
   names. Use it after an enrollment, or when you want to undo a UI edit.
 - **Objects are matched by name.** If you rename `infra-nodes`,
@@ -113,11 +120,28 @@ When a k8s node joins the mesh, Cilium auto-detects NetBird's `wt0` as one
 of its devices (`Devices: [eth0 wt0]`, seen on `k8s-worker-02`). It is
 harmless today (no kube-proxy replacement, no host firewall, iptables
 masquerade). Still, the mesh is for SSH only and must never carry cluster
-traffic. `inventory/ukubi/group_vars/k8s_cluster/k8s-net-cilium.yml` pins
-`cilium_extra_values: {devices: [eth0]}`. **It is not applied yet.** It
-needs a kubespray Cilium run from the k9s hub, done by the operator.
-**Enroll no more k8s nodes until that run is done.** After the run,
-`cilium status --verbose` on a peer node must list only `eth0`.
+traffic. `wt0` also has MTU 1280, and Cilium lowered its own MTUs to match.
+On k8s-worker-02, `cilium_host` and `cilium_vxlan` are 1280 and `cilium_wg0`
+is 1200. On k8s-worker-01 they are 1500, 1500 and 1420. So worker-02 runs a
+different tunnel MTU from the rest of the cluster. That is the silent
+large-packet-hang hazard already noted in `k8s-net-cilium.yml`, which makes
+the fix urgent.
+
+`inventory/ukubi/group_vars/k8s_cluster/k8s-net-cilium.yml` pins
+`cilium_extra_values: {devices: [eth0]}` (eth0 is the uplink on all five
+VMs). **It is committed, not applied.** **Enroll no more k8s nodes until it
+is.** The operator applies it from the laptop on the home LAN, with the local
+`id_k8s_vms` key and `kubespray-venv`. The k9s hub has no k8s VM key, and its
+checkout is behind.
+
+```bash
+cd kubespray && ../kubespray-venv/bin/ansible-playbook -i ../inventory/ukubi/hosts.yaml \
+  cluster.yml --become --diff --tags cilium
+kubectl -n kube-system rollout restart ds/cilium   # rollOutCiliumPods is unset: agents won't reload the configmap alone
+```
+
+After the restart, `cilium status --verbose` on k8s-worker-02 must list only
+`eth0`, and its `cilium_host`/`cilium_vxlan` MTU must be back to 1500.
 
 ## The rule that matters: only setup keys put peers in `infra-nodes`
 
@@ -198,8 +222,10 @@ non-storage LXCs → PVE → Pi-hole → garage/nfs in a window.
 
 2. **Mint the stage's setup key.** Set the usage limit to the host count + 2.
    The key auto-groups to `infra-nodes` and expires after 7 days. Its
-   plaintext goes straight to Infisical as `NETBIRD_INFRA_SETUP_KEY` and
-   overwrites the previous stage's key.
+   plaintext goes to Infisical as `NETBIRD_INFRA_SETUP_KEY_<STAGE>` (stage
+   uppercased, `-` → `_`, e.g. `NETBIRD_INFRA_SETUP_KEY_SPIKE`), one secret
+   per stage, written from a 0600 temp file, never on the command line. If
+   the Infisical write fails, the playbook revokes the new key and fails.
    ```bash
    ansible-playbook ansible/playbooks/netbird-configure.yml \
      -e netbird_setup_key_stage=<stage> -e netbird_setup_key_usage_limit=<n+2>
@@ -210,7 +236,10 @@ non-storage LXCs → PVE → Pi-hole → garage/nfs in a window.
    container**, which interrupts whatever runs there. It then installs
    `netbird=<netbird_version>`, holds the package, and runs `netbird up` with
    `--management-url=https://netbird.bnei.dev --allow-server-ssh
-   --enable-ssh-root --enable-ssh-sftp --disable-dns`, the key passed by file.
+   --enable-ssh-root --enable-ssh-sftp --disable-dns --disable-client-routes
+   --disable-server-routes`, the key passed by file. The two route flags keep
+   the mesh SSH only: a route or exit node added in the dashboard never
+   reaches a host.
    ```bash
    ansible-playbook -i ansible/inventories/mesh/hosts.yml \
      ansible/playbooks/netbird-client.yml -e netbird_stage=<stage>
@@ -239,9 +268,12 @@ the server, the laptops and the hosts together.
 4. Re-run `netbird-client.yml` once per stage. The playbook releases the
    apt hold, installs the pinned version, and holds it again.
 
-`-e netbird_reup=true` is a separate tool. It runs `netbird down` then `up`
-to apply **new flags** on an enrolled host. It needs a setup key that is
-still valid and has uses left.
+`-e netbird_reup=true` is a separate tool. It runs `netbird down`, then
+`netbird up <flags>` **without** a setup key, to apply new flags on an
+enrolled host. The peer is already registered and logs back in with its own
+WireGuard key, so no setup-key use is spent. **Pending:** the three spike
+hosts were enrolled before `--disable-client-routes`/`--disable-server-routes`
+existed and need one `-e netbird_reup=true` run to get them.
 
 ## Verification
 

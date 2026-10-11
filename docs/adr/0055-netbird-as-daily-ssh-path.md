@@ -40,7 +40,7 @@ reasoning, so there was no argument to weigh against these two pains.
 Group `infra-nodes`, enrolled by setup keys — **one per rollout stage**
 (the spike, each step-5 batch), reusable, usage limit = that stage's host
 count + 2 (the spike re-enrolls on purpose), 7-day expiry, `no_log`, current
-one in Infisical as `NETBIRD_INFRA_SETUP_KEY`. A single key sized to the whole
+one in Infisical as `NETBIRD_INFRA_SETUP_KEY_<STAGE>` (one secret per stage). A single key sized to the whole
 fleet would run out or expire mid-rollout. Peers: the five k8s VMs (three
 control plane, two workers), `.205`/`.207`, the etcd witness `.197`, the three PVE hosts,
 the LXCs (k9s hub, hermesagent, build-runner, garage, nfs) and Pi-hole `.55`.
@@ -134,16 +134,19 @@ any of them is down, no new NetBird session can start. So:
   and nothing else; fail2ban. Other hosts are reached with `ssh -J` through the
   hub, so the private key never sits on it.
 - Keys: **add** the break-glass key (Infisical + offline). Remove only
-  human-use keys. Untouched: the Hermes agent's `SSH_*` keys, Terraform's
-  `PVE_SSH_PRIVATE_KEY`, `SSH_OLDPG_KEY` (heavy Pigsty runs), and the PVE node
+  human-use keys. Untouched: the Hermes agent's `SSH_*` keys,
+  `PVE_SSH_PRIVATE_KEY` (Terraform, and `netbird-client.yml`'s `pct` step for
+  LXC tun), `SSH_OLDPG_KEY` (heavy Pigsty runs), and the PVE node
   entries in `/etc/pve/priv/authorized_keys` (migration and the node shell).
 
 ### 6. NetBird configuration as code: Ansible + REST
 
 `ansible/playbooks/netbird-configure.yml` uses `uri` with a service-user PAT
-(`NETBIRD_API_TOKEN`). It declares policies, posture checks, the DNS domain,
-the propagation setting, setup keys and peer names. It adopts the existing
-`laptops`/`pi` groups and Pi SSH policy. **Groups are POST-if-missing only and
+(`NETBIRD_API_TOKEN`). It declares policies, ~~posture checks,~~ the DNS domain,
+the propagation setting, setup keys and peer names. ~~It adopts the existing
+`laptops`/`pi` groups and Pi SSH policy.~~ *(2026-10-11: no posture check —
+see Decision 2's amendment — and it adopts nothing; the hand-clicked objects
+stay dashboard-owned. See the amendment below.)* **Groups are POST-if-missing only and
 never send `peers`** — the API's PUT replaces the whole member list. A human
 runs it, like every playbook here.
 
@@ -168,8 +171,17 @@ the next run create a duplicate. Everything it does not name is never written.
 > **Amended 2026-10-11: the SSH rule needs ports.** A `netbird-ssh` rule
 > without `ports` renders on the host as `ip saddr <source> accept` with no
 > destination port, which opens every TCP port. The policy carries
-> `ports: ["22"]` (NetBird redirects 22 to 22022). Cilium's devices are
-> pinned to `eth0` so it never attaches to `wt0`.
+> `ports: ["22"]` (NetBird redirects 22 to 22022).
+>
+> **Amended 2026-10-11: the mesh is SSH only, enforced client-side.** Hosts
+> run `netbird up` with `--disable-client-routes --disable-server-routes`, so a
+> route, network resource or exit node added in the dashboard never reaches
+> a host. (The three spike hosts get the flags at their next
+> `-e netbird_reup=true`.)
+>
+> **Cilium and `wt0`:** Cilium auto-detects `wt0` and lowers its MTUs to match
+> it. The pin `cilium_extra_values: {devices: [eth0]}` is **committed, not
+> applied**; see the progress note under Rollout.
 
 ### 7. Observability
 
@@ -186,7 +198,8 @@ blackbox probe.
 1. This ADR and the docs it changes.
 2. Observability (independent).
 3. `netbird-configure.yml`, first part: account settings, groups, admin auto
-   group, posture check, SSH policy, per-peer `ssh_enabled`, setup key. Pulled
+   group, ~~posture check~~ (dropped during the spike), SSH policy, per-peer
+   `ssh_enabled`, setup key. Pulled
    ahead of the spike so the spike runs on the declared state, not on clicks.
 4. **Spike**, by hand, on the witness `.197`, one k8s worker (not
    `k8s-worker-01`, whose host `.165` is the bit-flip suspect) and one
@@ -229,8 +242,11 @@ moot (Decision 2 amendment). Spike results so far:
   rule (`ip saddr <peer> accept`, no dport). The policy now has
   `ports: ["22"]` (ee291339).
 - **Failed until applied:** "devices exclude `wt0`". Cilium auto-detected
-  `wt0` on k8s-worker-02. The pin `cilium_extra_values: {devices: [eth0]}` is
-  committed but needs a kubespray Cilium run from the hub. No more k8s
+  `wt0` on k8s-worker-02 and lowered its MTUs there (`cilium_host`/`cilium_vxlan`
+  1280, `cilium_wg0` 1200, against 1500/1500/1420 on worker-01). The pin
+  `cilium_extra_values: {devices: [eth0]}` is committed, not applied: it needs
+  `cluster.yml --tags cilium` from the laptop on the LAN, then
+  `kubectl -n kube-system rollout restart ds/cilium`. No more k8s
   nodes enroll before that run.
 
 ## Consequences
@@ -238,14 +254,15 @@ moot (Decision 2 amendment). Spike results so far:
 - **One NetBird client update reaches every hypervisor, Patroni node and DNS at
   once.** Pinned and staged for that reason.
 - Each k8s node runs two WireGuard stacks (Cilium's and NetBird's).
-- **The geo check may deny laptops at home.** Through NAT loopback the Freebox
+- ~~**The geo check may deny laptops at home.**~~ *Superseded 2026-10-11: it
+  did, and the geo check was removed (Decision 2 amendment).* Through NAT loopback the Freebox
   may SNAT to its LAN address, and Traefik trusts forwarded headers from
   Cloudflare only, so management can see a `192.168.x` source with no country.
   ADR-0054's hairpin fallback (a Pi-hole override to `.233`) makes that
   certain. The spike tests it from home. If home is denied, the geo check
   goes, not the reverse.
 - The public `:49222` forward stays, narrowed to one key.
-- Infisical gains `NETBIRD_INFRA_SETUP_KEY`, `NETBIRD_API_TOKEN` and the
+- Infisical gains `NETBIRD_INFRA_SETUP_KEY_<STAGE>` (one per stage), `NETBIRD_API_TOKEN` and the
   break-glass key. Per-host human keys are removed once cutover is verified.
 
 ## Alternatives considered

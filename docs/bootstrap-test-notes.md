@@ -4647,10 +4647,43 @@ only tcp 22 and 22022 from the laptop. NetBird uses nftables tables
 health was 5/5. With no KPR, no host firewall and iptables masquerade, this is
 benign today. Pinned with `cilium_extra_values: {devices: [eth0]}` in
 `inventory/ukubi/group_vars/k8s_cluster/k8s-net-cilium.yml` (eth0 is the
-uplink on all five VMs). **Not applied yet.** It needs a kubespray Cilium run
-from the hub. The spike criterion "devices exclude `wt0`" stays FAILED until
+uplink on all five VMs). **Not applied yet.**
+
+**`wt0` also skewed Cilium's MTU on that node.** `wt0` has MTU 1280, and Cilium
+lowered its own MTUs to match. On k8s-worker-02, `cilium_host` and
+`cilium_vxlan` are 1280 and `cilium_wg0` is 1200. On k8s-worker-01 they are
+1500, 1500 and 1420. One node now runs a different tunnel MTU from the rest of
+the cluster. That is the same silent large-packet-hang class as the MTU hazard
+in `k8s-net-cilium.yml`, which makes the pin urgent.
+
+To apply it, run from the laptop on the home LAN. The hub has no k8s VM key,
+and its checkout is behind.
+
+```bash
+cd kubespray && ../kubespray-venv/bin/ansible-playbook -i ../inventory/ukubi/hosts.yaml \
+  cluster.yml --become --diff --tags cilium
+kubectl -n kube-system rollout restart ds/cilium
+```
+
+The restart is required: the chart's `rollOutCiliumPods` is unset, so the
+agents never pick up the configmap change on their own. The live Helm values
+were diffed against kubespray's render. Only `routingMode` differs, with the
+same effect: the chart default `""` means tunnel. The spike criterion "devices exclude `wt0`" stays FAILED until
 then, and no more k8s nodes enroll before it.
 
 **Other spike checks.** systemd-resolved is untouched: no `wt0` link,
 `--disable-dns` works. The Freebox LAN IPv6 prefix is
 `2a01:e0a:126d:910::/64` (eth0 on .203).
+
+**Review fixes (1b9c3390).**
+- The setup key is now one secret per stage, `NETBIRD_INFRA_SETUP_KEY_<STAGE>`.
+  The old unsuffixed secret was migrated to `_SPIKE` and then deleted.
+- `netbird-configure.yml` hides task output play-wide, because Ansible does
+  not mask the PAT in the `uri` headers. Use `-e netbird_debug=true` to see
+  the output.
+- An admin email with no NetBird user is now reported on a "needs a human"
+  line instead of failing the run.
+- `netbird up` now also passes `--disable-client-routes` and
+  `--disable-server-routes`. The spike hosts still need a
+  `-e netbird_reup=true` run to pick these up. That run no longer spends a
+  setup key.

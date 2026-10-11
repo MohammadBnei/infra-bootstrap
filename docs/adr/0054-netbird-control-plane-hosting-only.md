@@ -168,6 +168,14 @@ assigned in NetBird until it is tested.
   `laptops` mapped to the Pi's OS user. NetBird SSH fails closed when no
   mapping exists.
 
+> **As built (checked against the API 2026-10-11).** The groups were clicked
+> as `laptop` (both laptops and the Pi, `pi-lab`) and `All`, not
+> `laptops`/`pi`. `Default` (All ↔ All) exists but is **disabled**, not
+> deleted. The Pi's SSH policy is `SSH Access` (`laptop` → the `pi-lab` peer, NetBird
+> SSH on 22, mapped to user `ops`), plus `pi-lab-443-policy` (tcp 443). All of
+> them stay dashboard-owned; `netbird-configure.yml` (ADR-0055) does not touch
+> them. Operator view: [`docs/runbook-netbird.md`](../runbook-netbird.md).
+
 ### 6. Store and backup
 
 - **Databases.** All three stores are on Pigsty, owned by `dbuser_netbird`

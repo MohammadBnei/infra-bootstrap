@@ -446,6 +446,13 @@ ansible-playbook ansible/playbooks/netbird-configure.yml \
   -e netbird_setup_key_stage=<stage> -e netbird_setup_key_usage_limit=<hosts+2>  # mint a stage key
 ```
 
+Task output is hidden play-wide (the PAT sits in the `uri` headers, which
+Ansible doesn't mask); `-e netbird_debug=true` shows it. The final report has
+two lines: drift on owned fields, and what needs a human (user-owned peers in
+`infra-nodes`, admin emails with no NetBird user yet). The setup key goes to
+Infisical as `NETBIRD_INFRA_SETUP_KEY_<STAGE>` from a 0600 file; if that
+write fails the new key is revoked.
+
 Safe to re-run. A default run only creates missing objects and reports
 drift; it never overwrites a dashboard edit. Objects are matched by name —
 renaming a managed one in the UI makes the next run create a duplicate.
@@ -460,7 +467,11 @@ peers. Per host: `/dev/net/tun` for LXCs (`pct set --devN` on the PVE host,
 then a **container reboot**, only when missing), the client from
 pkgs.netbird.io pinned to `netbird_version` and held, then `netbird up` with
 the stage's setup key (passed by file) and `--management-url=https://netbird.bnei.dev
---allow-server-ssh --enable-ssh-root --enable-ssh-sftp --disable-dns`.
+--allow-server-ssh --enable-ssh-root --enable-ssh-sftp --disable-dns
+--disable-client-routes --disable-server-routes` (the mesh is SSH only).
+Guards: the stage must be a real stage group (not `all`, `ungrouped` or
+`pve_hosts`), and an LXC whose `netbird_pve_node` is not in `pve_hosts` fails
+up front.
 
 **Run for real 2026-10-11** against `spike` (`pg-etcd-witness`,
 `k8s-worker-02`, `build-runner` LXC 103 on server1).
@@ -468,11 +479,12 @@ the stage's setup key (passed by file) and `--management-url=https://netbird.bne
 ### Prerequisites
 
 - Infisical CLI session authenticated
-- `NETBIRD_INFRA_SETUP_KEY` for this stage, from
+- `NETBIRD_INFRA_SETUP_KEY_<STAGE>` for this stage (e.g. `_SPIKE`), from
   `netbird-configure.yml -e netbird_setup_key_stage=<stage>`
 - On the LAN, with the keys the inventory names. For LXCs the playbook
-  fetches `PVE_SSH_PRIVATE_KEY` into a temp file and deletes it in the final
-  play (a run that aborts earlier leaves it in `/tmp`: delete it by hand)
+  fetches `PVE_SSH_PRIVATE_KEY` into a 0600 temp file and deletes it in the
+  last play. An interrupted run (Ctrl-C, a failed play) leaves it behind:
+  check `$TMPDIR` for `*.pve` and delete it
 
 ### How to run
 
@@ -485,10 +497,11 @@ ansible-playbook ansible/playbooks/netbird-configure.yml -e netbird_enforce=true
 
 Safe to re-run: `netbird up` is skipped on a host already connected to
 management (install and hold still run). To
-apply changed `netbird up` flags, pass `-e netbird_reup=true` (needs a key
-that is still valid with uses left). A version bump is `netbird_version` plus
-a re-run — the hold is released and re-applied; move laptops and the server
-in lockstep. Under Claude Code's `!` prefix, append `2>&1 | cat`.
+apply changed `netbird up` flags, pass `-e netbird_reup=true`: down, then up
+without a setup key, so no key use is spent. The spike hosts still need one
+such run for the route flags. A version bump is `netbird_version` plus a
+re-run: the hold is released only when the installed version differs, and
+is always re-applied. Move laptops and the server in lockstep. Under Claude Code's `!` prefix, append `2>&1 | cat`.
 
 ### Other playbooks (not yet drafted)
 
