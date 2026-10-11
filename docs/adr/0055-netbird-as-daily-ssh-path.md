@@ -1,8 +1,11 @@
 # ADR-0055: NetBird as the daily SSH path to ukubi hosts — superseding ADR-0009 for SSH
 
 **Status:** Accepted — decided 2026-10-11, approved by M BN after an
-architecture interview and two adversarial review cycles. **Not live.**
-Rollout is gated on a spike (Rollout step 4). If the spike fails on the
+architecture interview and two adversarial review cycles. **Rolling out —
+spike stage enrolled 2026-10-11** (`pg-etcd-witness`, `k8s-worker-02`,
+`build-runner`); SSH over the mesh not yet verified end-to-end. Operator view:
+[`docs/runbook-netbird.md`](../runbook-netbird.md). Rollout past the spike is
+gated on it (Rollout step 4). If the spike fails on the
 automation half, Decision 3's light runs fall back to keys over the LAN and
 the rest stands.
 **Date:** 2026-10-11
@@ -78,6 +81,14 @@ network reach to every node, with only the OS-user mapping in the way.
 Posture check: **geolocation, FR only**. Add a country before travelling;
 being locked out abroad until then is accepted (Decision 5 is the way in).
 
+> **Amended 2026-10-11 — geolocation rejected during the spike.** At home the
+> laptop reaches management through the Freebox hairpin, so management sees
+> `192.168.1.254` with no country and `geo-fr-only` could never pass — the
+> case the Consequences section anticipated ("the geo check goes"). The
+> posture check is deleted and the policy has `source_posture_checks: []`.
+> Access rests on the authentik JWT per SSH session plus `platform-admins`
+> membership.
+
 ### 3. Light runs over the mesh, heavy runs over the LAN
 
 - **Light** — ad-hoc commands, app playbooks — from the laptop over NetBird SSH,
@@ -142,6 +153,18 @@ overwrites a UI edit only with `-e netbird_enforce=true`, and only on the fields
 it names. Objects are matched by name, so renaming a managed one in the UI makes
 the next run create a duplicate. Everything it does not name is never written.
 
+> **Amended 2026-10-11, after the first real runs.** The pre-existing
+> hand-clicked objects are groups `laptop` and `All` and policies
+> `SSH Access`, `pi-lab-443-policy` and `Default` (disabled) — not
+> `laptops`/`pi` as written above. They stay dashboard-owned; the playbook
+> does not adopt them. Hosts enroll with `ansible/playbooks/netbird-client.yml`
+> (inventory `ansible/inventories/mesh/hosts.yml`, LAN addresses for now).
+> **Only setup keys put peers in `infra-nodes`:** adding `infra-nodes` to a
+> user's auto groups pulled a laptop in through propagation, and an enforce run
+> switched its SSH server on. `netbird-configure.yml` now enables `ssh_enabled`
+> only on peers with no owning user, and reports user-owned peers in
+> `infra-nodes` as drift.
+
 ### 7. Observability
 
 Scrape `metricsPort: 9090` with a ServiceMonitor (zot's pattern), and add
@@ -185,6 +208,14 @@ blackbox probe.
    non-storage LXCs → PVE → Pi-hole → garage/nfs in a window.
 7. Cutover: the `sshd` `Match` blocks, the break-glass key, `:49222` restricted
    to it, and the `k8s-ops`/`ansible-ops`/`run-ukubi-ops` skills.
+
+**Progress (2026-10-11):** steps 1 and 3 done; step 2 partly (scrape, probe and
+the critical alerts are live; NetBird's Grafana dashboards and the degraded =
+warning rule are not); `netbird-configure.yml` part 1 run
+for real. Step 4 in progress: the three spike hosts are enrolled, reach
+management through the hairpin and show up on the laptop; the SSH,
+ansible-over-mesh and Cilium checks are not done. The geo pass criterion is
+moot (Decision 2 amendment).
 
 ## Consequences
 

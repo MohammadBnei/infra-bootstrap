@@ -29,6 +29,8 @@ incident log this skill is distilled from.
 
 ## Access pattern
 
+> **NetBird SSH is rolling out (ADR-0055, `docs/runbook-netbird.md`).** Until cutover (rollout step 7) the access paths below stay the default; don't switch to `*.bnei.mesh` on your own.
+
 ```bash
 ssh k9s kubectl <cmd>
 ```

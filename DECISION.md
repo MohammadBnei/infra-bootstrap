@@ -236,13 +236,21 @@ updated.
   two laptops and a Pi off-site. authentik is the only login, through
   the server's embedded Dex. All three stores live on Pigsty. See
   [ADR-0054](docs/adr/0054-netbird-control-plane-hosting-only.md).
-- **NetBird is the daily SSH path to every host** (ADR-0055, accepted, not
-  live — gated on a spike). Every host is a peer; access is `platform-admins`
-  through authentik, FR geo posture. Light runs go over the mesh through
-  `ansible/inventories/mesh/`; heavy runs (kubespray, pigsty `node`/`pgsql`/
+- **NetBird is the daily SSH path to every host** (ADR-0055, accepted,
+  rolling out — spike stage enrolled 2026-10-11, SSH not yet verified
+  end-to-end). Every host is a peer in `infra-nodes`; access is
+  `platform-admins` through authentik, with no posture check (the FR geo
+  check was dropped during the spike: through the Freebox hairpin management
+  sees no country). Account state is declared by
+  `ansible/playbooks/netbird-configure.yml` over the API, alongside the
+  dashboard; hosts enroll with `netbird-client.yml`. Peers are
+  `<name>.bnei.mesh`, resolvable on laptops only. After cutover, light runs go over the
+  mesh through an overlay inventory (rollout step 5; today
+  `ansible/inventories/mesh/` only drives enrollment over the LAN); heavy runs (kubespray, pigsty `node`/`pgsql`/
   `infra`) stay on the LAN from the k9s hub, whose inventories never change.
   `sshd` stays key-based on the LAN; `:49222` → hub stays as break-glass,
-  one key. See [ADR-0055](docs/adr/0055-netbird-as-daily-ssh-path.md).
+  one key. See [ADR-0055](docs/adr/0055-netbird-as-daily-ssh-path.md) and
+  [`docs/runbook-netbird.md`](docs/runbook-netbird.md).
 - **Certificate renewal is one token, so it gets an alarm.** Since ADR-0038
   every host in both zones renews through a single `CF_DNS_API_TOKEN`; its
   revocation or expiry stops renewal everywhere with no error anyone sees, on a

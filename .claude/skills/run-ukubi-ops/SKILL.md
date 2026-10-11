@@ -43,6 +43,8 @@ tool result.
 
 ## Run (agent path)
 
+> **NetBird SSH is rolling out (ADR-0055, `docs/runbook-netbird.md`).** Until cutover (rollout step 7) the access paths below stay the default; don't switch to `*.bnei.mesh` on your own.
+
 ```bash
 # discover what's available
 .claude/skills/run-ukubi-ops/driver.sh pigsty-list

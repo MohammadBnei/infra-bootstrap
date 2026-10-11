@@ -16,7 +16,7 @@
 #   next run create a second copy: don't rename `infra-nodes`,
 #   `platform-admins` or `platform-admins-ssh-infra-nodes`.
 # - Anything else in the account (other groups, policies, peers, the
-#   laptops/pi setup) is never read for writing, never touched.
+#   hand-clicked `laptop`/`All` setup) is never read for writing, never touched.
 #
 # WHAT IT OWNS
 # - Account settings: group propagation on, peer DNS domain `bnei.mesh`.
@@ -33,8 +33,9 @@
 #   Freebox hairpin, management sees 192.168.1.254, no country, and the
 #   check can never pass. Access rests on the authentik JWT per SSH
 #   session plus platform-admins membership.
-# - `ssh_enabled` on every peer in `infra-nodes` (the dashboard's per-peer
-#   "SSH Access" toggle; the client's --allow-server-ssh alone isn't enough).
+# - `ssh_enabled` on every peer in `infra-nodes` with no owning user, i.e.
+#   setup-key hosts (the dashboard's per-peer "SSH Access" toggle; the
+#   client's --allow-server-ssh alone isn't enough).
 # - A setup key, only when `-e netbird_setup_key_stage=<name>` is passed.
 #   Its plaintext is returned on create only, so it goes straight to
 #   Infisical as NETBIRD_INFRA_SETUP_KEY.
@@ -43,8 +44,8 @@
 # (netbirdio/netbird shared/management/http/api/openapi.yml).
 #
 # WHAT IT DOESN'T (yet)
-# - The existing `laptops`/`pi` groups and the Pi SSH policy stay as
-#   clicked. Adopt them once this file has run for real.
+# - The existing `laptop`/`All` groups and the Pi policies (`SSH Access`,
+#   `pi-lab-443-policy`) stay as clicked in the dashboard.
 # - Peer names from Pi-hole records and the mesh overlay inventory come
 #   after the spike (ADR-0055 rollout steps 4-5), once real peers exist.
 # - The authentik `groups` JWT claim (jwt_groups_*). Whether Dex passes it

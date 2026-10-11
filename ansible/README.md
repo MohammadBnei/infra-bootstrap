@@ -19,7 +19,8 @@ Custom playbooks for things kubespray and pigsty don't cover:
 | `playbooks/build-runner-configure.yml` | Install podman/buildah + register **one GitHub Actions runner instance per build repo** on the bare LXC terraform/build-runner.tf creates (ADR-0034) — an LXC rather than a pod because buildah cannot extract image layers unprivileged. Config-driven via `build_runner_repos` (same shape as `garage-configure.yml`'s `garage_buckets`); adding a repo means adding an entry and re-running, plus widening the `ACCESS_TOKEN` PAT first. See the `build-runner-ops` skill |
 | `playbooks/hermes-dashboard-configure.yml` | Point the Hermes dashboard on LXC 101 at authentik OIDC, firewall `:9119` to the k8s nodes, and bind it where Traefik can reach it ([ADR-0051](../docs/adr/0051-expose-hermes-dashboard.md)) — **run for real 2026-10-02**, 47 ok / 11 changed / 0 failed. Targets **`ex-laptop` from `inventories/proxmox/hosts.yml`** and drives the container with `pct exec`/`pct push`, because LXC 101's inbound SSH key is recorded nowhere. No Infisical session needed: a public OIDC client has no secret |
 | `playbooks/pihole-configure.yml` | Install/configure Pi-hole on the Pi 4, authoritative for `bnei.lan` — drafted, see below |
-| `playbooks/netbird-configure.yml` | NetBird account state for ADR-0055 through the management REST API, localhost only: propagation + `bnei.mesh`, groups `infra-nodes`/`platform-admins`, geo posture check, the `netbird-ssh` policy, per-peer `ssh_enabled`, and a per-stage setup key written to Infisical. **Coexists with the dashboard**: a default run creates what is missing and only reports drift; `-e netbird_enforce=true` overwrites — drafted, not yet run |
+| `playbooks/netbird-configure.yml` | NetBird account state for ADR-0055 through the management REST API, localhost only: propagation + `bnei.mesh`, groups `infra-nodes`/`platform-admins`, the `netbird-ssh` policy (no posture check), per-peer `ssh_enabled` on user-less peers only, and a per-stage setup key written to Infisical. **Coexists with the dashboard**: a default run creates what is missing and only reports drift; `-e netbird_enforce=true` overwrites — **run for real 2026-10-11, spike stage**, see below |
+| `playbooks/netbird-client.yml` | Install the pinned NetBird client (`netbird_version`, apt-held) on one rollout stage of hosts over the LAN and enroll it with the stage's setup key; gives LXCs `/dev/net/tun` through `pct` first (reboots them) — **run for real 2026-10-11, spike stage**, see below |
 | `playbooks/self-drain-configure.yml` | Configure k8s-cp-01/k8s-worker-01 to drain + uncordon themselves around their own graceful reboot — drafted and run, see below |
 | `inventories/proxmox/hosts.yml` | Proxmox host inventory for `pve-postinstall.yml` (`.200`/`.161` — `.165` is a delegation target only) |
 | `inventories/garage/hosts.yml` | Single-host inventory for `garage-configure.yml` (`garage-storage` LXC) |
@@ -27,6 +28,7 @@ Custom playbooks for things kubespray and pigsty don't cover:
 | `inventories/k9s-dashboard/hosts.yml` | Single-host inventory for `k9s-dashboard-configure.yml` (`k9s-dashboard` LXC) |
 | `inventories/build-runner/hosts.yml` | Single-host inventory for `build-runner-configure.yml` (`build-runner` LXC) |
 | `inventories/pihole/hosts.yml` | Single-host inventory for `pihole-configure.yml` (Pi 4, physical hardware) |
+| `inventories/mesh/hosts.yml` | NetBird enrollment inventory for `netbird-client.yml`: one group per ADR-0055 rollout stage (today only `spike`), LAN addresses, plus `pve_hosts` for the `pct` step. The kubespray and pigsty inventories are never repointed at the mesh |
 | `requirements.yml` | Ansible collections needed by these playbooks (`ansible-galaxy collection install -r ansible/requirements.yml`) |
 | `tests/build-runner-expressions.yml` | Localhost-only check for `build-runner-configure.yml`'s two silent-failure Jinja expressions (`rejectattr` instance filtering, `zip` token pairing). No infra, no connection: `ansible-playbook -i localhost, ansible/tests/build-runner-expressions.yml` |
 
@@ -38,6 +40,7 @@ Custom playbooks for things kubespray and pigsty don't cover:
 - [x] `nfs-configure.yml` drafted — see below
 - [x] `k9s-dashboard-configure.yml` drafted — see below
 - [x] `pihole-configure.yml` drafted — see below
+- [x] `netbird-configure.yml` + `netbird-client.yml` drafted **and run** 2026-10-11, spike stage (3 hosts enrolled) — see below and `docs/runbook-netbird.md`
 - [x] `hermes-dashboard-configure.yml` drafted **and run** 2026-10-02 — its step-0 probes earned their place: the container was at `192.168.1.72` not `.181`, and Hermes was `0.15.1`, which ships no self-hosted OIDC plugin at all (upgraded to `0.21.5`). Cloudflare's BIC blocks `urllib` but not the `httpx` the plugin actually uses
 - [x] `self-drain-configure.yml` drafted and run (2026-07-30) — see below
 - [x] `build-runner-configure.yml` drafted and run (2026-08-13) — image build LXC, ADR-0034
@@ -415,6 +418,77 @@ real JSON for arrays, so a read-then-compare isn't worth the parsing).
 
 **Not automated here:** pointing LAN devices/DHCP at `192.168.1.55` for
 DNS — that's a Freebox router config change, no API access assumed.
+
+## `playbooks/netbird-configure.yml`
+
+Declares the NetBird account state ADR-0055 depends on through the
+management REST API. Runs on localhost and never touches a host. The full
+model (what lives where, the per-stage procedure, troubleshooting) is in
+[`docs/runbook-netbird.md`](../docs/runbook-netbird.md); the playbook's
+header comment lists what it owns.
+
+**Run for real 2026-10-11, spike stage.** The geo posture check it first
+created was removed the same day (hairpin: management sees no country).
+
+### Prerequisites
+
+- Infisical CLI session authenticated (`source ~/.hermes/cache/inf-env.sh`)
+- `NETBIRD_API_TOKEN` in Infisical: the PAT of the `ukubi` service user
+  (admin), created by hand once in the dashboard — nothing can call the API
+  before it exists
+
+### How to run
+
+```bash
+ansible-playbook ansible/playbooks/netbird-configure.yml                          # drift report only
+ansible-playbook ansible/playbooks/netbird-configure.yml -e netbird_enforce=true # file wins on its fields
+ansible-playbook ansible/playbooks/netbird-configure.yml \
+  -e netbird_setup_key_stage=<stage> -e netbird_setup_key_usage_limit=<hosts+2>  # mint a stage key
+```
+
+Safe to re-run. A default run only creates missing objects and reports
+drift; it never overwrites a dashboard edit. Objects are matched by name —
+renaming a managed one in the UI makes the next run create a duplicate.
+Group membership is never written (a group PUT replaces the member list).
+`ssh_enabled` is only switched on for peers with no owning user, so never
+add `infra-nodes` to a user's auto groups.
+
+## `playbooks/netbird-client.yml`
+
+Enrolls one rollout stage of `inventories/mesh/hosts.yml` as NetBird SSH
+peers. Per host: `/dev/net/tun` for LXCs (`pct set --devN` on the PVE host,
+then a **container reboot**, only when missing), the client from
+pkgs.netbird.io pinned to `netbird_version` and held, then `netbird up` with
+the stage's setup key (passed by file) and `--management-url=https://netbird.bnei.dev
+--allow-server-ssh --enable-ssh-root --enable-ssh-sftp --disable-dns`.
+
+**Run for real 2026-10-11** against `spike` (`pg-etcd-witness`,
+`k8s-worker-02`, `build-runner` LXC 103 on server1).
+
+### Prerequisites
+
+- Infisical CLI session authenticated
+- `NETBIRD_INFRA_SETUP_KEY` for this stage, from
+  `netbird-configure.yml -e netbird_setup_key_stage=<stage>`
+- On the LAN, with the keys the inventory names. For LXCs the playbook
+  fetches `PVE_SSH_PRIVATE_KEY` into a temp file and deletes it in the final
+  play (a run that aborts earlier leaves it in `/tmp`: delete it by hand)
+
+### How to run
+
+```bash
+ansible-playbook -i ansible/inventories/mesh/hosts.yml \
+  ansible/playbooks/netbird-client.yml -e netbird_stage=<stage>
+# then switch SSH on, management side:
+ansible-playbook ansible/playbooks/netbird-configure.yml -e netbird_enforce=true
+```
+
+Safe to re-run: `netbird up` is skipped on a host already connected to
+management (install and hold still run). To
+apply changed `netbird up` flags, pass `-e netbird_reup=true` (needs a key
+that is still valid with uses left). A version bump is `netbird_version` plus
+a re-run — the hold is released and re-applied; move laptops and the server
+in lockstep. Under Claude Code's `!` prefix, append `2>&1 | cat`.
 
 ### Other playbooks (not yet drafted)
 
