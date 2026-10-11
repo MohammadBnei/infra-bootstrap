@@ -2,7 +2,7 @@
 
 **Status:** Accepted — decided 2026-10-11, approved by M BN after an
 architecture interview and two adversarial review cycles. **Rolling out —
-spike and k8s stages enrolled 2026-10-11** (7 hosts); human SSH over the
+spike, k8s and pg stages enrolled 2026-10-11** (9 hosts); human SSH over the
 mesh verified end-to-end the same day. Operator view:
 [`docs/runbook-netbird.md`](../runbook-netbird.md). Rollout past the spike is
 gated on it (Rollout step 4). If the spike fails on the
@@ -55,10 +55,12 @@ the LXCs (k9s hub, hermesagent, build-runner, garage, nfs) and Pi-hole `.55`.
 - LXCs are unprivileged: `/dev/net/tun` is passed with `pct set <id> --dev0
   /dev/net/tun` from the PVE host, which needs a container restart. garage
   (zot blobs, backups) and nfs (RWX pods) restart last, in a maintenance window.
-- Pigsty's firewall (`node_firewall_mode: zone`, re-applied on every
-  `node.yml`) gets **port 22022** in `node_firewall_public_port`. Trusting
-  `100.64.0.0/10` would open Patroni 8008 and etcd 2379 to every peer,
-  including the off-site Pi.
+- ~~Pigsty's firewall (`node_firewall_mode: zone`, re-applied on every
+  `node.yml`) gets **port 22022** in `node_firewall_public_port`.~~
+  *Not needed (2026-10-11): `<host>.bnei.mesh:22022` is reachable on the
+  witness, pg01 and pg02 with their firewall active and unchanged.* Trusting
+  `100.64.0.0/10` would still open Patroni 8008 and etcd 2379 to every peer,
+  including the off-site Pi, so don't.
 - **5432 is already public** on every Pigsty node (`all.vars`
   `node_firewall_public_port: [22, 80, 443, 5432]`, commented "remove in
   production!"), so on `wt0` it would be reachable by every mesh peer with only
@@ -284,7 +286,16 @@ failures. Then `-e netbird_enforce=true` turned on `ssh_enabled`. After the
 run: 5/5 nodes Ready, every Cilium agent saw 5/5 healthy, and etcd was ok
 through `/readyz`. `wt0` is up on all four and the Cilium MTUs stayed
 1500/1500/1420, so the eth0 pin holds. `<node>.bnei.mesh:22022` is reachable
-from the laptop. Remaining stages: `pg`, `lxc`, `pve`, `pi`, `storage`.
+from the laptop.
+
+**`pg` stage (2026-10-11 ~23:40):** `NETBIRD_INFRA_SETUP_KEY_PG` (limit 4),
+`-e netbird_serial=1` with Pigsty's key (`SSH_OLDPG_KEY`). pg02, the replica,
+enrolled first, then pg01, the leader, with 0 failures; enforce turned on
+`ssh_enabled`. Patroni is unchanged: pg-proxmox-1 is leader, pg-proxmox-2 is
+streaming with lag 0. The postgres VIP :5432, pigsty :80 and redis :6379
+answer. `:22022` is reachable through the active host firewall, so the
+Pigsty firewall change in Decision 1 is not needed. Remaining stages: `lxc`
+(k9s-dashboard, hermesagent), `pve`, `pi`, `storage`.
 
 ## Consequences
 

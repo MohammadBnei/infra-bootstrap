@@ -40,7 +40,7 @@ Custom playbooks for things kubespray and pigsty don't cover:
 - [x] `nfs-configure.yml` drafted — see below
 - [x] `k9s-dashboard-configure.yml` drafted — see below
 - [x] `pihole-configure.yml` drafted — see below
-- [x] `netbird-configure.yml` + `netbird-client.yml` drafted **and run** 2026-10-11, spike + k8s stages (7 hosts enrolled) — see below and `docs/runbook-netbird.md`
+- [x] `netbird-configure.yml` + `netbird-client.yml` drafted **and run** 2026-10-11, spike + k8s + pg stages (9 hosts enrolled) — see below and `docs/runbook-netbird.md`
 - [x] `hermes-dashboard-configure.yml` drafted **and run** 2026-10-02 — its step-0 probes earned their place: the container was at `192.168.1.72` not `.181`, and Hermes was `0.15.1`, which ships no self-hosted OIDC plugin at all (upgraded to `0.21.5`). Cloudflare's BIC blocks `urllib` but not the `httpx` the plugin actually uses
 - [x] `self-drain-configure.yml` drafted and run (2026-07-30) — see below
 - [x] `build-runner-configure.yml` drafted and run (2026-08-13) — image build LXC, ADR-0034
@@ -436,7 +436,7 @@ model (what lives where, the per-stage procedure, troubleshooting) is in
 [`docs/runbook-netbird.md`](../docs/runbook-netbird.md); the playbook's
 header comment lists what it owns.
 
-**Run for real 2026-10-11, spike and k8s stages.** The geo posture check it first
+**Run for real 2026-10-11, spike, k8s and pg stages.** The geo posture check it first
 created was removed the same day (hairpin: management sees no country).
 
 ### Prerequisites
@@ -490,7 +490,8 @@ afterwards by `netbird-configure.yml`'s report.
 `k8s-worker-02`, `build-runner` LXC 103 on server1), then `k8s`
 (`k8s-worker-01`, `k8s-cp-01`/`-02`/`-03`) with `-e netbird_serial=1`, which
 enrolls one host at a time and stops at the first failure. Use it for
-control-plane nodes and Patroni members.
+control-plane nodes and Patroni members. Then `pg` (`pg02`, then `pg01`), serial too, with
+`-e ansible_ssh_private_key_file=` pointing at a temp copy of `SSH_OLDPG_KEY`.
 
 ### Prerequisites
 
