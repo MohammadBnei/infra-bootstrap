@@ -9,8 +9,12 @@ PRs:
 **PR 1 live 2026-10-11** (#276, #277): server Ready, dashboard and Dex
 served at `netbird.bnei.dev` with the `*.bnei.dev` certificate, all three
 stores on Pigsty, STUN answering on the public IP through the Freebox UDP
-forward. Not yet: the authentik client (PR 2), any peer, and the Traefik
-timeout measurement.
+forward. **PR 2 live 2026-10-11** (#280–#282): authentik is the only login,
+the laptops and the Pi are peers. Still open: the Traefik timeout measurement
+(PR 3).
+**Amended 2026-10-11 by [ADR-0055](0055-netbird-as-daily-ssh-path.md):**
+cluster hosts join the mesh as NetBird SSH peers. §1's first bullet no longer
+holds; its second (no route or resource into the LAN) still does.
 **Date:** 2026-10-11
 **Related:**
 - [ADR-0009](0009-reject-wireguard-tailscale.md): the rejection this narrows.
@@ -49,8 +53,8 @@ VPNs.)
 
 The cluster may host the NetBird control plane. These stay forbidden, and
 each would need its own ADR:
-- **No cluster node, pod, PVE host or LXC runs a NetBird client** or joins
-  the mesh.
+- ~~**No cluster node, pod, PVE host or LXC runs a NetBird client** or joins
+  the mesh.~~ Superseded by ADR-0055: hosts are SSH peers. Pods still never are.
 - **No NetBird route, network resource or exit node points into
   `192.168.1.0/24`** or any cluster CIDR.
 - **Cluster remote access stays SSH/bastion**, exactly as ADR-0009 left it.

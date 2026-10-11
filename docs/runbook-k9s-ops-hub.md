@@ -15,6 +15,11 @@ port-forwarded, `82.65.231.50:49222`) **and** sits on the LAN with working
 Pi-hole DNS. That makes it the natural hub, and this runbook is how it becomes
 one without quietly becoming a second copy of every credential.
 
+**Planned (ADR-0055, not live):** day-to-day SSH moves to NetBird. This hub
+stays the place heavy runs (kubespray, pigsty `node`/`pgsql`/`infra`) are made
+from, over the LAN, and `:49222` stays as the off-LAN break-glass path,
+accepting one break-glass key only.
+
 `DECISION.md` names `hermesagent` as where "operations live". This runbook was
 written while that LXC looked dead: `192.168.1.181:22` refused connections and it
 had no DNS record. **Corrected 2026-10-02 (ADR-0051): it was never at

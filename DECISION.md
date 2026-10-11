@@ -233,10 +233,16 @@ updated.
   (ADR-0054). `netbird-server` + dashboard at `netbird.bnei.dev` (a grey
   record, because STUN on UDP 3478 shares the name and Cloudflare carries no
   UDP; STUN on MetalLB `.235`, `externalTrafficPolicy: Local`). Its peers are
-  two laptops and a Pi off-site. authentik becomes the only login, through
-  the server's embedded Dex, once its client lands (ADR-0054's PR 2). All three stores live on Pigsty. ADR-0009 still
-  forbids any cluster host as a peer. See
+  two laptops and a Pi off-site. authentik is the only login, through
+  the server's embedded Dex. All three stores live on Pigsty. See
   [ADR-0054](docs/adr/0054-netbird-control-plane-hosting-only.md).
+- **NetBird is the daily SSH path to every host** (ADR-0055, accepted, not
+  live — gated on a spike). Every host is a peer; access is `platform-admins`
+  through authentik, FR geo posture. Light runs go over the mesh through
+  `ansible/inventories/mesh/`; heavy runs (kubespray, pigsty `node`/`pgsql`/
+  `infra`) stay on the LAN from the k9s hub, whose inventories never change.
+  `sshd` stays key-based on the LAN; `:49222` → hub stays as break-glass,
+  one key. See [ADR-0055](docs/adr/0055-netbird-as-daily-ssh-path.md).
 - **Certificate renewal is one token, so it gets an alarm.** Since ADR-0038
   every host in both zones renews through a single `CF_DNS_API_TOKEN`; its
   revocation or expiry stops renewal everywhere with no error anyone sees, on a
@@ -276,9 +282,11 @@ Never propose these without an explicit user greenlight, even as a
 - ❌ **Infisical as SSH CA / TLS CA** — [ADR-0006](docs/adr/0006-reject-infisical-as-ssh-tls-ca.md)
 - ❌ **Vagrant for Proxmox provisioning** — [ADR-0007](docs/adr/0007-reject-vagrant-for-proxmox.md)
 - ❌ **Flatcar as VM OS** — [ADR-0008](docs/adr/0008-reject-flatcar-vm-os.md)
-- ❌ **Wireguard / Tailscale as cluster access** — [ADR-0009](docs/adr/0009-reject-wireguard-tailscale.md).
-  No cluster node, pod or PVE host joins a mesh. Hosting a NetBird control
-  plane for an *external* mesh is the one carve-out —
+- ❌ **Mesh routes into the LAN / pods as mesh peers** — [ADR-0009](docs/adr/0009-reject-wireguard-tailscale.md).
+  No NetBird route, network resource or exit node into `192.168.1.0/24` or a
+  cluster CIDR, and no pod joins a mesh. Hosts joining as NetBird **SSH**
+  peers is allowed since [ADR-0055](docs/adr/0055-netbird-as-daily-ssh-path.md);
+  hosting the control plane since
   [ADR-0054](docs/adr/0054-netbird-control-plane-hosting-only.md).
 - ❌ **External managed Postgres** — [ADR-0010](docs/adr/0010-reject-external-managed-postgres.md)
 - ❌ **Multi-region / DR / GPU multi-tenancy / service mesh** — [ADR-0011](docs/adr/0011-reject-multi-region-dr-service-mesh.md)

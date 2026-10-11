@@ -19,7 +19,7 @@ ADR-000N` (replaced by a later decision).
 | [0006](0006-reject-infisical-as-ssh-tls-ca.md) | Infisical as SSH/TLS CA | Rejected |
 | [0007](0007-reject-vagrant-for-proxmox.md) | Vagrant for Proxmox provisioning | Rejected |
 | [0008](0008-reject-flatcar-vm-os.md) | Flatcar as VM OS | Rejected |
-| [0009](0009-reject-wireguard-tailscale.md) | Wireguard / Tailscale | Rejected |
+| [0009](0009-reject-wireguard-tailscale.md) | Wireguard / Tailscale | Rejected — superseded for SSH by ADR-0055 |
 | [0010](0010-reject-external-managed-postgres.md) | External managed Postgres | Rejected |
 | [0011](0011-reject-multi-region-dr-service-mesh.md) | Multi-region / DR / GPU multi-tenancy / service mesh | Rejected |
 | [0012](0012-reject-gitops-for-proxmox.md) | GitOps-managed Proxmox | Rejected |
@@ -64,4 +64,5 @@ ADR-000N` (replaced by a later decision).
 | [0051](0051-expose-hermes-dashboard.md) | `hermes.bnei.dev`: the Hermes Agent dashboard behind **two** authentik gates (native OIDC + forwardAuth), public client as an upstream gap, break-glass via the hypervisor console | Accepted, **rolled out 2026-10-02** (three authentik worker restarts needed, not two — the policy file rolls back until the application exists; Cloudflare BIC turned out not to affect the plugin, which uses httpx. Outstanding: the Freebox reservation for .72 and a first interactive login) |
 | [0052](0052-wird-adminweb-forwardauth.md) | `wird-admin.bnei.dev`: the forwardAuth tier's second provider (`forward_single`), and the HS256-with-client_secret token a proxy provider actually forwards | Accepted (manifests on PR #268, held for a wird image tag; **the `wird_admin` role and its grants are live 2026-10-03** via Pigsty's own playbooks, negatives verified; the `wird-agent` service account is outstanding. Review caught that a proxy provider's `client_id`/`client_secret` cannot be declared — see Decision 3) |
 | [0053](0053-hq-dashboard-public-client-loopback-redirect.md) | `hq.bnei.dev`: one public OIDC client for an SPA and MCP clients, a fixed-port loopback redirect as an exception to ADR-0050 Decision 2, a dedicated always-require consent flow as its compensating control | Accepted (client and DB live; app PR pending) |
-| [0054](0054-netbird-control-plane-hosting-only.md) | Host a NetBird control plane (server + dashboard, STUN on `.235`) for an external laptops→Pi mesh; no cluster host joins it — a hosting-only carve-out from ADR-0009 | Accepted (not yet live) |
+| [0054](0054-netbird-control-plane-hosting-only.md) | Host a NetBird control plane (server + dashboard, STUN on `.235`) for an external laptops→Pi mesh; no cluster host joins it — a hosting-only carve-out from ADR-0009 | Accepted, live 2026-10-11 (PR 3, Traefik timeouts, open); host-peer rule amended by ADR-0055 |
+| [0055](0055-netbird-as-daily-ssh-path.md) | NetBird as the daily SSH path: every host a peer, `platform-admins` via authentik, light runs over the mesh and heavy runs from the hub over the LAN, `:49222` kept as break-glass only — supersedes ADR-0009 for SSH | Accepted (not live; gated on a spike) |

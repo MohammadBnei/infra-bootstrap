@@ -754,6 +754,12 @@ after PVE install).
 Per-host keys for each VM/LXC. Bastion pattern: hermesagent LXC → all
 hosts/VMs.
 
+**Planned (ADR-0055, not live):** every host becomes a NetBird SSH peer
+(`<name>.bnei.mesh`), authenticated through authentik `platform-admins`.
+`sshd` stays key-based, restricted to `192.168.1.0/24`; heavy runs stay on
+the LAN from the k9s hub; the public `:49222` forward to the hub accepts only
+the break-glass key.
+
 ### K8s
 
 New service accounts per app; Infisical for app secrets.
