@@ -326,7 +326,7 @@
     # propagation pulled a laptop in: never switch its SSH server on.
     - name: Record user-owned peers in infra-nodes
       ansible.builtin.set_fact:
-        netbird_drift: "{{ netbird_drift | default([]) + ['peer ' ~ item.json.name ~ ': owned by a user, should not be in infra-nodes (check user auto groups)'] }}"
+        netbird_drift: "{{ netbird_drift | default([]) + ['peer ' ~ item.json.name ~ ': user-owned, must not be in infra-nodes (check user auto groups)'] }}"
       loop: "{{ infra_peers.results }}"
       loop_control:
         label: "{{ item.json.name }}"

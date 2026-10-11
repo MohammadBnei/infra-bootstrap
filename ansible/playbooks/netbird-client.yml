@@ -95,7 +95,7 @@
 
     - name: Add the tun device and reboot the container
       ansible.builtin.shell: |
-        set -e
+        set -eo pipefail
         n=0
         while printf '%s\n' "$CONFIG" | grep -q "^dev$n:"; do n=$((n+1)); done
         pct set {{ hostvars[item.item].netbird_lxc_ctid }} --dev$n /dev/net/tun
@@ -111,7 +111,7 @@
       changed_when: true
 
 - name: Install and enroll the NetBird client
-  hosts: "{{ netbird_stage }}"
+  hosts: "{{ netbird_stage | default('netbird_stage_unset') }}" # the first play fails without it; default only for --syntax-check
   gather_facts: false
   vars:
     netbird_version: 0.80.0 # = the laptops' client and the server; bump together
