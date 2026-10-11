@@ -1,8 +1,11 @@
 # ADR-0055: NetBird as the daily SSH path to ukubi hosts — superseding ADR-0009 for SSH
 
 **Status:** Accepted — decided 2026-10-11, approved by M BN after an
-architecture interview and two adversarial review cycles. **Not live.**
-Rollout is gated on a spike (Rollout step 3). If the spike fails on the
+architecture interview and two adversarial review cycles. **Rolling out —
+spike stage enrolled 2026-10-11** (`pg-etcd-witness`, `k8s-worker-02`,
+`build-runner`); SSH over the mesh not yet verified end-to-end. Operator view:
+[`docs/runbook-netbird.md`](../runbook-netbird.md). Rollout past the spike is
+gated on it (Rollout step 4). If the spike fails on the
 automation half, Decision 3's light runs fall back to keys over the LAN and
 the rest stands.
 **Date:** 2026-10-11
@@ -37,7 +40,7 @@ reasoning, so there was no argument to weigh against these two pains.
 Group `infra-nodes`, enrolled by setup keys — **one per rollout stage**
 (the spike, each step-5 batch), reusable, usage limit = that stage's host
 count + 2 (the spike re-enrolls on purpose), 7-day expiry, `no_log`, current
-one in Infisical as `NETBIRD_INFRA_SETUP_KEY`. A single key sized to the whole
+one in Infisical as `NETBIRD_INFRA_SETUP_KEY_<STAGE>` (one secret per stage). A single key sized to the whole
 fleet would run out or expire mid-rollout. Peers: the five k8s VMs (three
 control plane, two workers), `.205`/`.207`, the etcd witness `.197`, the three PVE hosts,
 the LXCs (k9s hub, hermesagent, build-runner, garage, nfs) and Pi-hole `.55`.
@@ -77,6 +80,14 @@ network reach to every node, with only the OS-user mapping in the way.
 
 Posture check: **geolocation, FR only**. Add a country before travelling;
 being locked out abroad until then is accepted (Decision 5 is the way in).
+
+> **Amended 2026-10-11 — geolocation rejected during the spike.** At home the
+> laptop reaches management through the Freebox hairpin, so management sees
+> `192.168.1.254` with no country and `geo-fr-only` could never pass — the
+> case the Consequences section anticipated ("the geo check goes"). The
+> posture check is deleted and the policy has `source_posture_checks: []`.
+> Access rests on the authentik JWT per SSH session plus `platform-admins`
+> membership.
 
 ### 3. Light runs over the mesh, heavy runs over the LAN
 
@@ -123,18 +134,54 @@ any of them is down, no new NetBird session can start. So:
   and nothing else; fail2ban. Other hosts are reached with `ssh -J` through the
   hub, so the private key never sits on it.
 - Keys: **add** the break-glass key (Infisical + offline). Remove only
-  human-use keys. Untouched: the Hermes agent's `SSH_*` keys, Terraform's
-  `PVE_SSH_PRIVATE_KEY`, `SSH_OLDPG_KEY` (heavy Pigsty runs), and the PVE node
+  human-use keys. Untouched: the Hermes agent's `SSH_*` keys,
+  `PVE_SSH_PRIVATE_KEY` (Terraform, and `netbird-client.yml`'s `pct` step for
+  LXC tun), `SSH_OLDPG_KEY` (heavy Pigsty runs), and the PVE node
   entries in `/etc/pve/priv/authorized_keys` (migration and the node shell).
 
 ### 6. NetBird configuration as code: Ansible + REST
 
 `ansible/playbooks/netbird-configure.yml` uses `uri` with a service-user PAT
-(`NETBIRD_API_TOKEN`). It declares policies, posture checks, the DNS domain,
-the propagation setting, setup keys and peer names. It adopts the existing
-`laptops`/`pi` groups and Pi SSH policy. **Groups are POST-if-missing only and
+(`NETBIRD_API_TOKEN`). It declares policies, ~~posture checks,~~ the DNS domain,
+the propagation setting, setup keys and peer names. ~~It adopts the existing
+`laptops`/`pi` groups and Pi SSH policy.~~ *(2026-10-11: no posture check —
+see Decision 2's amendment — and it adopts nothing; the hand-clicked objects
+stay dashboard-owned. See the amendment below.)* **Groups are POST-if-missing only and
 never send `peers`** — the API's PUT replaces the whole member list. A human
 runs it, like every playbook here.
+
+**The dashboard stays a first-class editor.** Using both, or only the UI, must
+never clash. A default run only creates what is missing and reports drift; it
+overwrites a UI edit only with `-e netbird_enforce=true`, and only on the fields
+it names. Objects are matched by name, so renaming a managed one in the UI makes
+the next run create a duplicate. Everything it does not name is never written.
+
+> **Amended 2026-10-11, after the first real runs.** The pre-existing
+> hand-clicked objects are groups `laptop` and `All` and policies
+> `SSH Access`, `pi-lab-443-policy` and `Default` (disabled) — not
+> `laptops`/`pi` as written above. They stay dashboard-owned; the playbook
+> does not adopt them. Hosts enroll with `ansible/playbooks/netbird-client.yml`
+> (inventory `ansible/inventories/mesh/hosts.yml`, LAN addresses for now).
+> **Only setup keys put peers in `infra-nodes`:** adding `infra-nodes` to a
+> user's auto groups pulled a laptop in through propagation, and an enforce run
+> switched its SSH server on. `netbird-configure.yml` now enables `ssh_enabled`
+> only on peers with no owning user, and reports user-owned peers in
+> `infra-nodes` as drift.
+
+> **Amended 2026-10-11: the SSH rule needs ports.** A `netbird-ssh` rule
+> without `ports` renders on the host as `ip saddr <source> accept` with no
+> destination port, which opens every TCP port. The policy carries
+> `ports: ["22"]` (NetBird redirects 22 to 22022).
+>
+> **Amended 2026-10-11: the mesh is SSH only, enforced client-side.** Hosts
+> run `netbird up` with `--disable-client-routes --disable-server-routes`, so a
+> route, network resource or exit node added in the dashboard never reaches
+> a host. (The three spike hosts get the flags at their next
+> `-e netbird_reup=true`.)
+>
+> **Cilium and `wt0`:** Cilium auto-detects `wt0` and lowers its MTUs to match
+> it. The pin `cilium_extra_values: {devices: [eth0]}` is **committed, not
+> applied**; see the progress note under Rollout.
 
 ### 7. Observability
 
@@ -150,8 +197,13 @@ blackbox probe.
 
 1. This ADR and the docs it changes.
 2. Observability (independent).
-3. **Spike**, by hand, on the witness `.197`, one k8s worker and one non-storage
-   LXC. Log the results in `docs/bootstrap-test-notes.md`. Pass criteria:
+3. `netbird-configure.yml`, first part: account settings, groups, admin auto
+   group, ~~posture check~~ (dropped during the spike), SSH policy, per-peer
+   `ssh_enabled`, setup key. Pulled
+   ahead of the spike so the spike runs on the declared state, not on clicks.
+4. **Spike**, by hand, on the witness `.197`, one k8s worker (not
+   `k8s-worker-01`, whose host `.165` is the bit-flip suspect) and one
+   non-storage LXC. Log the results in `docs/bootstrap-test-notes.md`. Pass criteria:
    - From the LAN, an infra peer reaches management (hairpin), and the laptop
      passes the FR geo check from home.
    - The groups claim arrives, or the manual fallback is in place.
@@ -168,26 +220,49 @@ blackbox probe.
    - The Freebox LAN IPv6 prefix, and which address family LAN SSH uses.
    - Pod → Postgres connections arrive from node IPs (so 5432 can leave the
      public zone).
-4. `netbird-configure.yml`, the records move, the overlay inventory.
-5. Enrollment, staged: witness → k8s workers one at a time → control plane →
+5. `netbird-configure.yml`, second part: peer names, the records move, the
+   overlay inventory.
+6. Enrollment, staged: witness → k8s workers one at a time → control plane →
    Patroni replica (from `patronictl list`, not the name) → leader →
    non-storage LXCs → PVE → Pi-hole → garage/nfs in a window.
-6. Cutover: the `sshd` `Match` blocks, the break-glass key, `:49222` restricted
+7. Cutover: the `sshd` `Match` blocks, the break-glass key, `:49222` restricted
    to it, and the `k8s-ops`/`ansible-ops`/`run-ukubi-ops` skills.
+
+**Progress (2026-10-11):** steps 1 and 3 done; step 2 partly (scrape, probe and
+the critical alerts are live; NetBird's Grafana dashboards and the degraded =
+warning rule are not); `netbird-configure.yml` part 1 run
+for real. Step 4 in progress: the three spike hosts are enrolled, reach
+management through the hairpin and show up on the laptop; the SSH,
+ansible-over-mesh and Cilium checks are not done. The geo pass criterion is
+moot (Decision 2 amendment). Spike results so far:
+- **Passed:** systemd-resolved is untouched (`--disable-dns`, no `wt0`
+  link). LXC tun works. Infra peers reach management from the LAN. The
+  Freebox LAN IPv6 prefix is `2a01:e0a:126d:910::/64`.
+- **Found and fixed:** a `netbird-ssh` rule with no ports is an any-port
+  rule (`ip saddr <peer> accept`, no dport). The policy now has
+  `ports: ["22"]` (ee291339).
+- **Failed until applied:** "devices exclude `wt0`". Cilium auto-detected
+  `wt0` on k8s-worker-02 and lowered its MTUs there (`cilium_host`/`cilium_vxlan`
+  1280, `cilium_wg0` 1200, against 1500/1500/1420 on worker-01). The pin
+  `cilium_extra_values: {devices: [eth0]}` is committed, not applied: it needs
+  `cluster.yml --tags cilium` from the laptop on the LAN, then
+  `kubectl -n kube-system rollout restart ds/cilium`. No more k8s
+  nodes enroll before that run.
 
 ## Consequences
 
 - **One NetBird client update reaches every hypervisor, Patroni node and DNS at
   once.** Pinned and staged for that reason.
 - Each k8s node runs two WireGuard stacks (Cilium's and NetBird's).
-- **The geo check may deny laptops at home.** Through NAT loopback the Freebox
+- ~~**The geo check may deny laptops at home.**~~ *Superseded 2026-10-11: it
+  did, and the geo check was removed (Decision 2 amendment).* Through NAT loopback the Freebox
   may SNAT to its LAN address, and Traefik trusts forwarded headers from
   Cloudflare only, so management can see a `192.168.x` source with no country.
   ADR-0054's hairpin fallback (a Pi-hole override to `.233`) makes that
   certain. The spike tests it from home. If home is denied, the geo check
   goes, not the reverse.
 - The public `:49222` forward stays, narrowed to one key.
-- Infisical gains `NETBIRD_INFRA_SETUP_KEY`, `NETBIRD_API_TOKEN` and the
+- Infisical gains `NETBIRD_INFRA_SETUP_KEY_<STAGE>` (one per stage), `NETBIRD_API_TOKEN` and the
   break-glass key. Per-host human keys are removed once cutover is verified.
 
 ## Alternatives considered

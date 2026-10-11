@@ -20,6 +20,10 @@ described in `DECISION.md` §2.
 
 ## Which tool, which playbook
 
+> **NetBird SSH is rolling out (ADR-0055, `docs/runbook-netbird.md`).** Until cutover (rollout step 7) the access paths below stay the default; don't switch to `*.bnei.mesh` on your own.
+
+NetBird's own playbooks (`netbird-configure.yml`, `netbird-client.yml`) are described in `ansible/README.md`.
+
 - **Kubespray** — `kubespray/cluster.yml` (submodule). Greenfield bootstrap
   and any control-plane/etcd membership change (adding/removing a CP node)
   always uses `cluster.yml`, **never `scale.yml`** (`DECISION.md` §2 —

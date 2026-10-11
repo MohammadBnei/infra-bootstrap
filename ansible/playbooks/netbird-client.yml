@@ -1,0 +1,269 @@
+---
+# Enroll one rollout stage of ukubi hosts as NetBird SSH peers (ADR-0055).
+# Safe to re-run: a host already connected to management is left alone.
+#
+#   ansible-playbook -i ansible/inventories/mesh/hosts.yml \
+#     ansible/playbooks/netbird-client.yml -e netbird_stage=spike
+#
+# WHAT IT DOES
+# - LXCs (hosts with `netbird_lxc_ctid`): pass /dev/net/tun through from the
+#   PVE host with `pct set --devN` and reboot the container. Only when the
+#   device is missing; the reboot interrupts whatever runs in it.
+# - Installs the client from pkgs.netbird.io, pinned to `netbird_version`
+#   and held, so unattended-upgrades can't move it: 0.60/0.61 SSH is not
+#   compatible across versions, so hosts and laptops move together.
+# - `netbird up` with the stage's setup key (read from a 0600 file, never on
+#   the command line) and the ADR-0055 flags. Peers land in `infra-nodes`
+#   through the key's auto group.
+# - The flags refuse routes both ways (--disable-client-routes,
+#   --disable-server-routes): the mesh is SSH only (ADR-0055), so a route or
+#   exit node added in the dashboard later never reaches a host.
+#
+# AFTERWARDS
+# Re-run netbird-configure.yml -e netbird_enforce=true: it switches on
+# `ssh_enabled` for the new peers, which the client flags alone don't.
+#
+# CHANGING FLAGS ON AN ENROLLED HOST
+# `netbird up` only runs on hosts that aren't connected. To apply new flags,
+# pass -e netbird_reup=true: down, then up WITHOUT a setup key. The peer is
+# already registered, so it logs back in with its own WireGuard key and no
+# setup-key use is spent.
+#
+# PREREQUISITES
+# - Infisical CLI session authenticated (source ~/.hermes/cache/inf-env.sh).
+# - NETBIRD_INFRA_SETUP_KEY_<STAGE> (e.g. _SPIKE), from
+#   netbird-configure.yml -e netbird_setup_key_stage=<stage>.
+#
+# KNOWN GAP
+# A stage with LXCs writes PVE_SSH_PRIVATE_KEY to a 0600 temp file on the
+# controller; the last play deletes it. Interrupted runs (Ctrl-C, a failed
+# play) leave it behind: check $TMPDIR for *.pve.
+- name: Fetch secrets for this stage
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  vars:
+    infisical_args:
+      - --projectId={{ lookup('env', 'INFISICAL_PROJECT_ID') | default('8a3fa54f-be22-488a-bf51-55158f65c0f2', true) }}
+      - --env={{ lookup('env', 'INFISICAL_ENV') | default('dev', true) }}
+      - --domain={{ lookup('env', 'INFISICAL_DOMAIN') | default('https://infisical.bnei.dev', true) }}
+      - --plain
+  tasks:
+    - name: Fail without a real stage
+      ansible.builtin.assert:
+        that:
+          - netbird_stage is defined
+          - netbird_stage in groups
+          - netbird_stage not in ['all', 'ungrouped', 'pve_hosts']
+        fail_msg: "Pass -e netbird_stage=<stage group from ansible/inventories/mesh/hosts.yml>"
+
+    - name: Fail if an LXC's PVE node is not in pve_hosts
+      ansible.builtin.assert:
+        that: hostvars[item].netbird_pve_node | default('') in groups['pve_hosts']
+        fail_msg: "{{ item }}: netbird_pve_node '{{ hostvars[item].netbird_pve_node | default('') }}' is not in pve_hosts, so it would never get /dev/net/tun"
+      loop: "{{ groups[netbird_stage] | select('in', hostvars) | list }}"
+      when: hostvars[item].netbird_lxc_ctid is defined
+
+    - name: Read this stage's setup key
+      no_log: true
+      ansible.builtin.command:
+        argv: "{{ ['infisical', 'secrets', 'get', 'NETBIRD_INFRA_SETUP_KEY_' ~ (netbird_stage | upper | replace('-', '_'))] + infisical_args }}"
+      register: setup_key_read
+      changed_when: false
+      failed_when: setup_key_read.rc != 0 or setup_key_read.stdout | trim | length == 0
+
+    - name: Keep the setup key as a fact
+      no_log: true
+      ansible.builtin.set_fact:
+        netbird_setup_key: "{{ setup_key_read.stdout | trim }}"
+
+    - name: PVE key, when this stage has LXCs
+      when: groups[netbird_stage] | map('extract', hostvars) | selectattr('netbird_lxc_ctid', 'defined') | list | length > 0
+      block:
+        - name: Make a temp file for PVE_SSH_PRIVATE_KEY
+          ansible.builtin.tempfile:
+            suffix: .pve
+          register: pve_key_tmp
+
+        - name: Write PVE_SSH_PRIVATE_KEY
+          no_log: true
+          ansible.builtin.shell: |
+            set -o pipefail
+            umask 077
+            infisical secrets get PVE_SSH_PRIVATE_KEY {{ infisical_args | map('quote') | join(' ') }} > {{ pve_key_tmp.path | quote }}
+          args:
+            executable: /bin/bash
+          changed_when: false
+
+        - name: Keep the PVE key path
+          ansible.builtin.set_fact:
+            pve_key_file: "{{ pve_key_tmp.path }}"
+
+- name: Pass /dev/net/tun to this stage's LXCs
+  hosts: pve_hosts
+  gather_facts: false
+  tasks:
+    - name: Read container configs
+      ansible.builtin.command: pct config {{ hostvars[item].netbird_lxc_ctid }}
+      loop: "{{ groups[netbird_stage] }}"
+      when:
+        - hostvars[item].netbird_lxc_ctid is defined
+        - hostvars[item].netbird_pve_node == inventory_hostname
+      register: lxc_configs
+      changed_when: false
+
+    - name: Add the tun device and reboot the container
+      ansible.builtin.shell: |
+        set -eo pipefail
+        n=0
+        while printf '%s\n' "$CONFIG" | grep -q "^dev$n:"; do n=$((n+1)); done
+        pct set {{ hostvars[item.item].netbird_lxc_ctid }} --dev$n /dev/net/tun
+        pct reboot {{ hostvars[item.item].netbird_lxc_ctid }}
+      environment:
+        CONFIG: "{{ item.stdout }}"
+      args:
+        executable: /bin/bash
+      loop: "{{ lxc_configs.results | selectattr('stdout', 'defined') | list }}"
+      loop_control:
+        label: "{{ item.item }}"
+      when: "'/dev/net/tun' not in item.stdout"
+      changed_when: true
+
+- name: Install and enroll the NetBird client
+  hosts: "{{ netbird_stage | default('netbird_stage_unset') }}" # the first play fails without it; default only for --syntax-check
+  gather_facts: false
+  vars:
+    netbird_version: 0.80.0 # = the laptops' client and the server; bump together
+    netbird_up_flags:
+      - --management-url=https://netbird.bnei.dev
+      - --allow-server-ssh
+      - --enable-ssh-root
+      - --enable-ssh-sftp
+      - --disable-dns # the hosts resolve through Pi-hole; bnei.mesh is for laptops only
+      - --disable-client-routes # SSH only: never accept a route or exit node
+      - --disable-server-routes # ... and never act as a router for one
+    netbird_reup: false
+  tasks:
+    - name: Wait for the host (an LXC may be rebooting)
+      ansible.builtin.wait_for_connection:
+        timeout: 120
+
+    - name: Install python3-debian (deb822_repository needs it)
+      ansible.builtin.apt:
+        name: python3-debian
+        update_cache: true
+        cache_valid_time: 3600
+
+    - name: Add the NetBird apt repository
+      ansible.builtin.deb822_repository:
+        name: netbird
+        types: deb
+        uris: https://pkgs.netbird.io/debian
+        suites: stable
+        components: main
+        signed_by: https://pkgs.netbird.io/debian/public.key
+
+    - name: Read the installed client version
+      ansible.builtin.command: dpkg-query -W -f=${Version} netbird
+      register: nb_installed
+      changed_when: false
+      failed_when: false # not installed yet on the first run
+
+    - name: Install the pinned client
+      when: nb_installed.stdout != netbird_version
+      block:
+        - name: Release the hold, so the version change can apply
+          ansible.builtin.dpkg_selections:
+            name: netbird
+            selection: install
+          when: nb_installed.rc == 0
+
+        - name: Install netbird={{ netbird_version }}
+          ansible.builtin.apt:
+            name: "netbird={{ netbird_version }}"
+            update_cache: true
+            allow_downgrade: true
+      always:
+        # Re-held even if the install failed, so unattended-upgrades can
+        # never move an installed client off the pin.
+        - name: Hold the client
+          ansible.builtin.dpkg_selections:
+            name: netbird
+            selection: hold
+          failed_when: false # nothing to hold if the first install failed
+
+    - name: Install the client service
+      ansible.builtin.command: netbird service install
+      args:
+        creates: /etc/systemd/system/netbird.service
+
+    - name: Start the client service
+      ansible.builtin.systemd_service:
+        name: netbird
+        state: started
+        enabled: true
+
+    - name: Read the client status
+      ansible.builtin.command: netbird status --json
+      register: nb_status
+      changed_when: false
+      failed_when: false
+
+    - name: Work out whether to run netbird up
+      ansible.builtin.set_fact:
+        nb_connected: >-
+          {{ nb_status.rc == 0
+             and ((nb_status.stdout | from_json).management | default({})).connected | default(false) }}
+
+    - name: Re-up with new flags, no setup key
+      when: nb_connected | bool and netbird_reup | bool
+      block:
+        - name: Bring the client down
+          ansible.builtin.command: netbird down
+          changed_when: true
+
+        - name: Bring it back up with the current flags
+          ansible.builtin.command:
+            argv: "{{ ['netbird', 'up'] + netbird_up_flags }}"
+          changed_when: true
+
+    - name: Enroll
+      when: not nb_connected | bool
+      block:
+        - name: Write the setup key
+          no_log: true
+          ansible.builtin.copy:
+            content: "{{ hostvars['localhost'].netbird_setup_key }}"
+            dest: /run/netbird-setup-key
+            mode: "0600"
+
+        - name: Run netbird up
+          ansible.builtin.command:
+            argv: "{{ ['netbird', 'up', '--setup-key-file=/run/netbird-setup-key'] + netbird_up_flags }}"
+          changed_when: true
+      always:
+        - name: Remove the setup key
+          ansible.builtin.file:
+            path: /run/netbird-setup-key
+            state: absent
+
+    - name: Read the client status again
+      ansible.builtin.command: netbird status --json
+      register: nb_status_after
+      changed_when: false
+
+    - name: Fail unless connected to management
+      ansible.builtin.assert:
+        that: ((nb_status_after.stdout | from_json).management | default({})).connected | default(false)
+        fail_msg: "{{ inventory_hostname }} is not connected to management: {{ nb_status_after.stdout | truncate(400) }}"
+
+- name: Clean up
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  tasks:
+    - name: Remove the PVE key file
+      ansible.builtin.file:
+        path: "{{ pve_key_file }}"
+        state: absent
+      when: pve_key_file is defined

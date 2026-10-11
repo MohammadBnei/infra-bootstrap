@@ -55,3 +55,11 @@ cilium_encryption_type: wireguard
 # portmap chaining is not that case.
 cilium_hubble_install: true
 cilium_hubble_tls_generate: true
+
+# Pin Cilium's devices to the LAN uplink (all five VMs: eth0). Left to
+# auto-detection, Cilium also attaches to NetBird's wt0 once a node joins the
+# mesh — seen on k8s-worker-02 during the ADR-0055 spike, `Devices: [eth0
+# wt0]`. Harmless today (no KPR, no host firewall, iptables masquerade), but
+# the mesh is for SSH only and must never carry cluster traffic (ADR-0055).
+cilium_extra_values:
+  devices: [eth0]

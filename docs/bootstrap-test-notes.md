@@ -4583,3 +4583,107 @@ Reaching `.165` was harder than it should be: the `gpu-server` alias (user
 `mohammad`) is refused, the `server` alias's port 2222 on `.200` is refused,
 and `SSH_PROXMOX_KEY` from Infisical fails `ssh` with `invalid format`. The
 check above ran with a password login.
+
+## 2026-10-11 — NetBird spike enrollment: API shapes, an admin mix-up, and a laptop that became a target
+
+ADR-0055 rollout steps 3–4: `netbird-configure.yml` and `netbird-client.yml`
+run for real against the `spike` stage (`pg-etcd-witness`, `k8s-worker-02`,
+`build-runner` LXC 103). All three ended connected on client 0.80.0 with
+`ssh_enabled` on. SSH over the mesh itself is not yet tested. Model:
+`docs/runbook-netbird.md`.
+
+**API shapes the OpenAPI spec doesn't make obvious.**
+- `GET /api/groups?name=X` returns **404** when the group is missing, not
+  `[]`. The playbook keys "create" on `status == 404`.
+- An empty group returns `peers: null`, not `[]`. Default it before
+  iterating.
+
+**ansible under Claude Code's `!` prefix.** It fails with
+`Ansible requires blocking IO on stdin/stdout/stderr. Non-blocking file handles detected`.
+Pipe through `2>&1 | cat`.
+
+**`deb822_repository` needs `python3-debian` on the target.** The playbook
+installs it first.
+
+**`account@bnei.dev` is not the admin.** It is the local break-glass user from
+ADR-0054 §4 and owns no peers. The real admin, who owns the laptop, is the
+authentik user `mohammad@bnei.dev`. The first version of the playbook named
+`account@` in `netbird_admin_emails`, so `platform-admins` would have landed
+on a user with no peers. Caught before commit.
+
+**The LXC needed `/dev/net/tun` and a reboot.** LXC 103 is unprivileged and
+had no tun device, which NetBird's WireGuard interface needs. The fix was
+`pct set 103 --devN /dev/net/tun` on server1, then a container reboot. The
+playbook now does both, only when the device is missing.
+
+**The ADR's group names were wrong.** The hand-clicked groups are `laptop`
+and `All`, not `laptops`/`pi`. Amended in ADR-0055.
+
+**The geo posture check could never pass from home.** The laptop reaches
+`netbird.bnei.dev` through the Freebox hairpin, so management sees
+`192.168.1.254`, which has no country. `geo-fr-only` hid every infra peer from
+the laptop. ADR-0055's Consequences had predicted this. The operator dropped
+the check (a79042e1): the policy now has no posture check. After that, the
+laptop saw all three peers as `*.bnei.mesh`.
+
+**Propagation turned the laptop into an SSH target.** `infra-nodes` was added
+to the operator's own auto groups in the dashboard. Group propagation then
+put the laptop in `infra-nodes`, and an enforce run switched on the laptop's
+`ssh_enabled`. The change was reverted by hand. `netbird-configure.yml` now
+enables SSH only on peers with no owning user (setup-key hosts), and reports
+user-owned peers in `infra-nodes` as drift. Rule: only setup keys put peers in
+`infra-nodes`.
+
+**A `netbird-ssh` rule without ports opened every port.** With `ports` unset,
+NetBird rendered the policy rule on the hosts as `ip saddr <laptop> accept`,
+with no dport. Every TCP port of an infra host was open to `platform-admins`
+peers. The fix is `ports: ["22"]` on the rule; NetBird redirects 22 to 22022
+(ee291339). Verified on k8s-worker-02: `netbird-acl-input-rules` now allows
+only tcp 22 and 22022 from the laptop. NetBird uses nftables tables
+`ip netbird` and `ip6 netbird`, not iptables.
+
+**Cilium picked up `wt0`.** On k8s-worker-02 `cilium status --verbose` showed
+`Devices: [eth0 wt0]`. Node IPs were unaffected, encryption was OK, and cluster
+health was 5/5. With no KPR, no host firewall and iptables masquerade, this is
+benign today. Pinned with `cilium_extra_values: {devices: [eth0]}` in
+`inventory/ukubi/group_vars/k8s_cluster/k8s-net-cilium.yml` (eth0 is the
+uplink on all five VMs). **Not applied yet.**
+
+**`wt0` also skewed Cilium's MTU on that node.** `wt0` has MTU 1280, and Cilium
+lowered its own MTUs to match. On k8s-worker-02, `cilium_host` and
+`cilium_vxlan` are 1280 and `cilium_wg0` is 1200. On k8s-worker-01 they are
+1500, 1500 and 1420. One node now runs a different tunnel MTU from the rest of
+the cluster. That is the same silent large-packet-hang class as the MTU hazard
+in `k8s-net-cilium.yml`, which makes the pin urgent.
+
+To apply it, run from the laptop on the home LAN. The hub has no k8s VM key,
+and its checkout is behind.
+
+```bash
+cd kubespray && ../kubespray-venv/bin/ansible-playbook -i ../inventory/ukubi/hosts.yaml \
+  cluster.yml --become --diff --tags cilium
+kubectl -n kube-system rollout restart ds/cilium
+```
+
+The restart is required: the chart's `rollOutCiliumPods` is unset, so the
+agents never pick up the configmap change on their own. The live Helm values
+were diffed against kubespray's render. Only `routingMode` differs, with the
+same effect: the chart default `""` means tunnel. The spike criterion "devices exclude `wt0`" stays FAILED until
+then, and no more k8s nodes enroll before it.
+
+**Other spike checks.** systemd-resolved is untouched: no `wt0` link,
+`--disable-dns` works. The Freebox LAN IPv6 prefix is
+`2a01:e0a:126d:910::/64` (eth0 on .203).
+
+**Review fixes (1b9c3390).**
+- The setup key is now one secret per stage, `NETBIRD_INFRA_SETUP_KEY_<STAGE>`.
+  The old unsuffixed secret was migrated to `_SPIKE` and then deleted.
+- `netbird-configure.yml` hides task output play-wide, because Ansible does
+  not mask the PAT in the `uri` headers. Use `-e netbird_debug=true` to see
+  the output.
+- An admin email with no NetBird user is now reported on a "needs a human"
+  line instead of failing the run.
+- `netbird up` now also passes `--disable-client-routes` and
+  `--disable-server-routes`. The spike hosts still need a
+  `-e netbird_reup=true` run to pick these up. That run no longer spends a
+  setup key.

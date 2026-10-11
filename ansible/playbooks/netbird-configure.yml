@@ -1,0 +1,456 @@
+---
+# Declare the NetBird account state ADR-0055 depends on, through the
+# management REST API. Runs on localhost only; it never touches a host.
+# Safe to re-run.
+#
+# UI AND PLAYBOOK COEXIST
+# The dashboard stays a first-class way to change things. Either use both,
+# or only the UI — this file never fights it:
+# - A default run only CREATES what is missing (groups, policy, setup
+#   key) and REPORTS drift on everything else. It never
+#   overwrites an edit made in the UI.
+# - `-e netbird_enforce=true` writes this file's values back over drift,
+#   and only on the fields named below. Use it on the first run, or when
+#   you want the file to win.
+# - Objects are matched by NAME. Renaming one of them in the UI makes the
+#   next run create a second copy: don't rename `infra-nodes`,
+#   `platform-admins` or `platform-admins-ssh-infra-nodes`.
+# - Anything else in the account (other groups, policies, peers, the
+#   hand-clicked `laptop`/`All` setup) is never read for writing, never touched.
+#
+# WHAT IT OWNS
+# - Account settings: group propagation on, peer DNS domain `bnei.mesh`.
+#   Read-merge-write: the PUT sends back the whole settings object, so
+#   nothing it doesn't name is reset.
+# - Groups `infra-nodes` and `platform-admins`: POST if missing, never
+#   PUT. A group PUT replaces the member list (ADR-0055).
+# - `platform-admins` in the auto_groups of `netbird_admin_emails`. With
+#   propagation on, that puts the admin's own peers in the group, so the
+#   policy source is the admin's laptop and nothing else.
+# - Policy `platform-admins-ssh-infra-nodes` (protocol `netbird-ssh`,
+#   group → local-user mapping), with no posture check. A geo check was
+#   tried and dropped: at home the laptop reaches management through the
+#   Freebox hairpin, management sees 192.168.1.254, no country, and the
+#   check can never pass. Access rests on the authentik JWT per SSH
+#   session plus platform-admins membership.
+# - `ssh_enabled` on every peer in `infra-nodes` with no owning user, i.e.
+#   setup-key hosts (the dashboard's per-peer "SSH Access" toggle; the
+#   client's --allow-server-ssh alone isn't enough).
+# - A setup key, only when `-e netbird_setup_key_stage=<name>` is passed.
+#   Its plaintext is returned on create only, so it goes straight to
+#   Infisical as NETBIRD_INFRA_SETUP_KEY_<STAGE> (one secret per stage),
+#   through a 0600 file. If that write fails, the key is revoked.
+#
+# Task output is hidden by default: every API call carries the admin PAT.
+# Add -e netbird_debug=true to see it while debugging.
+#
+# Field names checked against the v0.80.0 OpenAPI spec
+# (netbirdio/netbird shared/management/http/api/openapi.yml).
+#
+# WHAT IT DOESN'T (yet)
+# - The existing `laptop`/`All` groups and the Pi policies (`SSH Access`,
+#   `pi-lab-443-policy`) stay as clicked in the dashboard.
+# - Peer names from Pi-hole records and the mesh overlay inventory come
+#   after the spike (ADR-0055 rollout step 5), once real peers exist.
+# - The authentik `groups` JWT claim (jwt_groups_*). Whether Dex passes it
+#   through is a spike question; until then membership is the NetBird-local
+#   auto_groups above.
+#
+# PREREQUISITES
+# - Infisical CLI session authenticated (source ~/.hermes/cache/inf-env.sh).
+# - NETBIRD_API_TOKEN in Infisical: a PAT of a NetBird *service user* with
+#   the admin role, created once by hand in the dashboard (Team → Service
+#   Users). Chicken-and-egg: nothing can call the API before it exists.
+#
+# RUN
+#   ansible-playbook ansible/playbooks/netbird-configure.yml -e netbird_enforce=true  # first run
+#   ansible-playbook ansible/playbooks/netbird-configure.yml                         # drift report
+#   ansible-playbook ansible/playbooks/netbird-configure.yml \
+#     -e netbird_setup_key_stage=spike -e netbird_setup_key_usage_limit=5
+- name: Configure the NetBird account (ADR-0055)
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  # Every uri task sends the admin PAT in its headers, which Ansible does
+  # not mask: hide task arguments and results by default. Asserts and the
+  # report opt back in. -e netbird_debug=true shows everything.
+  no_log: "{{ not (netbird_debug | default(false) | bool) }}"
+  vars:
+    infisical_project_id: "{{ lookup('env', 'INFISICAL_PROJECT_ID') | default('8a3fa54f-be22-488a-bf51-55158f65c0f2', true) }}"
+    infisical_env: "{{ lookup('env', 'INFISICAL_ENV') | default('dev', true) }}"
+    infisical_domain: "{{ lookup('env', 'INFISICAL_DOMAIN') | default('https://infisical.bnei.dev', true) }}"
+    netbird_api: https://netbird.bnei.dev/api
+    netbird_enforce: false # true = overwrite UI drift on the fields this file owns
+    netbird_dns_domain: bnei.mesh
+    # authentik identities, not account@bnei.dev: that is the local owner
+    # kept as break-glass (ADR-0054 §4) and owns no peers.
+    netbird_admin_emails:
+      - mohammad@bnei.dev
+    # Local users a platform-admin may log in as. kubespray and pigsty
+    # hosts use root/core/vagrant; the Pi and the LXCs use mohammad.
+    netbird_ssh_local_users: [root, core, vagrant, mohammad]
+    netbird_setup_key_usage_limit: 0 # set per stage: host count + 2
+    netbird_setup_key_expires_in: 604800 # 7 days
+    # One secret per stage: re-running an older stage must never spend a
+    # newer stage's key.
+    netbird_setup_key_secret: "NETBIRD_INFRA_SETUP_KEY_{{ netbird_setup_key_stage | default('') | upper | replace('-', '_') }}"
+    netbird_headers:
+      Authorization: "Token {{ netbird_api_token }}"
+      Accept: application/json
+  tasks:
+    - name: Read NETBIRD_API_TOKEN from Infisical
+      no_log: true
+      ansible.builtin.command:
+        argv:
+          - infisical
+          - secrets
+          - get
+          - NETBIRD_API_TOKEN
+          - --projectId={{ infisical_project_id }}
+          - --env={{ infisical_env }}
+          - --domain={{ infisical_domain }}
+          - --plain
+      register: token_read
+      changed_when: false
+      failed_when: token_read.rc != 0 or token_read.stdout | length == 0
+
+    - name: Keep the token as a fact
+      no_log: true
+      ansible.builtin.set_fact:
+        netbird_api_token: "{{ token_read.stdout | trim }}"
+
+    # -------------------------------------------------------------------
+    # 1. Account settings
+    # -------------------------------------------------------------------
+    - name: Get the account
+      ansible.builtin.uri:
+        url: "{{ netbird_api }}/accounts"
+        headers: "{{ netbird_headers }}"
+      register: accounts
+
+    - name: Merge the settings this playbook owns
+      ansible.builtin.set_fact:
+        account_id: "{{ accounts.json[0].id }}"
+        account_settings: "{{ accounts.json[0].settings }}"
+        account_settings_wanted: >-
+          {{ accounts.json[0].settings | combine({
+               'groups_propagation_enabled': true,
+               'dns_domain': netbird_dns_domain}) }}
+
+    - name: Update account settings
+      ansible.builtin.uri:
+        url: "{{ netbird_api }}/accounts/{{ account_id }}"
+        method: PUT
+        headers: "{{ netbird_headers }}"
+        body_format: json
+        body:
+          settings: "{{ account_settings_wanted }}"
+      when: account_settings != account_settings_wanted and netbird_enforce | bool
+      changed_when: true
+
+    - name: Record account settings drift
+      ansible.builtin.set_fact:
+        netbird_drift: "{{ netbird_drift | default([]) + ['account settings: groups_propagation_enabled / dns_domain'] }}"
+      when: account_settings != account_settings_wanted
+
+    # -------------------------------------------------------------------
+    # 2. Groups — POST if missing, never PUT
+    # -------------------------------------------------------------------
+    - name: Look up groups
+      ansible.builtin.uri:
+        url: "{{ netbird_api }}/groups?name={{ item }}"
+        headers: "{{ netbird_headers }}"
+        status_code: [200, 404] # a missing name is a 404, not an empty list
+      loop: [infra-nodes, platform-admins]
+      register: group_lookup
+
+    - name: Create missing groups
+      ansible.builtin.uri:
+        url: "{{ netbird_api }}/groups"
+        method: POST
+        headers: "{{ netbird_headers }}"
+        body_format: json
+        body:
+          name: "{{ item.item }}"
+      loop: "{{ group_lookup.results }}"
+      loop_control:
+        label: "{{ item.item }}"
+      when: item.status == 404
+      register: group_create
+      changed_when: true
+
+    - name: Map group names to ids
+      ansible.builtin.set_fact:
+        group_ids: >-
+          {{ group_ids | default({}) | combine({
+               item.0.item: (item.1.json.id if item.1.json is defined else item.0.json[0].id)}) }}
+      loop: "{{ group_lookup.results | zip(group_create.results) | list }}"
+      loop_control:
+        label: "{{ item.0.item }}"
+
+    # -------------------------------------------------------------------
+    # 3. Admins get platform-admins as an auto group
+    # -------------------------------------------------------------------
+    - name: List users
+      ansible.builtin.uri:
+        url: "{{ netbird_api }}/users"
+        headers: "{{ netbird_headers }}"
+      register: users
+
+    - name: Note admin emails with no NetBird user yet
+      ansible.builtin.set_fact:
+        netbird_notes: "{{ netbird_notes | default([]) + [item ~ ' has never logged in to netbird.bnei.dev: log in once, then re-run'] }}"
+      loop: "{{ netbird_admin_emails }}"
+      when: users.json | selectattr('email', 'equalto', item) | list | length == 0
+
+    - name: Add platform-admins to admin users' auto groups
+      ansible.builtin.uri:
+        url: "{{ netbird_api }}/users/{{ item.id }}"
+        method: PUT
+        headers: "{{ netbird_headers }}"
+        body_format: json
+        body:
+          role: "{{ item.role }}"
+          is_blocked: "{{ item.is_blocked }}"
+          auto_groups: "{{ item.auto_groups + [group_ids['platform-admins']] }}"
+      loop: "{{ users.json | selectattr('email', 'in', netbird_admin_emails) | list }}"
+      loop_control:
+        label: "{{ item.email }}"
+      when: group_ids['platform-admins'] not in item.auto_groups and netbird_enforce | bool
+      changed_when: true
+
+    - name: Record admin auto-group drift
+      ansible.builtin.set_fact:
+        netbird_drift: "{{ netbird_drift | default([]) + ['user ' ~ item.email ~ ': platform-admins not in auto groups'] }}"
+      loop: "{{ users.json | selectattr('email', 'in', netbird_admin_emails) | list }}"
+      loop_control:
+        label: "{{ item.email }}"
+      when: group_ids['platform-admins'] not in item.auto_groups
+
+    # -------------------------------------------------------------------
+    # 4. Node SSH policy
+    # -------------------------------------------------------------------
+    - name: List policies
+      ansible.builtin.uri:
+        url: "{{ netbird_api }}/policies"
+        headers: "{{ netbird_headers }}"
+      register: policies
+
+    - name: Build the wanted policy
+      ansible.builtin.set_fact:
+        policy_existing: "{{ policies.json | selectattr('name', 'equalto', 'platform-admins-ssh-infra-nodes') | first | default({}, true) }}"
+        policy_wanted:
+          name: platform-admins-ssh-infra-nodes
+          description: "NetBird SSH from platform-admins' peers to every ukubi host (ADR-0055). Managed by netbird-configure.yml"
+          enabled: true
+          source_posture_checks: []
+          rules:
+            - name: platform-admins-ssh-infra-nodes
+              enabled: true
+              action: accept
+              bidirectional: false
+              protocol: netbird-ssh
+              # Without ports the rule opens every TCP port of the host to
+              # the source peers (seen on the spike: `ip saddr <laptop>
+              # accept`, no dport). 22 is what NetBird redirects to 22022.
+              ports: ["22"]
+              sources: ["{{ group_ids['platform-admins'] }}"]
+              destinations: ["{{ group_ids['infra-nodes'] }}"]
+              authorized_groups: "{{ {group_ids['platform-admins']: netbird_ssh_local_users} }}"
+
+    # GET returns sources/destinations as group objects; compare on ids.
+    # The description is free to edit in the UI.
+    - name: Compare the existing policy
+      ansible.builtin.set_fact:
+        policy_drift: >-
+          {{ policy_existing | length > 0 and (policy_existing.enabled != true
+             or (policy_existing.source_posture_checks | default([])) != []
+             or policy_existing.rules | length != 1
+             or policy_existing.rules[0].protocol != 'netbird-ssh'
+             or (policy_existing.rules[0].ports | default([], true)) != ['22']
+             or policy_existing.rules[0].action != 'accept'
+             or policy_existing.rules[0].bidirectional != false
+             or policy_existing.rules[0].sources | map(attribute='id') | list != [group_ids['platform-admins']]
+             or policy_existing.rules[0].destinations | map(attribute='id') | list != [group_ids['infra-nodes']]
+             or policy_existing.rules[0].authorized_groups | default({}) != policy_wanted.rules[0].authorized_groups) }}
+
+    - name: Create or update the policy
+      ansible.builtin.uri:
+        url: "{{ netbird_api }}/policies{{ '/' ~ policy_existing.id if policy_existing | length > 0 else '' }}"
+        method: "{{ 'PUT' if policy_existing | length > 0 else 'POST' }}"
+        headers: "{{ netbird_headers }}"
+        body_format: json
+        body: "{{ policy_wanted }}"
+      when: policy_existing | length == 0 or (policy_drift | bool and netbird_enforce | bool)
+      changed_when: true
+
+    - name: Record policy drift
+      ansible.builtin.set_fact:
+        netbird_drift: "{{ netbird_drift | default([]) + ['policy platform-admins-ssh-infra-nodes'] }}"
+      when: policy_existing | length > 0 and policy_drift | bool
+
+    # -------------------------------------------------------------------
+    # 5. SSH server switched on, management side, for every infra peer
+    # -------------------------------------------------------------------
+    - name: Read infra-nodes members
+      ansible.builtin.uri:
+        url: "{{ netbird_api }}/groups/{{ group_ids['infra-nodes'] }}"
+        headers: "{{ netbird_headers }}"
+      register: infra_group
+
+    - name: Read infra peers
+      ansible.builtin.uri:
+        url: "{{ netbird_api }}/peers/{{ item.id }}"
+        headers: "{{ netbird_headers }}"
+      loop: "{{ infra_group.json.peers | default([], true) }}"
+      loop_control:
+        label: "{{ item.name }}"
+      register: infra_peers
+
+    - name: Enable SSH on infra peers
+      ansible.builtin.uri:
+        url: "{{ netbird_api }}/peers/{{ item.json.id }}"
+        method: PUT
+        headers: "{{ netbird_headers }}"
+        body_format: json
+        body:
+          name: "{{ item.json.name }}"
+          ssh_enabled: true
+          login_expiration_enabled: "{{ item.json.login_expiration_enabled }}"
+          inactivity_expiration_enabled: "{{ item.json.inactivity_expiration_enabled }}"
+      loop: "{{ infra_peers.results }}"
+      loop_control:
+        label: "{{ item.json.name }}"
+      when: not item.json.ssh_enabled and item.json.user_id | default('', true) == '' and netbird_enforce | bool
+      changed_when: true
+
+    - name: Record peers with SSH off
+      ansible.builtin.set_fact:
+        netbird_drift: "{{ netbird_drift | default([]) + ['peer ' ~ item.json.name ~ ': ssh_enabled is false'] }}"
+      loop: "{{ infra_peers.results }}"
+      loop_control:
+        label: "{{ item.json.name }}"
+      when: not item.json.ssh_enabled and item.json.user_id | default('', true) == ''
+
+    # Infra hosts enroll with a setup key and have no owning user. A user's
+    # peer here means someone added infra-nodes to a user's auto groups and
+    # propagation pulled a laptop in: never switch its SSH server on.
+    - name: Note user-owned peers in infra-nodes
+      ansible.builtin.set_fact:
+        netbird_notes: "{{ netbird_notes | default([]) + ['peer ' ~ item.json.name ~ ': user-owned, must not be in infra-nodes (check user auto groups)'] }}"
+      loop: "{{ infra_peers.results }}"
+      loop_control:
+        label: "{{ item.json.name }}"
+      when: item.json.user_id | default('', true) != ''
+
+    # -------------------------------------------------------------------
+    # 6. Setup key for one rollout stage (opt-in)
+    # -------------------------------------------------------------------
+    - name: Setup key
+      when: netbird_setup_key_stage is defined
+      block:
+        - name: Fail without a usage limit
+          no_log: false
+          ansible.builtin.assert:
+            that: netbird_setup_key_usage_limit | int > 0
+            fail_msg: "Pass -e netbird_setup_key_usage_limit=<stage host count + 2> (ADR-0055)"
+
+        - name: List setup keys
+          ansible.builtin.uri:
+            url: "{{ netbird_api }}/setup-keys"
+            headers: "{{ netbird_headers }}"
+          register: setup_keys
+
+        - name: Fail if this stage already has a valid key
+          no_log: false
+          ansible.builtin.assert:
+            that: >-
+              setup_keys.json | selectattr('name', 'equalto', 'infra-' ~ netbird_setup_key_stage)
+              | selectattr('valid') | list | length == 0
+            fail_msg: >-
+              infra-{{ netbird_setup_key_stage }} is still valid and its plaintext is only
+              shown on create. Use {{ netbird_setup_key_secret }}, or revoke it and re-run.
+
+        - name: Create the setup key
+          no_log: true
+          ansible.builtin.uri:
+            url: "{{ netbird_api }}/setup-keys"
+            method: POST
+            headers: "{{ netbird_headers }}"
+            body_format: json
+            body:
+              name: "infra-{{ netbird_setup_key_stage }}"
+              type: reusable
+              expires_in: "{{ netbird_setup_key_expires_in | int }}"
+              auto_groups: ["{{ group_ids['infra-nodes'] }}"]
+              usage_limit: "{{ netbird_setup_key_usage_limit | int }}"
+              ephemeral: false
+          register: setup_key
+          changed_when: true
+
+        # The plaintext exists only in this response. Hand it to Infisical
+        # through a 0600 file (never argv, where `ps` shows it); if that
+        # fails, revoke the key rather than leave a live key nobody holds.
+        - name: Store the setup key
+          block:
+            - name: Make a temp file for the key
+              ansible.builtin.tempfile:
+                suffix: .env
+              register: key_env
+
+            - name: Write the key to the temp file
+              ansible.builtin.copy:
+                content: "{{ netbird_setup_key_secret }}={{ setup_key.json.key }}\n"
+                dest: "{{ key_env.path }}"
+                mode: "0600"
+
+            - name: Write the stage key to Infisical as {{ netbird_setup_key_secret }}
+              ansible.builtin.command:
+                argv:
+                  - infisical
+                  - secrets
+                  - set
+                  - --projectId={{ infisical_project_id }}
+                  - --env={{ infisical_env }}
+                  - --domain={{ infisical_domain }}
+                  - --type=shared
+                  - --file={{ key_env.path }}
+              changed_when: true
+          rescue:
+            - name: Revoke the key nobody holds
+              ansible.builtin.uri:
+                url: "{{ netbird_api }}/setup-keys/{{ setup_key.json.id }}"
+                method: PUT
+                headers: "{{ netbird_headers }}"
+                body_format: json
+                body:
+                  revoked: true
+                  auto_groups: ["{{ group_ids['infra-nodes'] }}"]
+
+            - name: Fail after revoking
+              no_log: false
+              ansible.builtin.fail:
+                msg: "Could not store the setup key in Infisical; infra-{{ netbird_setup_key_stage }} was revoked. Fix the Infisical session and re-run."
+          always:
+            - name: Remove the temp file
+              ansible.builtin.file:
+                path: "{{ key_env.path }}"
+                state: absent
+              when: key_env.path is defined
+
+    # -------------------------------------------------------------------
+    # 7. Drift report
+    # -------------------------------------------------------------------
+    - name: Report drift
+      no_log: false
+      ansible.builtin.debug:
+        msg: >-
+          {{ 'Fixed (netbird_enforce=true): ' if netbird_enforce | bool
+             else 'Differs from this file, left as is (re-run with -e netbird_enforce=true to overwrite): ' }}
+          {{ netbird_drift | default([]) | join('; ') if netbird_drift is defined else 'none' }}
+
+    - name: Report what needs a human (never changed by this playbook)
+      no_log: false
+      ansible.builtin.debug:
+        msg: "{{ netbird_notes | join('; ') }}"
+      when: netbird_notes is defined
