@@ -2,7 +2,7 @@
 
 **Status:** Accepted — decided 2026-10-11, approved by M BN after an
 architecture interview and two adversarial review cycles. **Not live.**
-Rollout is gated on a spike (Rollout step 3). If the spike fails on the
+Rollout is gated on a spike (Rollout step 4). If the spike fails on the
 automation half, Decision 3's light runs fall back to keys over the LAN and
 the rest stands.
 **Date:** 2026-10-11
@@ -136,6 +136,12 @@ the propagation setting, setup keys and peer names. It adopts the existing
 never send `peers`** — the API's PUT replaces the whole member list. A human
 runs it, like every playbook here.
 
+**The dashboard stays a first-class editor.** Using both, or only the UI, must
+never clash. A default run only creates what is missing and reports drift; it
+overwrites a UI edit only with `-e netbird_enforce=true`, and only on the fields
+it names. Objects are matched by name, so renaming a managed one in the UI makes
+the next run create a duplicate. Everything it does not name is never written.
+
 ### 7. Observability
 
 Scrape `metricsPort: 9090` with a ServiceMonitor (zot's pattern), and add
@@ -150,8 +156,12 @@ blackbox probe.
 
 1. This ADR and the docs it changes.
 2. Observability (independent).
-3. **Spike**, by hand, on the witness `.197`, one k8s worker and one non-storage
-   LXC. Log the results in `docs/bootstrap-test-notes.md`. Pass criteria:
+3. `netbird-configure.yml`, first part: account settings, groups, admin auto
+   group, posture check, SSH policy, per-peer `ssh_enabled`, setup key. Pulled
+   ahead of the spike so the spike runs on the declared state, not on clicks.
+4. **Spike**, by hand, on the witness `.197`, one k8s worker (not
+   `k8s-worker-01`, whose host `.165` is the bit-flip suspect) and one
+   non-storage LXC. Log the results in `docs/bootstrap-test-notes.md`. Pass criteria:
    - From the LAN, an infra peer reaches management (hairpin), and the laptop
      passes the FR geo check from home.
    - The groups claim arrives, or the manual fallback is in place.
@@ -168,11 +178,12 @@ blackbox probe.
    - The Freebox LAN IPv6 prefix, and which address family LAN SSH uses.
    - Pod → Postgres connections arrive from node IPs (so 5432 can leave the
      public zone).
-4. `netbird-configure.yml`, the records move, the overlay inventory.
-5. Enrollment, staged: witness → k8s workers one at a time → control plane →
+5. `netbird-configure.yml`, second part: peer names, the records move, the
+   overlay inventory.
+6. Enrollment, staged: witness → k8s workers one at a time → control plane →
    Patroni replica (from `patronictl list`, not the name) → leader →
    non-storage LXCs → PVE → Pi-hole → garage/nfs in a window.
-6. Cutover: the `sshd` `Match` blocks, the break-glass key, `:49222` restricted
+7. Cutover: the `sshd` `Match` blocks, the break-glass key, `:49222` restricted
    to it, and the `k8s-ops`/`ansible-ops`/`run-ukubi-ops` skills.
 
 ## Consequences
