@@ -30,7 +30,8 @@ INF=(--projectId=8a3fa54f-be22-488a-bf51-55158f65c0f2 --env=dev --domain=https:/
 DEX_CONNECTOR_ID="${NETBIRD_DEX_CONNECTOR_ID:-db5q6h0g15ss73edt1eg}"
 CACHE="${TMPDIR:-/tmp}/node-sh-netbird-jwt"
 
-secret() { infisical secrets get "$1" "${INF[@]}" 2>/dev/null; }
+# --plain ends with a newline; a posted password must not.
+secret() { infisical secrets get "$1" "${INF[@]}" 2>/dev/null | tr -d '\n'; }
 
 mint() {
   if [ -s "$CACHE" ] && [ $(( $(date +%s) - $(stat -f %m "$CACHE" 2>/dev/null || stat -c %Y "$CACHE") )) -lt 540 ]; then
@@ -38,11 +39,11 @@ mint() {
   fi
   local client_id id_token jwt
   client_id="$(secret NETBIRD_OIDC_CLIENT_ID)"
-  id_token="$(secret NETBIRD_AGENT_APP_PASSWORD | curl -sf https://authentik.bnei.dev/application/o/token/ \
+  id_token="$(secret NETBIRD_AGENT_APP_PASSWORD | curl -s https://authentik.bnei.dev/application/o/token/ \
     -d grant_type=client_credentials -d "client_id=$client_id" -d username=netbird-agent \
     --data-urlencode password@- -d 'scope=openid profile email' | jq -r '.id_token // empty')"
   [ -n "$id_token" ] || { echo "authentik refused the netbird-agent client_credentials grant" >&2; exit 1; }
-  jwt="$(printf '%s' "$id_token" | curl -sf https://netbird.bnei.dev/oauth2/token \
+  jwt="$(printf '%s' "$id_token" | curl -s https://netbird.bnei.dev/oauth2/token \
     -d grant_type=urn:ietf:params:oauth:grant-type:token-exchange -d client_id=netbird-cli \
     -d "connector_id=$DEX_CONNECTOR_ID" --data-urlencode subject_token@- \
     -d subject_token_type=urn:ietf:params:oauth:token-type:id_token \
