@@ -168,9 +168,11 @@ assigned in NetBird until it is tested.
   - `netbirddb`: management, holding peers, groups, policies and setup keys.
   - `netbirdeventsdb`: activity.
   - `netbirdidpdb`: Dex.
-- **Backup** is therefore pgBackRest (ADR-0042) alone. There is no PVC to
-  restore at a different point in time. The required `dataDir` is an
-  `emptyDir`.
+- **Backup** is therefore pgBackRest (ADR-0042) alone. The required
+  `dataDir` is a 1Gi Longhorn PVC, but it holds only a cache: the GeoLite
+  databases management downloads at boot. It started as an `emptyDir`, and
+  the first deploy crashed once re-downloading them (a failed load is fatal),
+  so it moved to a PVC. It needs no backup.
 - **`server.store.encryptionKey`** (`NETBIRD_STORE_ENCRYPTION_KEY`) lives
   only in Infisical. Without it a restored `netbirddb` is unreadable. A
   restore also needs the same domain.
