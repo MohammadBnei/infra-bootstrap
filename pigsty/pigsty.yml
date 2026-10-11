@@ -281,10 +281,20 @@ all:
           # combined server keeps three stores (management, activity events, the
           # embedded Dex) and NetBird's own docs give the Dex store its own DB —
           # their table sets were never promised not to collide.
+          #
+          # connlimit 50, not hq's 20 — measured, not guessed. On 2026-10-11 the
+          # role sat at 20/20 (19 idle on netbirddb) and every dashboard API call
+          # failed `too many connections for role`. netbird v0.80.0 opens, per
+          # process: a gorm pool capped by NB_SQL_MAX_OPEN_CONNS (5), a SECOND
+          # pgxpool on the same DB hardcoded to MaxConns = 30 and set after the
+          # DSN is parsed, so nothing configurable lowers it
+          # (management/server/store/sql_store.go:56,254), 5 for activity, and
+          # Dex's default 5. About 45 worst case; 50 leaves a margin. Postgres
+          # max_connections is 500 with ~76 in use, so this costs nothing real.
           - name: dbuser_netbird
             password: 'SCRAM-SHA-256$4096:8F1+mCkpmiNLTBb997+J9Q==$JxbDWNbIefznPtaElVWkfp/mXF9Zbg/Nt8at2K2oVfk=:JYykD4DtDea6cmdbye3IXG/rOjPXLXCVW1Lv6MhjMUY='
             pgbouncer: false
-            connlimit: 20
+            connlimit: 50
             comment: NetBird control plane — management, events and Dex stores (ADR-0054)
             roles: [dbrole_readwrite]
 

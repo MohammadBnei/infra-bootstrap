@@ -47,8 +47,10 @@ resources:
 # Both gorm pools (management, activity) default to runtime.NumCPU() open
 # connections — the HOST's CPUs, not the container's limit (v0.80.0
 # management/server/store/sql_store.go:83, activity/store/sql_store.go:286).
-# On a big node that alone exceeds dbuser_netbird's connlimit of 20, and Dex
-# holds a third pool. 5 each leaves room for Dex. Recreate means no second pod.
+# Capping them at 5 matters less than it looks: the Postgres store also opens
+# a pgxpool hardcoded to 30 that no setting reaches, which is why
+# dbuser_netbird's connlimit is 50 (pigsty/pigsty.yml). Recreate means no
+# second pod ever doubles it.
 env:
   - name: NB_SQL_MAX_OPEN_CONNS
     value: "5"
@@ -72,24 +74,28 @@ readinessProbe:
   enabled: true
   type: tcp
 
+# dataDir on a PVC, not an emptyDir. All three stores are in Pigsty, but the
+# GeoLite databases are not: management downloads them into dataDir at boot,
+# and a failed load is FATAL (v0.80.0 management/internals/server/modules.go:50).
+# On an emptyDir every restart re-downloaded them, and the first deploy crashed
+# once on `failed to load MaxMind databases: checksum mismatch` (2026-10-11).
+# disableGeoliteUpdate is no way out: with no local file it errors the same.
+# Longhorn, so it is replicated, though nothing here needs a backup — it is a
+# cache. Recreate (above) keeps the RWO volume from deadlocking a rollout.
+persistence:
+  enabled: true
+  size: 1Gi
+  mountPath: /var/lib/netbird
+
 extraVolumes:
   - name: config
     secret:
       secretName: netbird-config
-  # dataDir is required by the server even with every store on Postgres
-  # (config.go's Validate). ponytail: emptyDir, because all three stores are
-  # in Pigsty and nothing written here was found to need surviving a restart.
-  # If a restart ever loses state, it is this: swap for persistence: (the
-  # strategy above is already Recreate, so an RWO PVC cannot deadlock it).
-  - name: data
-    emptyDir: {}
 
 extraVolumeMounts:
   - name: config
     mountPath: /etc/netbird
     readOnly: true
-  - name: data
-    mountPath: /var/lib/netbird
 
 extraManifests:
   # The one route for netbird.bnei.dev's server paths. The dashboard's
