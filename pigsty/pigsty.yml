@@ -275,6 +275,19 @@ all:
             comment: hq — personal dashboard, inbox of edits and comments (ADR-0053)
             roles: [dbrole_readwrite]
 
+          # NetBird control plane (ADR-0054). hq's arrangement: the plaintext is
+          # DBUSER_NETBIRD_PASSWORD in Infisical, only the verifier is here, and
+          # netbird-server dials 5432 direct. It owns three databases because the
+          # combined server keeps three stores (management, activity events, the
+          # embedded Dex) and NetBird's own docs give the Dex store its own DB —
+          # their table sets were never promised not to collide.
+          - name: dbuser_netbird
+            password: 'SCRAM-SHA-256$4096:8F1+mCkpmiNLTBb997+J9Q==$JxbDWNbIefznPtaElVWkfp/mXF9Zbg/Nt8at2K2oVfk=:JYykD4DtDea6cmdbye3IXG/rOjPXLXCVW1Lv6MhjMUY='
+            pgbouncer: false
+            connlimit: 20
+            comment: NetBird control plane — management, events and Dex stores (ADR-0054)
+            roles: [dbrole_readwrite]
+
         # define business databases : https://pigsty.io/docs/pgsql/config/db
         pg_databases:
           - name: meta
@@ -425,6 +438,28 @@ all:
           - name: hqdb
             comment: hq — personal dashboard inbox
             owner: dbuser_hq
+            revokeconn: true
+            pgbouncer: false
+            register_datasource: false
+
+          # NetBird (ADR-0054), hqdb's switches for hqdb's reasons. Losing
+          # netbirddb loses every peer, policy and setup key; the other two are
+          # an audit log and Dex sessions, which only cost a re-login.
+          - name: netbirddb
+            comment: NetBird management store — peers, groups, policies
+            owner: dbuser_netbird
+            revokeconn: true
+            pgbouncer: false
+            register_datasource: false
+          - name: netbirdeventsdb
+            comment: NetBird activity events
+            owner: dbuser_netbird
+            revokeconn: true
+            pgbouncer: false
+            register_datasource: false
+          - name: netbirdidpdb
+            comment: NetBird embedded Dex store
+            owner: dbuser_netbird
             revokeconn: true
             pgbouncer: false
             register_datasource: false

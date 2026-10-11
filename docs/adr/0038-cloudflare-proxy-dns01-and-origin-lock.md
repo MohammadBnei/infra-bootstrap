@@ -239,6 +239,7 @@ What was actually done:
 | `bnei.dev`, `*.bnei.dev` | proxied | Universal SSL covers apex + one wildcard level |
 | `fleet.bnei.dev` | explicit grey A | ConnectRPC streaming; Cloudflare Free 524s at 100s |
 | `s3.bnei.dev` | explicit grey A | SigV4 vs proxy path normalization untested; Ente depends on it |
+| `netbird.bnei.dev` | explicit grey A | STUN (UDP 3478) shares the name, and the proxy carries no UDP. Long gRPC streams too. Origin lock off (ADR-0054) |
 | `*.ente.bnei.dev` | grey | Two labels deep — no edge cert. URLs already shared publicly |
 | `*.e2e.bnei.dev` | deleted | Previews to be renamed to `<id>-e2e` (first-level) |
 

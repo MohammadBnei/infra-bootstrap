@@ -48,6 +48,19 @@ spec:
         namespace: zot
         hostname: ""
 
+      # NetBird control plane (ADR-0054), two releases in one namespace.
+      # The server's hostname is empty for zot's reason: its route is
+      # hand-written in values/netbird (gRPC paths need h2c), and its
+      # values set ingress.enabled: false. The dashboard owns the host's
+      # catch-all route through the chart as usual.
+      - name: netbird
+        namespace: netbird
+        hostname: ""
+
+      - name: netbird-dashboard
+        namespace: netbird
+        hostname: netbird.bnei.dev
+
   template:
     metadata:
       name: '{{.name}}'
