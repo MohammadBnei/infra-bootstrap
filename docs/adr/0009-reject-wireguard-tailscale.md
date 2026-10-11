@@ -3,7 +3,10 @@
 **Status:** Rejected — narrowed 2026-10-11 by
 [ADR-0054](0054-netbird-control-plane-hosting-only.md): the cluster may
 *host* a NetBird control plane for an external mesh it never joins.
-Everything below still holds for the cluster itself.
+**Superseded for SSH access 2026-10-11 by
+[ADR-0055](0055-netbird-as-daily-ssh-path.md):** every host joins that mesh
+as a NetBird SSH peer. Routes, network resources and exit nodes into the LAN
+stay rejected.
 
 ## Context
 
