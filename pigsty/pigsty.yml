@@ -275,6 +275,19 @@ all:
             comment: hq — personal dashboard, inbox of edits and comments (ADR-0053)
             roles: [dbrole_readwrite]
 
+          # mountain — public live 3D view of ukubi (ADR-0056). hq's shape, field
+          # for field: the SCRAM verifier is committed and the plaintext lives in
+          # Infisical as DBUSER_MOUNTAIN_PASSWORD; pgbouncer: false because it is a
+          # Go/pgx relay dialing 5432 direct. connlimit 10, not hq's 20: one
+          # replica with Recreate, so two pods never overlap, and a pool that
+          # stores an event log has no reason to want more.
+          - name: dbuser_mountain
+            password: 'SCRAM-SHA-256$4096:j9stYANzX+1Akz6k/8GGEw==$I1Zu7BQ5wXMxa/xG8X7h4/y5hWrBgFTjthrfahlgHa0=:+L/vZLgpJISA4MOVh4m6VWcnOB7kREJ8LCaWIGmNRTE='
+            pgbouncer: false
+            connlimit: 10
+            comment: mountain — event log, world snapshots, visitor marks (ADR-0056)
+            roles: [dbrole_readwrite]
+
           # NetBird control plane (ADR-0054). hq's arrangement: the plaintext is
           # DBUSER_NETBIRD_PASSWORD in Infisical, only the verifier is here, and
           # netbird-server dials 5432 direct. It owns three databases because the
@@ -448,6 +461,14 @@ all:
           - name: hqdb
             comment: hq — personal dashboard inbox
             owner: dbuser_hq
+            revokeconn: true
+            pgbouncer: false
+            register_datasource: false
+
+          # mountain (ADR-0056), hqdb's switches for hqdb's reasons.
+          - name: mountaindb
+            comment: mountain — event log, world snapshots, visitor marks
+            owner: dbuser_mountain
             revokeconn: true
             pgbouncer: false
             register_datasource: false
