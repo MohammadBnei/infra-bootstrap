@@ -185,3 +185,8 @@ This repo is mid-bootstrap, not finished:
 - `/build-runner-ops` — the `build-runner` LXC's GitHub Actions runner
   instances (one per build repo, ADR-0034): add a build repo, inspect
   runner/build/disk state, debug a queued or failing image build.
+- `/dev-pod` — iterate on any app against the live cluster with no image
+  build, registry push or ArgoCD deploy: throwaway `purpose=dev` namespace,
+  one alpine pod, binary hot-swapped via `kubectl cp`, port-forward only.
+  Ships a drop-in `devpod.sh` template. Not a substitute for the real
+  `/add-app` + ArgoCD deploy test.
