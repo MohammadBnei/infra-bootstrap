@@ -317,8 +317,8 @@
 # (common-app-chart has no ServiceMonitor template).
 #
 # Merge only after mountain's CI has replaced image.tag "unreleased" with a
-# built SHA, or the first sync is an ImagePullBackOff (hq/wird rule). No
-# DATABASE_URL yet — mountain-secret.yaml lands with W2.
+# built SHA, or the first sync is an ImagePullBackOff (hq/wird rule).
+# DATABASE_URL: gitops/bootstrap/mountain-secret.yaml (Secret mountain-config, envFrom).
 - name: mountain
   namespace: mountain
   syncWave: "10"
