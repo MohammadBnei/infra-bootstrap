@@ -94,7 +94,9 @@ metrics:
       enabled: true
     serviceMonitor:
       enabled: true
-      interval: 60s
+      # 15s, not 60s: mountain (ADR-0056) turns per-service request rate into
+      # motion, and a 1m scrape makes a deploy show up a minute late.
+      interval: 15s
     # Both the serviceMonitor and prometheusRule templates `fail` the whole
     # chart render if monitoring.coreos.com/v1 is absent. Traefik is sync-wave
     # 2; the Prometheus CRDs arrive with platform-prometheus at wave 5. Without
