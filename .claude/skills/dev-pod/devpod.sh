@@ -32,7 +32,7 @@ K="kubectl -n $NS"
 push() {
   (cd "$ROOT" && build)
   $K cp "$BIN" "$APP:/app/$APP.new" -c "$APP"
-  $K exec "$APP" -c "$APP" -- sh -c "chmod +x /app/$APP.new && mv /app/$APP.new /app/$APP && { pkill -x $APP || true; }"
+  $K exec "$APP" -c "$APP" -- sh -c "chmod +x /app/$APP.new && mv /app/$APP.new /app/$APP && { p=\$(pidof $APP) && kill \$p || true; }"
   echo "pushed $(shasum -a 256 "$BIN" | cut -c1-12)"
 }
 
@@ -48,7 +48,7 @@ spec:
   containers:
     - name: $APP
       image: docker.io/library/alpine:3.20
-      # Supervisor loop: pkill the binary => restarts with whatever is at /app/$APP.
+      # Supervisor loop: killing the binary (pidof + kill) => restarts with whatever is at /app/$APP.
       command: [sh, -c, 'while true; do [ -x /app/$APP ] && /app/$APP $ARGS; sleep 1; done']
       env: $ENV_YAML
       resources: { requests: { cpu: 20m, memory: 32Mi }, limits: { memory: 256Mi } }

@@ -30,7 +30,7 @@ code → live-data loop.
 3. Run one bare pod (`docker.io/library/alpine`) whose command is a
    supervisor loop: `while true; do [ -x /app/bin ] && /app/bin <args>; sleep 1; done`
    over an `emptyDir` at `/app`.
-4. `kubectl cp` the binary to `/app/bin.new`, then `mv` + `pkill` — the
+4. `kubectl cp` the binary to `/app/bin.new`, then `mv` + `kill $(pidof <app>)` — the
    loop restarts it within a second.
 5. Reach it only through `kubectl port-forward` — no Service, no
    IngressRoute, nothing public.
@@ -66,7 +66,7 @@ The template only needs `build()` to leave something executable at `$BIN`.
   runtime (`python:3.12-alpine`, `node:22-alpine` — keep the `-alpine`
   variant, see `kubectl cp` gotcha), `kubectl cp` the source dir instead of
   a binary, and make the supervisor run `python /app/src/main.py` /
-  `node /app/src/index.js`. Hot-swap is then: cp sources, `pkill` the
+  `node /app/src/index.js`. Hot-swap is then: cp sources, `kill $(pidof <interpreter>)` the
   interpreter. Dependencies either vendored into the copied dir or
   installed once into another `emptyDir` (`pip install --target`,
   `npm ci` with `HOME`/cache pointed at `/tmp`).
@@ -104,7 +104,7 @@ The template only needs `build()` to leave something executable at `$BIN`.
   (`/app`, `/tmp`). An app that writes to `$HOME`, a cache dir or its own
   working dir needs that path pointed at `/tmp` or another emptyDir added.
 - **`kubectl cp` needs `tar` in the image** — hence alpine, not
-  distroless/scratch. `pkill` comes from busybox too.
+  distroless/scratch. Use `kill $(pidof <app>)`, not busybox `pkill -x <app>`: on alpine 3.20 `pkill -x` matched nothing (rc=1) while `pidof` found the process, so the hot-swap silently kept the old binary. Verified live 2026-10-14.
 - **Origin/CORS checks:** the browser sees `http://127.0.0.1:<port>`.
   An app that checks `Origin` (websockets especially) needs a dev flag
   that allows `http://127.0.0.1:*` / `http://localhost:*` — and that flag
