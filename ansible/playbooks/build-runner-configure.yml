@@ -93,6 +93,10 @@
       # hq's dashboard image (ADR-0053). PAT repo list first, as above.
       - name: hq
         url: https://github.com/MohammadBnei/hq
+      # mountain's relay + www image (ADR-0056). Private repo, so no fork PR
+      # can reach this box. PAT repo list first, as above.
+      - name: mountain
+        url: https://github.com/MohammadBnei/mountain
     # NOT `ukubi` — that label belongs to the in-cluster runner holding a
     # ServiceAccount token with `create jobs` in vos/vos-dev. Builds must
     # not land there and cluster jobs must not land here.

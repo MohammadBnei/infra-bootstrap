@@ -236,6 +236,15 @@ updated.
   two laptops and a Pi off-site. authentik is the only login, through
   the server's embedded Dex. All three stores live on Pigsty. See
   [ADR-0054](docs/adr/0054-netbird-control-plane-hosting-only.md).
+- **`mountain.bnei.dev` reads the cluster through PromQL only** (ADR-0056).
+  A public, live 3D view of ukubi. Its relay holds no ServiceAccount token and no
+  RBAC — kube-state-metrics, ArgoCD and node metrics in Prometheus carry every
+  signal — so ADR-0032's single broad read grant stays single. What it shows the
+  internet is built by **allowlist** (named apps only, hosts as `h1..h3`,
+  bucketed values, no versions, alert fingerprints hashed), never by deleting
+  fields from a richer object. Sources with no metric (Garage, Pigsty) are drawn
+  as unmeasured, not guessed. Visitor accounts need their own ADR first. See
+  [ADR-0056](docs/adr/0056-mountain-public-live-cluster-view.md).
 - **NetBird is the daily SSH path to every host** (ADR-0055, accepted,
   rolling out — 14 hosts enrolled 2026-10-11, all but
   hermesagent/garage-storage/nfs-storage, human SSH over the
