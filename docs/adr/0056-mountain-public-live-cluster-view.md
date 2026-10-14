@@ -2,8 +2,11 @@
 
 **Status:** Accepted — decided 2026-10-14, approved by M BN. This PR lands the
 groundwork only: `dbuser_mountain`/`mountaindb` in `pigsty/pigsty.yml` and the
-`mountain` build-runner instance. **Not yet live:** neither playbook has run,
-and the app registration (`/add-app`) waits for the first image.
+`mountain` build-runner instance. **Live 2026-10-14:** runner
+`ukubi-build-mountain` online; `dbuser_mountain`/`mountaindb` created against
+`.205` (Patroni leader, `ignored=0`), with connlimit, owner, revoked PUBLIC
+connect and a VIP login verified. The app registration (`/add-app`) waits for
+the first image.
 **Date:** 2026-10-14
 **Related:** [ADR-0032](0032-thot-rbac-and-alerting.md) (the one broad read
 grant, which this deliberately does not repeat),
