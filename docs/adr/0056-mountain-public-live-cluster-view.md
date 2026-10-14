@@ -64,7 +64,10 @@ Two things make that architecturally significant here:
    verifier is committed and the plaintext is `DBUSER_MOUNTAIN_PASSWORD` in this
    repo's Infisical project. `pgbouncer: false` because the relay is Go/pgx
    dialing 5432 direct. `revokeconn`, no Grafana datasource. `connlimit: 10`,
-   because the relay runs one replica with `Recreate`.
+   because the relay runs one replica with `Recreate`. The relay **must set
+   pgxpool `MaxConns` explicitly (≤ 8)**: the default is `max(4, NumCPU)`,
+   which on a node with more than 10 CPUs would exceed the ceiling and fail
+   with `too many connections for role` (hq's comment in `pigsty.yml`).
 
 6. **Build on the build-runner LXC** as its own instance, per ADR-0034. The
    repo is **private**, so no fork PR can run on the box that holds the zot
