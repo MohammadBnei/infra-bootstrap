@@ -164,7 +164,7 @@ one Infisical row.
 | App | Where it is read | Expression |
 |---|---|---|
 | ArgoCD | `gitops/bootstrap/argocd-application.yaml` | `configs.rbac.policy.default: role:readonly` + `policy.csv: g, platform-admins, role:admin` + `scopes: "[groups, email]"` |
-| Grafana | `gitops/platform/values/grafana/values.yaml` | `role_attribute_path: contains(groups[*], 'platform-admins') && 'Admin' \|\| 'Viewer'`, with `allow_assign_grafana_admin: false` |
+| Grafana | `gitops/platform/values/grafana/values.yaml` | `role_attribute_path: contains(groups[*], 'platform-admins') && 'Admin' \|\| ''` + `role_attribute_strict: true` (anyone else is refused, not Viewer), with `allow_assign_grafana_admin: false` |
 | Hermes dashboard | nowhere — it has no roles | **none.** The `policybinding` in `authentik-blueprint-hermes-policy.yaml` is the entire authorization decision, which is why `gitops/redirectors/hermes.yaml` also carries `authentik-forwardauth`: two gates reading the same group, because there is no in-app floor to fall back to (ADR-0051) |
 
 Adding a person is one line in one file, not a per-app allowlist that drifts.
@@ -183,7 +183,8 @@ entire membership of the group. Deleting a line removes that person's access
 everywhere the group is honoured — which is the point, and also the trap.
 
 **Both role expressions fail closed *on a missing claim*.** A `groups` claim that
-is absent or does not contain `platform-admins` yields Viewer in Grafana and
+is absent or does not contain `platform-admins` refuses the login in Grafana
+(strict mode, since mountain W4) and yields
 `policy.default` (`role:readonly`) in ArgoCD, never admin. An expression that
 defaults high turns a broken group lookup into privilege escalation.
 
@@ -346,8 +347,9 @@ reproduce ArgoCD's doubling. That difference is the whole reason one app broke a
 the other did not.
 
 It is unchanged and stays. Grafana's group mapping has nonetheless never been
-observed resolving to Admin end to end — a login that lands in Viewer looks
-identical whether the group arrived or not. See §13.
+observed resolving to Admin end to end. Since strict mode, a login where the
+group did not arrive is refused rather than landing in Viewer, so the first
+successful OAuth login after this change is that observation. See §13.
 
 ## 7. The ArgoCD credential plumbing
 
@@ -819,6 +821,8 @@ user ID. Treat it as immutable.
   indistinguishable from one where the group never arrived. Grafana's userinfo call
   does not have ArgoCD's doubling problem — it takes a full URL — so there is no
   known reason for it to fail; that is not the same as having seen it succeed.
+  Since strict mode (mountain W4) the two cases differ: no group means the OAuth
+  login is refused, and the local admin is the way back in.
 
 Log anything surprising to `docs/bootstrap-test-notes.md`, not to memory.
 
