@@ -59,6 +59,17 @@ jobs:
       - name: yamllint
         run: yamllint -c gitops/.yamllint gitops/
 
+      # PyYAML comes with yamllint. The second run proves the gate still fails
+      # on a fixture app with no valid binding. The live half (--live) needs
+      # the cluster, so it is run by hand: see the script's header.
+      - name: every authentik application carries a policy binding
+        run: |
+          set -euo pipefail
+          python3 gitops/scripts/check-authentik-bindings.py
+          if python3 gitops/scripts/check-authentik-bindings.py gitops/scripts/testdata/authentik-blueprint-unbound-app.yaml; then
+            echo "::error::binding gate passed its unbound fixture"; exit 1
+          fi
+
       - uses: azure/setup-helm@v5.0.1
         with:
           version: "v4.2.3"
