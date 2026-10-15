@@ -243,8 +243,11 @@ updated.
   internet is built by **allowlist** (named apps only, hosts as `h1..h3`,
   bucketed values, no versions, alert fingerprints hashed), never by deleting
   fields from a richer object. Sources with no metric (Garage, Pigsty) are drawn
-  as unmeasured, not guessed. Visitor accounts need their own ADR first. See
-  [ADR-0056](docs/adr/0056-mountain-public-live-cluster-view.md).
+  as unmeasured, not guessed. Visitor accounts are self-service into
+  `mountain-visitors` only, behind a Turnstile captcha and email verification,
+  bound to the `mountain` application alone (ADR-0057). See
+  [ADR-0056](docs/adr/0056-mountain-public-live-cluster-view.md) and
+  [ADR-0057](docs/adr/0057-mountain-visitor-enrollment.md).
 - **NetBird is the daily SSH path to every host** (ADR-0055, accepted,
   rolling out — 14 hosts enrolled 2026-10-11, all but
   hermesagent/garage-storage/nfs-storage, human SSH over the

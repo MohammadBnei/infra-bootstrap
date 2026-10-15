@@ -1,0 +1,255 @@
+# Self-service enrollment for mountain's visitor layer (ADR-0057). A visitor
+# passes a Cloudflare Turnstile check, picks a handle, verifies their email,
+# and lands in `mountain-visitors` and nothing else. That group is bound to the
+# `mountain` application only (authentik-blueprint-mountain-policy.yaml); every
+# other application is bound to a group a visitor is never in, so enrolling here
+# grants mountain marks and nothing else.
+#
+# CLONED FROM authentik-blueprint-wird-enrollment.yaml — read its header for the
+# group-declared-locally rule (`!KeyOf`, never `!Find`: a `!Find` miss on
+# create_users_group returns None and every user enrolled in that window gets
+# no group, permanently), the deliberately unset brand `enrollment_flow`, and
+# the SMTP dependency. The differences:
+#
+# - A CAPTCHA STAGE FIRST. Stage fields verified against upstream
+#   authentik/stages/captcha/models.py at version/2026.8.0 and the Turnstile
+#   preset in web/src/admin/stages/captcha/shared.ts. The keys come from
+#   MOUNTAIN_TURNSTILE_SITE_KEY / MOUNTAIN_TURNSTILE_SECRET_KEY in authentik's
+#   env (authentik-secret.yaml). `!Env` with no default resolves to None when
+#   the variable is missing, public_key/private_key are required fields, so
+#   this whole blueprint fails to validate and no flow exists: there is never a
+#   mountain enrollment without a captcha.
+#   ROTATION does not re-apply this file: discovery re-applies only when the
+#   FILE hash changes, and an env change leaves it identical. After rotating,
+#   restart the worker (env is bound at start), then
+#     kubectl -n authentik exec deploy/platform-authentik-worker -- ak apply_blueprint \
+#       /blueprints/mounted/cm-authentik-blueprint-mountain-enrollment/mountain-enrollment.yaml
+# - NO NAME FIELD. The handle (username) is the only thing a visitor types that
+#   anyone else sees, and it is moderated by mountain-handle below. A free-text
+#   `name` would ride along in the ID token's profile claims unmoderated.
+#
+# Reached at its own URL, the mountain page's "Sign in to play":
+#   https://authentik.bnei.dev/if/flow/mountain-enrollment/
+#
+# A plain ConfigMap: the secret key arrives by `!Env`, so nothing here is
+# secret.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: authentik-blueprint-mountain-enrollment
+  namespace: authentik
+data:
+  mountain-enrollment.yaml: |
+    version: 1
+    metadata:
+      name: mountain-enrollment
+      labels:
+        blueprints.goauthentik.io/instantiate: "true"
+    entries:
+      # Same declaration as in authentik-blueprint-mountain-policy.yaml, on
+      # purpose. No `users:` — membership is runtime state (wird header).
+      - model: authentik_core.group
+        id: mountain-visitors
+        identifiers:
+          name: mountain-visitors
+        attrs:
+          name: mountain-visitors
+
+      - model: authentik_flows.flow
+        id: flow
+        identifiers:
+          slug: mountain-enrollment
+        attrs:
+          name: Mountain enrollment
+          title: Sign in to play
+          designation: enrollment
+          authentication: require_unauthenticated
+
+      # Turnstile in managed mode (the widget decides whether to show a
+      # challenge). Turnstile returns no score, so the thresholds are unused;
+      # error_on_invalid_score stays true, which is what makes a failed
+      # `success` an error rather than a context value.
+      - model: authentik_stages_captcha.captchastage
+        id: stage-captcha
+        identifiers:
+          name: mountain-enrollment-captcha
+        attrs:
+          public_key: !Env MOUNTAIN_TURNSTILE_SITE_KEY
+          private_key: !Env MOUNTAIN_TURNSTILE_SECRET_KEY
+          js_url: https://challenges.cloudflare.com/turnstile/v0/api.js
+          api_url: https://challenges.cloudflare.com/turnstile/v0/siteverify
+          request_content_type: application/x-www-form-urlencoded
+          interactive: true
+          error_on_invalid_score: true
+
+      # --- prompts -------------------------------------------------------
+      - model: authentik_stages_prompt.prompt
+        id: prompt-email
+        identifiers:
+          name: mountain-enrollment-field-email
+        attrs:
+          field_key: email
+          label: Email
+          type: email
+          required: true
+          placeholder: Email
+          placeholder_expression: false
+          order: 0
+      - model: authentik_stages_prompt.prompt
+        id: prompt-username
+        identifiers:
+          name: mountain-enrollment-field-username
+        attrs:
+          field_key: username
+          label: Handle (shown on the mountain)
+          type: username
+          required: true
+          placeholder: 3-20 of a-z 0-9 _ -
+          placeholder_expression: false
+          order: 1
+      - model: authentik_stages_prompt.prompt
+        id: prompt-password
+        identifiers:
+          name: mountain-enrollment-field-password
+        attrs:
+          field_key: password
+          label: Password
+          type: password
+          required: true
+          placeholder: Password
+          placeholder_expression: false
+          order: 2
+      - model: authentik_stages_prompt.prompt
+        id: prompt-password-repeat
+        identifiers:
+          name: mountain-enrollment-field-password-repeat
+        attrs:
+          field_key: password_repeat
+          label: Password (repeat)
+          type: password
+          required: true
+          placeholder: Password (repeat)
+          placeholder_expression: false
+          order: 3
+
+      # Wird's rules (see its file), declared again rather than `!Find`-ed:
+      # a cross-file miss would silently drop the policy from the stage.
+      - model: authentik_policies_password.passwordpolicy
+        id: mountain-password-policy
+        identifiers:
+          name: mountain-password-strength
+        attrs:
+          name: mountain-password-strength
+          password_field: password
+          check_static_rules: true
+          length_min: 8
+          amount_digits: 0
+          amount_uppercase: 0
+          amount_lowercase: 0
+          amount_symbols: 0
+          check_have_i_been_pwned: true
+          hibp_allowed_count: 0
+          error_message: >-
+            Use at least 8 characters, and a password that has not appeared in
+            a known data breach.
+
+      # The handle is public: the mountain page shows it (preferred_username).
+      # Lowercase-only also makes the prompt's case-sensitive uniqueness check
+      # (stages/prompt/stage.py) case-insensitive in practice.
+      - model: authentik_policies_expression.expressionpolicy
+        id: mountain-handle-policy
+        identifiers:
+          name: mountain-handle
+        attrs:
+          name: mountain-handle
+          expression: |
+            import re
+            handle = request.context.get("prompt_data", {}).get("username", "")
+            if not re.fullmatch(r"[a-z0-9_-]{3,20}", handle):
+                ak_message("Handle: 3 to 20 characters, a-z, 0-9, _ or -.")
+                return False
+            # ponytail: a short static denylist (exact words + substrings).
+            # The SAME list as the mountain relay's handleDeny/handleDenyExact
+            # (relay/validators.go), which re-checks every live session: change
+            # both together. An admin deletes a bad mark (mountain mark.delete)
+            # and deactivates the user for anything it misses.
+            exact = {"root", "mod", "mods", "staff", "system", "null", "none",
+                     "undefined", "anonymous", "mountain", "visitor",
+                     "everyone", "here", "sex", "kill", "rape"}
+            parts = ("admin", "authentik", "ukubi", "bnei", "moderat",
+                     "official", "support", "operator", "fuck", "shit",
+                     "cunt", "bitch", "nigg", "fag", "nazi", "hitler", "porn")
+            if handle in exact or any(p in handle for p in parts):
+                ak_message("That handle is not available.")
+                return False
+            return True
+
+      - model: authentik_stages_prompt.promptstage
+        id: stage-prompt
+        identifiers:
+          name: mountain-enrollment-prompt
+        attrs:
+          fields:
+            - !KeyOf prompt-email
+            - !KeyOf prompt-username
+            - !KeyOf prompt-password
+            - !KeyOf prompt-password-repeat
+          validation_policies:
+            - !KeyOf mountain-password-policy
+            - !KeyOf mountain-handle-policy
+
+      # Inactive until the email is proven; user_type left at `external`
+      # (wird file). mountain-visitors is the ONLY group a visitor gets.
+      - model: authentik_stages_user_write.userwritestage
+        id: stage-user-write
+        identifiers:
+          name: mountain-enrollment-user-write
+        attrs:
+          user_creation_mode: always_create
+          create_users_as_inactive: true
+          create_users_group: !KeyOf mountain-visitors
+
+      # Shared SMTP2GO sender with Wird and password recovery (ADR-0057:
+      # accepted risk, quota watched).
+      - model: authentik_stages_email.emailstage
+        id: stage-email
+        identifiers:
+          name: mountain-enrollment-email-verification
+        attrs:
+          use_global_settings: true
+          template: email/account_confirmation.html
+          activate_user_on_success: true
+
+      - model: authentik_stages_user_login.userloginstage
+        id: stage-login
+        identifiers:
+          name: mountain-enrollment-user-login
+
+      # --- bindings ------------------------------------------------------
+      # Captcha first: nothing behind it (handle lookups, the mail send) is
+      # reachable without passing it.
+      - model: authentik_flows.flowstagebinding
+        identifiers:
+          target: !KeyOf flow
+          stage: !KeyOf stage-captcha
+          order: 5
+      - model: authentik_flows.flowstagebinding
+        identifiers:
+          target: !KeyOf flow
+          stage: !KeyOf stage-prompt
+          order: 10
+      - model: authentik_flows.flowstagebinding
+        identifiers:
+          target: !KeyOf flow
+          stage: !KeyOf stage-user-write
+          order: 20
+      - model: authentik_flows.flowstagebinding
+        identifiers:
+          target: !KeyOf flow
+          stage: !KeyOf stage-email
+          order: 30
+      - model: authentik_flows.flowstagebinding
+        identifiers:
+          target: !KeyOf flow
+          stage: !KeyOf stage-login
+          order: 100
