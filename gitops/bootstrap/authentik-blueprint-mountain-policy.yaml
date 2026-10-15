@@ -1,0 +1,41 @@
+# Who may sign in to the `mountain` application (mountain detail mode,
+# ADR-0056). Without a sign-in, mountain.bnei.dev is still fully public: this
+# gates only the extra detail frames.
+#
+# SEPARATE FROM authentik-blueprint-mountain.yaml, the hermes convention
+# (authentik-blueprint-hermes-policy.yaml): a blueprint applies as one
+# transaction and PolicyBinding.target is a required FK, so a !Find miss on a
+# not-yet-registered `mountain` rolls back this file only. With
+# core_default_app_access false, a missing binding denies everyone, which is
+# the visible failure direction.
+#
+# platform-admins only, for now. mountain-visitors (marks) gets its own binding
+# with the W4 enrollment flow (mountain plan 08 "W4 hardening"), not before:
+# the group does not exist yet, and a !Find miss there would write a NULL-group
+# row that looks fine.
+#
+# Verify in the database, selecting the FKs explicitly:
+#   psql -d authentik -tAc 'SELECT target_id, group_id, enabled
+#                           FROM authentik_policies_policybinding'
+#
+# A plain ConfigMap: no credential to interpolate.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: authentik-blueprint-mountain-policy
+  namespace: authentik
+data:
+  mountain-policy.yaml: |
+    version: 1
+    metadata:
+      name: mountain-policy
+      labels:
+        blueprints.goauthentik.io/instantiate: "true"
+    entries:
+      - model: authentik_policies.policybinding
+        identifiers:
+          target: !Find [authentik_core.application, [slug, mountain]]
+          group: !Find [authentik_core.group, [name, platform-admins]]
+          order: 0
+        attrs:
+          enabled: true

@@ -122,11 +122,15 @@ blueprints:
   # stale username cannot stop platform-admins reconciling. The provider is
   # under `secrets:` below — it carries a client secret.
   - authentik-blueprint-netbird-policy
+  # mountain detail mode (ADR-0056): the platform-admins binding, in its own
+  # file (hermes convention). The provider is under `secrets:` below.
+  - authentik-blueprint-mountain-policy
   secrets:
   - authentik-blueprint-grafana
   - authentik-blueprint-argocd
   - authentik-blueprint-fleet
   - authentik-blueprint-netbird
+  - authentik-blueprint-mountain
 
 server:
   replicas: 1
