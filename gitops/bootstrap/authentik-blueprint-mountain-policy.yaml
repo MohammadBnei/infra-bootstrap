@@ -1,6 +1,8 @@
 # Who may sign in to the `mountain` application (mountain detail mode,
-# ADR-0056). Without a sign-in, mountain.bnei.dev is still fully public: this
-# gates only the extra detail frames.
+# ADR-0056; visitors, ADR-0057). Without a sign-in, mountain.bnei.dev is still
+# fully public: this gates only detail frames (platform-admins) and marks
+# (mountain-visitors). The application keeps the default policy_engine_mode
+# `any`, so either group admits; the relay maps the `groups` claim to a role.
 #
 # SEPARATE FROM authentik-blueprint-mountain.yaml, the hermes convention
 # (authentik-blueprint-hermes-policy.yaml): a blueprint applies as one
@@ -9,10 +11,17 @@
 # core_default_app_access false, a missing binding denies everyone, which is
 # the visible failure direction.
 #
-# platform-admins only, for now. mountain-visitors (marks) gets its own binding
-# with the W4 enrollment flow (mountain plan 08 "W4 hardening"), not before:
-# the group does not exist yet, and a !Find miss there would write a NULL-group
-# row that looks fine.
+# APPLY ORDER. The first apply of this file (2026-10-15) errored because it ran
+# before mountain-oidc had created the application; it healed on the next
+# hourly discovery (a failed apply keeps no last_applied_hash, so it is
+# retried). The two metaapplyblueprint entries below remove the race: each
+# applies the named blueprint instance inline first (the shape upstream's
+# blueprints/default/default-brand.yaml uses), and `required: true` fails this
+# file, retried the same way, when that instance has not been discovered yet.
+# So the `!Find`s below never run against a missing application (NULL target:
+# an error) or a missing platform-admins (NULL group: silent, the runbook's
+# `core_default_app_access` trap). mountain-visitors is declared locally
+# (`!KeyOf`), the wird-users rule in authentik-blueprint-wird-policy.yaml.
 #
 # Verify in the database, selecting the FKs explicitly:
 #   psql -d authentik -tAc 'SELECT target_id, group_id, enabled
@@ -32,10 +41,36 @@ data:
       labels:
         blueprints.goauthentik.io/instantiate: "true"
     entries:
+      - model: authentik_blueprints.metaapplyblueprint
+        attrs:
+          identifiers:
+            name: platform-groups
+          required: true
+      - model: authentik_blueprints.metaapplyblueprint
+        attrs:
+          identifiers:
+            name: mountain-oidc
+          required: true
+      # Same declaration as in authentik-blueprint-mountain-enrollment.yaml, on
+      # purpose. No `users:`: membership is written by enrollment, and a list
+      # here would be REPLACED on every apply, wiping every visitor.
+      - model: authentik_core.group
+        id: mountain-visitors
+        identifiers:
+          name: mountain-visitors
+        attrs:
+          name: mountain-visitors
       - model: authentik_policies.policybinding
         identifiers:
           target: !Find [authentik_core.application, [slug, mountain]]
           group: !Find [authentik_core.group, [name, platform-admins]]
           order: 0
+        attrs:
+          enabled: true
+      - model: authentik_policies.policybinding
+        identifiers:
+          target: !Find [authentik_core.application, [slug, mountain]]
+          group: !KeyOf mountain-visitors
+          order: 1
         attrs:
           enabled: true

@@ -122,9 +122,13 @@ blueprints:
   # stale username cannot stop platform-admins reconciling. The provider is
   # under `secrets:` below — it carries a client secret.
   - authentik-blueprint-netbird-policy
-  # mountain detail mode (ADR-0056): the platform-admins binding, in its own
-  # file (hermes convention). The provider is under `secrets:` below.
+  # mountain (ADR-0056/0057): the platform-admins and mountain-visitors
+  # bindings, in their own file (hermes convention). The provider is under `secrets:` below.
   - authentik-blueprint-mountain-policy
+  # mountain visitors (ADR-0057): self-service enrollment into
+  # mountain-visitors behind a Turnstile captcha, whose keys arrive by `!Env`
+  # from authentik-config, so this stays a ConfigMap.
+  - authentik-blueprint-mountain-enrollment
   secrets:
   - authentik-blueprint-grafana
   - authentik-blueprint-argocd
