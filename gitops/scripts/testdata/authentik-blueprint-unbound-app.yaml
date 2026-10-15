@@ -1,0 +1,33 @@
+# TEST FIXTURE for gitops/scripts/check-authentik-bindings.py, never deployed
+# (not under gitops/bootstrap/, not in authentik's values). CI asserts the gate
+# FAILS on it: `fixture-unbound` has no binding at all, and
+# `fixture-null-group` has only a binding whose `!Find` names a group no
+# blueprint declares (a NULL group_id at apply time, which does not count).
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: authentik-blueprint-fixture
+  namespace: authentik
+data:
+  fixture.yaml: |
+    version: 1
+    metadata:
+      name: fixture
+    entries:
+      - model: authentik_core.application
+        identifiers:
+          slug: fixture-unbound
+        attrs:
+          name: Fixture unbound
+      - model: authentik_core.application
+        identifiers:
+          slug: fixture-null-group
+        attrs:
+          name: Fixture null group
+      - model: authentik_policies.policybinding
+        identifiers:
+          target: !Find [authentik_core.application, [slug, fixture-null-group]]
+          group: !Find [authentik_core.group, [name, no-such-group]]
+          order: 0
+        attrs:
+          enabled: true
