@@ -158,17 +158,26 @@ grafana.ini:
     # No auto_login: it would remove the local-admin escape hatch from the UI
     # entirely, which is the opposite of Decision 6.
     auto_login: false
-    # Admin for members of the `platform-admins` authentik group, Viewer for
-    # everyone else. The group is declared in
+    # Admin for members of the `platform-admins` authentik group, and NO login
+    # for anyone else (mountain W4 hardening, ADR-0057). The group is declared in
     # gitops/bootstrap/authentik-blueprint-groups.yaml and ArgoCD reads the
     # SAME group name for its own `role:admin` — one membership list, honoured
     # by both apps, rather than a per-app allowlist that drifts.
     #
     # JMESPath, evaluated against the claims Grafana has after calling
     # `api_url` (userinfo) above. authentik's `profile` scope mapping is what
-    # puts `groups` there. If the claim is missing the expression yields
-    # Viewer, so a broken group lookup demotes rather than escalates.
-    role_attribute_path: contains(groups[*], 'platform-admins') && 'Admin' || 'Viewer'
+    # puts `groups` there.
+    #
+    # The empty fallback plus role_attribute_strict refuses the login outright:
+    # strict alone is a no-op while the expression always returns a role, and
+    # 'Viewer' would hand dashboards to anyone authentik let through. The
+    # authentik binding (platform-apps-policy) already admits platform-admins
+    # only; this is the second gate, for the day that binding is lost while the
+    # directory holds self-enrolled Wird and mountain users. A missing or broken
+    # `groups` claim now denies instead of demoting. The local admin is
+    # unaffected (not OAuth).
+    role_attribute_path: contains(groups[*], 'platform-admins') && 'Admin' || ''
+    role_attribute_strict: true
     # Org Admin, not Grafana *server* admin. Server admin manages users, orgs
     # and the instance itself; nothing about operating this cluster needs it,
     # and the local admin already has it.
