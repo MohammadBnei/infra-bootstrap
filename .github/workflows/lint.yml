@@ -66,8 +66,12 @@ jobs:
         run: |
           set -euo pipefail
           python3 gitops/scripts/check-authentik-bindings.py
-          if python3 gitops/scripts/check-authentik-bindings.py gitops/scripts/testdata/authentik-blueprint-unbound-app.yaml; then
-            echo "::error::binding gate passed its unbound fixture"; exit 1
+          # exactly 1 (a crash is not a pass) and both fixture apps named
+          rc=0
+          out=$(python3 gitops/scripts/check-authentik-bindings.py gitops/scripts/testdata/authentik-blueprint-unbound-app.yaml) || rc=$?
+          echo "$out"
+          if [ "$rc" -ne 1 ] || ! grep -q "'fixture-unbound'" <<<"$out" || ! grep -q "'fixture-null-group'" <<<"$out"; then
+            echo "::error::binding gate did not flag its unbound fixture (exit $rc)"; exit 1
           fi
 
       - uses: azure/setup-helm@v5.0.1

@@ -6,7 +6,7 @@ that flag ever reverts (a Postgres restore does it silently, see
 docs/runbook-authentik-identity.md) the same application admits everyone who
 ever enrolled (Wird, mountain). Either way the binding is load-bearing.
 
-A binding counts only if it is enabled and its group, user or policy resolves.
+A binding counts only if it is enabled, not negated, and its group, user or policy resolves.
 `!Find` returns None on a miss instead of failing, and the policy engine skips
 the resulting NULL-group row, so a binding that exists is not enough.
 
@@ -104,7 +104,8 @@ def static(paths):
 
     bound = set()
     for src, e in entries:
-        if e.get("model") != BINDING or (e.get("attrs") or {}).get("enabled") is False:
+        attrs = e.get("attrs") or {}
+        if e.get("model") != BINDING or attrs.get("enabled") is False or attrs.get("negate") is True:
             continue
         ids = {**(e.get("attrs") or {}), **(e.get("identifiers") or {})}
         slug = target_slug(ids["target"], src)
@@ -119,7 +120,7 @@ from authentik.core.models import Application
 from authentik.policies.models import PolicyBinding
 valid = Q(group__isnull=False) | Q(user__isnull=False) | Q(policy__isnull=False)
 for a in Application.objects.order_by("slug"):
-    ok = PolicyBinding.objects.filter(valid, target=a, enabled=True).exists()
+    ok = PolicyBinding.objects.filter(valid, target=a, enabled=True, negate=False).exists()
     print("GATE", "ok" if ok else "UNBOUND", a.slug)
 """
 
