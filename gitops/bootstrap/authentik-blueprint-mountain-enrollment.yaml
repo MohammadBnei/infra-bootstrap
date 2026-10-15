@@ -169,13 +169,16 @@ data:
                 ak_message("Handle: 3 to 20 characters, a-z, 0-9, _ or -.")
                 return False
             # ponytail: a short static denylist (exact words + substrings).
-            # Extend it here; an admin deletes a bad mark (mountain mark.delete)
+            # The SAME list as the mountain relay's handleDeny/handleDenyExact
+            # (relay/validators.go), which re-checks every live session: change
+            # both together. An admin deletes a bad mark (mountain mark.delete)
             # and deactivates the user for anything it misses.
             exact = {"root", "mod", "mods", "staff", "system", "null", "none",
-                     "anonymous", "mountain", "visitor", "everyone", "here"}
+                     "undefined", "anonymous", "mountain", "visitor",
+                     "everyone", "here", "sex", "kill", "rape"}
             parts = ("admin", "authentik", "ukubi", "bnei", "moderat",
                      "official", "support", "operator", "fuck", "shit",
-                     "cunt", "nigg", "fag", "nazi", "hitler")
+                     "cunt", "bitch", "nigg", "fag", "nazi", "hitler", "porn")
             if handle in exact or any(p in handle for p in parts):
                 ak_message("That handle is not available.")
                 return False
