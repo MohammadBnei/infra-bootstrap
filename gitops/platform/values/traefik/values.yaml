@@ -61,8 +61,9 @@ service:
   spec:
     externalTrafficPolicy: Local
 
-log:
-  format: json
+logs:
+  general:
+    format: json
   # ADR-0038. There was no record whatsoever of who reached what from the
   # internet before this — no forensics after the fact, and nothing for a
   # detection rule to read. Alloy already tails /var/log/pods on every node,
@@ -71,9 +72,9 @@ log:
   #
   # Only useful once externalTrafficPolicy above is Local — otherwise every
   # line records a node IP as the client.
-accessLog:
-  enabled: true
-  format: json
+  access:
+    enabled: true
+    format: json
 
 # ADR-0040 Decision 9. Nothing scraped Traefik before this: the chart enables
 # the prometheus metrics endpoint by default (entrypoint `metrics`, :9100) but
@@ -202,12 +203,11 @@ ports:
     # Note this entrypoint stays OUTSIDE the origin allowlist, which attaches
     # to websecure only — :80 remains world-reachable. It serves nothing but
     # this redirect, so that is acceptable, but it is not filtered.
-    http:
-      redirections:
-        entryPoint:
-          to: websecure
-          scheme: https
-          permanent: true
+    redirections:
+      entryPoint:
+        to: websecure
+        scheme: https
+        permanent: true
   websecure:
     # ADR-0038. Since *.bnei.dev went proxied, the TCP peer for every external
     # request is a Cloudflare edge IP, not the client. Without this, Traefik's
@@ -255,10 +255,9 @@ ports:
       - 2c0f:f248::/32
     # Entrypoint-level ACME wiring — every IngressRoute router using this
     # entrypoint gets the "le" cert resolver automatically.
-    http:
-      tls:
-        enabled: true
-        certResolver: le
+    tls:
+      enabled: true
+      certResolver: le
 
 providers:
   kubernetesGateway:
