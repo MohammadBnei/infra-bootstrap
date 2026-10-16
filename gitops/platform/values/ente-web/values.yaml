@@ -17,7 +17,9 @@ image:
   # NOT ghcr.io/ente-io/web — see ente-museum/values.yaml's comment, same
   # ghcr.io/ente/* namespace correction.
   repository: ghcr.io/ente/web
-  tag: "latest"
+  # Pinned 2026-10-16 (was "latest") to the commit tag of the digest that was
+  # running then, so this pin changed nothing live. Bump by hand.
+  tag: "5ab0c5b4c7a89c4e470ef6f793600da33cebf35d"
 
 service:
   port: 3000

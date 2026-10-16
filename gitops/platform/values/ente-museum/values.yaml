@@ -26,7 +26,10 @@ image:
   # actual published image lives under the shorter ghcr.io/ente/* namespace,
   # confirmed against server/quickstart.sh's generated compose.yaml.
   repository: ghcr.io/ente/server
-  tag: "latest"
+  # Pinned 2026-10-16 (was "latest") to the commit tag of the digest that was
+  # running then, so this pin changed nothing live. Bump by hand. Museum runs
+  # migrations at boot, so a bump here is forward-only: back up first.
+  tag: "0472c929b6070e61fecaf2013d47efce2dcda462"
 
 service:
   port: 8080

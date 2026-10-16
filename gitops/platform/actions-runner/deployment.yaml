@@ -26,7 +26,10 @@ spec:
       serviceAccountName: actions-runner
       containers:
       - name: runner
-        image: myoung34/github-runner:latest
+        # Pinned 2026-10-16 (was :latest). GitHub stops accepting a runner some
+        # weeks after a newer release ships, so bump this when a new
+        # myoung34/github-runner version tag appears.
+        image: myoung34/github-runner:2.338.0
         env:
         - name: REPO_URL
           value: https://github.com/MohammadBnei/vos-monolith
