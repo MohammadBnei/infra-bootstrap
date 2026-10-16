@@ -88,7 +88,7 @@ spec:
         namespace: infisical
         syncWave: "1"
         chartRepoURL: https://dl.cloudsmith.io/public/infisical/helm-charts/helm/charts/
-        chartRevision: "0.11.3"
+        chartRevision: "0.11.11" # 2026-10-16: from 0.11.3; render diff is OPERATOR_NAMESPACE env and infisicalConnectionRef no longer required in a CRD
         chartName: secrets-operator
         valuesPath: gitops/platform/values/infisical-operator/values.yaml
 
@@ -121,7 +121,7 @@ spec:
         namespace: kube-system
         syncWave: "5"
         chartRepoURL: https://kubernetes-sigs.github.io/metrics-server/
-        chartRevision: "3.12.2"
+        chartRevision: "3.14.0" # 2026-10-16: from 3.12.2 (app v0.7.2 -> v0.9.0); render diff is the image and the aggregated-reader ClusterRole gaining the release-name prefix, no flag changes
         chartName: metrics-server
         valuesPath: gitops/platform/values/metrics-server/values.yaml
 
@@ -143,7 +143,7 @@ spec:
         namespace: monitoring
         syncWave: "5"
         chartRepoURL: https://grafana.github.io/helm-charts
-        chartRevision: "1.11.0" # bumped 2026-07-29 from 0.12.0 (app v1.7.0 -> v1.18.0) — checked no breaking changes touch discovery.kubernetes/discovery.relabel/loki.source.kubernetes/loki.write or the chart's controller/rbac keys in that range; confirm against `helm search repo` before first apply — this chart has NOT migrated to grafana-community, unlike loki
+        chartRevision: "1.13.1" # 2026-10-16: from 1.11.0 (app v1.18.0 -> v1.20.1). Breaking changes in 1.18-1.20 touch only otelcol.*, discovery.hetzner and prometheus.operator.servicemonitors; this config uses discovery.kubernetes/discovery.relabel/local.file_match/loki.process/loki.source.file/loki.write. Render diff: images and a hardened config-reloader securityContext. Earlier: 2026-07-29 bumped from 0.12.0 (app v1.7.0 -> v1.18.0). This chart has NOT migrated to grafana-community, unlike loki
         chartName: alloy
         valuesPath: gitops/platform/values/alloy/values.yaml
 
@@ -157,7 +157,7 @@ spec:
         namespace: monitoring
         syncWave: "5"
         chartRepoURL: https://prometheus-community.github.io/helm-charts
-        chartRevision: "11.17.2" # confirmed against `helm search repo prometheus-community/prometheus-blackbox-exporter --versions` 2026-08-25 (app v0.28.0)
+        chartRevision: "11.20.0" # 2026-10-16: from 11.17.2 (app v0.28.0 -> v0.29.0); render diff is the image only, and the one PrometheusRule is still ours from values, not new chart defaults
         chartName: prometheus-blackbox-exporter
         valuesPath: gitops/platform/values/blackbox-exporter/values.yaml
 
