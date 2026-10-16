@@ -65,7 +65,7 @@ spec:
         namespace: kube-system
         syncWave: "0"
         chartRepoURL: https://nvidia.github.io/k8s-device-plugin
-        chartRevision: "0.17.1" # confirm against `helm search repo nvdp/nvidia-device-plugin --versions` before first apply
+        chartRevision: "0.20.1" # 2026-10-16: from 0.17.1. Render diff: a ServiceAccount + ClusterRole (nodes get/list/watch), a renamed hostPath volume, hostPID on the MPS daemon (0 pods here: no node carries nvidia.com/mps.capable). The default nodeAffinity is unchanged, so the nvidia.com/gpu.present node label (ADR-0043) still satisfies it
         chartName: nvidia-device-plugin
         valuesPath: gitops/platform/values/nvidia-device-plugin/values.yaml
 
