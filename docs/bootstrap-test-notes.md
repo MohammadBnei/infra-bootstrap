@@ -4584,6 +4584,38 @@ Reaching `.165` was harder than it should be: the `gpu-server` alias (user
 and `SSH_PROXMOX_KEY` from Infisical fails `ssh` with `invalid format`. The
 check above ran with a password login.
 
+### 2026-10-16: the same bit again
+
+**Symptom.** Identical to the entry above. From 04:09 UTC every scrape failed
+with `out of bounds`, and alerts such as `KubeAPIDown` and `PVEHostProbeStale`
+fired from 04:14. It was noticed at about 14:19, during the #309 upgrades.
+
+**Cause.** The head held **two** series, both apiserver `.204:6443`
+`apiserver_request_sli_duration_seconds_bucket{group="metallb.io",resource="bgppeers",le="3"}`
+(verbs LIST and DELETE). Both carried ts `1792190889210`. Clear bit 26 and you
+get `1792123780346`, 2026-10-16 04:09:40.346, which matches the last persisted
+block (04:09). Same bit as on 2026-10-11, and again Prometheus was on
+`k8s-worker-01` (`.165`). Node clocks were in sync (lease `renewTime` within
+seconds of wall time on all five nodes).
+
+**Why this points at the RAM.** One bit flipped twice in five days, inside
+int64 timestamps on unrelated pages. A random flip would not choose bit 26
+both times. A fault in one data lane of a DIMM would, because an aligned
+64-bit word always puts bit 26 on the same lane. The 2026-09-22 head-chunk
+`checksum mismatch` (`gitops/platform/values/prometheus/values.yaml`) happened
+on the same node. All three events are on `.165`. That host also runs
+`k8s-cp-01`, an etcd voter.
+
+**Fix.** Same as above: move `wal/` and `chunks_head/` aside to
+`*.poisoned-20261016`, then delete the pod. Nothing real was in the head.
+Then `prometheusSpec.affinity` was set to keep Prometheus off `k8s-cp-01` and
+`k8s-worker-01`, preferring `k8s-worker-02`. That is a workaround, not a
+repair.
+
+**Open.** Still memtest86+ on a drained `.165`. Until it runs, assume any
+workload on `k8s-cp-01`/`k8s-worker-01` can silently corrupt memory, etcd
+included.
+
 ## 2026-10-11 — NetBird spike enrollment: API shapes, an admin mix-up, and a laptop that became a target
 
 ADR-0055 rollout steps 3–4: `netbird-configure.yml` and `netbird-client.yml`
