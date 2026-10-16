@@ -142,7 +142,7 @@ spec:
         namespace: monitoring
         syncWave: "5"
         chartRepoURL: https://grafana-community.github.io/helm-charts
-        chartRevision: "6.55.0" # confirm against `helm search repo` before first apply — chart migrated off grafana.github.io/helm-charts ~March 2026
+        chartRevision: "18.16.1" # 2026-10-16: from 6.55.0 (app 3.6.7 -> 3.7.8). grafana-community uses strict SemVer, so 7-18 are real breaking-change majors; only 9 (selfMonitoring removed) and 12 (SingleBinary -> Monolithic) touch our values. StatefulSet immutable fields unchanged; PVC retention now Retain
         chartName: loki
         valuesPath: gitops/platform/values/loki/values.yaml
 
