@@ -4616,6 +4616,45 @@ repair.
 workload on `k8s-cp-01`/`k8s-worker-01` can silently corrupt memory, etcd
 included.
 
+## 2026-10-16 — Loki chart bump pruned its own StatefulSet, and the PVC with it
+
+**Symptom.** After #324 (loki chart 6.55.0 → 18.16.1) went Synced/Healthy,
+no log line older than the upgrade could be queried. `storage-platform-loki-0`
+was two minutes old.
+
+**Cause: a split apply.** A platform app's chart pin lives in
+`platform.applicationset.yaml`, which the `bootstrap` Application applies.
+Its values come from `main` through the `$values` ref, which every app
+resolves on its own. Nothing orders the two. #324 changed both in one commit:
+the pin, plus `deploymentMode: SingleBinary` → `Monolithic`. Sync `00151`
+(16:11:20) rendered the **new values against the old 6.55.0 chart**. 6.55
+does not know `Monolithic`, so it rendered no StatefulSet and no Services,
+and Argo **pruned** them. The old chart's StatefulSet carried
+`persistentVolumeClaimRetentionPolicy: whenDeleted: Delete`, so deleting the
+StatefulSet deleted the PVC, and the `longhorn` class's Delete reclaim deleted
+the volume. Four seconds later the ApplicationSet caught up to 18.16.1 and
+everything was recreated, empty. `argocd-application-controller` logs:
+`'Pruned'` for `StatefulSet/platform-loki` in sync `00151-SGhGT`.
+
+**Recovery.** The Longhorn daily backup of the old volume
+(`pvc-33a8c8e5…`, `backup-448a805f56ac4963`, 2026-10-16 03:00) is restored to
+a side volume. Its `/var/loki/chunks` (filesystem object store: chunks plus
+TSDB index) is copied into the live PVC with `cp -an`. Chunk and index file
+names are unique, so the old days merge alongside the new ones. 03:00–16:11 is
+lost.
+
+**Generalizable rule.** A commit that changes a chart pin **and** values that
+are valid only for the new chart is unsafe, because the two halves land in
+separate Applications. Before merging, render both mismatched pairs:
+- new values on the old chart, and
+- old values on the new chart.
+
+A schema error is safe: Argo applies nothing. A *silent* render that drops
+resources is the dangerous one. Ship the half whose mismatch errors out first.
+For Traefik 34 → 42 that was the pin (#321) before the values (#325): chart
+34 silently renders 42-style values with no redirect, `certResolver` or log
+config. Changes to values only, or to the pin only, are not affected.
+
 ## 2026-10-11 — NetBird spike enrollment: API shapes, an admin mix-up, and a laptop that became a target
 
 ADR-0055 rollout steps 3–4: `netbird-configure.yml` and `netbird-client.yml`
