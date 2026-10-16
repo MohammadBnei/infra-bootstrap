@@ -42,13 +42,18 @@ longhornManager:
 defaultSettings:
   defaultDataPath: /var/lib/longhorn
   defaultReplicaCount: 3
-  backupTarget: s3://k8s-longhorn-backup@garage/
-  backupTargetCredentialSecret: longhorn-backup-secret
   # 2026-10-16, ahead of the 1.7 -> 1.13 hop-by-hop upgrade: let Longhorn live-upgrade
   # each volume engine to the new default engine image, one volume per node at a
   # time. At 0 (the old value) every hop leaves the volumes on the previous
   # engine image until each one is upgraded by hand.
   concurrentAutomaticEngineUpgradePerNodeLimit: 1
+
+# Moved out of defaultSettings at chart 1.8 (2026-10-16): 1.8 replaced the
+# backup-target global settings with the default BackupTarget CR, which this
+# block now declares. The 1.8 upgrade had already migrated the live value.
+defaultBackupStore:
+  backupTarget: s3://k8s-longhorn-backup@garage/
+  backupTargetCredentialSecret: longhorn-backup-secret
 
 # The chart's own docs: "Disable this setting when installing Longhorn
 # using Argo CD or other GitOps solutions." The pre-upgrade check Job is a
