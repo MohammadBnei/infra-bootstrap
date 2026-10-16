@@ -106,6 +106,13 @@ spec:
         chartRevision: "92.10.0" # 2026-10-16: from 66.3.1 (operator v0.78.2 -> v0.94.1, Prometheus v2.55.1 -> v3.15.0, Alertmanager v0.27.0 -> v0.34.1). No values key we set changed in 67-92; Argo re-applies the CRDs every sync (no skipCrds, ServerSideApply), so no manual CRD step
         chartName: kube-prometheus-stack
         valuesPath: gitops/platform/values/prometheus/values.yaml
+        # 2026-10-16: 92.x renders Prometheus CR fields (enableOTLPReceiver, ...) that
+        # the live 0.78.2 CRD does not declare, and the client-side structured diff
+        # then fails with "field not declared in schema" before anything syncs.
+        # Server-side diff dry-runs against the API server instead, so the sync can
+        # proceed and apply the new CRDs first. Keep it: every operator bump that
+        # adds CR fields hits the same ordering problem.
+        serverSideDiff: true
 
       - name: grafana
         namespace: monitoring
@@ -185,6 +192,8 @@ spec:
         gitops.bnei.dev/tier: platform
       annotations:
         argocd.argoproj.io/sync-wave: '{{.syncWave}}'
+        # Empty unless an element sets serverSideDiff: true (missingkey=zero).
+        argocd.argoproj.io/compare-options: '{{ if .serverSideDiff }}ServerSideDiff=true{{ end }}'
       finalizers:
       - resources-finalizer.argocd.argoproj.io
     spec:
