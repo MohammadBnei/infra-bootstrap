@@ -10,7 +10,13 @@ image:
   repository: netbirdio/netbird-server
   # No `v`: Docker Hub tags this image `0.80.0`, unlike the dashboard's
   # `v2.94.0`. Digest for 0.80.0 was sha256:05b3d8d6…a261 on 2026-10-11.
-  tag: "0.80.0"
+  # 2026-10-16: 0.80.0 -> 0.81.2. Checked at v0.81.2: combined/cmd/config.go and
+  # management/server/idp/embedded.go are byte-identical, so every key in
+  # netbird-config-secret.yaml still means the same. NB_SQL_MAX_OPEN_CONNS moved to
+  # management/internals/shared/db/conn.go and still caps both gorm pools; the
+  # pgxpool is still 30. The GeoLite load is still fatal (modules.go:50). The only
+  # API removal is the four /api/ingress endpoints, unused here.
+  tag: "0.81.2"
 
 # Recreate, single replica. Management and signal HA is NetBird's commercial
 # tier, and two pods would split the relay and STUN anyway. A rollout is a
