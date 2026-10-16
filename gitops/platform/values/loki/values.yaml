@@ -14,7 +14,8 @@
 # PVC-Multi-Attach workaround from commit 761c6216 — StatefulSet rolling
 # updates reuse the same PVC per ordinal, no double-attach.
 
-deploymentMode: SingleBinary
+# Renamed from SingleBinary in chart 12.0.0 (2026-10-16 bump to 18.16.1); renders identically.
+deploymentMode: Monolithic
 
 loki:
   auth_enabled: false # single-tenant homelab — skip X-Scope-OrgID plumbing on the Alloy side
@@ -83,8 +84,6 @@ test:
 monitoring:
   serviceMonitor:
     enabled: false # no self-scraping via kube-prometheus-stack yet — can flip on later
-  selfMonitoring:
-    enabled: false # pulls in Grafana Agent Operator CRDs this cluster doesn't have
 # lokiCanary is a top-level key in this chart, NOT nested under monitoring:
 # — confirmed via `helm show values`. Nesting it there (an earlier version
 # of this file did) is a silent no-op: Helm accepts unknown keys without
