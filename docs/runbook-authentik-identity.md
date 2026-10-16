@@ -58,7 +58,7 @@ named the mechanism before any probe was written; nobody read it that closely.
 
 ## 3. What exists
 
-authentik **2026.8.0** at `https://authentik.bnei.dev`, deployed by ArgoCD from
+authentik **2026.8.4** (2026.8.0 until 2026-10-16, #312) at `https://authentik.bnei.dev`, deployed by ArgoCD from
 the upstream chart (`https://charts.goauthentik.io`) as a **platform** app —
 `gitops/bootstrap/platform.applicationset.yaml`, sync wave 5 — with values in
 `gitops/platform/values/authentik/values.yaml`. It is not in
