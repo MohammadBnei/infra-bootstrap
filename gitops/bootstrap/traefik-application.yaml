@@ -15,7 +15,10 @@ spec:
   # Source 1: public Helm chart — no credentials needed
   - repoURL: https://traefik.github.io/charts
     chart: traefik
-    targetRevision: "34.0.0"
+    # 2026-10-16: 34.0.0 -> 42.0.0 (app v3.3.x -> v3.7.14). traefik.io CRDs are still
+    # v1alpha1 only. Since chart 40 crds/ no longer ships Gateway API CRDs, so
+    # skipCrds could now be dropped; kept for this bump to change one thing at a time.
+    targetRevision: "42.0.0"
     helm:
       # traefik's chart bundles the full Gateway API CRD set
       # (crds/gateway-standard-install.yaml, bundle-version v1.2.1) alongside
