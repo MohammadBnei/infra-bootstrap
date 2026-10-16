@@ -174,7 +174,7 @@ spec:
         namespace: authentik
         syncWave: "5"
         chartRepoURL: https://charts.goauthentik.io
-        chartRevision: "2026.8.0" # confirmed against `helm search repo authentik/authentik` 2026-08-19
+        chartRevision: "2026.8.4" # 2026-10-16: from 2026.8.0, patch-only (2026.8.2 carries security backports); render diff vs 2026.8.0 is the version string only
         chartName: authentik
         valuesPath: gitops/platform/values/authentik/values.yaml
 
