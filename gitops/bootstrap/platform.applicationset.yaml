@@ -120,7 +120,7 @@ spec:
         # 2026-10-16: moved off grafana.github.io, where this chart is deprecated: true
         # and frozen at 10.5.15. Same version, digest c08c8796... identical in both indexes.
         chartRepoURL: https://grafana-community.github.io/helm-charts
-        chartRevision: "10.5.15" # Grafana 12.3.1 — bumped from 8.8.4/11.4.0, 2 majors behind
+        chartRevision: "14.0.0" # 2026-10-16: from 10.5.15 (Grafana 12.3.1 -> 13.2.4). Provisioning ConfigMaps byte-identical; grafana.ini gains [plugins] preinstall_auto_update=false. Unified-storage migration on first boot is one-way: rollback = restore the PVC (Longhorn daily backup). Earlier: bumped from 8.8.4/11.4.0
         chartName: grafana
         valuesPath: gitops/platform/values/grafana/values.yaml
 
