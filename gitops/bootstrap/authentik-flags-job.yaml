@@ -41,7 +41,7 @@
 # hence the backoffLimit below rather than failing the sync on first contact.
 #
 # THE IMAGE TAG MUST MOVE WITH THE CHART. `chartRevision` in
-# gitops/bootstrap/platform.applicationset.yaml pins authentik 2026.8.0, and the
+# gitops/bootstrap/platform.applicationset.yaml pins authentik 2026.8.4, and the
 # chart's appVersion is what the server runs. A stale tag here means running an
 # old `ak` against a newer schema.
 apiVersion: batch/v1
@@ -62,7 +62,7 @@ spec:
       restartPolicy: Never
       containers:
         - name: set-flags
-          image: ghcr.io/goauthentik/server:2026.8.0
+          image: ghcr.io/goauthentik/server:2026.8.4
           # No `command:` on purpose — the chart invokes this image the same
           # way (`args: [worker]`), so the ENTRYPOINT is the `ak` dispatcher.
           args: ["set_flag", "core_default_app_access", "false"]
