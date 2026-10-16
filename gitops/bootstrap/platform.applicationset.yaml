@@ -28,7 +28,7 @@ spec:
         namespace: local-path-storage
         syncWave: "0"
         chartRepoURL: https://charts.containeroo.ch
-        chartRevision: "0.0.37"
+        chartRevision: "0.0.38" # 2026-10-16: from 0.0.37 (app v0.0.36 -> v0.0.37); render diff adds /health and /ready probes on :8080, which v0.0.37 serves
         chartName: local-path-provisioner
         valuesPath: gitops/platform/values/local-path-provisioner/values.yaml
 
@@ -42,7 +42,7 @@ spec:
         namespace: kube-system
         syncWave: "0"
         chartRepoURL: https://raw.githubusercontent.com/kubernetes-csi/csi-driver-nfs/master/charts
-        chartRevision: "4.13.4" # confirmed against `helm search repo csi-driver-nfs/csi-driver-nfs` 2026-08-14
+        chartRevision: "4.13.5" # 2026-10-16: from 4.13.4; render diff is csi-resizer v2.2.0 -> v2.2.1 and three --max-snapshot-*=0 flags. NOTE: this repoURL is a mutable `master` directory, not a release artifact, so the pin is only as durable as that branch keeping the tgz
         chartName: csi-driver-nfs
         valuesPath: gitops/platform/values/csi-driver-nfs/values.yaml
 
