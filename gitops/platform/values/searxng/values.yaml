@@ -5,7 +5,9 @@
 
 image:
   repository: docker.io/searxng/searxng
-  tag: "2026.7.12-c19d86faa"
+  # 2026-10-16: from 2026.7.12. Deliberately a ~3-week-old build, not the
+  # newest: searxng has no stable channel, so age is the only soak test.
+  tag: "2026.9.23-783a09462"
 
 service:
   port: 8080
