@@ -151,7 +151,7 @@
   any_errors_fatal: "{{ netbird_serial is defined }}"
   gather_facts: false
   vars:
-    netbird_version: 0.80.0 # = the laptops' client and the server; bump together
+    netbird_version: 0.81.2 # = the laptops' client and the server; bump together
     netbird_up_flags:
       - --management-url=https://netbird.bnei.dev
       - --allow-server-ssh

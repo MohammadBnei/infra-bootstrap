@@ -45,7 +45,10 @@
 # Add -e netbird_debug=true to see it while debugging.
 #
 # Field names checked against the v0.80.0 OpenAPI spec
-# (netbirdio/netbird shared/management/http/api/openapi.yml).
+# (netbirdio/netbird shared/management/http/api/openapi.yml), and re-diffed
+# against v0.81.2 on 2026-10-16: the schemas used here only gained fields
+# (AccountSettings.peer_hostname_collision_rejected, Peer.network_addresses),
+# which the settings read-merge-write passes through.
 #
 # WHAT IT DOESN'T (yet)
 # - The existing `laptop`/`All` groups and the Pi policies (`SSH Access`,

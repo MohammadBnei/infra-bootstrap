@@ -7,7 +7,7 @@
 
 image:
   repository: netbirdio/dashboard
-  tag: "v2.94.0"
+  tag: "v2.95.0" # 2026-10-16: from v2.94.0, released with server 0.81.0
 
 service:
   port: 80
