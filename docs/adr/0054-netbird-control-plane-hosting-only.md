@@ -74,7 +74,7 @@ that is ADR-0009's question again, not this ADR's. *(It was asked:
 - **Two releases.** It and `netbirdio/dashboard` are two
   `platform-common-apps` releases in namespace `netbird`
   (`gitops/platform/values/netbird{,-dashboard}`). Pinned tags: `0.80.0` and
-  `v2.94.0`.
+  `v2.94.0` at acceptance; `0.81.2` and `v2.95.0` since 2026-10-16 (#317).
 - **Single replica, `Recreate`.** HA for management and signal is NetBird's
   commercial tier.
 - **Config delivery.** `config.yaml` is assembled whole by

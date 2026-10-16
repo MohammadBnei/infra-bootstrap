@@ -1,5 +1,10 @@
 # Runbook: NetBird SSH mesh (ADR-0054, ADR-0055)
 
+> **Update, 2026-10-16:** the server is 0.81.2 (#317). Every host is still on
+> client 0.80.0, which works against it (mesh SSH re-tested to `k8s-worker-02`
+> and `pg02`). `netbird-client.yml` now pins 0.81.2 for the next run. `pg02` is
+> the Patroni leader today.
+>
 > **Status, 2026-10-11:** rolling out. Six stages are enrolled, 14 hosts, all
 > on client 0.80.0, connected, with `ssh_enabled` on:
 > - `spike`: `pg-etcd-witness` (.197), `k8s-worker-02` (.203) and the
@@ -28,7 +33,7 @@
 ## The model in five lines
 
 1. **One control plane, in the cluster.** `netbird.bnei.dev` is `netbird-server`
-   0.80.0 (management, signal, relay, STUN) plus the dashboard. Login goes
+   0.81.2 since 2026-10-16, #317 (management, signal, relay, STUN) plus the dashboard. Login goes
    through its embedded Dex to authentik. Its stores are on Pigsty.
 2. **Every host is a peer in `infra-nodes`.** A host joins with a setup key.
    The key's auto group puts it there. The host's client runs an SSH server
