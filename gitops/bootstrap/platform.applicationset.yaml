@@ -110,7 +110,9 @@ spec:
       - name: grafana
         namespace: monitoring
         syncWave: "5"
-        chartRepoURL: https://grafana.github.io/helm-charts
+        # 2026-10-16: moved off grafana.github.io, where this chart is deprecated: true
+        # and frozen at 10.5.15. Same version, digest c08c8796... identical in both indexes.
+        chartRepoURL: https://grafana-community.github.io/helm-charts
         chartRevision: "10.5.15" # Grafana 12.3.1 — bumped from 8.8.4/11.4.0, 2 majors behind
         chartName: grafana
         valuesPath: gitops/platform/values/grafana/values.yaml
