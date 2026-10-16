@@ -20,7 +20,7 @@ spec:
         namespace: longhorn-system
         syncWave: "0"
         chartRepoURL: https://charts.longhorn.io
-        chartRevision: "1.8.2" # 2026-10-16: hop 1 of 6 toward 1.13.0 (one minor at a time, longhorn/website deploy/upgrade). Next: 1.9.2, 1.10.2, 1.11.3, 1.12.1, 1.13.0
+        chartRevision: "1.9.2" # 2026-10-16: hop 2 of 6 toward 1.13.0 (one minor at a time, longhorn/website deploy/upgrade). Next: 1.10.2, 1.11.3, 1.12.1, 1.13.0
         chartName: longhorn
         valuesPath: gitops/platform/values/longhorn/values.yaml
 

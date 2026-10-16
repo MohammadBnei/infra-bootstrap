@@ -64,3 +64,12 @@ defaultBackupStore:
 # `FailedCreate ... serviceaccount "longhorn-service-account" not found`.
 preUpgradeChecker:
   jobEnabled: false
+
+# Chart 1.12.1 turns on ingress NetworkPolicies for Longhorn's own internal
+# endpoints (instance-manager gRPC included) by default, and Cilium enforces
+# them. Longhorn's notes warn that on an enforcing CNI they can leave volume
+# operations or recovery stuck, and this cluster's Cilium-in-chaining-mode setup
+# is not on its validated list. Off for the 1.12/1.13 hops (charts before 1.12
+# ignore this key); turning it on is a separate, tested change.
+networkPolicies:
+  restrictInternalTraffic: false
