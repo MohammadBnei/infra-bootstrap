@@ -190,6 +190,33 @@ prometheus:
         memory: 1Gi
       limits:
         memory: 2Gi
+    # Keep Prometheus off the two VMs on `.165` (k8s-cp-01, k8s-worker-01).
+    # Its TSDB was poisoned twice by a timestamp with bit 26 flipped: on
+    # 2026-10-11 (docs/bootstrap-test-notes.md) and on 2026-10-16 at 04:09:40
+    # UTC, both times while running on k8s-worker-01. A sample 2^26 ms (~18.6h)
+    # in the future pushes the head forward, and every real scrape is then
+    # rejected `out of bounds` for hours. The same bit twice, on unrelated
+    # pages, points at one faulty data lane in `.165`'s non-ECC RAM, not at
+    # random flips. The 2026-09-22 head-chunk `checksum mismatch` above was on
+    # the same node. This keeps Prometheus off `.165`; it does not fix the RAM.
+    # Run memtest86+ on a drained `.165`, and drop this once that host is clean.
+    # Preferred, not required, toward k8s-worker-02: the control planes have
+    # only ~3GB, but still beat not scheduling at all if server1 is down.
+    affinity:
+      nodeAffinity:
+        requiredDuringSchedulingIgnoredDuringExecution:
+          nodeSelectorTerms:
+            - matchExpressions:
+                - key: kubernetes.io/hostname
+                  operator: NotIn
+                  values: [k8s-cp-01, k8s-worker-01]
+        preferredDuringSchedulingIgnoredDuringExecution:
+          - weight: 100
+            preference:
+              matchExpressions:
+                - key: kubernetes.io/hostname
+                  operator: In
+                  values: [k8s-worker-02]
 
 # node-exporter on every node
 nodeExporter:
