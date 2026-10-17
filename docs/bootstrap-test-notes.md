@@ -4843,3 +4843,80 @@ Verified 2026-10-12 ~00:20:
 - `--lan` worked on pg01 (vagrant), bnei (root), pihole (mohammad),
   k8s-cp-01 (core), garage-storage (root), nfs-storage (core) and
   build-runner (root).
+
+## 2026-10-17 — Control-plane RAM 4→6 GB: a frozen `/etc/pve` led back to `.165`'s link at 100Mb again
+
+Goal: raise `k8s-cp-01/02/03` from 4096 to 6144 MB (kube-apiserver alone
+was ~1.4 GB, ~690 MB left available). Done with `terraform apply
+-target='proxmox_virtual_environment_vm.k8s_node["<name>"]'`, one VM at a
+time, checking node Ready, `/readyz/etcd` and Longhorn 6/6 healthy between
+each. `terraform.tfvars` is local, so the sizes live there; the
+`variables.tf` default map still says 4096.
+
+**Host headroom first.** `bnei` and `ex-laptop` had room. `server1` did
+not: 30.0 GB of guest RAM configured on 31.1 GB physical, `Committed_AS`
+32.5 GB against a 24.7 GB `CommitLimit`, 1 GB of swap in use. The VMs have
+no balloon, so a k8s node eventually fills its RAM with page cache, and
++2 GB there would have ended in swap or the OOM killer. `k8s-worker-02`
+went 16384 → 14336 to pay for `k8s-cp-02`'s +2 GB (net zero). worker-02
+had 3.4 GB of requests and ~10 GB of limits, so 14 GB still fits.
+
+**The bpg provider reboots the VM on a memory change.** The control-plane
+nodes needed no drain: ~2 min down, and their Longhorn replicas rebuilt
+in ~2 min. `k8s-worker-02` has no self-drain unit (`self-drain-configure.yml`
+covers only `k8s-cp-01`/`k8s-worker-01`) and runs Traefik, Prometheus and
+Loki, so it was drained first. The drain waits on Longhorn instance-manager
+PDBs until the last volume detaches, then completes on its own.
+
+**The worker-02 apply failed: `/etc/pve` was frozen on server1.** First
+`failed to wait for command termination`, then on retry
+`500 can't lock file '/var/lock/qemu-server/lock-203.conf' - got timeout`.
+A `pvedaemon` worker held the lock, blocked in `request_wait_answer`
+(waiting on the pmxcfs FUSE mount), and `qm pending 203` hung in D state.
+The kernel had logged hung `pvescheduler`/`pvestatd` tasks since
+**2026-10-16 12:14**. `systemctl restart pve-cluster` on server1 brought
+reads back, but writes still hung, **on all three hosts**: corosync was
+retransmitting the same message ids every second (`[TOTEM ] Retransmit
+List: 3e 40 41 …`).
+
+**Cause: `.165`'s NIC is back at 100Mb/s.** `corosync-cfgtool -s` showed
+`bnei` losing its links to both peers while `server1`↔`ex-laptop` stayed
+up. `dmesg` on bnei:
+
+```
+[Fri Oct 16 12:02:14 2026] r8169 0000:09:00.0 nic0: Link is Down
+[Fri Oct 16 12:02:27 2026] r8169 0000:09:00.0 nic0: Link is Up - 100Mbps/Full
+```
+
+That's twelve minutes before the first hung task. `ethtool nic0` shows the
+**link partner advertising only 10/100**. The room switch has been gigabit
+since the 2026-08-15 swap above, so either a damaged pair made the link
+downshift (patch cable NIC↔room switch, or that switch port) or the old
+10/100 switch is back in the path. A link that carries cp-01's etcd,
+worker-01, pg02 and Longhorn replica traffic at 100 Mb drops corosync
+packets. **Open: needs a physical check on the LAN.** Confirm with
+`cat /sys/class/net/nic0/speed`, which should read `1000`.
+
+`systemctl restart corosync` on bnei cleared the retransmit backlog, and
+the queued writes landed. Retransmits read 0 after the RAM work, but at
+100 Mb this will come back under load.
+
+**The provider then saw no change.** The stuck PUT had landed as a
+*pending* change (`[PENDING] memory: 14336`), so the next `apply` refreshed
+to 14336 and reported `0 changed` without rebooting. The running VM was
+still at 16 GB. A manual `qm reboot 203` (after a drain) applied it. After
+any failed memory apply, check `qm config <id>` for a `[PENDING]` section
+before trusting a clean plan.
+
+**Collateral: Grafana had been down since 2026-10-16 23:32.** worker-01
+logged `Buffer I/O error on dev sdd … lost sync page write` on Grafana's
+Longhorn volume. ext4 aborted its journal and remounted read-only, and
+Grafana crash-looped on `failed to check table existence: unable to open
+database file (14)` (71 restarts). The volume itself reported `healthy`.
+Deleting the pod remounted it, and Grafana came back with `database: ok`.
+A Longhorn volume can show healthy while the mount on the node is read-only,
+so for a SQLite `CANTOPEN` on a Longhorn PVC, check `dmesg` on the node first.
+
+End state: cp-01/02/03 at 6 GB, worker-02 at 14 GB, etcd ok, Longhorn 6/6
+healthy, every Argo app Synced/Healthy, Prometheus back on worker-02.
+server1 `MemAvailable` went from 5.6 to 10 GB after the reboots.
