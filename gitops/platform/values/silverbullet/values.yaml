@@ -1,0 +1,107 @@
+# SilverBullet — the shared notes webapp of M BN and N MG (ADR-0058).
+# Public upstream image, chart and values in this repo: platform-common tier.
+#
+# The space is a git clone of MohammadBnei/notes at /data/notes; SilverBullet
+# commits browser edits and pushes them with a per-space deploy key, and
+# pulls what Claude Code pushes. Users, OIDC and the git remote are set in
+# its Dashboard and live on the PVC, not in git — the accepted deviation and
+# the one-time setup are in ADR-0058.
+#
+# No forwardAuth middleware: SilverBullet logs in through authentik itself
+# (authentik-blueprint-silverbullet.yaml), so each commit is authored by the
+# person who made the edit.
+
+image:
+  repository: ghcr.io/silverbulletmd/silverbullet
+  # -slim: no bundled Chromium (the Runtime API is unused here).
+  tag: "2.12.1-slim"
+
+service:
+  port: 3000
+
+ingress:
+  hostname: notes.bnei.dev
+
+# The container MUST start as root: the entrypoint creates a `silverbullet`
+# user at PUID/PGID and drops to it, because ssh (git sync) refuses to run
+# under a UID with no passwd entry. So no runAsUser here. fsGroup makes the
+# fresh Longhorn PVC (root:root 0755) group-writable for that user — the
+# trap traefik's acme.json PVC hit (values/traefik/values.yaml).
+env:
+  - name: PUID
+    value: "1000"
+  - name: PGID
+    value: "1000"
+podSecurityContext:
+  fsGroup: 1000
+  fsGroupChangePolicy: OnRootMismatch
+
+# Holds the space, users.json, authentication.json (OIDC client secret) and
+# the deploy key. Longhorn default class: replicated and in daily-backup.
+persistence:
+  enabled: true
+  size: 5Gi
+  mountPath: /data
+
+# RWO PVC: a RollingUpdate would Multi-Attach and hang (grafana's note).
+strategy:
+  type: Recreate
+
+resources:
+  requests:
+    cpu: 50m
+    memory: 128Mi
+  limits:
+    memory: 512Mi
+
+# /.instance is the image's own HEALTHCHECK path.
+livenessProbe:
+  enabled: true
+  path: /.instance
+readinessProbe:
+  enabled: true
+  path: /.instance
+
+extraManifests:
+  # Any writer can make the server fetch a URL (`/.proxy`, net.proxyFetch),
+  # and nothing else in this cluster denies egress — so without this a
+  # browser session could reach in-cluster services with no auth of their
+  # own (Longhorn UI, Prometheus). Allow DNS, Traefik's VIP (authentik.bnei.dev
+  # may resolve there through Pi-hole) and the internet; deny the rest of
+  # RFC1918, the cluster ranges and link-local.
+  - |
+    apiVersion: networking.k8s.io/v1
+    kind: NetworkPolicy
+    metadata:
+      name: silverbullet-egress
+    spec:
+      podSelector: {}
+      policyTypes:
+      - Egress
+      egress:
+      # nodelocaldns (kubespray, enable_nodelocaldns) and CoreDNS behind it.
+      - to:
+        - ipBlock:
+            cidr: 169.254.25.10/32
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+          podSelector:
+            matchLabels:
+              k8s-app: kube-dns
+        ports:
+        - {protocol: UDP, port: 53}
+        - {protocol: TCP, port: 53}
+      - to:
+        - ipBlock:
+            cidr: 192.168.1.233/32
+        ports:
+        - {protocol: TCP, port: 443}
+      - to:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+            except:
+            - 10.0.0.0/8
+            - 172.16.0.0/12
+            - 192.168.0.0/16
+            - 169.254.0.0/16
