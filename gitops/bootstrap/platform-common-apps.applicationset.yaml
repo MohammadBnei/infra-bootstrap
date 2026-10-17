@@ -61,6 +61,12 @@ spec:
         namespace: netbird
         hostname: netbird.bnei.dev
 
+      # Shared notes of M BN and N MG (ADR-0058). Logs in through authentik
+      # itself (native OIDC), so no forwardAuth middleware in its values.
+      - name: silverbullet
+        namespace: silverbullet
+        hostname: notes.bnei.dev
+
   template:
     metadata:
       name: '{{.name}}'

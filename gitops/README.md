@@ -68,7 +68,8 @@ gitops/
 │       ├── searxng/values.yaml            # common-app-chart values, driven by platform-common-apps.applicationset.yaml
 │       ├── pgweb/values.yaml              # ditto
 │       ├── ente-museum/values.yaml        # ditto
-│       └── ente-web/values.yaml           # ditto
+│       ├── ente-web/values.yaml           # ditto
+│       └── silverbullet/values.yaml       # ditto — shared notes, ADR-0058
 ├── redirectors/                           # Plain manifests, no chart — TLS-terminating redirects to out-of-cluster hosts
 │   ├── proxmox.yaml                       # Namespace+Service(ExternalName)+ServersTransport+IngressRoute → proxmox.bnei.dev (192.168.1.200:8006)
 │   ├── garage-s3.yaml                     # Namespace+Service(ExternalName)+IngressRoute → s3.bnei.dev (Garage S3 API, 192.168.1.199:3900) — ADR-0030
@@ -145,7 +146,7 @@ Each platform app: public Helm chart + values from `infra-bootstrap` via the man
 
 **`platform-common-apps.applicationset.yaml`** — simple containerized tools with no app-specific code (public image, no CI/CD of their own), all at wave 10:
 
-searxng · pgweb · ente-museum · ente-web
+searxng · pgweb · ente-museum · ente-web · zot · netbird · netbird-dashboard · silverbullet
 
 Unlike the two ApplicationSets above, both the chart (`common-app-chart`) and the values file live in `infra-bootstrap` itself — a single Application source, no external repo or SSH key needed. Add one: append a list element + `gitops/platform/values/<name>/values.yaml`.
 
