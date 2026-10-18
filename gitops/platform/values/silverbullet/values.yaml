@@ -93,6 +93,38 @@ readinessProbe:
   path: /.instance
 
 extraManifests:
+  # Second host, same server: the Opus Tech space (M BN and N MG's company,
+  # MohammadBnei → opus-tech-hq/workspace) is bound to opus.bnei.dev, while
+  # notes.bnei.dev stays M BN's ukubi notes. SilverBullet picks the space by
+  # Host, so this is only a route. The chart renders one Host per release, so
+  # the second is hand-written here with the same baseline chain, in the
+  # chart's order (origin lock, rate limit, headers). OIDC needs nothing new:
+  # login always goes through the central callback on the primary URL
+  # (notes.bnei.dev), and the same authentik application and group gate it.
+  - |
+    apiVersion: traefik.io/v1alpha1
+    kind: IngressRoute
+    metadata:
+      name: {{ .Release.Name }}-opus
+      namespace: {{ .Release.Namespace }}
+    spec:
+      entryPoints:
+      - websecure
+      routes:
+      - kind: Rule
+        match: Host(`opus.bnei.dev`)
+        services:
+        - name: {{ .Release.Name }}
+          port: {{ .Values.service.port }}
+        middlewares:
+        - name: {{ .Release.Name }}-baseline-originlock
+          namespace: {{ .Release.Namespace }}
+        - name: {{ .Release.Name }}-baseline-ratelimit
+          namespace: {{ .Release.Namespace }}
+        - name: {{ .Release.Name }}-baseline-headers
+          namespace: {{ .Release.Namespace }}
+      tls:
+        certResolver: {{ .Values.ingress.certResolver }}
   # Any writer can make the server fetch a URL (`/.proxy`, net.proxyFetch),
   # so without a fence a browser session could reach in-cluster services that
   # have no auth of their own (Longhorn UI, Prometheus). searxng's
