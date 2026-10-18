@@ -68,9 +68,11 @@ weighed on 2026-10-17:
    akadmin and nicozlat. Not `platform-admins`, which is ArgoCD and Grafana
    admin.
 8. **Egress is fenced.** Any writer can make the server fetch a URL
-   (`/.proxy`). The namespace's NetworkPolicy allows DNS, Traefik's VIP on
-   443 and the internet, and denies the rest of RFC1918, the cluster ranges
-   and link-local — the first egress policy in this cluster.
+   (`/.proxy`). A CiliumNetworkPolicy, searxng's (ADR-0040) field for field,
+   allows DNS (the `host` entity, since nodelocaldns is host identity) and
+   the internet, and denies the rest of RFC1918, the cluster ranges and
+   link-local. OIDC needs no carve-out: from a pod, `authentik.bnei.dev`
+   resolves to Cloudflare.
 9. **The Board is GitHub Projects + Issues** on the notes repo, not markdown.
 
 ## Accepted deviation: settings held by the app, not by git
@@ -105,14 +107,17 @@ and replace it on GitHub.
 
 ## Rollout
 
-1. Merge. ArgoCD creates the namespace, PVC and pod; authentik applies both
-   blueprints (the policy one may need one more worker restart if it ran
-   before the application existed).
+1. Merge. ArgoCD creates the namespace, PVC and pod, with **no route**;
+   authentik applies both blueprints (the policy one may need one more
+   worker restart if it ran before the application existed). Until
+   `users.json` exists, SilverBullet serves its setup wizard on every host,
+   and completing it takes no token — so the wizard must never be public.
 2. The notes repo deliberately has no `index.md`: the wizard seeds one into
    the empty space folder, and connecting the remote in step 5 then asks once
    to combine unrelated histories — with no file on both sides, the combine
    cannot conflict. Keep it that way until the space is connected.
-3. Wizard: the local admin (break-glass), space `notes` bound to
+3. Wizard over `kubectl -n silverbullet port-forward deploy/silverbullet 3000`:
+   the local admin (break-glass), space `notes` bound to
    `notes.bnei.dev`, folder `/data/notes`.
 4. Admin → Server: primary URL `https://notes.bnei.dev`. Admin →
    Authentication: generic OIDC, issuer
@@ -122,3 +127,6 @@ and replace it on GitHub.
 5. Space → Revisions: Managed, connect `git@github.com:MohammadBnei/notes.git`,
    "Deploy key for this space", add it on GitHub with write access, check
    remote every minute.
+6. Follow-up PR: set `hostname: notes.bnei.dev` in
+   `platform-common-apps.applicationset.yaml` and `ingress.enabled: true` in
+   `values/silverbullet/values.yaml`.
