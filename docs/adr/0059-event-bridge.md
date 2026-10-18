@@ -9,14 +9,14 @@ instance per build repo), [ADR-0035](0035-self-hosted-forgejo-authoritative-gith
 (Forgejo, Proposed), [ADR-0038](0038-cloudflare-proxy-dns01-and-origin-lock.md)
 (WAF skip rule for a GitHub webhook), [ADR-0055](0055-netbird-as-daily-ssh-path.md)
 (`netbird-agent` short-lived JWT). agent-fleet: `adr/0048` (one session, one pod;
-no queue in core), `adr/0061` (gate amendment: registered clients open sessions),
+no queue in core), `adr/0062` (gate amendment: registered clients open sessions),
 `adr/0071` (event dispatch, threads, trust), `adr/0072` (approval-gated executor).
 
 ## Context
 
 Agent-fleet is gaining *defined agents*: agents dedicated to one app or one
 platform component (zot/buildah, traefik/netbird, each app repo), see
-agent-fleet `adr/0061`–`0070`. Those agents are only useful if the right
+agent-fleet `adr/0062`–`0070`. Those agents are only useful if the right
 information reaches them without the operator relaying it by hand: a PR to
 review, an alert on the component they own, a hand-off from another agent.
 
