@@ -254,6 +254,13 @@ updated.
   authentik native OIDC (`shared-notes` group). Its users, OIDC and git remote
   are held on its PVC, not in git — an accepted deviation, like NetBird's
   dashboard. See [ADR-0058](docs/adr/0058-shared-notes-silverbullet.md).
+- **Events reach agents through `ukubi-bridge`** (ADR-0059, accepted, not built).
+  A Postgres database on Pigsty holds an append-only CloudEvents log with one
+  cursor per subscriber; the bridge alone touches it. GitHub (via a GitHub App),
+  Alertmanager and Grafana post to the bridge; agent-fleet core stays private and
+  queue-free, publishing through `PublishEvent` and consuming as one dispatcher
+  subscriber. Trust comes from the PR author and head repo, never the webhook
+  sender. See [ADR-0059](docs/adr/0059-event-bridge.md).
 - **NetBird is the daily SSH path to every host** (ADR-0055, accepted,
   rolling out — 14 hosts enrolled 2026-10-11, all but
   hermesagent/garage-storage/nfs-storage, human SSH over the
