@@ -72,10 +72,16 @@ spec:
                 grant_types:
                   - authorization_code
                   - refresh_token
-                # core keys authorization on the email claim and stores it as
-                # the author of a session/proposal/decision. user_email keeps
-                # `sub` and that attribution the same string.
-                sub_mode: user_email
+                # Defined agents key session ownership (sessions.owner,
+                # transcript.author_sub) on `sub`, so it must survive an email
+                # change and never be shared by two accounts. Email is neither:
+                # admins can edit it and it has no unique constraint.
+                # hashed_user_id is stable for the install's life (ADR-0050
+                # Decision 9). core still reads the email claim for display and
+                # attribution. Set EXPLICITLY, not omitted: a blueprint leaves
+                # an omitted attr at its current value, which here was
+                # user_email.
+                sub_mode: hashed_user_id
                 # Single-operator homelab: a consent screen on every login to
                 # your own console is friction with no corresponding gain.
                 authorization_flow: !Find [authentik_flows.flow, [slug, default-provider-authorization-implicit-consent]]
