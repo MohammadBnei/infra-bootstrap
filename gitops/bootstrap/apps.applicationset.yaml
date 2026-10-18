@@ -179,6 +179,15 @@ spec:
         valuesPath: [helm/values.yaml]
         targetRevision: main
         hostname: files.bnei.dev
+      # ukubi-bridge: event bus (ADR-0060). Public on /webhook/github only, via
+      # the app's ingress.pathPrefix — see gitops/apps/registry.yaml's entry.
+      - name: ukubi-bridge
+        namespace: ukubi-bridge
+        syncWave: "10"
+        repoURL: https://github.com/MohammadBnei/ukubi-bridge.git
+        valuesPath: [helm/values.yaml]
+        targetRevision: main
+        hostname: events.bnei.dev
   template:
     metadata:
       name: '{{.name}}'

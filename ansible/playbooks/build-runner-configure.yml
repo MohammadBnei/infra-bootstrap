@@ -101,6 +101,17 @@
       # covered it (registration-token 201, 2026-10-18).
       - name: drop
         url: https://github.com/MohammadBnei/drop
+      # ukubi-bridge, the event bus (ADR-0060). PUBLIC repo, like agent-fleet
+      # and wird. Its workflow keeps pull_request jobs GitHub-hosted, but that
+      # does not keep fork PRs off this box: a pull_request run uses the
+      # workflow file from the PR's merge commit, so a fork can add its own
+      # `runs-on: [self-hosted, ukubi-build]` job, and `sudo buildah` here is
+      # root. The guard is the repo's fork-PR approval policy, which must be
+      # `all_external_contributors` before this instance registers (GitHub's
+      # default only gates first-time contributors). PAT repo list and the CI
+      # identity's bound claims first, as above.
+      - name: ukubi-bridge
+        url: https://github.com/MohammadBnei/ukubi-bridge
     # NOT `ukubi` — that label belongs to the in-cluster runner holding a
     # ServiceAccount token with `create jobs` in vos/vos-dev. Builds must
     # not land there and cluster jobs must not land here.
