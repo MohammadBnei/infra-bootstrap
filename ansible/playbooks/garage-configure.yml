@@ -212,6 +212,18 @@
             AllowedHeader: ["*"]
             ExposeHeader: ["ETag"]
             MaxAgeSeconds: 3000
+          # SilverBullet's `Files: Upload` command PUTs from the space itself.
+          - AllowedOrigin: ["https://opus.bnei.dev"]
+            AllowedMethod: ["PUT"]
+            AllowedHeader: ["*"]
+            ExposeHeader: ["ETag"]
+            MaxAgeSeconds: 3000
+          # SilverBullet's `Files: Upload` command PUTs from the space itself.
+          - AllowedOrigin: ["https://notes.bnei.dev"]
+            AllowedMethod: ["PUT"]
+            AllowedHeader: ["*"]
+            ExposeHeader: ["ETag"]
+            MaxAgeSeconds: 3000
         # Nothing prunes it, and this LXC's 200GB also holds the Longhorn,
         # pgBackRest and zot targets (wedding-wall's reasoning). Doubles as
         # the upload cap: drop has no per-file limit of its own.
