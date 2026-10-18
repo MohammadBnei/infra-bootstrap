@@ -1,4 +1,4 @@
-# ADR-0059: Event bridge — `ukubi-bridge`, a Postgres-backed event bus feeding fleet agents
+# ADR-0060: Event bridge — `ukubi-bridge`, a Postgres-backed event bus feeding fleet agents
 
 **Status:** Accepted, not built. Nothing is deployed by this ADR.
 **Date:** 2026-10-18

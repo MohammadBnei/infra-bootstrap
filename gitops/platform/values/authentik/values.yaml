@@ -132,6 +132,9 @@ blueprints:
   # shared notes (ADR-0058): the shared-notes group and its binding. The
   # provider is under `secrets:` below.
   - authentik-blueprint-silverbullet-policy
+  # drop (ADR-0059): the shared-notes binding for files.bnei.dev. Its
+  # provider lives in authentik-blueprint-forwardauth, wird-admin's reason.
+  - authentik-blueprint-drop-policy
   secrets:
   - authentik-blueprint-grafana
   - authentik-blueprint-argocd

@@ -332,3 +332,24 @@
 # gitops/bootstrap/platform-common-apps.applicationset.yaml and
 # gitops/platform/values/{searxng,pgweb}/values.yaml. This registry is
 # only for apps that genuinely need their own repo.
+
+# drop: file sharing for the SilverBullet spaces (ADR-0059) — a Go signer in
+# front of the Garage bucket `drop`. The pod never handles file bytes.
+#
+# Gated by its OWN forwardAuth, drop-forwardauth (namespace default), bound to
+# shared-notes, not platform-admins: N MG uses it for the opus space. The ref
+# lives in drop's helm/values.yaml; the callback route is
+# gitops/bootstrap/drop-outpost-route.yaml (forward_single). drop trusts
+# X-authentik-username, so its values also carry a NetworkPolicy admitting
+# Traefik alone (has-journal's lesson). Baseline chain stays on.
+#
+# S3 keys: gitops/bootstrap/drop-secret.yaml (Secret drop-config, envFrom).
+# Merge only after drop's CI has replaced image.tag "unreleased" with a built
+# SHA (hq/wird rule).
+- name: drop
+  namespace: drop
+  syncWave: "10"
+  repoURL: https://github.com/MohammadBnei/drop.git
+  valuesPath: [helm/values.yaml]
+  targetRevision: main
+  hostname: files.bnei.dev

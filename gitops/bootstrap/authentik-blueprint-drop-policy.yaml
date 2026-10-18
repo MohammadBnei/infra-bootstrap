@@ -1,0 +1,37 @@
+# Who may use the `drop` application (files.bnei.dev). ADR-0059.
+#
+# The shared-notes group (declared in authentik-blueprint-silverbullet-policy.yaml),
+# not platform-admins: drop serves the SilverBullet spaces, so it follows their
+# gate. Which space each member sees is drop's own DROP_SPACES map (N MG gets
+# opus only, per ADR-0058); this binding only decides who reaches the app.
+#
+# Its own file, separate from the provider in authentik-blueprint-forwardauth.yaml,
+# for wird-admin-policy's reason: a !Find miss here rolls back this binding,
+# never the forwardAuth tier. With core_default_app_access false, a missing
+# binding denies everyone, the visible failure direction.
+#
+# First apply may race the `drop` application or the `shared-notes` group:
+# the !Find misses and this blueprint goes to `error`. One more worker restart
+# applies it.
+#
+# A plain ConfigMap: no credential here.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: authentik-blueprint-drop-policy
+  namespace: authentik
+data:
+  drop-policy.yaml: |
+    version: 1
+    metadata:
+      name: drop-policy
+      labels:
+        blueprints.goauthentik.io/instantiate: "true"
+    entries:
+      - model: authentik_policies.policybinding
+        identifiers:
+          target: !Find [authentik_core.application, [slug, drop]]
+          group: !Find [authentik_core.group, [name, shared-notes]]
+          order: 0
+        attrs:
+          enabled: true

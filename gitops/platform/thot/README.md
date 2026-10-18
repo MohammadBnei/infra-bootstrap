@@ -57,8 +57,9 @@ concrete RBAC/Alertmanager design.
    agent-fleet component.
 4. ~~Mint a `THOT_AUTH_TOKEN`~~ — done, present in both this project (`dev`)
    and `agent-fleet-nygh` (`dev`) — the sidecar and core need the
-   same value to reach `ThotService`. Leaving it unset makes that service
-   unauthenticated.
+   same value to reach `ThotService`. From agent-fleet#260 (ADR-0069) the
+   executor refuses to start when it is unset or shorter than 32 bytes;
+   before that, unset meant unauthenticated.
 5. Apply this Application once (or let `gitops/bootstrap/`'s self-sync
    pick it up per ADR-0021 — no manual `kubectl apply` needed beyond the
    one-time bootstrap already documented in `gitops/README.md`).

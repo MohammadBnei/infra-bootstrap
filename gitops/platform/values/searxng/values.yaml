@@ -229,15 +229,16 @@ extraManifests:
         # port-53-only, so every other ClusterIP port is denied by that instead.
         # The 10.0.0.0/8 entry is belt-and-braces there, not the control.
         #
-        # Consequence for the rollout, and this is the part worth copying: a
-        # namespace that DOES need in-cluster egress will NOT get it from a
-        # `toEndpoints` rule. Under cilium_kube_proxy_replacement: false the
-        # verdict for ClusterIP traffic is taken against reserved:host, never
-        # against the backend pod's identity, so a toEndpoints allow can never
-        # match. `toServices` is the documented answer but is UNVERIFIED here —
-        # test it on the first namespace that needs it rather than trusting
-        # this comment. Allowing reserved:host on the port also works and is
-        # blunt: it opens the node on that port too.
+        # For a namespace that DOES need in-cluster egress, CORRECTED
+        # 2026-10-18 (docs/bootstrap-test-notes.md, 2026-08-25 claim 3):
+        # use `toEndpoints` WITH `toPorts`. Even with KPR off, Cilium's BPF LB
+        # handles ClusterIP (`Services: ClusterIP: Enabled`) and DNATs before
+        # egress policy, so the verdict is taken against the backend pod
+        # identity. The reserved:host entry above is IPVS's copy of the VIP and
+        # never matters for those Services. Avoid `toServices` without
+        # `toPorts` (it opens every port on the backend) and `toEntities: host`
+        # on a non-DNS port (it does not carry ClusterIP traffic and opens the
+        # pod's own node).
         #
         # 169.254.0.0/16 is deliberately NOT excepted — that would strand the
         # DNS rule above on the unproven half of cilium#18644. Bare metal, so

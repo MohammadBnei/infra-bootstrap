@@ -97,6 +97,10 @@
       # can reach this box. PAT repo list first, as above.
       - name: mountain
         url: https://github.com/MohammadBnei/mountain
+      # drop's signer image (ADR-0059). Private repo. The PAT already
+      # covered it (registration-token 201, 2026-10-18).
+      - name: drop
+        url: https://github.com/MohammadBnei/drop
     # NOT `ukubi` — that label belongs to the in-cluster runner holding a
     # ServiceAccount token with `create jobs` in vos/vos-dev. Builds must
     # not land there and cluster jobs must not land here.
