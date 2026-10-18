@@ -51,10 +51,10 @@ prints it in the browser (a Space Lua exporter in each space's `CONFIG`).
 ## Consequences
 
 - **A public link is a bearer URL.** Anyone who has it can download the file
-  for 7 days. Deleting the object is the only way to revoke it.
+  for 7 days. Deleting the file in drop revokes it. The pod deletes over the
+  LAN endpoint; the key's `--write` grant covers DeleteObject.
 - **Adding a user means editing `DROP_SPACES` in drop's values.** That is
   fine for two people.
-- **No delete in the UI yet.** Remove objects with the Garage CLI.
 
 ## Rollout
 
