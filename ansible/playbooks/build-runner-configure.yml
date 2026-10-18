@@ -97,6 +97,10 @@
       # can reach this box. PAT repo list first, as above.
       - name: mountain
         url: https://github.com/MohammadBnei/mountain
+      # drop's signer image (ADR-0059). Private repo. The PAT already
+      # covered it (registration-token 201, 2026-10-18).
+      - name: drop
+        url: https://github.com/MohammadBnei/drop
       # ukubi-bridge, the event bus (ADR-0059). PUBLIC repo, like agent-fleet
       # and wird. Its workflow keeps pull_request jobs GitHub-hosted, but that
       # does not keep fork PRs off this box: a pull_request run uses the

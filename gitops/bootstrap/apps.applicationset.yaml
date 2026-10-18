@@ -170,6 +170,15 @@ spec:
         valuesPath: [helm/values.yaml]
         targetRevision: main
         hostname: mountain.bnei.dev
+      # drop: SilverBullet file sharing (ADR-0059). Own forwardAuth on
+      # shared-notes, see gitops/apps/registry.yaml's entry.
+      - name: drop
+        namespace: drop
+        syncWave: "10"
+        repoURL: https://github.com/MohammadBnei/drop.git
+        valuesPath: [helm/values.yaml]
+        targetRevision: main
+        hostname: files.bnei.dev
       # ukubi-bridge: event bus (ADR-0059). Public on /webhook/github only, via
       # the app's ingress.pathPrefix — see gitops/apps/registry.yaml's entry.
       - name: ukubi-bridge

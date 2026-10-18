@@ -3564,6 +3564,44 @@ into a policy on faith. Allowing `reserved:host` on the specific port does work
 and is blunt: identity 1 covers the node too, so it opens that port on the node
 as well.
 
+**Corrected 2026-10-18 — claim 3's correction was itself wrong.** A live spike
+(agent-fleet defined-agents P0, throwaway `spike-netlock` namespaces) found that
+`toEndpoints` *does* match ClusterIP traffic. `cilium-dbg status --verbose` shows
+`KubeProxyReplacement: False` but **`Services: ClusterIP: Enabled`** (NodePort,
+LoadBalancer, externalIPs and HostPort disabled). So for every ClusterIP that
+`cilium-dbg service list` holds as a BPF LB frontend, the per-packet LB in
+`bpf_lxc` DNATs to the backend *before* egress policy, and the verdict is taken
+against the **backend pod identity**. The VIP's `identity 1` ipcache entry, which
+comes from IPVS's `kube-ipvs0`, never comes into play for those services. The
+searxng probe above dropped because its policy had no `toEndpoints` rule, not
+because such a rule cannot match.
+
+| Egress rule (with DNS = `toEntities: [host]` 53) | Allowed backend via ClusterIP | Own node `:port` | Other ports on the backend |
+|---|---|---|---|
+| `toEndpoints` + `toPorts` | **pass** | blocked | blocked |
+| `toServices` (no `toPorts`) | pass | blocked | **open**: compiles to backend identity on ANY port |
+| `toEntities: [host]` + `toPorts` | **blocked** | **reached** | n/a |
+
+Proof is from the endpoint policy map counters, as this entry prescribes:
+`Allow Egress k8s:app=vaultish 14322/TCP 1544 bytes`. The rule to copy is
+`toEndpoints` (add `k8s:io.kubernetes.pod.namespace` across namespaces) **with**
+`toPorts`. Never use `toServices` without `toPorts`, and never `toEntities:
+[host]` beyond `:53`. That rule does not carry pod-backed ClusterIP traffic, and
+it opens the pod's own node on that port. The remote nodes stay closed, because
+they are `remote-node` (7 here), not `host`.
+
+Two scope notes:
+- This covers ClusterIPs only. A MetalLB `LoadBalancer` IP (Traefik `.233`) is
+  not a Cilium LB frontend under this config. It still lands on IPVS and so on
+  `host`, which means silverbullet's comment about the VIP stands.
+- L7 `rules.dns` with `matchName` on the `host:53` rule works with nodelocaldns as
+  host identity, and anything else gets `REFUSED`. That breaks musl lookups
+  under `ndots:5` for non-trailing-dot FQDNs, because the search-expanded name
+  is refused first. Use a short name, a trailing dot, or `ndots:1`.
+
+Still not re-checked after a `cilium-agent` restart, when the BPF service map is
+briefly empty.
+
 ### Why every hop misled
 
 `hubble observe` reports drops against the **post-DNAT** address with a

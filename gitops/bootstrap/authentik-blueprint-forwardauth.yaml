@@ -166,6 +166,38 @@ data:
           meta_launch_url: https://wird-admin.bnei.dev
           meta_description: Wird operations view — reports triage, sync outcomes, corpus version
       # ----------------------------------------------------------------
+      # drop (ADR-0059): files.bnei.dev, the SilverBullet spaces' file
+      # sharing. In this file for wird-admin's reason above: the outpost
+      # list must reach it by !KeyOf. Its binding (shared-notes, not
+      # platform-admins) is authentik-blueprint-drop-policy.yaml.
+      - model: authentik_providers_proxy.proxyprovider
+        id: drop-proxy-provider
+        identifiers:
+          name: drop
+        attrs:
+          name: drop
+          # forward_single, wird-admin's reasoning: a static hostname, and a
+          # second forward_domain provider on bnei.dev would clash with
+          # previews. Callback leg: gitops/bootstrap/drop-outpost-route.yaml.
+          mode: forward_single
+          external_host: https://files.bnei.dev
+          # No bearer clients: every caller is a browser with a session. Off,
+          # so a stray Authorization header never skips the login.
+          intercept_header_auth: false
+          basic_auth_enabled: false
+          access_token_validity: "hours=8"
+          authorization_flow: !Find [authentik_flows.flow, [slug, default-provider-authorization-implicit-consent]]
+          invalidation_flow: !Find [authentik_flows.flow, [slug, default-provider-invalidation-flow]]
+      - model: authentik_core.application
+        identifiers:
+          slug: drop
+        attrs:
+          name: Files
+          slug: drop
+          provider: !KeyOf drop-proxy-provider
+          meta_launch_url: https://files.bnei.dev
+          meta_description: Files shared from the SilverBullet spaces, on Garage
+      # ----------------------------------------------------------------
       # THE TRAP. A proxy provider does nothing at all until it is bound
       # to an outpost, and the embedded outpost ships with providers = [].
       # Verified live: `authentik Embedded Outpost :: proxy :: providers= []`.
@@ -184,3 +216,5 @@ data:
             # an unresolved reference invalidates the whole blueprint and takes
             # previews down with it.
             - !KeyOf wird-admin-proxy-provider
+            # drop (ADR-0059), declared above in this same file.
+            - !KeyOf drop-proxy-provider
