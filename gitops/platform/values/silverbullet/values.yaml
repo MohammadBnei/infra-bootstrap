@@ -53,6 +53,20 @@ podSecurityContext:
   fsGroup: 1000
   fsGroupChangePolicy: OnRootMismatch
 
+# The entrypoint runs `mkdir -p $SB_FOLDER` as root BEFORE dropping to PUID,
+# and only infers ownership when PUID is unset — so /data/sb came out
+# root:silverbullet 0755 and setup failed with "could not create folder
+# /data/sb/notes: Permission denied" (2026-10-18). fsGroup's setgid on /data
+# passes the group down, not the write bit. Own it here, every start, so a
+# restored or recreated volume comes up right too. Same image: no extra pull.
+initContainers:
+  - name: own-data-folder
+    image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+    command: ["sh", "-c", "mkdir -p /data/sb && chown 1000:1000 /data/sb"]
+    volumeMounts:
+      - name: data
+        mountPath: /data
+
 # Holds the space, users.json, authentication.json (OIDC client secret) and
 # the deploy key. Longhorn default class: replicated and in daily-backup.
 persistence:
