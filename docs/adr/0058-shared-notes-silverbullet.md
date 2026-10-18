@@ -131,3 +131,16 @@ and replace it on GitHub.
 6. Follow-up PR: set `hostname: notes.bnei.dev` in
    `platform-common-apps.applicationset.yaml` and `ingress.enabled: true` in
    `values/silverbullet/values.yaml`.
+
+## Amendment, 2026-10-18: a second space for Opus Tech
+
+`notes` is too general a name for the company: it stays M BN's ukubi notes.
+M BN and N MG's company, Opus Tech, gets its own repo,
+`opus-tech-hq/workspace` (GitHub org `opus-tech-hq`; `opus-tech` was taken),
+served as a second space on the same server at `opus.bnei.dev`, with its own
+deploy key. The route is a hand-written IngressRoute in the app's
+`extraManifests` (the chart renders one host per release), carrying the
+same baseline middlewares. OIDC is unchanged: one authentik application, one
+central callback on the primary URL, one `shared-notes` group. Which space a
+person can open is SilverBullet's per-space membership: N MG writes on the
+Opus Tech space only.

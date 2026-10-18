@@ -408,7 +408,7 @@ A    bnei.dev           → 82.65.231.50   (apex)
 A    *.bnei.dev         → 82.65.231.50   argocd, grafana, infisical,
                                          alertmanager, pgweb, s3, fleet,
                                          proxmox, blog, dreamer, searxng,
-                                         ente, e2e, notes
+                                         ente, e2e, notes, opus
 A    *.ente.bnei.dev    → 82.65.231.50   api.ente, album.ente
 A    *.e2e.bnei.dev     → 82.65.231.50   agent-fleet per-task previews
 MX   bnei.dev           → 10 mxa/mxb.mailgun.org
