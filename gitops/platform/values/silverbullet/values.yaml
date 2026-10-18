@@ -19,13 +19,12 @@ image:
 service:
   port: 3000
 
-# NO ROUTE until the setup wizard is done. Until /data/users.json exists,
-# SilverBullet serves /.setup on every host and `POST /.setup/api/complete`
-# takes no token: whoever reaches it first creates the admin account. The
-# wizard runs over `kubectl port-forward` (ADR-0058 Rollout); a follow-up PR
-# sets the hostname in platform-common-apps and flips this to true.
+# The route was withheld until the setup wizard had run (it hands the admin
+# account to whoever completes it first, and takes no token). Done before
+# this was enabled; users.json now exists, so /.setup is closed.
 ingress:
-  enabled: false
+  enabled: true
+  hostname: notes.bnei.dev
 
 # The container MUST start as root: the entrypoint creates a `silverbullet`
 # user at PUID/PGID and drops to it, because ssh (git sync) refuses to run
