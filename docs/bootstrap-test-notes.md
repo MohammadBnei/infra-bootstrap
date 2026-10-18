@@ -4920,3 +4920,55 @@ so for a SQLite `CANTOPEN` on a Longhorn PVC, check `dmesg` on the node first.
 End state: cp-01/02/03 at 6 GB, worker-02 at 14 GB, etcd ok, Longhorn 6/6
 healthy, every Argo app Synced/Healthy, Prometheus back on worker-02.
 server1 `MemAvailable` went from 5.6 to 10 GB after the reboots.
+
+## 2026-10-18 — authentik "Failed to fetch data": gunicorn workers segfaulting
+
+**Symptom.** After the 2026.8.0 → 2026.8.4 bump (#312), the admin UI's
+Events and Applications pages sometimes failed with `Failed to fetch data`
+/ `Response returned an error code`. Other pages mostly worked.
+
+**No 5xx in the request log.** The request that fails dies with its
+gunicorn worker, so it is never logged. The server log shows the crash
+instead:
+
+```
+{"event": "Worker (pid:51656) was sent SIGSEGV!", "logger": "gunicorn.error", ...}
+```
+
+The crash came 2s after that same pid served the browser's
+`/api/v3/core/applications/` call.
+
+**Rate and onset (Loki, 7 days).** 0 SIGSEGV before the upgrade. 1–2 per 6h
+on the night of 2026-10-16. Then about 22 per 6h, steady from 2026-10-17
+08:00. That is about one every 15 minutes, and each one fails whatever
+requests are in flight. Not out-of-memory: 495Mi of a 1Gi limit, and the
+signal is SIGSEGV, not SIGKILL. The `platform-authentik-worker` deployment
+had none.
+
+**`dmesg` on the node (k8s-worker-01) named the library:**
+
+```
+gunicorn: worke[2697580]: segfault at 76023fb4e4a9 ip 000076021f82d647 ... error 4 in libpython3.14.so.1.0[76021f6f7000+27c000]
+```
+
+Every crash, in gunicorn workers and in `ThreadPoolExecutor` threads alike,
+showed the **same fault address and the same instruction pointer**. Workers
+are forked from the gunicorn master, so a pointer that is bad the same way
+in each new worker came from the master's memory, not from any one request.
+The pod was 45h old. It ran on worker-01, where the RAM work in the entry
+above also found I/O errors in the same window. That link is not proven.
+
+**Fix.** `kubectl -n authentik rollout restart deploy/platform-authentik-server`.
+The new pod landed on worker-02. 0 SIGSEGV over the next 2h (checked every
+5 min), against a baseline of about 4/hour. The UI pages load. 2026.8.4 is
+kept.
+
+**If it comes back,** the image is the suspect, not the process state.
+Options then: roll back to 2026.8.0 (first check `django_migrations` for
+anything newer than 2026.8.0, and note this drops the 2026.8.2 security
+backports), or stay on 2026.8.4 and file upstream with the `dmesg` line
+above. The closest upstream report is goauthentik/authentik#26274
+(sporadic 503s on 2026.8.3).
+
+**Takeaway.** When the authentik UI fails intermittently with no 5xx in the
+log, grep the server log for `SIGSEGV` and check `dmesg` on the node.
