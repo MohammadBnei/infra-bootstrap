@@ -327,7 +327,7 @@
   targetRevision: main
   hostname: mountain.bnei.dev
 
-# ukubi-bridge: the event bus (ADR-0059) — a Go service appending GitHub App
+# ukubi-bridge: the event bus (ADR-0060) — a Go service appending GitHub App
 # deliveries (and later Alertmanager, Publish calls) to a Postgres log.
 #
 # PUBLIC ON ONE PATH ONLY. The app's values set ingress.pathPrefix:

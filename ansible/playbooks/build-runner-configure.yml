@@ -101,7 +101,7 @@
       # covered it (registration-token 201, 2026-10-18).
       - name: drop
         url: https://github.com/MohammadBnei/drop
-      # ukubi-bridge, the event bus (ADR-0059). PUBLIC repo, like agent-fleet
+      # ukubi-bridge, the event bus (ADR-0060). PUBLIC repo, like agent-fleet
       # and wird. Its workflow keeps pull_request jobs GitHub-hosted, but that
       # does not keep fork PRs off this box: a pull_request run uses the
       # workflow file from the PR's merge commit, so a fork can add its own

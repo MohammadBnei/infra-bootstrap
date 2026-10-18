@@ -38,7 +38,7 @@ ingress:
   certResolver: le
   # Route only this path prefix of the hostname ("" = the whole host). For an
   # app that exposes one public path and keeps the rest cluster-internal:
-  # ukubi-bridge publishes /webhook/github and nothing else (ADR-0059).
+  # ukubi-bridge publishes /webhook/github and nothing else (ADR-0060).
   pathPrefix: ""
   annotations: {}
   # Traefik Middleware refs: [{name, namespace}]. Define the Middleware
