@@ -63,13 +63,12 @@ spec:
 
       # Shared notes of M BN and N MG (ADR-0058). Logs in through authentik
       # itself (native OIDC), so no forwardAuth middleware in its values.
-      # hostname empty-but-present for zot's reason, and on purpose: no route
-      # until its setup wizard has run over port-forward, because that wizard
-      # hands the admin account to whoever reaches it first. The follow-up
-      # sets notes.bnei.dev here and ingress.enabled in its values.
+      # The route went live only after its setup wizard had run over
+      # port-forward (ADR-0058 Rollout): that wizard hands the admin account
+      # to whoever completes it first.
       - name: silverbullet
         namespace: silverbullet
-        hostname: ""
+        hostname: notes.bnei.dev
 
   template:
     metadata:
