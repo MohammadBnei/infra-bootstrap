@@ -37,6 +37,13 @@ env:
     value: "1000"
   - name: PGID
     value: "1000"
+  # An empty subfolder, not the PVC root. SilverBullet picks its boot mode
+  # from whether the data folder is empty, and a fresh ext4 volume always
+  # holds lost+found — so with /data it booted in single-space mode (no
+  # Dashboard, no users, no OIDC). Seen on the first deploy, 2026-10-18.
+  # Deleting lost+found is no fix: a restore or fsck brings it back.
+  - name: SB_FOLDER
+    value: /data/sb
   # Process-wide kill switch for the server-side shell. Multi-space mode
   # already keeps it off unless spaces.json enables it; this stops a later
   # Dashboard toggle from turning a writer's session into remote exec.

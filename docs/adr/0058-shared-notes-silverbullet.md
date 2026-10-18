@@ -118,7 +118,8 @@ and replace it on GitHub.
    cannot conflict. Keep it that way until the space is connected.
 3. Wizard over `kubectl -n silverbullet port-forward deploy/silverbullet 3000`:
    the local admin (break-glass), space `notes` bound to
-   `notes.bnei.dev`, folder `/data/notes`.
+   `notes.bnei.dev`, folder `/data/sb/notes` (`SB_FOLDER=/data/sb`: the PVC
+   root holds `lost+found`, which made it boot single-space).
 4. Admin → Server: primary URL `https://notes.bnei.dev`. Admin →
    Authentication: generic OIDC, issuer
    `https://authentik.bnei.dev/application/o/silverbullet/`, client id and
