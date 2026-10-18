@@ -72,8 +72,10 @@ all:
         # warns about, and the reason a pgsql-* run would have aimed writes at
         # the standby and still printed a green PLAY RECAP. Found while picking a
         # target for ADR-0052's wird_admin role.
-        192.168.1.205: { pg_seq: 1, pg_role: primary } # <---- primary instance with read-write capability
-        192.168.1.207: { pg_seq: 2, pg_role: replica } # <---- read only replica for read-only online traffic
+        # FLIPPED BACK 2026-10-18: Patroni reports pg-proxmox-2 (.207) leader
+        # and pg-proxmox-1 (.205) replica, checked before dbuser_bridge's run.
+        192.168.1.205: { pg_seq: 1, pg_role: replica } # <---- read only replica for read-only online traffic
+        192.168.1.207: { pg_seq: 2, pg_role: primary } # <---- primary instance with read-write capability
       vars:
         pg_cluster: pg-proxmox
 
