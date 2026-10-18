@@ -199,6 +199,23 @@
         # wedding-wall: this LXC's 200GB also holds the Longhorn, pgBackRest and
         # zot targets.
         max_size: "2GB"
+      - name: "drop" # files shared from the SilverBullet spaces (opus, notes), served by drop at files.bnei.dev (ADR-0059)
+        key_name: "drop-key"
+        infisical_prefix: "DROP_S3"
+        # The browser PUTs uploads straight here with a presigned URL minted
+        # by drop, so files.bnei.dev's JS makes a real cross-origin request:
+        # PUT only. Downloads are top-level navigations to presigned GETs and
+        # need no CORS. One origin per rule (see ente-photos above).
+        cors:
+          - AllowedOrigin: ["https://files.bnei.dev"]
+            AllowedMethod: ["PUT"]
+            AllowedHeader: ["*"]
+            ExposeHeader: ["ETag"]
+            MaxAgeSeconds: 3000
+        # Nothing prunes it, and this LXC's 200GB also holds the Longhorn,
+        # pgBackRest and zot targets (wedding-wall's reasoning). Doubles as
+        # the upload cap: drop has no per-file limit of its own.
+        max_size: "20GB"
 
   handlers:
     - name: Restart garage
