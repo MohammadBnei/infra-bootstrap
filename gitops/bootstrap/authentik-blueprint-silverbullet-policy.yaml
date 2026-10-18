@@ -1,0 +1,51 @@
+# Who may log in to the shared notes (ADR-0058) — the `shared-notes` group.
+#
+# authentik-blueprint-netbird-policy.yaml's shape, for its reasons: the group
+# is declared here, in its own file, not in authentik-blueprint-groups.yaml,
+# so an unresolved `!Find` can never stop platform-admins reconciling; and the
+# binding is separate from the provider blueprint, so a miss rolls back the
+# gate, not the provider — with core_default_app_access false, a missing
+# binding denies everyone, the visible failure direction.
+#
+# Not platform-admins: that group is ArgoCD and Grafana admin. N MG gets notes,
+# nothing else.
+#
+# First apply may race the `silverbullet` application (netbird's 2026-10-11
+# note): the !Find misses and this blueprint goes to `error`. One more worker
+# restart applies it. Verify in the database, selecting the FKs explicitly:
+#   SELECT target_id, group_id, enabled FROM authentik_policies_policybinding
+#
+# A plain ConfigMap: membership carries no credential.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: authentik-blueprint-silverbullet-policy
+  namespace: authentik
+data:
+  silverbullet-policy.yaml: |
+    version: 1
+    metadata:
+      name: silverbullet-policy
+      labels:
+        blueprints.goauthentik.io/instantiate: "true"
+    entries:
+      - model: authentik_core.group
+        id: shared-notes
+        identifiers:
+          name: shared-notes
+        attrs:
+          name: shared-notes
+          # REPLACED on every apply: this list is the whole membership.
+          # Deleting either account means deleting its line in the same change.
+          users:
+            # M BN.
+            - !Find [authentik_core.user, [username, akadmin]]
+            # N MG. Account exists since 2026-10-11 (netbird-users).
+            - !Find [authentik_core.user, [username, nicozlat]]
+      - model: authentik_policies.policybinding
+        identifiers:
+          target: !Find [authentik_core.application, [slug, silverbullet]]
+          group: !KeyOf shared-notes
+          order: 0
+        attrs:
+          enabled: true

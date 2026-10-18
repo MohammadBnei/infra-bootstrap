@@ -1,0 +1,127 @@
+# SilverBullet — the shared notes webapp of M BN and N MG (ADR-0058).
+# Public upstream image, chart and values in this repo: platform-common tier.
+#
+# The space is a git clone of MohammadBnei/notes at /data/notes; SilverBullet
+# commits browser edits and pushes them with a per-space deploy key, and
+# pulls what Claude Code pushes. Users, OIDC and the git remote are set in
+# its Dashboard and live on the PVC, not in git — the accepted deviation and
+# the one-time setup are in ADR-0058.
+#
+# No forwardAuth middleware: SilverBullet logs in through authentik itself
+# (authentik-blueprint-silverbullet.yaml), so each commit is authored by the
+# person who made the edit.
+
+image:
+  repository: ghcr.io/silverbulletmd/silverbullet
+  # -slim: no bundled Chromium (the Runtime API is unused here).
+  tag: "2.12.1-slim"
+
+service:
+  port: 3000
+
+# NO ROUTE until the setup wizard is done. Until /data/users.json exists,
+# SilverBullet serves /.setup on every host and `POST /.setup/api/complete`
+# takes no token: whoever reaches it first creates the admin account. The
+# wizard runs over `kubectl port-forward` (ADR-0058 Rollout); a follow-up PR
+# sets the hostname in platform-common-apps and flips this to true.
+ingress:
+  enabled: false
+
+# The container MUST start as root: the entrypoint creates a `silverbullet`
+# user at PUID/PGID and drops to it, because ssh (git sync) refuses to run
+# under a UID with no passwd entry. So no runAsUser here. fsGroup makes the
+# fresh Longhorn PVC (root:root 0755) group-writable for that user — the
+# trap traefik's acme.json PVC hit (values/traefik/values.yaml).
+env:
+  - name: PUID
+    value: "1000"
+  - name: PGID
+    value: "1000"
+  # Process-wide kill switch for the server-side shell. Multi-space mode
+  # already keeps it off unless spaces.json enables it; this stops a later
+  # Dashboard toggle from turning a writer's session into remote exec.
+  - name: SB_SHELL_BACKEND
+    value: "off"
+podSecurityContext:
+  fsGroup: 1000
+  fsGroupChangePolicy: OnRootMismatch
+
+# Holds the space, users.json, authentication.json (OIDC client secret) and
+# the deploy key. Longhorn default class: replicated and in daily-backup.
+persistence:
+  enabled: true
+  size: 5Gi
+  mountPath: /data
+
+# RWO PVC: a RollingUpdate would Multi-Attach and hang (grafana's note).
+strategy:
+  type: Recreate
+
+resources:
+  requests:
+    cpu: 50m
+    memory: 128Mi
+  limits:
+    memory: 512Mi
+
+# /.instance is the image's own HEALTHCHECK path.
+livenessProbe:
+  enabled: true
+  path: /.instance
+readinessProbe:
+  enabled: true
+  path: /.instance
+
+extraManifests:
+  # Any writer can make the server fetch a URL (`/.proxy`, net.proxyFetch),
+  # so without a fence a browser session could reach in-cluster services that
+  # have no auth of their own (Longhorn UI, Prometheus). searxng's
+  # searxng-lan-egress-lock (ADR-0040), field for field, for its reasons —
+  # read values/searxng/values.yaml before changing this. In short: a plain
+  # NetworkPolicy cannot allow DNS here, because pods resolve through
+  # nodelocaldns at 169.254.25.10, which Cilium classifies as the `host`
+  # entity, and no ipBlock ever matches that (docs/bootstrap-test-notes.md).
+  #
+  # No rule for Traefik's VIP is needed: from a pod, authentik.bnei.dev
+  # resolves to Cloudflare, so OIDC goes out through the world rule and back
+  # in through the front door, like ArgoCD's and Grafana's. If a LAN override
+  # for *.bnei.dev is ever added, the VIP is also `host` identity and the fix
+  # is `toEntities: [host]` on 443, not a toEndpoints rule to Traefik.
+  #
+  # Verify with Hubble:
+  #   hubble observe --namespace silverbullet --verdict DROPPED
+  - |
+    apiVersion: cilium.io/v2
+    kind: CiliumNetworkPolicy
+    metadata:
+      name: silverbullet-egress-lock
+      namespace: {{ .Release.Namespace }}
+    spec:
+      endpointSelector: {}
+      egress:
+        - toEntities:
+            - host
+          toPorts:
+            - ports:
+                - port: "53"
+                  protocol: UDP
+                - port: "53"
+                  protocol: TCP
+        # Belt and braces, searxng's reason: cilium#18644 has 169.254.25.10
+        # flip-flopping to a CIDR identity depending on start order.
+        - toCIDR:
+            - 169.254.25.10/32
+          toPorts:
+            - ports:
+                - port: "53"
+                  protocol: UDP
+                - port: "53"
+                  protocol: TCP
+        # github.com (git sync over SSH) and authentik via Cloudflare.
+        - toCIDRSet:
+            - cidr: 0.0.0.0/0
+              except:
+                - 10.0.0.0/8
+                - 172.16.0.0/12
+                - 192.168.0.0/16
+                - 169.254.0.0/16

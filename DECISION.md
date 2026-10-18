@@ -248,6 +248,12 @@ updated.
   bound to the `mountain` application alone (ADR-0057). See
   [ADR-0056](docs/adr/0056-mountain-public-live-cluster-view.md) and
   [ADR-0057](docs/adr/0057-mountain-visitor-enrollment.md).
+- **Shared notes are markdown in git, edited through SilverBullet** (ADR-0058).
+  `notes.bnei.dev` serves a clone of `MohammadBnei/notes`; SilverBullet commits
+  and pushes each person's edits and pulls what Claude Code pushes. Login is
+  authentik native OIDC (`shared-notes` group). Its users, OIDC and git remote
+  are held on its PVC, not in git — an accepted deviation, like NetBird's
+  dashboard. See [ADR-0058](docs/adr/0058-shared-notes-silverbullet.md).
 - **NetBird is the daily SSH path to every host** (ADR-0055, accepted,
   rolling out — 14 hosts enrolled 2026-10-11, all but
   hermesagent/garage-storage/nfs-storage, human SSH over the

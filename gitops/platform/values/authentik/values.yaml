@@ -129,12 +129,16 @@ blueprints:
   # mountain-visitors behind a Turnstile captcha, whose keys arrive by `!Env`
   # from authentik-config, so this stays a ConfigMap.
   - authentik-blueprint-mountain-enrollment
+  # shared notes (ADR-0058): the shared-notes group and its binding. The
+  # provider is under `secrets:` below.
+  - authentik-blueprint-silverbullet-policy
   secrets:
   - authentik-blueprint-grafana
   - authentik-blueprint-argocd
   - authentik-blueprint-fleet
   - authentik-blueprint-netbird
   - authentik-blueprint-mountain
+  - authentik-blueprint-silverbullet
 
 server:
   replicas: 1
