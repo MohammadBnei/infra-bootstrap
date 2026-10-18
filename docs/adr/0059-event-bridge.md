@@ -62,8 +62,9 @@ authorise is an approval button.
    `actor` (`human|bot|agent|machine`), `trust`, `hops`, `causationid`,
    `replayed`.
 4. **The API is gRPC (Connect)**: `Publish`, `Subscribe(name)` (stream),
-   `Ack`, `Replay`. Only `Replay` sets `replayed`. Subscribers must be
-   idempotent on the event id.
+   `Ack`, `Nack`, `Replay`. Only `Replay` sets `replayed`. Subscribers must be
+   idempotent on `(source, id)` — `id` alone is unique only per source — or on
+   the log position `seq`, which the API carries and Ack/Nack/Replay take.
 5. **Push sources are ingested by the bridge itself.**
    - GitHub through a **GitHub App** (one install, HMAC, deliveries API).
      `X-GitHub-Delivery` is the `ce_id`. An in-process reconcile loop
