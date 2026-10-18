@@ -9,6 +9,8 @@ image:
 
 ingress:
   hostname: ci-check.example.com
+  # Renders the `&& PathPrefix(...)` branch of the match (ADR-0059).
+  pathPrefix: /webhook/github
 
 persistence:
   enabled: true

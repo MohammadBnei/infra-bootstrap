@@ -97,6 +97,12 @@
       # can reach this box. PAT repo list first, as above.
       - name: mountain
         url: https://github.com/MohammadBnei/mountain
+      # ukubi-bridge, the event bus (ADR-0059). PUBLIC repo, like agent-fleet
+      # and wird: its workflow runs pull_request jobs on GitHub-hosted runners
+      # only and reaches this box on push/workflow_dispatch, so a fork PR never
+      # runs here. PAT repo list and the CI identity's bound claims first, as above.
+      - name: ukubi-bridge
+        url: https://github.com/MohammadBnei/ukubi-bridge
     # NOT `ukubi` — that label belongs to the in-cluster runner holding a
     # ServiceAccount token with `create jobs` in vos/vos-dev. Builds must
     # not land there and cluster jobs must not land here.

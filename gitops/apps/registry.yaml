@@ -327,6 +327,31 @@
   targetRevision: main
   hostname: mountain.bnei.dev
 
+# ukubi-bridge: the event bus (ADR-0059) — a Go service appending GitHub App
+# deliveries (and later Alertmanager, Publish calls) to a Postgres log.
+#
+# PUBLIC ON ONE PATH ONLY. The app's values set ingress.pathPrefix:
+# /webhook/github, so the chart's IngressRoute matches Host(events.bnei.dev) &&
+# PathPrefix(/webhook/github); /healthz and the future /webhook/alertmanager
+# and gRPC API stay reachable only through the Service. The Cloudflare WAF
+# skip rule is scoped to the same path (ADR-0038's argocd webhook precedent).
+# Baseline chain on: the host is proxied, so origin lock and per-CF-IP rate
+# limiting apply as for any other app.
+#
+# replicaCount 1 + Recreate in the app's helm/values.yaml: one writer, and a
+# LISTEN connection that must not be doubled.
+#
+# Merge only after ukubi-bridge's CI has put a built SHA in image.tag, or the
+# first sync is an ImagePullBackOff (hq/wird/mountain rule).
+# Env: gitops/bootstrap/ukubi-bridge-secret.yaml (Secret ukubi-bridge-config, envFrom).
+- name: ukubi-bridge
+  namespace: ukubi-bridge
+  syncWave: "10"
+  repoURL: https://github.com/MohammadBnei/ukubi-bridge.git
+  valuesPath: [helm/values.yaml]
+  targetRevision: main
+  hostname: events.bnei.dev
+
 # searxng and pgweb are NOT here: they're public-image tools with no
 # app-specific code, so they're driven as platform apps instead — see
 # gitops/bootstrap/platform-common-apps.applicationset.yaml and

@@ -36,6 +36,10 @@ ingress:
   # docs/adr/0001-ingress-traefik-ingressroute-over-gateway-api.md) — Gateway API
   # can't get certs from Traefik's ACME resolver without cert-manager.
   certResolver: le
+  # Route only this path prefix of the hostname ("" = the whole host). For an
+  # app that exposes one public path and keeps the rest cluster-internal:
+  # ukubi-bridge publishes /webhook/github and nothing else (ADR-0059).
+  pathPrefix: ""
   annotations: {}
   # Traefik Middleware refs: [{name, namespace}]. Define the Middleware
   # itself via extraManifests below (e.g. BasicAuth for an admin-only app).

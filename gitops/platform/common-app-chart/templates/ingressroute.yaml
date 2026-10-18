@@ -15,7 +15,7 @@ spec:
   - websecure
   routes:
   - kind: Rule
-    match: Host(`{{ .Values.ingress.hostname }}`)
+    match: Host(`{{ .Values.ingress.hostname }}`){{ with .Values.ingress.pathPrefix }} && PathPrefix(`{{ . }}`){{ end }}
     services:
     - name: {{ .Release.Name }}
       port: {{ .Values.service.port }}
