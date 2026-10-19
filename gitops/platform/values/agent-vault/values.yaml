@@ -1,0 +1,154 @@
+# Infisical Agent Vault (ADR-0061): agent-fleet's credential broker. A MITM
+# proxy that swaps a definition pod's placeholder credentials for real ones per
+# host/path. ClusterIP only: no IngressRoute, never exposed (the ApplicationSet
+# element's hostname is empty for zot's reason). Callers: agent-fleet's
+# provisioner (API :14321) and definition pods (proxy :14322), fenced by the
+# NetworkPolicy below.
+#
+# Platform-common app (public image, no per-app repo), not a
+# gitops/apps/registry.yaml user app — same reasoning as searxng/pgweb/zot.
+#
+# After the first sync, run gitops/scripts/agent-vault-bootstrap.sh once: it
+# creates the owner and the provisioner's agent token (ADR-0061 Decision 5).
+
+image:
+  repository: docker.io/infisical/agent-vault
+  # 0.40.0 (git 872578e4, 2026-10-01), multi-arch index digest. Research-preview
+  # upstream: bump deliberately, never float.
+  tag: "0.40.0@sha256:4d490e2586c553ea121fa404b66812ad40c246cc841b0cc746682d0a360bdf1e"
+
+replicaCount: 1
+# SQLite on an RWO volume: never two writers, so never two pods.
+strategy:
+  type: Recreate
+
+service:
+  port: 14321              # API (container port name "http")
+  extraPorts:
+    # MITM proxy. No declared containerPort needed: numeric targetPort.
+    - name: mitm
+      port: 14322
+
+# No IngressRoute — see header. The ApplicationSet passes ingress.hostname
+# unconditionally, so this must be explicit rather than merely absent.
+ingress:
+  enabled: false
+
+env:
+  # Its own address, echoed as av_addr in mint responses.
+  - name: AGENT_VAULT_ADDR
+    value: "http://agent-vault.agent-vault.svc.cluster.local:14321"
+  # Defaults to ON and sends the owner's email upstream. Mandatory.
+  - name: AGENT_VAULT_TELEMETRY
+    value: "false"
+  # Upstream's default, pinned: the proxy dials no RFC-1918/loopback/link-local/
+  # CGN address (checked per resolved IP at connect time), so a definition pod
+  # cannot use it to reach cluster Services, pods, nodes or the LAN directly.
+  # Public addresses stay open, including this homelab's own: the WAN IP's
+  # port-forwards and Cloudflare-proxied *.bnei.dev lead back to Traefik and
+  # the :49222 break-glass SSH. Narrowed per vault only once the provisioner
+  # sets deny (agent-fleet 0065). The vault's only egress fence — no egress
+  # NetworkPolicy (ADR-0061 Consequences).
+  - name: AGENT_VAULT_ALLOW_PRIVATE_RANGES
+    value: "false"
+
+# The folder also holds the owner password (read by the bootstrap script only)
+# and an unused AGENT_VAULT_OWNER_EMAIL. `keys` keeps both out of the Secret
+# and so out of this process's env: only the master password (the only
+# headless first-boot path) is synced. Folders and this filter are sync config,
+# not a boundary: the shared universal-auth identity reads the whole project
+# (accepted, ADR-0049 class — ADR-0061 Consequences).
+infisical:
+  enabled: true
+  projectSlug: "agent-fleet-nygh"
+  envSlug: dev
+  secretsPath: "/agent-vault-server"
+  keys: [AGENT_VAULT_MASTER_PASSWORD]
+  autoReload: false        # the master password does not rotate in place
+
+persistence:
+  enabled: true
+  size: 1Gi
+  # HOME=/data in the image: the SQLite db and the MITM CA live here.
+  # longhorn (default class): replicated + backed up. SQLite, not Pigsty
+  # (upstream supports DATABASE_URL): no DB, user or pigsty run for a store
+  # that is mostly a cache (ADR-0061 Decision 2; `migrate-db` if that changes).
+  mountPath: /data
+
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 65532
+  runAsGroup: 65532
+  fsGroup: 65532           # the PVC root is created root-owned
+  seccompProfile:
+    type: RuntimeDefault
+securityContext:
+  allowPrivilegeEscalation: false
+  capabilities:
+    drop: [ALL]
+
+resources:
+  requests:
+    cpu: 50m
+    memory: 64Mi
+  limits:
+    cpu: 500m
+    memory: 512Mi
+
+# Monitoring = these probes + the cluster-wide KubePodNotReady /
+# KubeDeploymentReplicasMismatch / KubePodCrashLooping rules
+# (kube-prometheus-stack, all namespaces). No metrics port upstream.
+readinessProbe:
+  enabled: true
+  type: http
+  path: /health
+livenessProbe:
+  enabled: true
+  type: http
+  path: /health
+  initialDelaySeconds: 20
+
+extraManifests:
+  - |
+    # ADR-0061 Decision 4: :14321 only from agent-fleet's provisioner, :14322
+    # only from definition pods. Plain NetworkPolicy ingress holds through the
+    # ClusterIP under Cilium chaining (verified 2026-10-18: source identity
+    # survives ClusterIP + vxlan, same label from another namespace refused).
+    # Residuals (ADR-0061 Consequences): host identity on THIS pod's node
+    # (kubelet probes, hostNetwork pods) is always admitted — Cilium's default
+    # host allow; and any Application (all are project: default) can add an
+    # allow policy here or run a pod with these labels in agent-fleet.
+    apiVersion: networking.k8s.io/v1
+    kind: NetworkPolicy
+    metadata:
+      name: agent-vault-ingress
+      namespace: {{ .Release.Namespace }}
+    spec:
+      podSelector:
+        matchLabels:
+          app.kubernetes.io/name: {{ .Release.Name }}
+          app.kubernetes.io/instance: {{ .Release.Name }}
+      policyTypes: [Ingress]
+      ingress:
+        - from:
+            - namespaceSelector:
+                matchLabels:
+                  kubernetes.io/metadata.name: agent-fleet
+              podSelector:
+                matchLabels:
+                  app: provisioner
+          ports:
+            - port: 14321
+              protocol: TCP
+        # :14322 proxy callers, one `from` entry per caller kind (OR'd).
+        - from:
+            - namespaceSelector:
+                matchLabels:
+                  kubernetes.io/metadata.name: agent-fleet
+              podSelector:
+                matchExpressions:
+                  - key: fleet.bnei.dev/definition
+                    operator: Exists
+          ports:
+            - port: 14322
+              protocol: TCP

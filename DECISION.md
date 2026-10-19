@@ -261,6 +261,17 @@ updated.
   queue-free, publishing through `PublishEvent` and consuming as one dispatcher
   subscriber. Trust comes from the PR author and head repo, never the webhook
   sender. See [ADR-0060](docs/adr/0060-event-bridge.md).
+- **Credential broker: Infisical Agent Vault** (ADR-0061, accepted, not live).
+  agent-fleet's definition pods hold placeholders; the vault's MITM proxy swaps in
+  the real credential per host and path. A platform-common app, ClusterIP only, no
+  IngressRoute, telemetry off, image pinned by digest. SQLite on a longhorn PVC,
+  not Pigsty: upstream supports Postgres, but one replica of a store whose
+  contents are mostly re-reconciled from git + Infisical every minute does not
+  need a Pigsty database, user and playbook run (`migrate-db` if that changes). A NetworkPolicy admits the API
+  only from agent-fleet's provisioner and the proxy only from definition pods. The
+  owner and the provisioner's agent token come from one idempotent operator
+  command, `gitops/scripts/agent-vault-bootstrap.sh`, which fails closed. See
+  [ADR-0061](docs/adr/0061-agent-vault.md).
 - **NetBird is the daily SSH path to every host** (ADR-0055, accepted,
   rolling out — 14 hosts enrolled 2026-10-11, all but
   hermesagent/garage-storage/nfs-storage, human SSH over the
