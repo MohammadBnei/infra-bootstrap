@@ -43,13 +43,20 @@ env:
     value: "false"
   - name: AGENT_VAULT_LOG_LEVEL
     value: "info"
+  # Upstream's default, pinned: the proxy dials no RFC-1918/loopback/link-local/
+  # CGN address (checked per resolved IP at connect time), so a definition pod
+  # cannot use it to reach cluster Services, pods, nodes or the LAN. It is the
+  # vault's only egress fence — no egress NetworkPolicy (ADR-0061 Consequences).
+  - name: AGENT_VAULT_ALLOW_PRIVATE_RANGES
+    value: "false"
 
-# AGENT_VAULT_MASTER_PASSWORD (the only headless first-boot path) plus the
-# owner's email/password, read by gitops/scripts/agent-vault-bootstrap.sh inside
-# this pod. A folder of agent-fleet-nygh, not a new project. Folders are sync
-# config, not a boundary: the shared universal-auth identity reads the whole
-# project, so any InfisicalSecret in any namespace can name this path (accepted,
-# ADR-0049 class — ADR-0061 Consequences).
+# AGENT_VAULT_MASTER_PASSWORD only (the only headless first-boot path). The
+# owner password is in /agent-vault-owner, which nothing syncs: the bootstrap
+# script sends it over stdin, so it is never in this process's env. A folder of
+# agent-fleet-nygh, not a new project. Folders are sync config, not a
+# boundary: the shared universal-auth identity reads the whole project, so any
+# InfisicalSecret in any namespace can name either path (accepted, ADR-0049
+# class — ADR-0061 Consequences).
 infisical:
   enabled: true
   projectSlug: "agent-fleet-nygh"
@@ -61,8 +68,9 @@ persistence:
   enabled: true
   size: 1Gi
   # HOME=/data in the image: the SQLite db and the MITM CA live here.
-  # longhorn (default class): replicated + backed up. Not Pigsty: v0.40.0's
-  # store is SQLite only (ADR-0061 Decision 2).
+  # longhorn (default class): replicated + backed up. SQLite, not Pigsty
+  # (upstream supports DATABASE_URL): no DB, user or pigsty run for a store
+  # that is mostly a cache (ADR-0061 Decision 2; `migrate-db` if that changes).
   mountPath: /data
 
 podSecurityContext:
@@ -137,9 +145,6 @@ extraManifests:
                 matchExpressions:
                   - key: fleet.bnei.dev/definition
                     operator: Exists
-            # The bridge executor (ADR-0060 / agent-fleet 0072) goes HERE as
-            # its own entry keyed on `fleet.bnei.dev/executor` when it ships.
-            # Not granted now; the executor never borrows the definition label.
           ports:
             - port: 14322
               protocol: TCP

@@ -110,3 +110,6 @@ jobs:
 
       - name: registry.yaml <-> apps.applicationset.yaml sync check
         run: bash gitops/scripts/check-app-registry-sync.sh
+
+      - name: agent-vault-bootstrap.sh fails closed (stubbed, offline)
+        run: sh gitops/scripts/test-agent-vault-bootstrap.sh

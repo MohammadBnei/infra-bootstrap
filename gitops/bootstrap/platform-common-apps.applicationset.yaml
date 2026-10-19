@@ -73,7 +73,7 @@ spec:
       # agent-fleet's credential broker (ADR-0061). Cluster-internal only:
       # hostname empty for zot's reason, and values/agent-vault sets
       # ingress.enabled: false. Run gitops/scripts/agent-vault-bootstrap.sh
-      # once after its first sync.
+      # right after its first sync.
       - name: agent-vault
         namespace: agent-vault
         hostname: ""

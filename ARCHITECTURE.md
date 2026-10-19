@@ -795,7 +795,8 @@ agent-fleet's provisioner holds a vault credential (agent-fleet ADR 0065).
 | 14322 | MITM proxy | pods labelled `fleet.bnei.dev/definition` in `agent-fleet` |
 
 ClusterIP only: no IngressRoute and no LAN address. The data is SQLite on a
-1Gi longhorn PVC, not Pigsty, because upstream is SQLite-only. The owner and
+1Gi longhorn PVC, not Pigsty: upstream supports Postgres, but one replica of a
+mostly-cache store does not need a Pigsty database (ADR-0061 Decision 2). The owner and
 the provisioner's agent token come from `gitops/scripts/agent-vault-bootstrap.sh`.
 
 ### Proxmox
