@@ -781,6 +781,23 @@ passes through Traefik at all. `core` must not trust `X-authentik-*` headers.
 Cloudflare terminates TLS at the edge, so a client certificate can never reach
 Traefik. Passkeys are the answer instead.
 
+### Agent Vault (agent-fleet's credential broker)
+
+Infisical Agent Vault, a platform-common app in namespace `agent-vault`
+([ADR-0061](docs/adr/0061-agent-vault.md); not live). agent-fleet's definition
+pods carry placeholder credentials and an `HTTPS_PROXY` pointing at its MITM
+proxy, which injects the real credential per host and path. Only
+agent-fleet's provisioner holds a vault credential (agent-fleet ADR 0065).
+
+| Port | Service | Admitted from (NetworkPolicy) |
+|---|---|---|
+| 14321 | API (`agent-vault.agent-vault.svc:14321`) | pods `app: provisioner` in `agent-fleet` |
+| 14322 | MITM proxy | pods labelled `fleet.bnei.dev/definition` in `agent-fleet` |
+
+ClusterIP only: no IngressRoute and no LAN address. The data is SQLite on a
+1Gi longhorn PVC, not Pigsty, because upstream is SQLite-only. The owner and
+the provisioner's agent token come from `gitops/scripts/agent-vault-bootstrap.sh`.
+
 ### Proxmox
 
 API tokens per host (exists for proxmox; new token needed for server1
