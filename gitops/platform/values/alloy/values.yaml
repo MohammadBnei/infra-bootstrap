@@ -120,8 +120,10 @@ alloy:
         // ADR-0061: Agent Vault has no SMTP, so it logs password-reset and
         // email-verification codes in clear ("[agent-vault] Password reset
         // code for <email>: NNNNNN"). Anyone who can reach its API and read
-        // Loki could reset the owner. Keep those lines off Loki; the pod log
-        // on the node (cluster-admin) is the only copy.
+        // Loki could reset the owner. Keep those lines off Loki. That is all
+        // this does: whoever can read pods/log in agent-vault still sees them
+        // (cluster-admin, ArgoCD platform-admins, thot-executor — ADR-0061
+        // Consequences).
         stage.match {
           selector = "{namespace=\"agent-vault\"}"
           stage.drop {

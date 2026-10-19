@@ -55,3 +55,20 @@ parent key, see deployment.yaml's `containers:`/`- name:`).
     {{- toYaml . | nindent 4 }}
   {{- end }}
 {{- end }}
+
+{{/*
+InfisicalSecret template.data for a list of literal key names. Guarded on
+purpose. Verified against operator v0.11.3: an unguarded "{{ .KEY.Value }}"
+for a key absent from the source renders the LITERAL STRING "<no value>" — it
+does not fail, and the CR still reports ReadyToSyncSecrets=True. Worse, a key
+that later disappears from the source overwrites the previously good value
+with "<no value>" within one resync tick, silently. The guard turns both cases
+into an empty string, which an SDK treats as "no credential" instead of
+sending a bogus 10-char one. The key itself cannot be omitted — template.data
+is a flat map.
+*/}}
+{{- define "common-app-chart.guardedTemplateData" -}}
+{{- range . }}
+{{ . }}: "{{ printf "{{ if .%s }}{{ .%s.Value }}{{ end }}" . . }}"
+{{- end }}
+{{- end }}

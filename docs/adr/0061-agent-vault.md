@@ -96,15 +96,19 @@ namespace `spike-vault`, deleted) showed:
      and with no SMTP a second user's verification code is only logged), and
      rotates or creates the `fleet-provisioner` agent with instance role
      `member`.
-   - A refused owner login on an initialized instance stops the run with
-     `INCIDENT`: someone else owns the instance or reset its password.
+   - A refused owner login (401, the CLI's "invalid email or password") on
+     an initialized instance stops the run with `INCIDENT`: someone else owns
+     the instance or reset its password. An unreachable `/v1/status`, or a
+     login that fails any other way, exits 1 without `INCIDENT` and changes
+     nothing, so an outage never reads as a stolen owner.
    - It writes that agent's token to Infisical `agent-fleet-nygh`
      `/agent-vault` `AGENT_VAULT_TOKEN`. The provisioner mounts that path
      through its own InfisicalSecret (agent-fleet 0065).
    - It is idempotent and fails closed. A re-run while the stored token
      still authenticates changes nothing. Only a missing key or a token the
-     vault refuses (401/403) leads to a rotation; an Infisical read error or
-     any other vault answer aborts before anything changes. `--rotate`
+     vault refuses (401/403) leads to a rotation; an Infisical read error, an
+     unreachable vault or any other vault answer aborts before anything
+     changes. `--rotate`
      forces a new token, and the old one dies at once (outage:
      Consequences). If the Infisical write fails after a rotation, or the
      stream fails after the pod printed, the new token stays in its 0600 file
@@ -123,7 +127,17 @@ namespace `spike-vault`, deleted) showed:
      back on stdout into a 0600 file that `infisical secrets set --file`
      reads.
    - `gitops/scripts/test-agent-vault-bootstrap.sh` (CI) checks the
-     fail-closed branches against stubs.
+     fail-closed branches against stubs, and in every case that no token
+     or the owner password reaches the output.
+   - **A re-created agent does not inherit vaults. Trade-off.** If
+     `fleet-provisioner` is ever deleted (UI, partial restore), the script's
+     404 path creates a new one, and upstream makes only a vault's creator
+     its admin (`handle_vaults.go`); the owner has no vault-admin override,
+     only delete. The old agent's vaults then refuse the new one, and every
+     definition warm on them fails closed. Remedy: delete those vaults as
+     the owner (UI or `agent-vault vault delete`); the provisioner recreates
+     them from git + Infisical at its next reconcile. Not automated: the
+     only trigger is deleting the agent by hand.
    - Verified against a dev copy on 2026-10-19: run 1 created the token,
      run 2 changed nothing, and run 3 (`--rotate`) made the old token 401
      while the new one returned 200 on `GET /v1/vaults`. The new token
@@ -148,7 +162,13 @@ namespace `spike-vault`, deleted) showed:
      and the window lasts from the first sync until the operator runs the
      script, which is why Rollout runs it right after the sync. A stolen
      owner shows as the script's login failing on an initialized instance;
-     the remedy is to delete the PVC and bootstrap again. Closing it in the
+     the remedy is to delete the PVC and bootstrap again. The window
+     **reopens on every PVC loss**: the pod comes back uninitialized,
+     `/health` stays 200, and no alert fires. Not alerted on purpose: a
+     probe of `/v1/status` would need a third caller admitted to `:14321`,
+     which also opens `forgot-password` to it. The provisioner sees every
+     authenticated route answer 503 "not initialized" and fails closed;
+     surfacing that is agent-fleet 0065's. Closing it in the
      pod (self-registration at first boot) would put the owner password back
      in the server's env, which Decision 6 removes.
 6. **Secrets live in two folders of `agent-fleet-nygh`, not a new project:**
@@ -210,10 +230,29 @@ namespace `spike-vault`, deleted) showed:
   `POST /v1/auth/forgot-password` for the owner's (literal) email from any
   caller admitted to `:14321` produces one; whoever can read it can reset the
   owner. Alloy drops those lines from namespace `agent-vault` before Loki
-  (`gitops/platform/values/alloy/values.yaml`, verified on Alloy v1.20.1);
-  the only copy left is the pod log on the node, which needs cluster-admin.
+  (`gitops/platform/values/alloy/values.yaml`, verified on Alloy v1.20.1).
+  That keeps them off Loki only: anyone who can read `pods/log` in
+  `agent-vault` still sees them — cluster-admin, ArgoCD's `role:admin`
+  (`platform-admins`, already owner-equivalent), and `thot-executor` (next
+  bullet).
   Invite-only (Decision 5) stops the second-user path. A reset that happens
   anyway shows as the bootstrap script's `INCIDENT`.
+- **`thot-executor` can read and rewrite the vault. Accepted, ADR-0032
+  class.** Its ClusterRole grants `pods/log` get and `deployments` patch in
+  every namespace, `agent-vault` included, and agent sessions drive it.
+  - Read: the logged auth codes above.
+  - Patch: it can rewrite `deploy/agent-vault`'s pod template (command or
+    env: print `/proc/1/environ`, which still holds the master password, or
+    set `AGENT_VAULT_ALLOW_PRIVATE_RANGES=true`) and read the result back
+    through `pods/log` before selfHeal reverts it. It can also add
+    `app: provisioner` or `fleet.bnei.dev/definition` to an `agent-fleet`
+    pod template, which passes Decision 4's fence.
+  - This is not new to the vault: the same patch-then-read-logs path
+    already reaches every Secret any Deployment can mount, which ADR-0032's
+    "no `secrets`" exclusion does not stop.
+  - Upgrade path, cluster-wide rather than here: a ValidatingAdmissionPolicy
+    that admits a `thot-executor` patch only when it changes nothing but
+    `kubectl.kubernetes.io/restartedAt`.
 - **`--rotate` is a short provisioner outage.** The old token dies at once.
   The new one arrives after Infisical's resync (60s) plus kubelet's
   Secret-volume refresh (60s or less). If the Infisical write fails after a
@@ -222,8 +261,11 @@ namespace `spike-vault`, deleted) showed:
   upstream's dial guard, pinned on with `AGENT_VAULT_ALLOW_PRIVATE_RANGES=false`:
   the proxy refuses every RFC-1918, loopback, link-local and CGN address at
   connect time, per resolved IP, so it cannot relay a definition pod to a
-  cluster Service, pod, node or the LAN. What stays open is the public
-  internet. Between a vault's creation and the provisioner setting
+  cluster Service, pod, node or the LAN directly. What stays open is the
+  public internet, and that includes this homelab's own public surfaces: the
+  WAN IP's Freebox port-forwards and Cloudflare-proxied `*.bnei.dev` lead
+  back to Traefik's ingresses (Infisical, authentik, ArgoCD) and the
+  `:49222` break-glass SSH, each behind its own login. Between a vault's creation and the provisioner setting
   `unmatched_host_policy=deny`, a definition pod could reach any public host
   through it, without a real credential; agent-fleet 0065 orders deny before
   any pod gets a session. An egress policy would need DNS (nodelocaldns on
@@ -250,14 +292,27 @@ namespace `spike-vault`, deleted) showed:
 2. Run, once, **right after that sync** (Decision 5, register race), from an
    infra-bootstrap checkout on a NetBird peer in `platform-admins`:
    `gitops/scripts/agent-vault-bootstrap.sh`
-3. agent-fleet's side (0065) can merge before or after. Each fails closed
-   without the other: definition warms are refused, and repo sessions are
-   unaffected.
+3. Check that the stored `AGENT_VAULT_TOKEN` authenticates: a re-run of the
+   script prints "nothing changed".
+4. **Only then** merge agent-fleet's side (0065). The live P1 definitions
+   warm today on 0064's interim real token; once 0065 deploys (agent-fleet
+   releases and deploys every `main` push), their warms need a bootstrapped
+   vault and the token, and fail closed without them. Merged first, it is
+   an outage of working definitions until steps 1-3 are done. Repo sessions
+   are unaffected either way.
+   - 0065 must add a **new** InfisicalSecret for `/agent-vault`: the
+     provisioner's existing one (`k8s/provisioner/infisicalsecret.yaml`)
+     syncs `secretsPath: "/"` non-recursively and cannot see this folder.
+     As of 2026-10-19 that branch is not pushed and has no PR; until it
+     merges, nothing delivers the token, by design.
 
 Done (2026-10-19, by the build agent): the folders `/agent-vault-server` and
 `/agent-vault` exist in `agent-fleet-nygh`; the master and owner passwords
 were generated (64 hex characters, `openssl rand -hex 32`) and never printed.
 Nothing is left to do in Infisical before the merge: the key filter
 (Decision 6) keeps the owner password out of the pod from the first sync.
-Optional clean-up, any time: delete the unused `AGENT_VAULT_OWNER_EMAIL` from
-`/agent-vault-server`.
+Operator clean-up, any time (the build agent created it; its delete was
+refused as a secret-store write): `infisical secrets delete
+AGENT_VAULT_OWNER_EMAIL --type=shared --path=/agent-vault-server` in
+`agent-fleet-nygh` `dev`, then drop its row in `docs/secrets.md` and the
+mentions here and in the values file.

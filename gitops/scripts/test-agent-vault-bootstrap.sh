@@ -50,11 +50,13 @@ esac
 echo '{}'
 EOF
 # agent-vault: register/login write a session (as upstream's first-user
-# register does), login fails with AV_LOGIN_RC=1; `owner config set
+# register does), login fails with AV_LOGIN_RC=1 (message $AV_LOGIN_MSG,
+# default upstream's 401 text); WG_DOWN=1 fails every call as unreachable; `owner config set
 # --invite-only` logs "invite"; rotate/create log and print $AV_OUT.
 cat >"$D/bin/agent-vault" <<'EOF'
 #!/bin/sh
-if [ "$1 $2" = "auth login" ] && [ "${AV_LOGIN_RC:-0}" != 0 ]; then echo "Error: invalid credentials" >&2; exit 1; fi
+[ -z "${WG_DOWN:-}" ] || { echo "Error: could not reach server at x: connection refused" >&2; exit 1; }
+if [ "$1 $2" = "auth login" ] && [ "${AV_LOGIN_RC:-0}" != 0 ]; then echo "Error: ${AV_LOGIN_MSG:-invalid email or password}" >&2; exit 1; fi
 case "$1 $2" in
   "auth register" | "auth login") cat >/dev/null; echo "$2" >>"$D/log"; mkdir -p "$HOME/.agent-vault"
                 echo '{"token":"av_sess_x","address":"a"}' >"$HOME/.agent-vault/session.json" ;;
@@ -66,40 +68,47 @@ chmod +x "$D/bin/"*
 
 fails=0
 # run <name> <want-rc> [env...]: fresh store (stored token $STORED, default
-# $OK) and log; $ARGS goes to the script.
+# $OK; STORED= means the key is missing) and log; $ARGS goes to the script.
+# Every case asserts no credential reached the output.
 run() {
   name=$1 want=$2; shift 2
   rm -rf "$D/store" "$D/log" "$D/set.env"; mkdir "$D/store"; : >"$D/log"
-  printf %s "${STORED:-$OK}" >"$D/store/AGENT_VAULT_TOKEN"
+  [ -z "${STORED-$OK}" ] || printf %s "${STORED-$OK}" >"$D/store/AGENT_VAULT_TOKEN"
   printf %s ownerpw >"$D/store/AGENT_VAULT_OWNER_PASSWORD"
   rc=0
   # shellcheck disable=SC2086 # $ARGS is a flag list
   env D="$D" PATH="$D/bin:$PATH" AV_NODE_SH="$D/bin/node.sh" AV_OUT="$NEW" "$@" \
     sh "$HERE/agent-vault-bootstrap.sh" ${ARGS:-} >"$D/out" 2>&1 || rc=$?
   [ "$rc" = "$want" ] || { echo "FAIL $name: rc=$rc want $want"; cat "$D/out"; fails=$((fails + 1)); }
+  ! grep -qe "$NEW" -e "$OK" -e ownerpw "$D/out" || { echo "FAIL $name: a credential was printed"; fails=$((fails + 1)); }
 }
 has() { grep -qx "$1" "$D/log" || { echo "FAIL $name: no '$1' in log"; fails=$((fails + 1)); }; }
 hasnt() { ! grep -qx "$1" "$D/log" || { echo "FAIL $name: unexpected '$1'"; fails=$((fails + 1)); }; }
 said() { grep -q "$1" "$D/out" || { echo "FAIL $name: output lacks '$1'"; fails=$((fails + 1)); }; }
+saidnt() { ! grep -q "$1" "$D/out" || { echo "FAIL $name: output has '$1'"; fails=$((fails + 1)); }; }
 wrote() { [ "$(cat "$D/set.env" 2>/dev/null)" = "AGENT_VAULT_TOKEN=$1" ] || { echo "FAIL $name: Infisical got the wrong write"; fails=$((fails + 1)); }; }
 nowrite() { [ ! -e "$D/set.env" ] || { echo "FAIL $name: wrote to Infisical"; fails=$((fails + 1)); }; }
 
 run "valid token is a no-op" 0;                    hasnt rotate; hasnt login; nowrite; said "nothing changed"
 run "Infisical read failure aborts" 1 INF_GET_RC=1; hasnt rotate; nowrite
 run "vault 5xx does not rotate" 1 WG_VAULTS=503;   hasnt rotate; nowrite
-run "unreachable vault aborts" 1 WG_DOWN=1;        hasnt rotate; nowrite
+run "unreachable vault aborts" 1 WG_DOWN=1;        hasnt rotate; nowrite; saidnt INCIDENT
+STORED=; run "missing key, vault down: no incident" 1 WG_DOWN=1; hasnt login; nowrite; said unreachable; saidnt INCIDENT
+ARGS=--rotate; run "--rotate, vault down: no incident" 1 WG_DOWN=1; hasnt login; nowrite; said unreachable; saidnt INCIDENT; ARGS=
+run "missing key on an initialized vault rotates" 0; has login; has rotate; wrote "$NEW"
+STORED=garbage; run "garbage stored value rotates" 0; has rotate; wrote "$NEW"; unset STORED
 run "refused token rotates" 0 WG_VAULTS=401;       has rotate; has invite; has logout; wrote "$NEW"
-STORED=av_agt_other; run "another stored token is refused, rotates" 0; has rotate; wrote "$NEW"; STORED=
+STORED=av_agt_other; run "another stored token is refused, rotates" 0; has rotate; wrote "$NEW"; unset STORED
 ARGS=--rotate; run "--rotate forces a rotation" 0; has rotate; wrote "$NEW"; ARGS=
 run "missing agent is created" 0 WG_VAULTS=401 WG_AGENT=404; has create; hasnt rotate
 run "uninitialized vault registers, skips the check" 0 WG_INIT=false WG_VAULTS=503 WG_AGENT=404; has register; hasnt login; has invite; has create; wrote "$NEW"
 run "agent lookup 5xx aborts" 1 WG_VAULTS=401 WG_AGENT=500; hasnt rotate; hasnt create; nowrite
 run "refused owner login is an incident" 1 WG_VAULTS=401 AV_LOGIN_RC=1; hasnt rotate; hasnt create; nowrite; said INCIDENT
+run "login server error is not an incident" 1 WG_VAULTS=401 AV_LOGIN_RC=1 AV_LOGIN_MSG="login failed with status 503"; hasnt rotate; nowrite; saidnt INCIDENT
 run "rotate printing nothing is an error" 1 WG_VAULTS=401 AV_OUT=""; has rotate; nowrite; said "printed no token"
 run "extra output is rejected" 1 WG_VAULTS=401 AV_OUT="$NEW\\nA new release is available"; nowrite; said "kept in"
 run "stream failing after the token keeps it" 1 WG_VAULTS=401 NODE_RC=255; nowrite; said "kept in"
 ARGS=--lan; run "--lan reaches node.sh as its own word" 0; has "node --lan"; ARGS=
 run "Infisical write failure keeps the token" 1 WG_VAULTS=401 INF_SET_RC=1; said "new token is in"
-! grep -q "$NEW" "$D/out" || { echo "FAIL: a token was printed"; fails=$((fails + 1)); }
 
 [ "$fails" = 0 ] && echo "OK: agent-vault-bootstrap.sh" || exit 1

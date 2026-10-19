@@ -41,12 +41,14 @@ env:
   # Defaults to ON and sends the owner's email upstream. Mandatory.
   - name: AGENT_VAULT_TELEMETRY
     value: "false"
-  - name: AGENT_VAULT_LOG_LEVEL
-    value: "info"
   # Upstream's default, pinned: the proxy dials no RFC-1918/loopback/link-local/
   # CGN address (checked per resolved IP at connect time), so a definition pod
-  # cannot use it to reach cluster Services, pods, nodes or the LAN. It is the
-  # vault's only egress fence — no egress NetworkPolicy (ADR-0061 Consequences).
+  # cannot use it to reach cluster Services, pods, nodes or the LAN directly.
+  # Public addresses stay open, including this homelab's own: the WAN IP's
+  # port-forwards and Cloudflare-proxied *.bnei.dev lead back to Traefik and
+  # the :49222 break-glass SSH. Narrowed per vault only once the provisioner
+  # sets deny (agent-fleet 0065). The vault's only egress fence — no egress
+  # NetworkPolicy (ADR-0061 Consequences).
   - name: AGENT_VAULT_ALLOW_PRIVATE_RANGES
     value: "false"
 

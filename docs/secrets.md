@@ -293,9 +293,13 @@ these paths (accepted, ADR-0049 class — ADR-0061 Consequences).
 | credential values (`CLAUDE_CODE_OAUTH_TOKEN`, `GH_DEV_NOTES`, …) | `/agent-vault` | What the provisioner sets into each definition's vault. Owned by agent-fleet ADR 0065 | user / agent-fleet | agent-fleet provisioner |
 
 `CLAUDE_CODE_OAUTH_TOKEN` in `/agent-vault` is a **copy** of the root key that repo
-sessions use, the same duplicated-value trade as `STT_TOKEN_FLEET`: rotating the
-root key does not update it, and definition sessions then fail with 401. Rotate
-both places, or have the provisioner read the root key (agent-fleet ADR 0065).
+sessions use (checked 2026-10-19: the unexpanded value is a literal, not a
+`${...}` reference; its sha256 matches the root key's today). Same duplicated-value
+trade as `STT_TOKEN_FLEET`: rotating the root key does not update it, and definition
+sessions then fail with 401. Rotate both places. To make it follow the root key,
+replace the value with the reference `${dev.CLAUDE_CODE_OAUTH_TOKEN}` (an operator
+step; the build agent's secret-store write was refused), then delete this paragraph —
+agent-fleet ADR 0065 already assumes the reference.
 
 ## SSH access (per-host)
 

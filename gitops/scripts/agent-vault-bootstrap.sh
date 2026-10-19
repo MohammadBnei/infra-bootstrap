@@ -13,9 +13,10 @@
 #   3. Writes that token to Infisical agent-fleet-nygh /agent-vault
 #      AGENT_VAULT_TOKEN, which agent-fleet's provisioner mounts.
 #
-# Fails closed: an Infisical read error, or any vault answer other than 200 /
-# 401 / 403 to the token check, aborts before anything rotates. Only a missing
-# key or a refused token leads to step 2.
+# Fails closed: an Infisical read error, an unreachable /v1/status, or any
+# vault answer other than 200 / 401 / 403 to the token check, aborts before
+# anything rotates. Only a missing key or a refused token leads to step 2.
+# INCIDENT is printed only for a 401 owner login, never a transport error.
 #
 # --rotate is an outage: the old token dies at once, and the provisioner is
 # locked out until Infisical (60s) + kubelet (<=60s) deliver the new one. If
@@ -97,20 +98,33 @@ code() {
 }
 # Uninitialized (first run, or a lost PVC): no stored token can be valid, and
 # every authenticated route answers 503 until the owner exists.
-if wget -qO- "$A/v1/status" | grep -q '"initialized":false'; then
-  printf %s "$OWN" | agent-vault auth register --address "$A" --email "$E" --password-stdin >/dev/null
-elif [ "$ROT" = 0 ] && [ -n "$CUR" ]; then
-  case "$(code "$A/v1/vaults" "$CUR")" in
-    200) echo NOOP; exit 0 ;;
-    401 | 403) ;;          # stored token refused: replace it
-    *) exit 1 ;;           # vault unhealthy or unreachable: change nothing
+# Reachability is a precondition: an unreachable vault must never read as
+# "initialized" and fall through to a login whose failure looks like an incident.
+st=$(wget -qO- "$A/v1/status") || { echo "agent-vault-bootstrap: vault API unreachable; nothing changed" >&2; exit 1; }
+case "$st" in
+  *'"initialized":false'*)
+    printf %s "$OWN" | agent-vault auth register --address "$A" --email "$E" --password-stdin >/dev/null ;;
+  *'"initialized":true'*)
+    if [ "$ROT" = 0 ] && [ -n "$CUR" ]; then
+      case "$(code "$A/v1/vaults" "$CUR")" in
+        200) echo NOOP; exit 0 ;;
+        401 | 403) ;;          # stored token refused: replace it
+        *) exit 1 ;;           # vault unhealthy or unreachable: change nothing
+      esac
+    fi ;;
+  *) echo "agent-vault-bootstrap: unexpected /v1/status answer; nothing changed" >&2; exit 1 ;;
+esac
+# The first user's register saves a session; otherwise log in. Only a 401
+# (the CLI's "invalid email or password") is an incident; a transport or
+# server error is not, and must not lead anyone to wipe the PVC.
+if [ ! -s "$S" ] && ! e=$(printf %s "$OWN" | agent-vault auth login --address "$A" --email "$E" --password-stdin 2>&1 >/dev/null); then
+  case "$e" in
+    *"invalid email or password"*)
+      echo "agent-vault-bootstrap: INCIDENT: owner login refused on an initialized vault (owner taken or password reset), ADR-0061 Decision 5" >&2 ;;
+    *) echo "agent-vault-bootstrap: owner login failed, not an auth refusal; nothing changed: $e" >&2 ;;
   esac
-fi
-# The first user's register saves a session; otherwise log in.
-[ -s "$S" ] || printf %s "$OWN" | agent-vault auth login --address "$A" --email "$E" --password-stdin >/dev/null || {
-  echo "agent-vault-bootstrap: INCIDENT: owner login refused on an initialized vault (owner taken or password reset), ADR-0061 Decision 5" >&2
   exit 1
-}
+fi
 # No second account, ever: registration stays open by default (no SMTP).
 agent-vault owner config set --invite-only >/dev/null
 T=$(tok)
