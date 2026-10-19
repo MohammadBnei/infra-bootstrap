@@ -10,7 +10,7 @@
 #      role `member` — the `fleet-provisioner` agent's token. A refused owner
 #      login on an initialized instance is an incident: someone else owns it,
 #      or reset the password (ADR-0061).
-#   3. Writes that token to Infisical agent-fleet-nygh /agent-vault
+#   3. Writes that token to Infisical project agent-vault /agent-vault
 #      AGENT_VAULT_TOKEN, which agent-fleet's provisioner mounts.
 #
 # Fails closed: an Infisical read error, an unreachable /v1/status, or any
@@ -45,7 +45,7 @@ for a; do
     *) echo "usage: $0 [--rotate] [--lan]" >&2; exit 2 ;;
   esac
 done
-INF="--projectId=ae771c2c-5115-452a-8f1c-1e03fa0e2b9a --env=dev --domain https://infisical.bnei.dev --silent"
+INF="--projectId=60735f70-38af-46f3-8049-4fc91aabeb68 --env=dev --domain https://infisical.bnei.dev --silent"
 TOK_PATH=--path=/agent-vault
 NODE="${AV_NODE_SH:-$(cd "$(dirname "$0")/../../ansible/scripts" && pwd)/node.sh}"
 umask 077
