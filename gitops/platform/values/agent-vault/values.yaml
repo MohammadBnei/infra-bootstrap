@@ -52,19 +52,21 @@ env:
   - name: AGENT_VAULT_ALLOW_PRIVATE_RANGES
     value: "false"
 
-# The folder also holds the owner password (read by the bootstrap script only)
-# and an unused AGENT_VAULT_OWNER_EMAIL. `keys` keeps both out of the Secret
-# and so out of this process's env: only the master password (the only
-# headless first-boot path) is synced. Folders and this filter are sync config,
-# not a boundary: the shared universal-auth identity reads the whole project
-# (accepted, ADR-0049 class — ADR-0061 Consequences).
+# The folder also holds the owner password (read by the bootstrap script only).
+# `keys` keeps it out of the Secret and so out of this process's env: only the
+# master password (the only headless first-boot path) is synced. The project
+# `agent-vault` is read by its own identity, `agent-vault-operator` (viewer on
+# this project only), not the shared universal-auth one (ADR-0061 Decision 6).
 infisical:
   enabled: true
-  projectSlug: "agent-fleet-nygh"
+  projectSlug: "agent-vault"
   envSlug: dev
   secretsPath: "/agent-vault-server"
   keys: [AGENT_VAULT_MASTER_PASSWORD]
   autoReload: false        # the master password does not rotate in place
+  credentialsRef:
+    secretName: agent-vault-universal-auth
+    secretNamespace: infisical
 
 persistence:
   enabled: true

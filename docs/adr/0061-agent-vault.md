@@ -101,7 +101,7 @@ namespace `spike-vault`, deleted) showed:
      the instance or reset its password. An unreachable `/v1/status`, or a
      login that fails any other way, exits 1 without `INCIDENT` and changes
      nothing, so an outage never reads as a stolen owner.
-   - It writes that agent's token to Infisical `agent-fleet-nygh`
+   - It writes that agent's token to Infisical project `agent-vault`
      `/agent-vault` `AGENT_VAULT_TOKEN`. The provisioner mounts that path
      through its own InfisicalSecret (agent-fleet 0065).
    - It is idempotent and fails closed. A re-run while the stored token
@@ -171,25 +171,25 @@ namespace `spike-vault`, deleted) showed:
      surfacing that is agent-fleet 0065's. Closing it in the
      pod (self-registration at first boot) would put the owner password back
      in the server's env, which Decision 6 removes.
-6. **Secrets live in two folders of `agent-fleet-nygh`, not a new project:**
+6. **Secrets live in a dedicated Infisical project, `agent-vault`** (id
+   `60735f70-38af-46f3-8049-4fc91aabeb68`, env `dev`), read by its own machine
+   identity `agent-vault-operator` (universal auth, `viewer` on this project
+   only, no org role). Its credentials are the Secret
+   `infisical/agent-vault-universal-auth`, named by `credentialsRef` in both
+   consumers' InfisicalSecrets. Amended 2026-10-19: the first version used two
+   folders of `agent-fleet-nygh` behind the shared identity.
    - `/agent-vault-server`: `AGENT_VAULT_MASTER_PASSWORD` (the only headless
      first-boot path) and `AGENT_VAULT_OWNER_PASSWORD`. The vault's
      InfisicalSecret syncs **only the master key** (common-app-chart's
      `infisical.keys`, a `template.data` filter), so the owner password is in
-     no pod's env and in no Kubernetes Secret, whatever else the folder
-     holds. Only the operator's bootstrap script reads it. The owner email is
-     a fixed literal in the script (`agent-vault-owner@bnei.dev`), not a
-     secret; the folder's `AGENT_VAULT_OWNER_EMAIL` key is unused.
-     - A separate owner folder was tried first and dropped: it needed a
-       manual move before merge, and folders are not a boundary here anyway
-       (Consequences). The key filter holds from the first sync.
+     no pod's env and in no Kubernetes Secret. Only the operator's bootstrap
+     script reads it. The owner email is a fixed literal in the script
+     (`agent-vault-owner@bnei.dev`), not a secret.
    - `/agent-vault`: `AGENT_VAULT_TOKEN` and the credential values. The
-     provisioner reads this folder.
-
-   Core's and the provisioner's existing InfisicalSecrets sync the project
-   root non-recursively, so no folder lands in their Secrets.
-   - **Why not a new project:** it needs a UI-created identity grant, a
-     user step.
+     provisioner reads this folder (agent-fleet ADR 0065).
+   - **Why not `agent-fleet-nygh`:** the shared `universal-auth-credentials`
+     identity reads that whole project, so any InfisicalSecret could name the
+     vault's folders.
    - **Why not `platform-commons`:** these values are not shared between
      apps, and every app that opts in to commons can read that project
      (ADR-0049).
@@ -200,18 +200,21 @@ namespace `spike-vault`, deleted) showed:
 
 ## Consequences
 
-- **Folders are sync configuration, not isolation. Accepted, ADR-0049
-  class.** The shared `universal-auth-credentials` identity reads the whole
-  of `agent-fleet-nygh`, so any InfisicalSecret in any namespace can name
-  any folder.
-  - That reaches `AGENT_VAULT_TOKEN`, which is a `member` agent with no
-    expiry. It can `reveal` every credential of every vault the provisioner
-    administers. Those are the same values `/agent-vault` already holds.
-  - It also reaches the master and owner passwords, which give full control
-    of the vault. Keeping the owner password out of the server's env (Decision
-    6) narrows what a leak of the running process exposes, not this.
-  - Upgrade path: a dedicated project, plus an identity granted only to the
-    provisioner and the vault. Needs the Infisical UI.
+- **One identity for both consumers.** `agent-vault-operator` reads the
+  whole `agent-vault` project, so the provisioner's InfisicalSecret could name
+  `/agent-vault-server` and the vault's could name `/agent-vault`. Accepted:
+  `AGENT_VAULT_TOKEN` already reveals every stored credential, and the master
+  password is useful only with the PVC. Upgrade: a second identity, one per
+  consumer.
+- **The credentials Secret is referenceable cluster-wide.** The Infisical
+  operator reads `credentialsRef` from any namespace, so whoever can create an
+  InfisicalSecret CR (any ArgoCD app) can name `agent-vault-universal-auth`.
+  This is the same class as ADR-0049, narrowed from "every app's project" to
+  this one project.
+- **`CLAUDE_CODE_OAUTH_TOKEN` is a copy across projects.** Infisical
+  references do not cross projects, so rotating agent-fleet's root key does
+  not update `/agent-vault`; definition sessions then fail with 401. Rotate
+  both.
 - **Plain HTTP on `:14321` inside the cluster.** Credential values cross it
   when the provisioner sets them. It is fenced by Decision 4.
 - **Same-node host identity is always admitted** by the ingress policy
@@ -306,13 +309,10 @@ namespace `spike-vault`, deleted) showed:
      As of 2026-10-19 that branch is not pushed and has no PR; until it
      merges, nothing delivers the token, by design.
 
-Done (2026-10-19, by the build agent): the folders `/agent-vault-server` and
-`/agent-vault` exist in `agent-fleet-nygh`; the master and owner passwords
-were generated (64 hex characters, `openssl rand -hex 32`) and never printed.
-Nothing is left to do in Infisical before the merge: the key filter
-(Decision 6) keeps the owner password out of the pod from the first sync.
-Operator clean-up, any time (the build agent created it; its delete was
-refused as a secret-store write): `infisical secrets delete
-AGENT_VAULT_OWNER_EMAIL --type=shared --path=/agent-vault-server` in
-`agent-fleet-nygh` `dev`, then drop its row in `docs/secrets.md` and the
-mentions here and in the values file.
+Done (2026-10-19): merged and bootstrapped. The same day the secrets moved
+to the dedicated project (Decision 6): the operator ran a one-off script that
+created project `agent-vault`, copied the five keys from `agent-fleet-nygh`
+(values never printed), created identity `agent-vault-operator` and wrote
+`infisical/agent-vault-universal-auth`. Once both consumers read the new
+project, delete the old folders `/agent-vault-server` and `/agent-vault` from
+`agent-fleet-nygh` `dev`.
