@@ -46,8 +46,9 @@ namespace `spike-vault`, deleted) showed:
    `docker.io/infisical/agent-vault:0.40.0@sha256:4d490e25…`. It is a
    research-preview upstream, so bumps are deliberate.
 2. **SQLite on a 1Gi longhorn PVC. This deviates from the plan, which said
-   "backed by Pigsty Postgres".** Upstream does support Postgres (v0.40.0:
-   `DATABASE_URL`, GORM migrations under an advisory lock, the MITM CA stored
+   "backed by Pigsty Postgres".** Upstream does support Postgres (v0.40.0,
+   `internal/store/open.go`: `DATABASE_URL` with a `postgres://` scheme opens
+   Postgres, otherwise SQLite; GORM migrations under an advisory lock, the MITM CA stored
    in the DB, `docs/self-hosting/postgres.mdx`). It is not used because what
    it buys — stateless replicas, pgBackRest — is not needed by one replica of
    a store that is mostly a cache, and it costs a Pigsty database and user
@@ -67,7 +68,8 @@ namespace `spike-vault`, deleted) showed:
 3. **ClusterIP only, no IngressRoute, `AGENT_VAULT_TELEMETRY=false`.**
    Telemetry is on by default and sends the owner's email. The UI is never
    exposed. An operator who needs it uses `kubectl port-forward`.
-4. **NetworkPolicy, two ingress rules, nothing else admitted:**
+4. **NetworkPolicy, two ingress rules** (residuals in Consequences: same-node
+   host identity, and any Application that adds a policy or a labelled pod):
    - `:14321` (API): only pods `app: provisioner` in namespace `agent-fleet`.
    - `:14322` (proxy): only pods carrying the `fleet.bnei.dev/definition`
      label (any value) in `agent-fleet`. The bridge executor (ADR-0060) will
@@ -89,8 +91,13 @@ namespace `spike-vault`, deleted) showed:
 5. **Owner and provisioner identity: one documented operator command,
    `gitops/scripts/agent-vault-bootstrap.sh [--rotate]`.**
    - It registers the owner if the instance is uninitialized (first user =
-     owner), logs in as the owner, and rotates or creates the
-     `fleet-provisioner` agent with instance role `member`.
+     owner), logs in as the owner, closes self-registration
+     (`agent-vault owner config set --invite-only`; upstream leaves it open,
+     and with no SMTP a second user's verification code is only logged), and
+     rotates or creates the `fleet-provisioner` agent with instance role
+     `member`.
+   - A refused owner login on an initialized instance stops the run with
+     `INCIDENT`: someone else owns the instance or reset its password.
    - It writes that agent's token to Infisical `agent-fleet-nygh`
      `/agent-vault` `AGENT_VAULT_TOKEN`. The provisioner mounts that path
      through its own InfisicalSecret (agent-fleet 0065).
@@ -99,16 +106,20 @@ namespace `spike-vault`, deleted) showed:
      vault refuses (401/403) leads to a rotation; an Infisical read error or
      any other vault answer aborts before anything changes. `--rotate`
      forces a new token, and the old one dies at once (outage:
-     Consequences). If the Infisical write fails after a rotation, the new
-     token stays in its 0600 file and the script prints the retry command.
-   - The pod's output must be exactly one `av_agt_` token, or nothing is
-     written.
-   - It revokes its owner session (`POST /v1/auth/logout`) on exit, so no
-     owner-level session outlives a run.
+     Consequences). If the Infisical write fails after a rotation, or the
+     stream fails after the pod printed, the new token stays in its 0600 file
+     and the script says so: retry the write, do not rotate again.
+   - The pod's output must be exactly `NOOP` (stored token works) or exactly
+     one `av_agt_` token. Anything else, including nothing, writes nothing
+     and exits 1.
+   - It revokes its owner session (`POST /v1/auth/logout`) on exit, also on
+     HUP/INT/TERM/PIPE, and warns on stderr if the logout fails. A pod shell
+     killed outright (SIGKILL) leaves the session to upstream's TTL.
+   - `--lan` reaches `k9s-dashboard` through `node.sh --lan` when NetBird is
+     down.
    - No credential goes on the operator machine's argv or its output. The
      inner script, the current token and the owner password ride the pod's
-     stdin. The owner password lives in `/agent-vault-owner`, which no
-     InfisicalSecret syncs, so it is in no pod's env. The new token comes
+     stdin. The owner password is in no pod's env (Decision 6). The new token comes
      back on stdout into a 0600 file that `infisical secrets set --file`
      reads.
    - `gitops/scripts/test-agent-vault-bootstrap.sh` (CI) checks the
@@ -119,8 +130,9 @@ namespace `spike-vault`, deleted) showed:
      created a vault (201) and minted a session (200), which proves the
      `member` role. The revised script was re-run the same day against the
      pinned image in a local container: first run on an uninitialized
-     instance, no-op, `--rotate` (old token 401), a refused stored token
-     replaced, and no owner session left behind.
+     instance, no-op, `--rotate` (old token 401, new 200), a second
+     self-registration refused 403 (invite-only), a changed owner password
+     stopped with `INCIDENT`, and no token prefix in the vault's log.
 
    **Why not a hook (ADR-0023):** the owner step could be a PostSync hook,
    but the agent token is server-generated and must land in Infisical.
@@ -139,13 +151,18 @@ namespace `spike-vault`, deleted) showed:
      the remedy is to delete the PVC and bootstrap again. Closing it in the
      pod (self-registration at first boot) would put the owner password back
      in the server's env, which Decision 6 removes.
-6. **Secrets live in three folders of `agent-fleet-nygh`, not a new project:**
-   - `/agent-vault-server`: `AGENT_VAULT_MASTER_PASSWORD` only (the only
-     headless first-boot path). The vault pod reads this folder.
-   - `/agent-vault-owner`: `AGENT_VAULT_OWNER_PASSWORD`. Only the operator's
-     bootstrap script reads it; no InfisicalSecret names it. The owner email
-     is a fixed literal in the script (`agent-vault-owner@bnei.dev`), not a
-     secret.
+6. **Secrets live in two folders of `agent-fleet-nygh`, not a new project:**
+   - `/agent-vault-server`: `AGENT_VAULT_MASTER_PASSWORD` (the only headless
+     first-boot path) and `AGENT_VAULT_OWNER_PASSWORD`. The vault's
+     InfisicalSecret syncs **only the master key** (common-app-chart's
+     `infisical.keys`, a `template.data` filter), so the owner password is in
+     no pod's env and in no Kubernetes Secret, whatever else the folder
+     holds. Only the operator's bootstrap script reads it. The owner email is
+     a fixed literal in the script (`agent-vault-owner@bnei.dev`), not a
+     secret; the folder's `AGENT_VAULT_OWNER_EMAIL` key is unused.
+     - A separate owner folder was tried first and dropped: it needed a
+       manual move before merge, and folders are not a boundary here anyway
+       (Consequences). The key filter holds from the first sync.
    - `/agent-vault`: `AGENT_VAULT_TOKEN` and the credential values. The
      provisioner reads this folder.
 
@@ -180,6 +197,23 @@ namespace `spike-vault`, deleted) showed:
 - **Same-node host identity is always admitted** by the ingress policy
   (Cilium's default host allow, for kubelet probes). This is the known
   residual of every NetworkPolicy here.
+- **Any Application can widen the fence. Accepted, ADR-0049 class.** Every
+  Application is `project: default`, so one whose values or `extraManifests`
+  live in a repo this one does not review can add an allow NetworkPolicy in
+  `agent-vault` (policies are additive) or run a pod labelled
+  `app: provisioner` or `fleet.bnei.dev/definition` in `agent-fleet`. With
+  the shared Infisical identity it could also sync the owner password.
+  Upgrade path: an AppProject for user apps with namespace-restricted
+  destinations.
+- **Auth codes go to the vault's log.** With no SMTP, upstream logs password
+  reset and email verification codes in clear. An unauthenticated
+  `POST /v1/auth/forgot-password` for the owner's (literal) email from any
+  caller admitted to `:14321` produces one; whoever can read it can reset the
+  owner. Alloy drops those lines from namespace `agent-vault` before Loki
+  (`gitops/platform/values/alloy/values.yaml`, verified on Alloy v1.20.1);
+  the only copy left is the pod log on the node, which needs cluster-admin.
+  Invite-only (Decision 5) stops the second-user path. A reset that happens
+  anyway shows as the bootstrap script's `INCIDENT`.
 - **`--rotate` is a short provisioner outage.** The old token dies at once.
   The new one arrives after Infisical's resync (60s) plus kubelet's
   Secret-volume refresh (60s or less). If the Infisical write fails after a
@@ -206,8 +240,8 @@ namespace `spike-vault`, deleted) showed:
   adr/0037).
 - Log hygiene, dev copy at info level: a grep of the vault's log for the
   owner and master passwords, the two agent tokens and the `av_agt_`/`av_sess_`/
-  `Bearer` prefixes counted **0**. agent-fleet 0065 repeats the check under
-  proxied traffic.
+  `Bearer` prefixes counted **0**. It did not look for auth codes, which are
+  there (above). agent-fleet 0065 repeats the check under proxied traffic.
 
 ## Rollout
 
@@ -222,12 +256,8 @@ namespace `spike-vault`, deleted) showed:
 
 Done (2026-10-19, by the build agent): the folders `/agent-vault-server` and
 `/agent-vault` exist in `agent-fleet-nygh`; the master and owner passwords
-were generated (64 hex characters, `openssl rand -hex 32`) and never printed,
-and the owner email was set to its fixed literal.
-
-**Not done, operator step before step 2** (the build agent's Infisical write
-was refused): create the folder `/agent-vault-owner`, copy
-`AGENT_VAULT_OWNER_PASSWORD` into it from `/agent-vault-server`, then delete
-`AGENT_VAULT_OWNER_PASSWORD` and `AGENT_VAULT_OWNER_EMAIL` from
-`/agent-vault-server`. Until then the script aborts with "missing", and
-nothing changes.
+were generated (64 hex characters, `openssl rand -hex 32`) and never printed.
+Nothing is left to do in Infisical before the merge: the key filter
+(Decision 6) keeps the owner password out of the pod from the first sync.
+Optional clean-up, any time: delete the unused `AGENT_VAULT_OWNER_EMAIL` from
+`/agent-vault-server`.

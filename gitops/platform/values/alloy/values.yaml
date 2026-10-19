@@ -116,6 +116,19 @@ alloy:
         forward_to = [loki.write.default.receiver]
 
         stage.cri {}
+
+        // ADR-0061: Agent Vault has no SMTP, so it logs password-reset and
+        // email-verification codes in clear ("[agent-vault] Password reset
+        // code for <email>: NNNNNN"). Anyone who can reach its API and read
+        // Loki could reset the owner. Keep those lines off Loki; the pod log
+        // on the node (cluster-admin) is the only copy.
+        stage.match {
+          selector = "{namespace=\"agent-vault\"}"
+          stage.drop {
+            expression          = "(?i)(reset|verification) code"
+            drop_counter_reason = "agent_vault_auth_code"
+          }
+        }
       }
 
       // ADR-0040: the kube-apiserver audit log.

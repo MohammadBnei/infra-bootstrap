@@ -18,6 +18,8 @@ persistence:
 infisical:
   enabled: true
   projectSlug: ci-check
+  # Renders the template.data key filter (ADR-0061).
+  keys: [CI_KEY]
 
 hooks:
   migrate:

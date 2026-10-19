@@ -233,6 +233,9 @@ infisical:
   # Sets secrets.infisical.com/auto-reload: "true" on the Deployment so the
   # Infisical operator restarts it when the managed secret's content changes.
   autoReload: false
+  # Literal key names: when set, only these keys of secretsPath reach the
+  # Secret. Env hygiene, not an access boundary (see sharedSecrets below).
+  keys: []
   credentialsRef:
     secretName: universal-auth-credentials
     secretNamespace: infisical
