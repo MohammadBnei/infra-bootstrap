@@ -46,8 +46,9 @@ bnei_lan_service_records:
   - "192.168.1.199 garage.bnei.lan" # Garage S3 endpoint (:3900), used by Longhorn backups, zot and pgBackRest
   - "192.168.1.234 registry.bnei.lan" # zot (ADR-0034), MetalLB address pinned in gitops/platform/values/zot/values.yaml; every node's containerd names it
   - "192.168.1.180 k8s.bnei.lan" # kube-vip control-plane VIP (ADR-0016): use this for the API server, not a node
-    # SPLIT HORIZON — the only .bnei.dev record here, and the only one that
-    # shadows a PUBLIC name rather than naming a private one.
+    # SPLIT HORIZON — .bnei.dev records shadow a PUBLIC name rather than
+    # naming a private one. stt (grey) first; infisical (proxied, ADR-0063)
+    # below it.
     #
     # stt.bnei.dev resolves publicly to the WAN address (82.65.231.50), so a
     # client that resolves it publicly reaches the service the long way round
@@ -79,3 +80,10 @@ bnei_lan_service_records:
     # what makes this record apply broadly, and that is a Freebox setting this
     # playbook cannot reach (noted in the final debug task too).
   - "192.168.1.233 stt.bnei.dev" # Traefik VIP — see ADR-0044/0046
+    # The one PROXIED host shadowed here, under its own ADR (0063), as the
+    # warning above requires. The build runner's Infisical fetch went home →
+    # Cloudflare → home and failed with 522/525 when that path dropped. Its
+    # route's cloudflare-origin-lock already admits 192.168.1.0/24 and the pod
+    # CIDR (the ADR-0039 break-glass), so LAN clients pass it; they skip the
+    # WAF for this host, which that lock already accepted.
+  - "192.168.1.233 infisical.bnei.dev" # Traefik VIP — see ADR-0063
