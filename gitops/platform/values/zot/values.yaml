@@ -72,22 +72,21 @@ env:
         name: zot-infisical
         key: ZOT_S3_SECRET
 
-# ponytail: the chart appends `envFrom: secretRef` for the managed secret
-# whenever infisical.enabled is true, and there's no way to keep the
-# InfisicalSecret CR without it. Since garage-configure.yml writes to this
-# project's root path, that means EVERY secret at "/" — including
-# GARAGE_ROOT_TOKEN and the other buckets' S3 credentials — lands as an env
-# var in this pod, not just ZOT_S3_*. Accepted for now: it is how every
-# platform-common app here already works, and zot runs a pinned upstream
-# image rather than anything built from an app repo. Upgrade path if that
-# stops being comfortable: move the ZOT_* secrets into an Infisical folder
-# (`infisical secrets set --path=/zot` from garage-configure.yml) and point
-# secretsPath below at it — the explicit secretKeyRef env vars above already
-# work either way, so only this block changes.
+# The chart appends `envFrom: secretRef` for the managed secret whenever
+# infisical.enabled is true. garage-configure.yml writes to this project's
+# root path, so without `keys:` EVERY secret at "/" (K8S_BREAK_GLASS_TOKEN,
+# GARAGE_ROOT_TOKEN, the bridge keys...) landed as env in this pod and in
+# the zot-infisical Secret. `keys:` renders a template.data, so the operator
+# writes only zot's three keys (security review 2026-10-20).
+# The operator does not re-render on template changes: after this syncs,
+# restart the Infisical operator (never delete the Orphan Secret, see
+# docs/runbook-authentik-identity.md), check the Secret holds 3 keys, then
+# restart zot so its env drops the rest.
 infisical:
   enabled: true
   projectSlug: "infra-bootstrap-1-ge1"
   envSlug: dev
+  keys: [ZOT_S3_ACCESS_KEY, ZOT_S3_SECRET, ZOT_HTPASSWD]
   # autoReload was true, on the reasoning "restart when the S3 credential
   # rotates". Turned off after it caused real restarts: the operator
   # computes one ETag over the WHOLE managed secret, which here is all 54
@@ -109,10 +108,8 @@ infisical:
   # restart is already this app's operating model anyway — its config.json
   # is mounted with subPath, which never picks up ConfigMap updates.
   #
-  # The fuller fix, which would let this be true again AND close the
-  # envFrom exposure noted above: move the ZOT_* secrets into an Infisical
-  # folder and point secretsPath at it, so the managed secret holds only
-  # zot's own keys.
+  # `keys:` above closes the envFrom exposure. Whether the ETag now covers
+  # only those three keys is unverified, so this stays false.
   autoReload: false
 
 extraVolumes:
