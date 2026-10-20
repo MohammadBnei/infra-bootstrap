@@ -79,11 +79,22 @@ bnei_lan_service_records:
     # public answer and the slow path. Pointing LAN DHCP at 192.168.1.55 is
     # what makes this record apply broadly, and that is a Freebox setting this
     # playbook cannot reach (noted in the final debug task too).
-  - "192.168.1.233 stt.bnei.dev" # Traefik VIP — see ADR-0044/0046
     # The one PROXIED host shadowed here, under its own ADR (0063), as the
     # warning above requires. The build runner's Infisical fetch went home →
     # Cloudflare → home and failed with 522/525 when that path dropped. Its
     # route's cloudflare-origin-lock already admits 192.168.1.0/24 and the pod
     # CIDR (the ADR-0039 break-glass), so LAN clients pass it; they skip the
     # WAF for this host, which that lock already accepted.
-  - "192.168.1.233 infisical.bnei.dev" # Traefik VIP — see ADR-0063
+
+# SPLIT HORIZON — public .bnei.dev names that LAN clients asking the Pi get
+# answered with a LAN address. The comments above (under
+# bnei_lan_service_records) explain stt, infisical and the rules for adding one.
+#
+# Not dns.hosts: a dns.hosts record answers A only, and Pi-hole forwards the
+# AAAA query upstream, so an IPv6-capable client (the build runner) still got
+# Cloudflare's address and took the public path (measured 2026-10-20). Each
+# name here becomes `local=/<name>/` + `address=/<name>/<ip>` in dnsmasq:
+# answered by the Pi alone, never forwarded, AAAA empty. ADR-0063.
+bnei_lan_split_horizon:
+  stt.bnei.dev: 192.168.1.233 # Traefik VIP — ADR-0044/0046
+  infisical.bnei.dev: 192.168.1.233 # Traefik VIP — ADR-0063

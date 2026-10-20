@@ -83,6 +83,12 @@
     pihole_hosts_records: >-
       {{ bnei_lan_hosts.values() | zip(bnei_lan_hosts.keys() | map('regex_replace', '$', '.bnei.lan'))
          | map('join', ' ') | list + bnei_lan_service_records }}
+    # Split-horizon .bnei.dev names (vars/bnei-lan-records.yml): local= keeps
+    # the AAAA query off the upstream, address= answers A. ADR-0063.
+    pihole_dnsmasq_lines: >-
+      {{ bnei_lan_split_horizon.keys() | map('regex_replace', '^', 'local=/') | map('regex_replace', '$', '/') | list
+         + (bnei_lan_split_horizon.keys() | zip(bnei_lan_split_horizon.values()) | map('join', '/')
+            | map('regex_replace', '^', 'address=/') | list) }}
 
   tasks:
     # -------------------------------------------------------------------
@@ -271,6 +277,28 @@
       ansible.builtin.command:
         argv: [pihole-FTL, --config, dns.hosts, "{{ pihole_hosts_records | to_json }}"]
       changed_when: true
+
+    # misc.dnsmasq_lines only takes effect on an FTL restart, and a restart
+    # is a LAN-wide DNS blip, so this one IS compared: the printed form is
+    # `[ a, b ]` (see the note above section 4), rendered here the same way.
+    - name: Read misc.dnsmasq_lines
+      ansible.builtin.command:
+        argv: [pihole-FTL, --config, misc.dnsmasq_lines]
+      register: pihole_dnsmasq_current
+      changed_when: false
+
+    - name: Set misc.dnsmasq_lines (split-horizon .bnei.dev names)
+      ansible.builtin.command:
+        argv: [pihole-FTL, --config, misc.dnsmasq_lines, "{{ pihole_dnsmasq_lines | to_json }}"]
+      when: pihole_dnsmasq_current.stdout | trim != ('[ ' ~ (pihole_dnsmasq_lines | join(', ')) ~ ' ]')
+      register: pihole_dnsmasq_set
+      changed_when: true
+
+    - name: Restart pihole-FTL so dnsmasq_lines apply
+      ansible.builtin.systemd:
+        name: pihole-FTL
+        state: restarted
+      when: pihole_dnsmasq_set is changed
 
     # -------------------------------------------------------------------
     # Done
