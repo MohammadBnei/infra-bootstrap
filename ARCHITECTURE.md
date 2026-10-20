@@ -390,6 +390,7 @@ A    garage.bnei.lan         → 192.168.1.199  (Garage S3 endpoint :3900 — Lo
 A    registry.bnei.lan       → 192.168.1.234  (zot — a MetalLB address, pinned in gitops/platform/values/zot/values.yaml and named by every node's containerd — ADR-0034)
 A    k8s.bnei.lan            → 192.168.1.180  (kube-vip control-plane VIP — ADR-0016)
 A    stt.bnei.dev            → 192.168.1.233  (split horizon, Traefik VIP — ADR-0044/0046)
+A    infisical.bnei.dev      → 192.168.1.233  (split horizon, proxied host — ADR-0063; LAN hosts only, pods use the backend Service)
 ```
 
 *Renamed 2026-10-11 (one-name rule): `proxmox` → `bnei`, `postgres-1`/`-2` →
