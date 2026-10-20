@@ -32,3 +32,8 @@ data:
       MohammadBnei/wedding-2026:
         id: 1340904445
         name: wedding
+      # agent-fleet's opus-workspace definition names its repo `opus-workspace`;
+      # GitHub's bare name `workspace` is too generic for a fleet name.
+      opus-tech-hq/workspace:
+        id: 1424343192
+        name: opus-workspace
