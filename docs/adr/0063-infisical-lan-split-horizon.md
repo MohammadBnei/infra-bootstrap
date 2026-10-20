@@ -37,6 +37,18 @@ same pattern as `stt.bnei.dev`.
 - **In-cluster secret sync is unaffected.** It uses the in-cluster service URL
   (`hostAPI: http://platform-infisical-backend…`), not this name.
 
+### Amendment 2026-10-20: dnsmasq, not dns.hosts
+A `dns.hosts` record answers A only. Pi-hole forwarded the AAAA query
+upstream, and the build runner, which has an IPv6 route, took Cloudflare's
+IPv6 address anyway: `curl` went `via 2a06:98c1:3121::2`. The split-horizon
+names now live in `bnei_lan_split_horizon` and become dnsmasq lines,
+`local=/<name>/` plus `address=/<name>/<ip>`. The Pi answers them itself and
+never forwards them, so the AAAA answer is empty (NOERROR). Measured live
+after the change: 10 of 10 runner calls went via `192.168.1.233`, status 200.
+`stt.bnei.dev` moved with it for consistency; it has no public AAAA, so its
+behaviour is unchanged. The playbook restarts
+pihole-FTL only when the lines change.
+
 ## Consequences
 - On the LAN, Infisical no longer depends on Cloudflare reaching home.
 - LAN and pod clients skip Cloudflare's WAF, geo and bot rules for this host.

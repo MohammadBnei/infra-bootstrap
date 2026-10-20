@@ -244,7 +244,9 @@
     # probe would fail here forever and prove nothing. If httpx ever starts
     # getting 403, the remedy is a Pi-hole split-horizon entry for
     # authentik.bnei.dev -> 192.168.1.233 (the Traefik VIP), the same thing
-    # ansible/playbooks/pihole-configure.yml already does for stt.bnei.dev, or a
+    # ansible/playbooks/pihole-configure.yml already does for stt.bnei.dev and
+    # infisical.bnei.dev (bnei_lan_split_horizon, needs its own ADR for a
+    # proxied host like authentik — see ADR-0063), or a
     # Cloudflare WAF exception.
     - name: Probe authentik discovery from inside the container (curl)
       ansible.builtin.command:
