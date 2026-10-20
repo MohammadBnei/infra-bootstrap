@@ -7,6 +7,24 @@
 | Status | Rotation deferred by the operator (M BN, GitHub `MohammadBnei`). A later session executes this runbook with the operator. |
 | Done before this runbook | 2026-10-20: `PG_ADMIN_PASSWORD`, `PG_MONITOR_PASSWORD`, `PG_REPLICATION_PASSWORD`, `PATRONI_PASSWORD` were **created** after the leak (PR #351; `docs/bootstrap-test-notes.md`, entry 2026-10-20; break-glass in `docs/runbook-pg-bootstrap.md` §6). They are not leaked. zot's InfisicalSecret was narrowed to its 3 keys (PR #350). Do not re-rotate any of these. |
 
+## Progress
+
+**2026-10-20, batch 1** (values written by Claude, propagation by the operator):
+
+| Key | State |
+|---|---|
+| `FLEET_SESSION_KEYS`, `MOUNTAIN_SESSION_KEY` | new value in Infisical; live after the core/mountain restart in `rot-batch1-apply.sh` |
+| `BASIC_AUTH_HTPASSWD` (+ new `BASIC_AUTH_PASSWORD`) | bcrypt cost 12 replaces apr1; live on the next resync (Traefik watches the Secret) |
+| `K8S_GRAFANA_ADMIN_PASSWORD` | new value; live after the in-pod reset in `rot-batch1-apply.sh` |
+| `BRIDGE_ALERT_TOKEN`, `BRIDGE_CORE_TOKEN` + `BRIDGE_CLIENTS` | new values, hash checked; live after the bridge restart |
+| `BRIDGE_GITHUB_WEBHOOK_SECRET` | new value; the App is repointed by `rot-batch1-apply.sh` right after the bridge restart |
+
+Read-only checks done the same day:
+
+- **NetBird:** all nine setup keys expired by 2026-10-18 (last used 2026-10-11/12). No peer was created after 2026-10-12. There are no routes and no networks. Two laptop peers predate the leak and are for the operator to confirm: `macbook-pro-de-nico3` and `emerald-eea` (in `platform-admins`). The six `NETBIRD_INFRA_SETUP_KEY_*` rows are dead values and can be deleted.
+- **`argocd-ukubi-bot`:** no events on `infra-bootstrap`, `agent-fleet`, `editable-blog`, `wird` or `vos-monolith`, and no PRs, since 2026-10-18. Revoking the PAT is still needed (T2, operator).
+- **Mesh SSH from the laptop goes through NetBird's SSH proxy** (`/etc/ssh/ssh_config.d/99-netbird.conf`: `ProxyCommand netbird ssh proxy`, an SSO login, `StrictHostKeyChecking no`). Stale `ControlMaster` sockets in `~/.ssh/control-*` made sessions return empty output. Use `ssh -S none`. The Postgres break-glass must use the LAN IPs.
+
 ## 0. What the export did and did not contain
 
 The 121 key names in the project on 2026-10-20 are the input to this runbook.
