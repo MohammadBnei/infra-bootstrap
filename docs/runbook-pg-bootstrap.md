@@ -30,7 +30,7 @@ onto a pair of data VMs.
   matrix — 7 daily / 4 weekly / 3 monthly, PITR 7 days).
 - **Infisical secrets needed at this phase** (`docs/secrets.md` has the
   full table with generators/consumers — this is just the relevant
-  subset): `PG_SUPERUSER_PASSWORD`, `PG_REPLICATION_PASSWORD`,
+  subset): `PG_ADMIN_PASSWORD`, `PG_MONITOR_PASSWORD`, `PG_REPLICATION_PASSWORD`, `PATRONI_PASSWORD`,
   `PG_BACKREST_REPO_PASSWORD`, `PGBACKREST_S3_ACCESS_KEY` /
   `PGBACKREST_S3_SECRET`, `DBUSER_META_PASSWORD`, `DBUSER_VIEW_PASSWORD`,
   `DBUSER_INFISICAL_PASSWORD`, `DBUSER_ORY_PASSWORD`,
@@ -84,6 +84,24 @@ disaster-recovery framing. If a fresh `pgsql.yml` run against new VMs
 goes wrong, the practical reset is destroying those VMs via Terraform
 (they aren't the `imported.tf`/`prevent_destroy` production pair) and
 re-running this runbook from Step 1.
+
+## 6. Break-glass: Postgres when Infisical is down
+
+Infisical keeps its own data on this cluster, so a Pigsty outage also takes
+away every password in it. None of them is needed to get back in:
+
+1. Root on a pg node with a key held outside Infisical:
+   `ssh -i ~/.ssh/infra_bootstrap_id_ed25519 root@pg01.bnei.mesh` (or `pg02`,
+   or the LAN IPs .205/.207). Verified 2026-10-20. Off-LAN, the mesh needs
+   NetBird's management server, which also stores on Pigsty, so plan on the
+   LAN for a real outage.
+2. `sudo -iu postgres psql`: the OS `postgres` user logs in by local ident
+   (pg_hba order 100), no password.
+3. Find the primary with `select pg_is_in_recovery()` (false = primary), and
+   reset any role from there, e.g. `ALTER ROLE dbuser_dba PASSWORD '...'`.
+   Then put the value back in Infisical and re-run the Pigsty tags that
+   render it (`pg_conf,pg_pass`, exporters) so pgpass, Patroni and the
+   exporters agree.
 
 ## Previous
 
