@@ -272,6 +272,15 @@ updated.
   owner and the provisioner's agent token come from one idempotent operator
   command, `gitops/scripts/agent-vault-bootstrap.sh`, which fails closed. See
   [ADR-0061](docs/adr/0061-agent-vault.md).
+- **agent-fleet's GitHub identity is the App `ukubi-fleet`** (ADR-0062,
+  proposed), not the `argocd-ukubi-bot` PAT. A second App next to ADR-0060's
+  `ukubi-bridge`, which keeps its own key: the bridge needs App-JWT calls
+  behind a public ingress, and that pod must never hold a key that can write
+  repos. Public (it must install on `opus-tech-hq`), so agent-fleet honours
+  installations only from an account-id allowlist. Installing it on a repo
+  is how the repo joins the fleet. Its key lives in the dedicated Infisical
+  project `fleet-github-app`, mounted as files on the provisioner only. See
+  [ADR-0062](docs/adr/0062-fleet-github-app.md).
 - **NetBird is the daily SSH path to every host** (ADR-0055, accepted,
   rolling out — 14 hosts enrolled 2026-10-11, all but
   hermesagent/garage-storage/nfs-storage, human SSH over the
