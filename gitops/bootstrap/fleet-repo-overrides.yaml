@@ -1,0 +1,34 @@
+# What agent-fleet's repos list does NOT take from GitHub (agent-fleet
+# docs/adr/0074). The list itself is GitHub's: a repo joins the fleet when
+# argocd-ukubi-bot is added as a collaborator and leaves when it is removed.
+# Only the exceptions live here, keyed by owner/repo, each pinned to the
+# GitHub repo id so a deleted-and-recreated repo of the same name inherits
+# nothing:
+#
+#   name           fleet name, when not the lowercased GitHub repo name
+#   baseBranch     when not the repo's default_branch
+#   image          worker image, when not the catalog default
+#   clusterAccess  grants the thot-executor kubectl shim (agent-fleet ADR-0037)
+#
+# This file is the ONLY source of clusterAccess: each sync revokes it on every
+# repo without a matching entry here. An empty `repos:` revokes everything; a
+# missing or unparsable file keeps core's last good copy. Core mounts this
+# ConfigMap without subPath, so an edit applies within a minute or two, no
+# restart. agent-fleet's rbac_test.go keeps fleet roles from writing it.
+#
+# Get a repo's id: gh api repos/<owner>/<repo> --jq .id
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: fleet-repo-overrides
+  namespace: agent-fleet
+data:
+  overrides.yaml: |
+    repos:
+      MohammadBnei/infra-bootstrap:
+        id: 1259577926
+        clusterAccess: true
+      # The fleet has always called it `wedding`; sessions reference that name.
+      MohammadBnei/wedding-2026:
+        id: 1340904445
+        name: wedding

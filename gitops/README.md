@@ -32,6 +32,7 @@ gitops/
 │   ├── alertmanager-ingressroute.yaml      # Traefik IngressRoute → alertmanager.bnei.dev, gated by basic-admin-auth
 │   ├── alertmanager-discord-secret.yaml    # InfisicalSecret → Discord webhook Alertmanager posts to
 │   ├── provisioner-application.yaml        # Standalone Application: agent-fleet's provisioner (plain manifests, own RBAC, sourced from agent-fleet's own k8s/provisioner/) — see agent-fleet docs/adr/0012/0019/0020/0021
+│   ├── fleet-repo-overrides.yaml           # ConfigMap: agent-fleet repo exceptions (name/baseBranch/image/clusterAccess); the repo list itself is the bot's GitHub collaborator list — agent-fleet docs/adr/0074
 │   ├── platform.applicationset.yaml       # ApplicationSet for remaining platform apps (not traefik)
 │   ├── platform-common-apps.applicationset.yaml  # ApplicationSet for common-app-chart-based platform tools (public image, no app-specific code)
 │   └── apps.applicationset.yaml           # ApplicationSet for user apps with their own private repo
