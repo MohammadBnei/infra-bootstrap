@@ -798,12 +798,20 @@ all:
     #----------------------------------------------#
     # PASSWORD : https://pigsty.io/docs/setup/security/
     #----------------------------------------------#
+    # The four Postgres/Patroni system passwords come from Infisical at run
+    # time (infisical run ... -- ansible-playbook, docs/secrets.md). They were
+    # Pigsty's published defaults until 2026-10-20, live on the cluster. A
+    # run without them fails on an undefined variable instead of writing an
+    # empty password. Break-glass if Infisical is down (it lives on this
+    # cluster): root on pg01/pg02, then `sudo -iu postgres psql` (local
+    # ident, no password) and ALTER ROLE. See docs/runbook-pg-bootstrap.md.
+    # ponytail: grafana/haproxy/etcd-root below are still defaults.
     grafana_admin_password: pigsty
     grafana_view_password: DBUser.Viewer
-    pg_admin_password: DBUser.DBA
-    pg_monitor_password: DBUser.Monitor
-    pg_replication_password: DBUser.Replicator
-    patroni_password: Patroni.API
+    pg_admin_password: "{{ lookup('ansible.builtin.env', 'PG_ADMIN_PASSWORD', default=undef()) }}"
+    pg_monitor_password: "{{ lookup('ansible.builtin.env', 'PG_MONITOR_PASSWORD', default=undef()) }}"
+    pg_replication_password: "{{ lookup('ansible.builtin.env', 'PG_REPLICATION_PASSWORD', default=undef()) }}"
+    patroni_password: "{{ lookup('ansible.builtin.env', 'PATRONI_PASSWORD', default=undef()) }}"
     haproxy_admin_password: pigsty
     minio_secret_key: S3User.MinIO
     etcd_root_password: Etcd.Root

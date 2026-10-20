@@ -5010,3 +5010,41 @@ above. The closest upstream report is goauthentik/authentik#26274
 
 **Takeaway.** When the authentik UI fails intermittently with no 5xx in the
 log, grep the server log for `SIGSEGV` and check `dmesg` on the node.
+
+## 2026-10-20 — Pigsty system passwords rotated off the published defaults (PR #351)
+
+A security review found `dbuser_dba`, `replicator` and `dbuser_monitor` still
+on Pigsty's published default passwords: one login each from the k9s hub
+succeeded. `dbuser_dba` is superuser on every database here, Infisical's
+included. Rotated with a snapshot + guarded run from the hub; four attempts,
+three clean rollbacks, each caused by something worth knowing:
+
+1. **`postgres` has `\timing` on in its `.psqlrc`.** Every `psql -Atc` from
+   automation gets a `Time: … ms` line appended, so a scripted
+   `select pg_is_in_recovery()` never equals `f`, and a saved list of
+   password verifiers gains a garbage line. Always `psql -X`.
+2. **Ansible templates run with `trim_blocks`.** A `{% endif %}` swallows the
+   newline after it, gluing the next shell line onto the previous command
+   (`[ … = 3 ] chmod …` → "too many arguments"). Use shell `if`, not Jinja
+   blocks, inside `shell:` bodies. Also, `psql -c` does not substitute
+   `:'var'`; pipe the SQL through stdin.
+3. **The live Patroni configs predate the vendored Pigsty (rendered
+   2026-07-30).** A fresh `-t pg_conf` render differs beyond passwords:
+   pg01's VM grew 2→4 GB, so `shared_buffers` 492→979 MB, and an extra
+   `pgbackrest` list entry. The run kept the live files and spliced in only
+   the `password:` lines. Reconciling the rest is a separate, planned run.
+4. **The vendored `pg_monitor` role no longer has `pg_exporter.env`**, the
+   template that produced the live `/etc/default/pg_exporter`. Re-rendering
+   exporters fails; the run swapped only the password inside
+   `PG_EXPORTER_URL`.
+5. `-t pg_conf` also rewrites `/etc/pgbackrest/pgbackrest.conf` (outside any
+   snapshot). `pgbackrest info` stayed `status: ok` afterwards.
+
+**Break-glass, verified the same day:** root on pg01/pg02 with a key held
+outside Infisical, then `sudo -iu postgres psql` (local ident). Runbook:
+`docs/runbook-pg-bootstrap.md` §6. Over the mesh, `root@pg02.bnei.mesh`
+answered with empty output while pg01 was fine; use the LAN IPs.
+
+**Takeaway.** Pigsty's vendored code and this cluster have drifted; any
+`pgsql.yml` run against `pg-proxmox` needs a render-to-temp diff first
+(the guard used here: render, mask secrets, diff against `/pg/conf`).
