@@ -92,6 +92,9 @@ considered and rejected as the fleet's identity:
   automatically. The bridge can't tell one agent from another by author;
   dropping a thread's own agent events is core's dispatcher's job, not the
   bridge's (agent-fleet #257).
+  Definition sessions driven by audience members share that trusted login.
+  This is accepted while no definition can open PRs; before one can,
+  core's dispatcher keys trust on session provenance (agent-fleet 0075).
 - Commits are authored `ukubi <ukubi@bnei.dev>` from config. The App is the
   transport credential.
 - `argocd-ukubi-bot` keeps its non-fleet uses for now: `UKUBI_BOT_GH_PAT`.
@@ -101,12 +104,14 @@ considered and rejected as the fleet's identity:
 ## Rollout
 
 1. This ADR, plus agent-fleet 0075.
-2. Operator: create `ukubi-fleet` and install it on `MohammadBnei/notes` and
-   `opus-tech-hq/workspace`. Agent: create the `fleet-github-app` project
+2. Operator: create `ukubi-fleet` and install it on every repo that should
+   stay in the fleet, plus `agent-fleet` and the fleet-shared and genome
+   source repos. This must happen before agent-fleet's step merges, because
+   that step moves the provisioner's own git onto installation tokens.
+   Installing early is harmless: membership still comes from the bot. Agent: create the `fleet-github-app` project
    and identity, and store `GITHUB_APP_ID` and `GITHUB_APP_PRIVATE_KEY`.
    agent-fleet then mints definition-vault tokens (Opus unblocked).
-3. Operator: install on all 11 fleet repos. agent-fleet switches membership
-   to installations; this repo's `gitops/bootstrap/fleet-repo-overrides.yaml`
+3. agent-fleet switches membership to installations; this repo's `gitops/bootstrap/fleet-repo-overrides.yaml`
    header comment changes with it.
 4. The vault changes in Decision 4, merged and synced before agent-fleet
    moves repo pods onto the vault.
