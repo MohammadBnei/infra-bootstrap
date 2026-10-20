@@ -286,6 +286,7 @@
         argv: [pihole-FTL, --config, misc.dnsmasq_lines]
       register: pihole_dnsmasq_current
       changed_when: false
+      check_mode: false
 
     - name: Set misc.dnsmasq_lines (split-horizon .bnei.dev names)
       ansible.builtin.command:

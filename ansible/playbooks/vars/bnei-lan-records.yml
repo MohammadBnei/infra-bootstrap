@@ -47,8 +47,9 @@ bnei_lan_service_records:
   - "192.168.1.234 registry.bnei.lan" # zot (ADR-0034), MetalLB address pinned in gitops/platform/values/zot/values.yaml; every node's containerd names it
   - "192.168.1.180 k8s.bnei.lan" # kube-vip control-plane VIP (ADR-0016): use this for the API server, not a node
     # SPLIT HORIZON — .bnei.dev records shadow a PUBLIC name rather than
-    # naming a private one. stt (grey) first; infisical (proxied, ADR-0063)
-    # below it.
+    # naming a private one. The records themselves are in
+    # bnei_lan_split_horizon at the end of this file (dnsmasq lines, so AAAA
+    # is answered too, ADR-0063); this comment is why each one is safe.
     #
     # stt.bnei.dev resolves publicly to the WAN address (82.65.231.50), so a
     # client that resolves it publicly reaches the service the long way round
