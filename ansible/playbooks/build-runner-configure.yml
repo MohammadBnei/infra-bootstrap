@@ -112,6 +112,11 @@
       # identity's bound claims first, as above.
       - name: ukubi-bridge
         url: https://github.com/MohammadBnei/ukubi-bridge
+      # pi-lab's landing page, a static nginx image (pi-lab ADR-0020), served
+      # here while the Pi is offline. Private repo. PAT repo list and the CI
+      # identity's bound claims first, as above.
+      - name: pi-lab
+        url: https://github.com/MohammadBnei/pi-lab
     # NOT `ukubi` — that label belongs to the in-cluster runner holding a
     # ServiceAccount token with `create jobs` in vos/vos-dev. Builds must
     # not land there and cluster jobs must not land here.
