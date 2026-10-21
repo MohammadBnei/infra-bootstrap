@@ -1,6 +1,6 @@
 # ADR-0062: The fleet GitHub App `ukubi-fleet`
 
-**Status:** Proposed. Nothing is created until this merges.
+**Status:** Accepted. Rollout complete 2026-10-21: every step below is done.
 **Date:** 2026-10-20
 **Related:** [ADR-0034](0034-in-cluster-oci-registry-zot-garage-backed.md)
 (build runners keep the owner's PAT), [ADR-0060](0060-event-bridge.md) (the
@@ -128,3 +128,11 @@ considered and rejected as the fleet's identity:
    moves repo pods onto the vault.
 5. The bot is removed from the fleet repos, and agent-fleet-nygh `/GH_TOKEN`
    is deleted.
+
+Done 2026-10-21: steps 2-3 as agent-fleet #278/#290, step 4 as #358 here,
+then agent-fleet #307 (repo pods behind per-owner vaults) and #310 (a sidecar
+egress router: only the three vault hosts go to the vault). Step 5: `/GH_TOKEN`
+deleted; `argocd-ukubi-bot` removed from all 11 repos it was a collaborator on.
+ArgoCD was never on the bot: `repo-creds-github-bnei` is the owner's own
+fine-grained PAT. Watch the next release of `wedding-2026` and `vos-monolith`:
+their workflows push with an Actions secret `PAT` whose owner was not checked.
