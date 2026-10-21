@@ -1,6 +1,9 @@
-# Restricts the `fleet` application to the platform-admins group, at authentik,
-# so a directory user who is not an operator cannot obtain a token for it at
-# all.
+# The platform-admins binding on the `fleet` application. Since agent-fleet
+# ADR-0068's islands, shared-notes has a second binding
+# (authentik-blueprint-fleet-members-policy.yaml), so authentik admits both
+# groups; keeping members out of the console is core's groups check alone
+# (agent-fleet core/internal/auth: AgentService is the only member route).
+# Any other directory user still cannot obtain a token for it.
 #
 # DELIBERATELY A SEPARATE FILE from authentik-blueprint-fleet.yaml, and this is
 # the whole reason it exists as its own blueprint rather than two more entries

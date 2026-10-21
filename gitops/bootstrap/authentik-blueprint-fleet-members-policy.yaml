@@ -32,6 +32,6 @@ data:
         identifiers:
           target: !Find [authentik_core.application, [slug, fleet]]
           group: !Find [authentik_core.group, [name, shared-notes]]
-          order: 10
+          order: 1
         attrs:
           enabled: true
