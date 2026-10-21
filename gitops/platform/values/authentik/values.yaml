@@ -135,6 +135,10 @@ blueprints:
   # drop (ADR-0059): the shared-notes binding for files.bnei.dev. Its
   # provider lives in authentik-blueprint-forwardauth, wird-admin's reason.
   - authentik-blueprint-drop-policy
+  # fleet members (agent-fleet ADR-0066/0068): the shared-notes binding on
+  # the fleet application, so members can sign in from an island. Core admits
+  # them to AgentService only.
+  - authentik-blueprint-fleet-members-policy
   secrets:
   - authentik-blueprint-grafana
   - authentik-blueprint-argocd

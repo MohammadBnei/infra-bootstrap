@@ -1,0 +1,37 @@
+# Lets the shared-notes group (N MG and M BN) obtain a token for the `fleet`
+# application, so a member can sign in from an island: the <fleet-agent>
+# component on opus.bnei.dev / notes.bnei.dev (agent-fleet ADR-0068).
+#
+# What a member can then do is decided in core, not here, and it is narrow:
+# core admits shared-notes only to AgentService (agent-fleet ADR-0066 §2), and
+# AgentService only to definitions whose audience is that group (opus-workspace).
+# The console and DashboardService stay platform-admins only, enforced by
+# core's own groups check; authentik-blueprint-fleet-policy.yaml keeps the
+# platform-admins binding.
+#
+# Its own file, drop-policy's pattern: a !Find miss here (shared-notes is
+# declared in authentik-blueprint-silverbullet-policy.yaml) rolls back this
+# binding only, never the platform-admins one. First apply may race the group;
+# one more worker restart applies it.
+#
+# A plain ConfigMap: no credential here.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: authentik-blueprint-fleet-members-policy
+  namespace: authentik
+data:
+  fleet-members-policy.yaml: |
+    version: 1
+    metadata:
+      name: fleet-members-policy
+      labels:
+        blueprints.goauthentik.io/instantiate: "true"
+    entries:
+      - model: authentik_policies.policybinding
+        identifiers:
+          target: !Find [authentik_core.application, [slug, fleet]]
+          group: !Find [authentik_core.group, [name, shared-notes]]
+          order: 1
+        attrs:
+          enabled: true
