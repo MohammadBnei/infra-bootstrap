@@ -793,7 +793,7 @@ agent-fleet's provisioner holds a vault credential (agent-fleet ADR 0065).
 | Port | Service | Admitted from (NetworkPolicy) |
 |---|---|---|
 | 14321 | API (`agent-vault.agent-vault.svc:14321`) | pods `app: provisioner` in `agent-fleet` |
-| 14322 | MITM proxy | pods labelled `fleet.bnei.dev/definition` in `agent-fleet` |
+| 14322 | MITM proxy | pods labelled `fleet.bnei.dev/definition` or `fleet.bnei.dev/vault-owner` (repo pods, ADR-0062 Decision 4) in `agent-fleet` |
 
 ClusterIP only: no IngressRoute and no LAN address. The data is SQLite on a
 1Gi longhorn PVC, not Pigsty: upstream supports Postgres, but one replica of a

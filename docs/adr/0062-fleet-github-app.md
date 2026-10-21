@@ -75,6 +75,17 @@ considered and rejected as the fleet's identity:
    - the per-(actor, vault) rate limit (20 rps, burst 200, 64 concurrent;
      every repo pod of one owner shares a bucket) is turned off or raised.
 
+   Configured 2026-10-21 after the PR4a spike, effective once ArgoCD syncs
+   it (the vault itself is per ADR-0061's status): the `:14322` rule admits pods
+   labelled `fleet.bnei.dev/vault-owner`, CPU is 250m request / 2 limit
+   (500m throttled at 3 concurrent installs), and the rate-limit profile is
+   `loose`. The spike also settled what repo pods accept: HTTP/2 and gRPC to
+   external hosts do not work through the vault (HTTP/1.1 only), and the
+   vault sees all repo-pod HTTPS in plaintext, passthrough hosts included
+   (it re-signs every host). Both accepted. Repo pods also inherit the
+   vault's refusal of private destinations, so their NO_PROXY must cover
+   `.bnei.lan`, split-horizon `.bnei.dev` names and the cluster suffixes.
+
 ## Consequences
 
 - **A leaked `ukubi-fleet` key means write access to every repo in the two
