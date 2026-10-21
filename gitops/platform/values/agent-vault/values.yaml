@@ -2,8 +2,8 @@
 # proxy that swaps a definition pod's placeholder credentials for real ones per
 # host/path. ClusterIP only: no IngressRoute, never exposed (the ApplicationSet
 # element's hostname is empty for zot's reason). Callers: agent-fleet's
-# provisioner (API :14321) and definition pods (proxy :14322), fenced by the
-# NetworkPolicy below.
+# provisioner (API :14321), definition pods and repo pods (proxy :14322;
+# repo pods per ADR-0062 Decision 4), fenced by the NetworkPolicy below.
 #
 # Platform-common app (public image, no per-app repo), not a
 # gitops/apps/registry.yaml user app — same reasoning as searxng/pgweb/zot.
@@ -54,8 +54,14 @@ env:
   # ADR-0062 Decision 4: repo pods route ALL their HTTPS through the proxy
   # (passthrough), and the per-token default (20 rps, burst 200, 64 in flight)
   # is shared by every repo pod of one owner. `loose` is 40/s, burst 400, 128
-  # in flight; a 401-package bun install fits the default burst, a large
-  # monorepo would not (PR4a spike, 2026-10-21).
+  # in flight (v0.40.0 internal/ratelimit/config.go). One 401-package bun
+  # install got no 429 under the default only thanks to refill; several pods
+  # of one owner installing at once would (PR4a spike, 2026-10-21).
+  # Repo pods also inherit ALLOW_PRIVATE_RANGES=false above: any private
+  # destination through the proxy is refused, including split-horizon
+  # *.bnei.dev names that resolve to 192.168.1.233 on the LAN (ADR-0063), so
+  # agent-fleet's repo-pod NO_PROXY must list .bnei.lan, .bnei.dev and the
+  # cluster suffixes to reach them directly.
   - name: AGENT_VAULT_RATELIMIT_PROFILE
     value: "loose"
 
@@ -103,7 +109,7 @@ securityContext:
 resources:
   requests:
     cpu: 250m
-    memory: 64Mi
+    memory: 128Mi    # spike peak 105Mi: never run above the request
   limits:
     cpu: "2"
     memory: 512Mi
@@ -124,13 +130,14 @@ livenessProbe:
 extraManifests:
   - |
     # ADR-0061 Decision 4: :14321 only from agent-fleet's provisioner, :14322
-    # only from definition pods. Plain NetworkPolicy ingress holds through the
+    # only from definition pods and (ADR-0062 Decision 4) repo pods. Plain NetworkPolicy ingress holds through the
     # ClusterIP under Cilium chaining (verified 2026-10-18: source identity
     # survives ClusterIP + vxlan, same label from another namespace refused).
     # Residuals (ADR-0061 Consequences): host identity on THIS pod's node
     # (kubelet probes, hostNetwork pods) is always admitted — Cilium's default
     # host allow; and any Application (all are project: default) can add an
-    # allow policy here or run a pod with these labels in agent-fleet.
+    # allow policy here or run a pod with these labels in agent-fleet — the
+    # repo-pod label included, whose value the policy does not check.
     apiVersion: networking.k8s.io/v1
     kind: NetworkPolicy
     metadata:
@@ -155,8 +162,9 @@ extraManifests:
               protocol: TCP
         # :14322 proxy callers, one `from` entry per caller kind (OR'd):
         # definition pods, and repo pods routed through their owner's vault
-        # (ADR-0062 Decision 4, agent-fleet 0075 §7). The repo-pod label is
-        # set only by agent-fleet's provisioner.
+        # (ADR-0062 Decision 4, agent-fleet 0075 §7). By convention only the
+        # provisioner sets the repo-pod label; nothing enforces that (see the
+        # residuals above).
         - from:
             - namespaceSelector:
                 matchLabels:

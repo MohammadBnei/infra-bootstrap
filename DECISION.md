@@ -268,7 +268,8 @@ updated.
   not Pigsty: upstream supports Postgres, but one replica of a store whose
   contents are mostly re-reconciled from git + Infisical every minute does not
   need a Pigsty database, user and playbook run (`migrate-db` if that changes). A NetworkPolicy admits the API
-  only from agent-fleet's provisioner and the proxy only from definition pods. The
+  only from agent-fleet's provisioner and the proxy only from definition pods and
+  (ADR-0062) repo pods. The
   owner and the provisioner's agent token come from one idempotent operator
   command, `gitops/scripts/agent-vault-bootstrap.sh`, which fails closed. See
   [ADR-0061](docs/adr/0061-agent-vault.md).
