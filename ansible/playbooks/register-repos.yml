@@ -53,6 +53,7 @@
         - SMTP_HOST
         - SMTP_USERNAME
         - SMTP_PASSWORD
+        - SMTP_FROM_ADDRESS
         - ARGOCD_INFISICAL_CLIENT_ID
         - ARGOCD_INFISICAL_CLIENT_SECRET
       loop_control:
@@ -223,6 +224,7 @@
               SMTP_HOST={{ lookup('env', 'SMTP_HOST') }}
               SMTP_USERNAME={{ lookup('env', 'SMTP_USERNAME') }}
               SMTP_PASSWORD={{ lookup('env', 'SMTP_PASSWORD') }}
+              SMTP_FROM_ADDRESS={{ lookup('env', 'SMTP_FROM_ADDRESS') }}
               CAPTCHA_SITE_KEY={{ lookup('env', 'CAPTCHA_SITE_KEY') }}
               TELEMETRY_ENABLED={{ lookup('env', 'TELEMETRY_ENABLED') }}
 
