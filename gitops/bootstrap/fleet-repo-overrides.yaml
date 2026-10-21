@@ -1,6 +1,8 @@
 # What agent-fleet's repos list does NOT take from GitHub (agent-fleet
-# docs/adr/0074). The list itself is GitHub's: a repo joins the fleet when
-# argocd-ukubi-bot is added as a collaborator and leaves when it is removed.
+# docs/adr/0074). The list itself is GitHub's: a repo joins the fleet when the
+# App ukubi-fleet is installed on it (ADR-0062, agent-fleet docs/adr/0075 §4)
+# and leaves when it is uninstalled. Both installs are "all repositories"; a
+# repo is switched off per repo from the dashboard (repos.active).
 # Only the exceptions live here, keyed by owner/repo, each pinned to the
 # GitHub repo id so a deleted-and-recreated repo of the same name inherits
 # nothing:
