@@ -188,6 +188,15 @@ spec:
         valuesPath: [helm/values.yaml]
         targetRevision: main
         hostname: events.bnei.dev
+      # pi-lab: static landing page (pi-lab ADR-0020), see
+      # gitops/apps/registry.yaml's entry.
+      - name: pi-lab
+        namespace: pi-lab
+        syncWave: "10"
+        repoURL: https://github.com/MohammadBnei/pi-lab.git
+        valuesPath: [helm/values.yaml]
+        targetRevision: main
+        hostname: pi-lab.bnei.dev
   template:
     metadata:
       name: '{{.name}}'

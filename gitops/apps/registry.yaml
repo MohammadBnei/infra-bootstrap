@@ -378,3 +378,15 @@
   valuesPath: [helm/values.yaml]
   targetRevision: main
   hostname: files.bnei.dev
+
+# pi-lab: the pi-lab landing page, a static Three.js scroll-story on nginx
+# (pi-lab ADR-0020), served here while the Pi is offline. Public, no
+# forwardAuth; baseline chain stays on (proxied via the *.bnei.dev wildcard).
+# CSP comes from nginx; the app's values pin Referrer-Policy to no-referrer.
+- name: pi-lab
+  namespace: pi-lab
+  syncWave: "10"
+  repoURL: https://github.com/MohammadBnei/pi-lab.git
+  valuesPath: [helm/values.yaml]
+  targetRevision: main
+  hostname: pi-lab.bnei.dev
