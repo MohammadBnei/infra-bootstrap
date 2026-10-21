@@ -25,6 +25,16 @@ service:
 ingress:
   enabled: true
   hostname: notes.bnei.dev
+  # agent-fleet ADR-0068: the <fleet-agent> island runs inside opus.bnei.dev's
+  # pages, so its Allow / Approve buttons live here. A same-site page (any
+  # *.bnei.dev app, an agent's preview host) that framed the space could
+  # clickjack them with the member's cookie riding, so no page but the
+  # space's own may frame it. SilverBullet sends no CSP of its own, so this
+  # replaces nothing. The baseline headers middleware serves both hosts.
+  baseline:
+    headers:
+      customResponseHeaders:
+        Content-Security-Policy: "frame-ancestors 'self'"
 
 # The container MUST start as root: the entrypoint creates a `silverbullet`
 # user at PUID/PGID and drops to it, because ssh (git sync) refuses to run
