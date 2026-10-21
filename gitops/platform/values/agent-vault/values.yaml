@@ -51,6 +51,13 @@ env:
   # NetworkPolicy (ADR-0061 Consequences).
   - name: AGENT_VAULT_ALLOW_PRIVATE_RANGES
     value: "false"
+  # ADR-0062 Decision 4: repo pods route ALL their HTTPS through the proxy
+  # (passthrough), and the per-token default (20 rps, burst 200, 64 in flight)
+  # is shared by every repo pod of one owner. `loose` is 40/s, burst 400, 128
+  # in flight; a 401-package bun install fits the default burst, a large
+  # monorepo would not (PR4a spike, 2026-10-21).
+  - name: AGENT_VAULT_RATELIMIT_PROFILE
+    value: "loose"
 
 # The folder also holds the owner password (read by the bootstrap script only).
 # `keys` keeps it out of the Secret and so out of this process's env: only the
@@ -89,12 +96,16 @@ securityContext:
   capabilities:
     drop: [ALL]
 
+# CPU: the proxy TLS-terminates every repo-pod request (it re-signs
+# passthrough hosts too). 3 concurrent cold installs peaked at 389m and were
+# throttled in 82% of periods under the old 500m limit (PR4a spike,
+# 2026-10-21); memory peaked at 105Mi.
 resources:
   requests:
-    cpu: 50m
+    cpu: 250m
     memory: 64Mi
   limits:
-    cpu: 500m
+    cpu: "2"
     memory: 512Mi
 
 # Monitoring = these probes + the cluster-wide KubePodNotReady /
@@ -142,7 +153,10 @@ extraManifests:
           ports:
             - port: 14321
               protocol: TCP
-        # :14322 proxy callers, one `from` entry per caller kind (OR'd).
+        # :14322 proxy callers, one `from` entry per caller kind (OR'd):
+        # definition pods, and repo pods routed through their owner's vault
+        # (ADR-0062 Decision 4, agent-fleet 0075 §7). The repo-pod label is
+        # set only by agent-fleet's provisioner.
         - from:
             - namespaceSelector:
                 matchLabels:
@@ -150,6 +164,13 @@ extraManifests:
               podSelector:
                 matchExpressions:
                   - key: fleet.bnei.dev/definition
+                    operator: Exists
+            - namespaceSelector:
+                matchLabels:
+                  kubernetes.io/metadata.name: agent-fleet
+              podSelector:
+                matchExpressions:
+                  - key: fleet.bnei.dev/vault-owner
                     operator: Exists
           ports:
             - port: 14322
