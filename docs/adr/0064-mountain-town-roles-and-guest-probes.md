@@ -63,14 +63,19 @@ services.
    | hermesagent | h3 | mill |
    | garage-storage | h1 | granary (the service key becomes a machine) |
 
-   - **What is published:** the role, the host bucket and an up/down state.
-   - **Debounce:** a guest's state changes on the page only after it has held for **10 minutes**, both ways. The page
-     is not a real-time oracle for a single box.
-   - **Not debounced:** the k8s VMs follow node Ready, which ADR-0056 already publishes live, and host state (quorum,
-     host-tagged alerts) stays live as before.
+   - **What is published:** the role, the host bucket and, for a probed guest, an up/down state.
+   - **Debounce:** a guest's state changes on the page only after it has held for **10 minutes**, both ways, and is
+     never published early: after a restart the last published state stands and any difference waits 10 minutes again.
+     The page is not a real-time oracle for a single box.
+   - **The k8s VMs have no state of their own** (owner, 2026-10-22, mountain R8 deploy B doubt cycle): the keeps and
+     halls grey with their island, like every building. Per-node Ready would publish the k8s etcd members' state live
+     and split control plane from worker, which today's per-host Ready does not.
+   - **Not debounced:** host state (per-host Ready, quorum, host-tagged alerts) stays live as before.
    - **k9s-dashboard is never drawn, probed or named.** It is the cluster-admin break-glass box.
    - **Real hostnames only reach a signed-in `platform-admins` session**, through mountain's `/auth/me`. They never
-     reach the public socket, a replay or the database.
+     reach the public socket, a public replay or the public tables. Carve-out (owner, 2026-10-22): mountain's
+     admin-only detail channel (ADR-0056, R2) keeps the raw alert labels, node names and instances included, and its
+     30-day private `events.detail` rows. Machine state never goes through it.
    - The owner is making this repository **private**, so its IP ↔ hostname files stop mapping the public role keys
      back to machines. History already cloned elsewhere is out of reach; this is accepted.
 
@@ -103,6 +108,9 @@ services.
   - The Postgres pair plus the witness, read together, give a delayed view of the etcd DCS quorum. The owner accepts
     this with the debounce.
   - Primary vs replica is not revealed: both answer `/health`.
+- **Live traffic can show an outage before the debounce:** granary keeps its live S3 traffic (walkers, error puffs), so
+  a dead garage-storage shows within a poll, and an archive or cellar outage can show as other apps' errors. The owner
+  accepts this (2026-10-22); the debounce covers the machine's own state, not every signal it touches.
 - **More probe traffic:** seven more targets at 30 s each. Two side effects:
   - sshd on build-runner logs a pre-auth disconnect per probe. Accepted; no `PerSourcePenalty` exemption for the node
     IPs, which would let any pod brute-force without penalty.
