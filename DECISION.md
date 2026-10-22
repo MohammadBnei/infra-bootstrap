@@ -254,14 +254,17 @@ updated.
   authentik native OIDC (`shared-notes` group). Its users, OIDC and git remote
   are held on its PVC, not in git — an accepted deviation, like NetBird's
   dashboard. See [ADR-0058](docs/adr/0058-shared-notes-silverbullet.md).
-- **Events reach agents through `ukubi-bridge`** (ADR-0060, accepted, not built).
+- **Events reach agents through `ukubi-bridge`** (ADR-0060, accepted, partly
+  built: the bridge is deployed; Alertmanager and Grafana still post to core,
+  and core's consumer, agent-fleet `adr/0071`, is unbuilt).
   A Postgres database on Pigsty holds an append-only CloudEvents log with one
   cursor per subscriber; the bridge alone touches it. GitHub (via a GitHub App),
   Alertmanager and Grafana post to the bridge; agent-fleet core stays private and
   queue-free, publishing through `PublishEvent` and consuming as one dispatcher
   subscriber. Trust comes from the PR author and head repo, never the webhook
   sender. See [ADR-0060](docs/adr/0060-event-bridge.md).
-- **Credential broker: Infisical Agent Vault** (ADR-0061, accepted, not live).
+- **Credential broker: Infisical Agent Vault** (ADR-0061, accepted, live
+  2026-10-19).
   agent-fleet's definition pods hold placeholders; the vault's MITM proxy swaps in
   the real credential per host and path. A platform-common app, ClusterIP only, no
   IngressRoute, telemetry off, image pinned by digest. SQLite on a longhorn PVC,

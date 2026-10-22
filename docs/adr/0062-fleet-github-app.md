@@ -53,8 +53,10 @@ considered and rejected as the fleet's identity:
      issues write, metadata read, actions read, checks read, statuses read.
      No webhook. Never `administration`.
    - Installed on `MohammadBnei` (account id 43962695) and `opus-tech-hq`
-     (344349211), on selected repos. **Installing it on a repo is how the
-     repo joins the fleet** (agent-fleet 0075 amends 0074).
+     (344349211), both on "all repositories"
+     (`gitops/bootstrap/fleet-repo-overrides.yaml`); a repo is switched off
+     per repo from the dashboard (`repos.active`). **Installing it on a repo
+     is how the repo joins the fleet** (agent-fleet 0075 amends 0074).
 2. **Only those two accounts count.** A public App can be installed by
    anyone. agent-fleet's provisioner holds the account-id allowlist, ignores
    installations by any other account in both the repo listing and token
@@ -89,7 +91,12 @@ considered and rejected as the fleet's identity:
 ## Consequences
 
 - **A leaked `ukubi-fleet` key means write access to every repo in the two
-  allowlisted installations**, `main` branches included (none is protected).
+  allowlisted installations**, `main` included wherever no ruleset guards it.
+  infra-bootstrap's `main` has the `protect-main` ruleset
+  (`docs/runbook-secret-rotation-2026-10-18.md`). agent-fleet and ukubi-bridge
+  had zero rulesets and an unprotected `main` when checked through the GitHub
+  API on 2026-10-22; rulesets for those two are being prepared, and the owner
+  applies them.
   The key sits in one place (provisioner files), behind one identity.
 - **A repo is onboarded once, but can be installed twice.** Fleet membership
   is the `ukubi-fleet` installation. Bridge events need a separate
@@ -110,7 +117,9 @@ considered and rejected as the fleet's identity:
   transport credential.
 - `argocd-ukubi-bot` keeps its non-fleet uses for now: `UKUBI_BOT_GH_PAT`.
   ADR-0034's runners use the owner's PAT and don't depend on the bot. Retiring
-  the bot entirely is a later decision.
+  the bot entirely is a later decision. (Since Rollout step 5 the bot is a
+  collaborator on no repo, so that PAT reaches nothing; it expires 2026-10-28
+  and is still to be deleted from Infisical: `docs/secrets.md`.)
 
 ## Rollout
 

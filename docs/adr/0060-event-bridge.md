@@ -1,6 +1,10 @@
 # ADR-0060: Event bridge — `ukubi-bridge`, a Postgres-backed event bus feeding fleet agents
 
-**Status:** Accepted, not built. Nothing is deployed by this ADR.
+**Status:** Accepted, partly built. Rollout step 2 is done (#340): the bridge
+is deployed (`gitops/apps/registry.yaml`, `ukubi-bridge-secret.yaml`, Pigsty
+database `bridge`, build runner). Steps 3–6 are not: Alertmanager and Grafana
+still post to agent-fleet core, and core's consumer (agent-fleet `adr/0071`)
+is unbuilt.
 **Date:** 2026-10-18
 **Related:** [ADR-0031](0031-defer-hpa-scale-to-zero.md) (Knative/KEDA deferred),
 [ADR-0032](0032-thot-rbac-and-alerting.md) (Alertmanager → thot webhook),

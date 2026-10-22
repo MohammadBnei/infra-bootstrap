@@ -1,0 +1,2 @@
+# Backs the main ruleset's code-owner review: only the owner's approval satisfies it, so the fleet's GitHub App cannot approve-and-merge.
+* @MohammadBnei

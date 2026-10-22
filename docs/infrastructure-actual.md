@@ -1,5 +1,9 @@
 # Infrastructure — Actual State
 
+> **Historical snapshot as of its "Last updated" date (2026-08-31), not
+> maintained since.** Current truth is [`ARCHITECTURE.md`](../ARCHITECTURE.md)
+> plus [`gitops/`](../gitops/README.md); where this file disagrees, they win.
+
 > **Source of truth** for what is currently running.
 > Last updated: 2026-08-31
 > Owner: hermesagent (this AI)

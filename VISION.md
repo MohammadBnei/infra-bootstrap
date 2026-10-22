@@ -104,6 +104,9 @@ system can reach is one it can be brought back from. That is what earns it
 the freedom to act unsupervised, and it means the restore path must survive
 the system failing entirely — so it cannot live only inside the cluster.
 
+*2026-10-22:* that restore path does not exist and is not planned. Out of
+scope for now; I accept the risk. The principle stays, unmet.
+
 **9. It remembers.** Continuity across sessions, tasks and restarts is what
 makes this an entity rather than a series of capable amnesiacs. The journal
 is not a log; it is what persists when nothing else does.
@@ -133,6 +136,11 @@ Mapped over: the system may generate variants and propose them; a human
 selects. Whether it ever gets to originate intent rather than pursue it is
 the real open question, and it is not answered here.
 
+*Amended 2026-10-22.* Agents may **originate** proposals: new work, not only
+convergent fixes. Sources, in order: drift and alerts; usage and
+observability; repo activity; cross-project synergy. I still select every
+one, through agent-fleet's proposals table. Agents still never merge.
+
 ## Where the metaphor breaks
 
 Marked so it is not followed off a cliff.
@@ -154,18 +162,36 @@ self-terminating. Use git and tests for the enforcement biology never had.
 Direction only; sequencing and feasibility belong in `DECISION.md` and
 `docs/adr/` as each is actually taken.
 
-- **Registry in-cluster before git.** Nearly pure upside: it removes the
-  Docker Hub rate limit, makes per-repo images cheap, and losing it costs
-  rebuilt images rather than lost work. Reversible, and it does not couple
-  the ability to work to cluster uptime.
+- **Registry in-cluster before git.** Done: Zot on Garage (ADR-0034).
+  Nearly pure upside: it removes the Docker Hub rate limit, makes per-repo
+  images cheap, and losing it costs rebuilt images rather than lost work.
+  Reversible, and it does not couple the ability to work to cluster uptime.
 - **A restore path that leaves the failure domain, before autonomy.** Garage
   is in-cluster too; a backup story terminating there is not one (principle
-  8).
-- **Then git, mirrored.** Ownership is not sole custody — the mirror is the
-  restore path, not a hedge against owning the stack. Note the bootstrap
-  circularity: ArgoCD syncs `infra-bootstrap` from git, so the repos that
-  bootstrap the cluster cannot be the ones hosted only inside it.
+  8). *2026-10-22: out of scope for now, risk accepted.*
+
+Next, in order (2026-10-22):
+
+- **Git, mirrored** (Forgejo, ADR-0035). Ownership is not sole custody —
+  the mirror is the restore path, not a hedge against owning the stack.
+  Note the bootstrap circularity: ArgoCD syncs `infra-bootstrap` from git,
+  so the repos that bootstrap the cluster cannot be the ones hosted only
+  inside it.
 - **Give drift detection somewhere to write.** Turning `mission-drift` from
-  prose into proposed tasks is the loop closing for the first time, still
-  human-approved at the far end — and it reveals whether the drift signal is
-  good enough to act on before anything acts on it unsupervised.
+  prose into agent-fleet proposals is the loop closing for the first time,
+  still human-approved at the far end — and it reveals whether the drift
+  signal is good enough to act on before anything acts on it unsupervised.
+- **The hardening backlog.**
+
+## Decided 2026-10-22
+
+- **An agent per service and app, staged.** First a steward per repo
+  (agent-fleet is the pilot). Later, apps call an embedded agent through
+  agent-fleet's `AgentService`. Resident agents last.
+- **Structural guard on `main`.** The infra repos (infra-bootstrap,
+  agent-fleet, ukubi-bridge) get branch rulesets: PR plus code-owner review,
+  and the fleet's GitHub App is never a bypass actor. In progress.
+- **Known gap, accepted for now.** Every build repo's CI runs as root
+  (`sudo buildah`) on the one shared `build-runner` box — PRs and unprotected
+  app repos included. A compromise there can reach a release image of a
+  protected repo.
