@@ -1,6 +1,8 @@
 # ADR-0056: `mountain.bnei.dev` — a public, live 3D view of ukubi, fed by PromQL only
 
-**Status:** Accepted — decided 2026-10-14, approved by M BN. This PR lands the
+**Status:** Accepted — decided 2026-10-14, approved by M BN. Decisions 2–3
+amended by [ADR-0064](0064-mountain-town-roles-and-guest-probes.md) (platform
+services and infra guests public by role key; guests probed by blackbox). This PR lands the
 groundwork only: `dbuser_mountain`/`mountaindb` in `pigsty/pigsty.yml` and the
 `mountain` build-runner instance. **Live 2026-10-14:** runner
 `ukubi-build-mountain` online; `dbuser_mountain`/`mountaindb` created against

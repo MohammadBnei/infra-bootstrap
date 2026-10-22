@@ -881,6 +881,13 @@ per-session certs would have exhausted issuance domain-wide.
 - Prometheus + Grafana in K8s (existing).
 - pg_exporter on Postgres (via Pigsty).
 - node_exporter on every host (Pi 4, ex-laptop, PVE hosts).
+- blackbox-exporter (`gitops/platform/values/blackbox-exporter/values.yaml`):
+  TCP to `pveproxy:8006` on the three PVE hosts (alerting), NetBird's public
+  path (alerting), and — [ADR-0064](docs/adr/0064-mountain-town-roles-and-guest-probes.md) —
+  seven infra guests outside k8s as `guest-<role>` (Patroni `/health` on
+  pg01/pg02, etcd TLS on the witness, Garage S3, NFS, build-runner sshd,
+  hermesagent's dashboard), read by mountain's public town and never
+  alerting. k9s-dashboard is deliberately not probed.
 - Hubble for Cilium L3/L4 observability, exporting flow metrics
   `[dns, drop, tcp, flow, icmp]` to Prometheus. `http` is deliberately
   excluded — L7 means Hubble parses application payloads, a different
