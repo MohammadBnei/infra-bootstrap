@@ -242,12 +242,16 @@ updated.
   signal — so ADR-0032's single broad read grant stays single. What it shows the
   internet is built by **allowlist** (named apps only, hosts as `h1..h3`,
   bucketed values, no versions, alert fingerprints hashed), never by deleting
-  fields from a richer object. Sources with no metric (Garage, Pigsty) are drawn
-  as unmeasured, not guessed. Visitor accounts are self-service into
+  fields from a richer object. Platform services and the infra guests outside
+  k8s (Postgres pair, etcd witness, Garage, NFS, build-runner, hermesagent) are
+  public by **role key** only, never a product or host name; the guests are
+  measured by blackbox `guest-<role>` probes, drawn only once measured, and their
+  state is debounced 10 min; k9s-dashboard is never shown (ADR-0064). Visitor accounts are self-service into
   `mountain-visitors` only, behind a Turnstile captcha and email verification,
   bound to the `mountain` application alone (ADR-0057). See
   [ADR-0056](docs/adr/0056-mountain-public-live-cluster-view.md) and
-  [ADR-0057](docs/adr/0057-mountain-visitor-enrollment.md).
+  [ADR-0057](docs/adr/0057-mountain-visitor-enrollment.md), amended by
+  [ADR-0064](docs/adr/0064-mountain-town-roles-and-guest-probes.md).
 - **Shared notes are markdown in git, edited through SilverBullet** (ADR-0058).
   `notes.bnei.dev` serves a clone of `MohammadBnei/notes`; SilverBullet commits
   and pushes each person's edits and pulls what Claude Code pushes. Login is

@@ -64,7 +64,16 @@ as a "yes this was actually verified" record, not just a list of problems.
    explaining why something is forbidden) — read the context before
    flagging.
 
-6. **Open questions** — list every ADR under `docs/adr/` whose `Status` is
+6. **mountain guest probes** — [ADR-0064](../../../docs/adr/0064-mountain-town-roles-and-guest-probes.md):
+   every running Terraform guest outside k8s (`terraform/*.tf`, except
+   k9s-dashboard and templates) should have a `guest-<role>` target in
+   `gitops/platform/values/blackbox-exporter/values.yaml`, and each target's
+   IP should still be that guest's (`ansible/playbooks/vars/bnei-lan-records.yml`).
+   A new guest without a probe never appears in mountain's town; a stale IP
+   probes the wrong box. Report, don't fix — the role list is mirrored in
+   mountain's `relay/config.yaml`.
+
+7. **Open questions** — list every ADR under `docs/adr/` whose `Status` is
    `Proposed` (read `docs/adr/README.md`'s index table, or grep each file's
    `**Status:**` line) as a reminder checklist; don't try to resolve them,
    they're explicitly open until a fresh ADR status change lands.
