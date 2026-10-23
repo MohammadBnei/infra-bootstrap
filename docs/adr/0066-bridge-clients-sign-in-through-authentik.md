@@ -190,7 +190,7 @@ Several parts of ADR-0060 and of the code don't fit that:
 
      The next `Subscribe` first sends one message carrying the gap and its version, then the events as usual; a gapped
      stream that is live is ended, so it reconnects to it. The consumer resyncs (the game from AgentService and its
-     own database) and **confirms the gap** (`ConfirmGap` with that version, from the live stream that received it). It
+     own database) and **confirms the gap** (`ConfirmGap` with that version; only a version that was sent is accepted). It
      is sent on every reconnect until confirmed; confirming an older version (one a later run widened) is refused, and
      the consumer reconnects for the current one. A stream a run gaps while it is connecting ends at once, too. A `Replay` from below the
      watermark streams what is kept, parked events included, after a first message saying that events in the range
