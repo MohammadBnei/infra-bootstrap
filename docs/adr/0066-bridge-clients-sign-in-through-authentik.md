@@ -177,18 +177,25 @@ Several parts of ADR-0060 and of the code don't fit that:
 
 6. **Retention: events are deleted by age, 30 days** (ADR-0060 §2). The bridge is the transport, not the record. Each
    consumer keeps its own durable state, idempotent on `(source, id)`.
-   - **Parked events are kept.** Deletion skips any event behind an uncleared dead letter on its subscription and
-     subject. A Grafana alert fires on a dead letter left uncleared for 3 days.
-   - **A gap is announced, never silent, and never false.** Each deletion run deletes up to a log position `X` and, in
-     the same transaction, looks at every subscription whose cursor is below `X`:
-     - if a deleted event matched its filter and was never acked, it records the gap (the deleted range) on the
-       subscription;
-     - either way, the cursor moves up to `X`, so a quiet subscription is not left behind.
+   - **Parked events are kept.** Deletion skips any event at or past an uncleared dead letter on its subject, for any
+     subscription. A Grafana alert fires on a dead letter left uncleared for 3 days.
+   - **A gap is announced, never silent, and never false.** Amended 2026-10-23 after the build's review passes. Each
+     deletion run deletes everything ingested before the cutoff (by the bridge's `ingested_at`, never the publisher's
+     `time`), except events kept behind an uncleared dead letter, and, in the same transaction, for every subscription
+     whose cursor is behind:
+     - if a deleted event matched its filter and was never acked, it records or widens the gap (the deleted range)
+       and bumps the gap's version;
+     - the cursor moves past the deleted range, so a quiet subscription is not left behind, but stops before any kept
+       event the subscription still has to receive (another subscription's parked subject must not hide it).
 
-     The next `Subscribe` on that subscription first sends one message carrying the gap, then the events as usual. The
-     consumer resyncs (the game from AgentService and its own database) and goes on with no extra call. A `Replay`
-     from below the oldest kept event streams what is kept, parked events included, and its first message carries
-     the gap the same way; it is never refused.
+     The next `Subscribe` first sends one message carrying the gap and its version, then the events as usual; a gapped
+     stream that is live is ended, so it reconnects to it. The consumer resyncs (the game from AgentService and its
+     own database) and **confirms the gap** (`ConfirmGap` with that version; only a version that was sent is accepted). It
+     is sent on every reconnect until confirmed; confirming an older version (one a later run widened) is refused, and
+     the consumer reconnects for the current one. A stream a run gaps while it is connecting ends at once, too. A `Replay` from below the
+     watermark streams what is kept, parked events included, after a first message saying that events in the range
+     may have been deleted; it is never refused. The run locks `dead_letters`, so an operator's unparking cannot land
+     between its steps.
    - **Dedup holds only within retention.** An alert still firing after 30 days, or a republish of an old id, comes
      back as a new event.
 
