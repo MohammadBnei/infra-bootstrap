@@ -166,8 +166,8 @@ Several parts of ADR-0060 and of the code don't fit that:
      - a `spec.subscribes` whose `types` list is empty (an `owns` may leave it empty: it routes by repo or component,
        and core's own subscription never carries the reserved types);
      - in either, a type prefix that is a prefix of, or starts with, `dev.bnei.fleet.session.` or `dev.bnei.game.`;
-     - in either, a subject glob aimed at `fleet/` or `game/` (its literal head starts with one or could still become
-       one). A match-all subject is accepted: the reserved types are the fence.
+     - in either, a subject glob aimed at `fleet/` or `game/` (one that can match some subject starting with them).
+       A match-all subject (only `*`, or none) is accepted: the reserved types are the fence.
    - Core's `PublishEvent` refuses those type prefixes and `fleet/` and `game/` subjects, so an agent cannot announce a
      wait for someone else's session.
    - Otherwise an agent woken by its own wait would loop, and a game event's text would become a prompt.
