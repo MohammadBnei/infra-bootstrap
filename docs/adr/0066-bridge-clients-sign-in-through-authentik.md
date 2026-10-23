@@ -151,7 +151,8 @@ Several parts of ADR-0060 and of the code don't fit that:
        bridge's log `seq`. Never the definition, the opener, a
        prompt, a tool input or any transcript text.
      - **Envelope:** `actor=machine`, `actor_login=core`, `trusted=false`, no `owner`, no `causation_id`. The CloudEvent
-       id is `<thread id>:<position>`.
+       id is `<thread id>:<position>:<edge>` (`waiting` or `resumed`), since a session archived while waiting resumes
+       at the position of its wait.
      - **These events are hints.** Core holds no queue of messages (agent-fleet `adr/0048` §2). It stores, per session,
        the last edge the bridge accepted and republishes when the current state differs (agent-fleet `adr/0078` §3), so
        an outage delays an edge rather than losing it, and an edge that flipped twice meanwhile arrives once, as the
