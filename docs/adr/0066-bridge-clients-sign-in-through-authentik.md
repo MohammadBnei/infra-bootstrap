@@ -146,23 +146,28 @@ Several parts of ADR-0060 and of the code don't fit that:
        The subject is `fleet/client/<client>/<thread id>`. Console and member sessions are never announced, so no
        client learns of a session AgentService would hide from it (agent-fleet `adr/0066`, `adr/0067`).
      - **Data:** `{thread_id, pending, reasons, position}`, where `reasons` lists `question`, `permission` or `plan`,
-       and `position` is the id of the transcript entry whose append changed the count. It is durable and grows per
-       session, so it survives a core restart; it is not the bridge's log `seq`. Never the definition, the opener, a
+       and `position` is the transcript `seq` of the entry whose append changed the count (transcript rows are keyed
+       by session and `seq`). It is durable and grows per session, so it survives a core restart; it is not the
+       bridge's log `seq`. Never the definition, the opener, a
        prompt, a tool input or any transcript text.
      - **Envelope:** `actor=machine`, `actor_login=core`, `trusted=false`, no `owner`, no `causation_id`. The CloudEvent
        id is `<thread id>:<position>`.
-     - **These events are hints.** Core holds no queue (agent-fleet `adr/0048` §2), so a publish lost while the bridge
-       or authentik is down is gone. The game applies the highest `position` it has seen per thread, and reconciles with
+     - **These events are hints.** Core holds no queue of messages (agent-fleet `adr/0048` §2). It stores, per session,
+       the last edge the bridge accepted and republishes when the current state differs (agent-fleet `adr/0078` §3), so
+       an outage delays an edge rather than losing it, and an edge that flipped twice meanwhile arrives once, as the
+       current state. The game applies the highest `position` it has seen per thread, and reconciles with
        AgentService's status of its own threads at start and on a timer.
    - **`dev.bnei.game.needs_you.<kind>`** is the game's decision that a person should be told.
      - Data: the authentik username to notify and a link into the town.
      - Never an app, a host or a prompt. The push sender sends only a generic text and the link.
 
 4. **Nothing an agent runs reads or forges the human-facing types.**
-   - agent-fleet's definition loader refuses a `spec.owns` or `spec.subscribes` when:
-     - its `types` list is empty;
-     - a type prefix is a prefix of, or starts with, `dev.bnei.fleet.session.` or `dev.bnei.game.`;
-     - a subject glob can match `fleet/` or `game/`.
+   - agent-fleet's definition loader (`adr/0078` §4) refuses:
+     - a `spec.subscribes` whose `types` list is empty (an `owns` may leave it empty: it routes by repo or component,
+       and core's own subscription never carries the reserved types);
+     - in either, a type prefix that is a prefix of, or starts with, `dev.bnei.fleet.session.` or `dev.bnei.game.`;
+     - in either, a subject glob aimed at `fleet/` or `game/` (one that can match some subject starting with them).
+       A match-all subject (only `*`, or none) is accepted: the reserved types are the fence.
    - Core's `PublishEvent` refuses those type prefixes and `fleet/` and `game/` subjects, so an agent cannot announce a
      wait for someone else's session.
    - Otherwise an agent woken by its own wait would loop, and a game event's text would become a prompt.
