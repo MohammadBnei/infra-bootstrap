@@ -82,17 +82,22 @@ Several parts of ADR-0060 and of the code don't fit that:
      bridge reads the JWKS the same way, so neither depends on Cloudflare. The rollout decodes a live token to check
      `iss`.
    - **What the bridge checks:**
-     - the signature, against that JWKS, RS256 only (never HS* or `none`);
-     - the JWKS is cached, refetched on an unknown `kid` at most once a minute, and backed by the public certificate
-       shipped in the bridge's config, so a restart while authentik is down can still verify;
-     - `iss`, `aud` and `azp` (the provider's client id), and `exp`.
+     - the signature, RS256 only (never HS* or `none`), against **the pinned certificate** in the bridge's config
+       (`BRIDGE_OIDC_CERT`, one or more PEM certificates during a rotation). That certificate is the only trust
+       anchor. Amended 2026-10-23, after the build's doubt cycle: the JWKS is fetched over the pod network, where an
+       agent pod could spoof the reply and so forge a token for the privileged `bridge-core`. The bridge fetches the
+       JWKS hourly only to warn when it no longer contains a pinned key, which is what a rotation looks like;
+       rotating means adding the new certificate to the config, then removing the old one. With no certificate
+       pinned, every API call is refused and the webhooks keep working;
+     - `iss`, `aud` and `azp` (the provider's client id), and `exp` with no leeway (`nbf` and `iat` get one minute).
 
      The signing key is shared by every provider, so the `iss` and `aud` checks are what make a token this bridge's:
      a mountain or Grafana token fails them.
    - **Who the caller is.** `sub` (the username) names the client in the bridge's table. An unknown `sub` is
      `Unauthenticated`.
-   - **Streams expire with their token.** The bridge ends a `Subscribe` or `Replay` stream at its token's `exp`, and the
-     client reconnects with a fresh token. Deactivating an account in authentik therefore takes effect within 10
+   - **Streams expire with their token.** The bridge ends a `Subscribe` or `Replay` stream 15 seconds before its
+     token's `exp`, so the Ack of the last delivery still carries a valid token, and the client reconnects with a fresh
+     one. A token with less than 15 seconds left cannot open a stream. Deactivating an account in authentik therefore takes effect within 10
      minutes. Revoking a single token in authentik has no effect, because the bridge validates offline.
    - **The client table stays in the bridge, without secrets.** Its shape is `{name: {kind, publish_types,
      publish_subjects, subscribe, privileged}}`, where `subscribe` is a list of rules `{types, subjects}` (Decision 2).
