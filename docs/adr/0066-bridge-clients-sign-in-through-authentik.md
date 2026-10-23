@@ -54,6 +54,8 @@ Several parts of ADR-0060 and of the code don't fit that:
      - `signing_key`: the shared `authentik Self-signed Certificate` (RS256). Without it, authentik signs with HS256
        using the client secret;
      - `access_token_validity: minutes=10`, `sub_mode: user_username`, `issuer_mode: per_provider`;
+     - `authorization_flow` set to the implicit-consent flow and `invalidation_flow` to the default, which every
+       OAuth2 provider requires even when no browser uses it;
      - no `jwt_federation_providers` and no `jwt_federation_sources`.
 
      The provider's client secret is never handed out: a grant with it creates an `ak-…-client_credentials` account
@@ -67,6 +69,9 @@ Several parts of ADR-0060 and of the code don't fit that:
        username and would take that account over.
      - `bridge-`, `netbird-` and `ak-` are reserved prefixes in the `mountain-handle` policy and in a username policy
        on wird's enrollment.
+     - Users cannot change their own username (authentik's "Allow users to change username" is off, declared, not
+       clicked). Otherwise a visitor could rename into a future `bridge-<client>` before its blueprint lands. Every
+       later client's rollout repeats the `bridge-*` username check.
    - **The app passwords** are `BRIDGE_<CLIENT>_APP_PASSWORD` in the root project (`infra-bootstrap-1-ge1`). The
      blueprint renders the key, and a `gitops/bootstrap/<client>-bridge-secret.yaml` delivers it to the client's
      namespace. This is the `NETBIRD_AGENT_APP_PASSWORD` arrangement, not `platform-commons`: each value has exactly
@@ -90,22 +95,29 @@ Several parts of ADR-0060 and of the code don't fit that:
      client reconnects with a fresh token. Deactivating an account in authentik therefore takes effect within 10
      minutes. Revoking a single token in authentik has no effect, because the bridge validates offline.
    - **The client table stays in the bridge, without secrets.** Its shape is `{name: {kind, publish_types,
-     publish_subjects, subscribe_types, subscribe_subjects, privileged}}`.
+     publish_subjects, subscribe, privileged}}`, where `subscribe` is a list of rules `{types, subjects}` (Decision 2).
      - It moves from Infisical to the bridge's `helm/values.yaml`, behind CODEOWNERS.
      - The bridge refuses to start if any client other than `bridge-core` is `privileged`.
-     - `BRIDGE_CLIENTS` leaves `gitops/bootstrap/ukubi-bridge-secret.yaml`, and `BRIDGE_CORE_TOKEN` is deleted. Neither
-       was ever used.
+     - `BRIDGE_CLIENTS` leaves `gitops/bootstrap/ukubi-bridge-secret.yaml`, and `BRIDGE_CORE_TOKEN` is deleted, both
+       after the new bridge runs (Rollout step 3). The running bridge reads `BRIDGE_CLIENTS`; no client ever used
+       `core`'s token.
    - **Core moves too, as `bridge-core`.** That is a second identity, never core's console OIDC client. A failed grant
      must not stop core from starting: the dispatcher retries and the rest of core runs.
    - **Unchanged:** GitHub keeps its HMAC, and Alertmanager and Grafana keep `BRIDGE_ALERT_TOKEN`, because neither
      sender can run an OAuth grant.
 
-2. **Subscribing is bounded like publishing.**
-   - `subscribe_types` are type prefixes and `subscribe_subjects` subject prefixes.
-   - A `Subscribe` from a non-privileged client is refused when:
-     - its filter is empty;
-     - a requested type does not start with an allowed prefix;
-     - a subject glob does not start with an allowed prefix before its first `*` or `?`.
+2. **Subscribing is bounded like publishing, for every client, core included.**
+   - A client's `subscribe` is a list of rules. Each rule pairs type prefixes with subject prefixes, where `""`
+     allows any subject. A client needs one subscription per rule: bridge-game's session events and its alerts are
+     two subscriptions (`bridge-game/sessions`, `bridge-game/alerts`).
+   - A `Subscribe` is accepted only when one rule covers its whole filter, and is refused when:
+     - its type list is empty;
+     - a requested type does not start with one of that rule's type prefixes;
+     - its subject list is empty while the rule's subjects are not `""`;
+     - a subject glob does not start with one of that rule's subject prefixes before its first `*` or `?`.
+   - `privileged` changes only what a client may stamp on `Publish` (actor, trust, owner, hops). It never widens what
+     it may read: bridge-core's rules exclude the human-facing types, so the bridge itself enforces Decision 4's read
+     half, not only agent-fleet's loader.
    - `Replay` re-checks the stored filter against the table, so a client that loses a right cannot read history with
      it.
    - Type prefixes are written with their final dot (`dev.bnei.game.`), so a name never matches a longer one by
@@ -115,9 +127,9 @@ Several parts of ADR-0060 and of the code don't fit that:
 
    | Client | Publishes | Subscribes to |
    |---|---|---|
-   | `bridge-core` (privileged) | `dev.bnei.agent.` (hand-offs) and `dev.bnei.fleet.session.`, subjects `fleet/` plus core's threads | `dev.bnei.github.`, `dev.bnei.alert.`, `dev.bnei.agent.` |
-   | `bridge-game` (mountain's game) | `dev.bnei.game.`, subjects `game/` | `dev.bnei.fleet.session.` on `fleet/client/game/`, and `dev.bnei.alert.` |
-   | `bridge-push` (the push sender, its own ADR) | nothing | `dev.bnei.game.needs_you.` on `game/` |
+   | `bridge-core` (privileged) | `dev.bnei.agent.` (hand-offs) and `dev.bnei.fleet.session.`, subjects `fleet/` plus core's threads | one rule: `dev.bnei.github.`, `dev.bnei.alert.`, `dev.bnei.agent.` on any subject |
+   | `bridge-game` (mountain's game) | `dev.bnei.game.`, subjects `game/` | two rules: `dev.bnei.fleet.session.` on `fleet/client/game/`; `dev.bnei.alert.` on any subject |
+   | `bridge-push` (the push sender, its own ADR) | nothing | one rule: `dev.bnei.game.needs_you.` on `game/` |
 
    - **`dev.bnei.fleet.session.waiting` and `.resumed`** mark the edges of a session's pending decisions: unanswered
      questions and permission requests, where a plan to approve is a permission request for `ExitPlanMode`.
@@ -126,12 +138,14 @@ Several parts of ADR-0060 and of the code don't fit that:
      - **Only for sessions opened by a client that opts in** (a field in agent-fleet's `definitions/clients/<name>.yaml`).
        The subject is `fleet/client/<client>/<thread id>`. Console and member sessions are never announced, so no
        client learns of a session AgentService would hide from it (agent-fleet `adr/0066`, `adr/0067`).
-     - **Data:** `{thread_id, pending, reasons, seq}`, where `reasons` lists `question`, `permission` or `plan`. Never
-       the definition, the opener, a prompt, a tool input or any transcript text.
+     - **Data:** `{thread_id, pending, reasons, position}`, where `reasons` lists `question`, `permission` or `plan`,
+       and `position` is the id of the transcript entry whose append changed the count. It is durable and grows per
+       session, so it survives a core restart; it is not the bridge's log `seq`. Never the definition, the opener, a
+       prompt, a tool input or any transcript text.
      - **Envelope:** `actor=machine`, `actor_login=core`, `trusted=false`, no `owner`, no `causation_id`. The CloudEvent
-       id is `<thread id>:<seq>`.
+       id is `<thread id>:<position>`.
      - **These events are hints.** Core holds no queue (agent-fleet `adr/0048` §2), so a publish lost while the bridge
-       or authentik is down is gone. The game applies the highest `seq` it has seen per thread, and reconciles with
+       or authentik is down is gone. The game applies the highest `position` it has seen per thread, and reconciles with
        AgentService's status of its own threads at start and on a timer.
    - **`dev.bnei.game.needs_you.<kind>`** is the game's decision that a person should be told.
      - Data: the authentik username to notify and a link into the town.
@@ -158,9 +172,16 @@ Several parts of ADR-0060 and of the code don't fit that:
    consumer keeps its own durable state, idempotent on `(source, id)`.
    - **Parked events are kept.** Deletion skips any event behind an uncleared dead letter on its subscription and
      subject. A Grafana alert fires on a dead letter left uncleared for 3 days.
-   - **A gap is announced, never silent.** The bridge keeps a deletion watermark. A `Subscribe` whose cursor, or a
-     `Replay` whose `from_seq`, is below it is answered `FailedPrecondition` with the watermark, so the consumer
-     resyncs (the game from AgentService and its own database) and moves on.
+   - **A gap is announced, never silent, and never false.** Each deletion run deletes up to a log position `X` and, in
+     the same transaction, looks at every subscription whose cursor is below `X`:
+     - if a deleted event matched its filter and was never acked, it records the gap (the deleted range) on the
+       subscription;
+     - either way, the cursor moves up to `X`, so a quiet subscription is not left behind.
+
+     The next `Subscribe` on that subscription first sends one message carrying the gap, then the events as usual. The
+     consumer resyncs (the game from AgentService and its own database) and goes on with no extra call. A `Replay`
+     from below the oldest kept event streams what is kept, parked events included, and its first message carries
+     the gap the same way; it is never refused.
    - **Dedup holds only within retention.** An alert still firing after 30 days, or a republish of an old id, comes
      back as a new event.
 
@@ -221,13 +242,15 @@ Several parts of ADR-0060 and of the code don't fit that:
    - the `ukubi-bridge-api` provider and application;
    - the three service accounts, each with its own binding (after the `bridge-*` username check);
    - the reserved prefixes in `mountain-handle` and in a wird username policy;
-   - the app passwords in Infisical, and `bridge-core`'s secret delivered to `agent-fleet`;
-   - `BRIDGE_CLIENTS` out of the bridge secret, and `BRIDGE_CORE_TOKEN` deleted.
+   - the username-change setting off;
+   - the app passwords in Infisical, and `bridge-core`'s secret delivered to `agent-fleet`.
 3. ukubi-bridge:
    - token validation, the client table in `helm/values.yaml` with CODEOWNERS;
    - the subscribe allowlists, stream expiry, and deletion with the watermark and kept dead letters;
    - the dead-letter alert;
-   - then a live token decoded for `iss`.
+   - then a live token decoded for `iss`;
+   - only once that image runs: `BRIDGE_CLIENTS` out of the bridge secret here, and `BRIDGE_CORE_TOKEN` deleted.
+     Until then the running bridge reads `BRIDGE_CLIENTS` at start.
 4. agent-fleet:
    - core's grant, dispatcher and `PublishEvent` (ADR-0060 step 4);
    - the session edges and the client opt-in, in their own ADR;
