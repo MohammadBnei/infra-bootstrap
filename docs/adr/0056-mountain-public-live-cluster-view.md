@@ -2,7 +2,9 @@
 
 **Status:** Accepted — decided 2026-10-14, approved by M BN. Decisions 2–3
 amended by [ADR-0064](0064-mountain-town-roles-and-guest-probes.md) (platform
-services and infra guests public by role key; guests probed by blackbox). This PR lands the
+services and infra guests public by role key; guests probed by blackbox), and by
+[ADR-0065](0065-mountain-behind-forwardauth-invited-visitors.md): **no longer public** — the whole site
+sits behind an authentik forwardAuth gate for `platform-admins` and invited `mountain-visitors`. This PR lands the
 groundwork only: `dbuser_mountain`/`mountaindb` in `pigsty/pigsty.yml` and the
 `mountain` build-runner instance. **Live 2026-10-14:** runner
 `ukubi-build-mountain` online; `dbuser_mountain`/`mountaindb` created against

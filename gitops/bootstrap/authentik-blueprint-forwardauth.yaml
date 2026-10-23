@@ -198,6 +198,38 @@ data:
           meta_launch_url: https://files.bnei.dev
           meta_description: Files shared from the SilverBullet spaces, on Garage
       # ----------------------------------------------------------------
+      # mountain-gate (ADR-0065): the whole of mountain.bnei.dev, the town,
+      # for platform-admins and invited mountain-visitors. A second gate in
+      # front of an app that federates (ADR-0039's exception, hermes' shape,
+      # ADR-0051): the relay keeps its own OIDC app `mountain` for its roles
+      # (admin detail, plants), this one only decides who reaches it. Its
+      # binding is authentik-blueprint-mountain-gate-policy.yaml; callback
+      # leg gitops/bootstrap/mountain-outpost-route.yaml.
+      - model: authentik_providers_proxy.proxyprovider
+        id: mountain-gate-proxy-provider
+        identifiers:
+          name: mountain-gate
+        attrs:
+          name: mountain-gate
+          # forward_single, drop's reasoning: a static hostname, and a second
+          # forward_domain provider on bnei.dev would clash with previews.
+          mode: forward_single
+          external_host: https://mountain.bnei.dev
+          intercept_header_auth: false
+          basic_auth_enabled: false
+          access_token_validity: "hours=8"
+          authorization_flow: !Find [authentik_flows.flow, [slug, default-provider-authorization-implicit-consent]]
+          invalidation_flow: !Find [authentik_flows.flow, [slug, default-provider-invalidation-flow]]
+      - model: authentik_core.application
+        identifiers:
+          slug: mountain-gate
+        attrs:
+          name: Town
+          slug: mountain-gate
+          provider: !KeyOf mountain-gate-proxy-provider
+          meta_launch_url: https://mountain.bnei.dev
+          meta_description: The ukubi cluster as a live town
+      # ----------------------------------------------------------------
       # THE TRAP. A proxy provider does nothing at all until it is bound
       # to an outpost, and the embedded outpost ships with providers = [].
       # Verified live: `authentik Embedded Outpost :: proxy :: providers= []`.
@@ -218,3 +250,5 @@ data:
             - !KeyOf wird-admin-proxy-provider
             # drop (ADR-0059), declared above in this same file.
             - !KeyOf drop-proxy-provider
+            # mountain-gate (ADR-0065), declared above in this same file.
+            - !KeyOf mountain-gate-proxy-provider

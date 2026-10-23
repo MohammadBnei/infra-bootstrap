@@ -237,21 +237,26 @@ updated.
   the server's embedded Dex. All three stores live on Pigsty. See
   [ADR-0054](docs/adr/0054-netbird-control-plane-hosting-only.md).
 - **`mountain.bnei.dev` reads the cluster through PromQL only** (ADR-0056).
-  A public, live 3D view of ukubi. Its relay holds no ServiceAccount token and no
+  A live 3D view of ukubi, **gated since ADR-0065**: the whole site sits behind its
+  own authentik forwardAuth (`mountain-gate`) for `platform-admins` and invited
+  `mountain-visitors`. Its relay holds no ServiceAccount token and no
   RBAC — kube-state-metrics, ArgoCD and node metrics in Prometheus carry every
-  signal — so ADR-0032's single broad read grant stays single. What it shows the
-  internet is built by **allowlist** (named apps only, hosts as `h1..h3`,
+  signal — so ADR-0032's single broad read grant stays single. What it shows is
+  built by **allowlist** (named apps only, hosts as `h1..h3`,
   bucketed values, no versions, alert fingerprints hashed), never by deleting
   fields from a richer object. Platform services and the infra guests outside
   k8s (Postgres pair, etcd witness, Garage, NFS, build-runner, hermesagent) are
   public by **role key** only, never a product or host name; the guests are
   measured by blackbox `guest-<role>` probes, drawn only once measured, and their
-  state is debounced 10 min; k9s-dashboard is never shown (ADR-0064). Visitor accounts are self-service into
-  `mountain-visitors` only, behind a Turnstile captcha and email verification,
-  bound to the `mountain` application alone (ADR-0057). See
+  state is debounced 10 min; k9s-dashboard is never shown (ADR-0064). An app's
+  other hosts show as tents and replica counts are coarse buckets (ADR-0065).
+  Visitor accounts are **invitation-only** into `mountain-visitors` (an
+  invitation stage, email verification; ADR-0065 superseded ADR-0057's open,
+  Turnstile-guarded sign-up). See
   [ADR-0056](docs/adr/0056-mountain-public-live-cluster-view.md) and
   [ADR-0057](docs/adr/0057-mountain-visitor-enrollment.md), amended by
-  [ADR-0064](docs/adr/0064-mountain-town-roles-and-guest-probes.md).
+  [ADR-0064](docs/adr/0064-mountain-town-roles-and-guest-probes.md) and
+  [ADR-0065](docs/adr/0065-mountain-behind-forwardauth-invited-visitors.md).
 - **Shared notes are markdown in git, edited through SilverBullet** (ADR-0058).
   `notes.bnei.dev` serves a clone of `MohammadBnei/notes`; SilverBullet commits
   and pushes each person's edits and pulls what Claude Code pushes. Login is

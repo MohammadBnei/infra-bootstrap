@@ -1,0 +1,25 @@
+# mountain's own forwardAuth Middleware (mountain.bnei.dev). ADR-0065.
+#
+# WHY NOT THE SHARED `authentik-forwardauth`: drop's reason
+# (drop-forwardauth-middleware.yaml). That one is the previews gate, bound to
+# platform-admins; mountain's provider `mountain-gate` admits mountain-visitors
+# too (authentik-blueprint-mountain-gate-policy.yaml). The outpost picks the
+# provider from the forwarded host either way; a dedicated object keeps the ref
+# honest. No authResponseHeaders: the relay trusts no forwarded identity, it
+# signs people in through its own OIDC app for its roles (ADR-0056).
+#
+# Referenced from mountain's own helm/values.yaml (ingress.middlewares), so the
+# gate is live only once that ref ships. Revert order: mountain's ref first,
+# then this file, or the route errors and the site answers 404.
+#
+# Address and trustForwardHeader copied from drop-forwardauth-middleware.yaml,
+# for its reasons (same embedded outpost, port 80).
+apiVersion: traefik.io/v1alpha1
+kind: Middleware
+metadata:
+  name: mountain-forwardauth
+  namespace: default
+spec:
+  forwardAuth:
+    address: http://platform-authentik-server.authentik.svc.cluster.local/outpost.goauthentik.io/auth/traefik
+    trustForwardHeader: true

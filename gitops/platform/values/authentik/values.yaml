@@ -123,12 +123,16 @@ blueprints:
   # under `secrets:` below — it carries a client secret.
   - authentik-blueprint-netbird-policy
   # mountain (ADR-0056/0057): the platform-admins and mountain-visitors
-  # bindings, in their own file (hermes convention). The provider is under `secrets:` below.
+  # bindings on the relay's OIDC app, in their own file (hermes convention).
+  # The provider is under `secrets:` below.
   - authentik-blueprint-mountain-policy
-  # mountain visitors (ADR-0057): self-service enrollment into
-  # mountain-visitors behind a Turnstile captcha, whose keys arrive by `!Env`
-  # from authentik-config, so this stays a ConfigMap.
+  # mountain visitors (ADR-0057, invitation-only since ADR-0065): enrollment
+  # into mountain-visitors behind an invitation stage. Nothing secret in it.
   - authentik-blueprint-mountain-enrollment
+  # mountain's gate (ADR-0065): platform-admins and mountain-visitors on the
+  # `mountain-gate` forwardAuth application. Its provider lives in
+  # authentik-blueprint-forwardauth, wird-admin's reason.
+  - authentik-blueprint-mountain-gate-policy
   # shared notes (ADR-0058): the shared-notes group and its binding. The
   # provider is under `secrets:` below.
   - authentik-blueprint-silverbullet-policy
