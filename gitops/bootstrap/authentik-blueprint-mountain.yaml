@@ -1,7 +1,10 @@
 # authentik blueprint declaring mountain's OIDC provider + application
 # (ADR-0056; mountain plan 08 "W3 detail mode"). The fleet/grafana shape.
 #
-# mountain.bnei.dev is a public page. Signing in only adds "detail mode": the
+# mountain.bnei.dev sits behind its own forwardAuth gate (ADR-0065:
+# platform-admins and invited mountain-visitors); this OIDC app is the relay's
+# own sign-in, which the page does automatically once mountain references the
+# gate. It adds roles: the
 # relay maps the ID token's `groups` claim to a role (platform-admins = detail
 # frames; mountain-visitors = marks, W4; anyone else = view) and keeps a signed
 # 1 h session cookie of its own. It stores no token and nothing against `sub`.

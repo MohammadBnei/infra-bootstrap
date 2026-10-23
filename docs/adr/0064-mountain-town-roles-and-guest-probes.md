@@ -1,7 +1,9 @@
 # ADR-0064: mountain's town shows platform services and infra guests by role; blackbox probes the guests
 
 **Status:** Proposed — decided 2026-10-22 by M BN in mountain's R7/R8 planning (one question at a time, two doubt
-cycles). Amends [ADR-0056](0056-mountain-public-live-cluster-view.md) Decisions 2 and 3.
+cycles). Amends [ADR-0056](0056-mountain-public-live-cluster-view.md) Decisions 2 and 3. Amended by
+[ADR-0065](0065-mountain-behind-forwardauth-invited-visitors.md): the town is gated, shows every host an app runs on
+(tents), and coarsens replica counts.
 **Date:** 2026-10-22
 **Related:** [ADR-0056](0056-mountain-public-live-cluster-view.md) (the public view this widens),
 [ADR-0029](0029-postgres-automatic-failover-3-node-etcd-quorum.md) (the Postgres pair and witness probed here),

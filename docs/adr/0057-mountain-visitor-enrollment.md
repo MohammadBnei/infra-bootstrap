@@ -1,6 +1,8 @@
 # ADR-0057: mountain visitors: self-service enrollment into `mountain-visitors`, behind Turnstile
 
-**Status:** Accepted, not live. This PR adds the blueprints; the Turnstile widget
+**Status:** Superseded by [ADR-0065](0065-mountain-behind-forwardauth-invited-visitors.md) (2026-10-23):
+enrollment is invitation-only (an invitation stage replaces the Turnstile captcha) and mountain.bnei.dev is gated.
+Was: Accepted, not live. This PR adds the blueprints; the Turnstile widget
 and its two Infisical keys are manual steps (Rollout).
 **Date:** 2026-10-15
 **Related:** [ADR-0050](0050-public-oidc-client-for-native-apps.md) (Wird's

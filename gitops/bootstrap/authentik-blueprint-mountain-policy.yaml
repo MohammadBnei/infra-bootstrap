@@ -1,6 +1,7 @@
 # Who may sign in to the `mountain` application (mountain detail mode,
-# ADR-0056; visitors, ADR-0057). Without a sign-in, mountain.bnei.dev is still
-# fully public: this gates only detail frames (platform-admins) and marks
+# ADR-0056; visitors, ADR-0057). Reaching mountain.bnei.dev at all is the
+# separate `mountain-gate` decision (authentik-blueprint-mountain-gate-policy.yaml,
+# ADR-0065); this gates only detail frames (platform-admins) and marks
 # (mountain-visitors). The application keeps the default policy_engine_mode
 # `any`, so either group admits; the relay maps the `groups` claim to a role.
 #

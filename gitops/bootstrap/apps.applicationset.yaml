@@ -161,8 +161,9 @@ spec:
         valuesPath: [app/helm/values.yaml]
         targetRevision: main
         hostname: hq.bnei.dev
-      # mountain: public live cluster view (ADR-0056). No forwardAuth, baseline
-      # on — see gitops/apps/registry.yaml's entry.
+      # mountain: live cluster view (ADR-0056), gated by its own forwardAuth
+      # (ADR-0065, ref in mountain's helm/values.yaml), baseline on — see
+      # gitops/apps/registry.yaml's entry.
       - name: mountain
         namespace: mountain
         syncWave: "10"

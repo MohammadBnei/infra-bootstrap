@@ -1,0 +1,67 @@
+# Who may reach mountain.bnei.dev at all (ADR-0065): the `mountain-gate`
+# forwardAuth application, declared in authentik-blueprint-forwardauth.yaml.
+# platform-admins and mountain-visitors; a visitor joins only through an
+# invitation (authentik-blueprint-mountain-enrollment.yaml). The relay's own
+# sign-in for its roles stays authentik-blueprint-mountain-policy.yaml, on the
+# OIDC application `mountain`: the same two groups, a separate decision.
+#
+# Its own file, drop-policy's reason: a !Find miss here rolls back this
+# binding, never the forwardAuth tier. With core_default_app_access false, a
+# missing binding denies everyone, the visible failure direction.
+#
+# APPLY ORDER: mountain-policy's metaapplyblueprint shape, on the two
+# instances this file needs and nothing else. Not mountain-oidc: that one is
+# an InfisicalSecret, and a stale OIDC blueprint must not shut the gate.
+# mountain-visitors is declared locally (`!KeyOf`, the wird-users rule in
+# authentik-blueprint-wird-policy.yaml), the same declaration as in
+# mountain-policy and mountain-enrollment: no `users:`, membership is written
+# by the invitation flow and a list here would be REPLACED on every apply.
+#
+# Verify in the database, selecting the FKs explicitly:
+#   psql -d authentik -tAc 'SELECT target_id, group_id, enabled
+#                           FROM authentik_policies_policybinding'
+#
+# A plain ConfigMap: no credential here.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: authentik-blueprint-mountain-gate-policy
+  namespace: authentik
+data:
+  mountain-gate-policy.yaml: |
+    version: 1
+    metadata:
+      name: mountain-gate-policy
+      labels:
+        blueprints.goauthentik.io/instantiate: "true"
+    entries:
+      - model: authentik_blueprints.metaapplyblueprint
+        attrs:
+          identifiers:
+            name: platform-groups
+          required: true
+      - model: authentik_blueprints.metaapplyblueprint
+        attrs:
+          identifiers:
+            name: forwardauth-tier
+          required: true
+      - model: authentik_core.group
+        id: mountain-visitors
+        identifiers:
+          name: mountain-visitors
+        attrs:
+          name: mountain-visitors
+      - model: authentik_policies.policybinding
+        identifiers:
+          target: !Find [authentik_core.application, [slug, mountain-gate]]
+          group: !Find [authentik_core.group, [name, platform-admins]]
+          order: 0
+        attrs:
+          enabled: true
+      - model: authentik_policies.policybinding
+        identifiers:
+          target: !Find [authentik_core.application, [slug, mountain-gate]]
+          group: !KeyOf mountain-visitors
+          order: 1
+        attrs:
+          enabled: true
