@@ -79,7 +79,8 @@ Several parts of ADR-0060 and of the code don't fit that:
    - **The issuer is the public one:** `https://authentik.bnei.dev/application/o/ukubi-bridge-api/`. authentik builds
      `iss` from the request host. So clients run the grant against the in-cluster Service
      (`platform-authentik-server.authentik.svc`) with `Host: authentik.bnei.dev` and `X-Forwarded-Proto: https`, and the
-     bridge reads the JWKS the same way, so neither depends on Cloudflare. The rollout decodes a live token to check
+     bridge reads the JWKS from the same Service (its content does not depend on the host), so neither depends on
+     Cloudflare. The rollout decodes a live token to check
      `iss`.
    - **What the bridge checks:**
      - the signature, RS256 only (never HS* or `none`), against **the pinned certificate** in the bridge's config
@@ -95,9 +96,10 @@ Several parts of ADR-0060 and of the code don't fit that:
      a mountain or Grafana token fails them.
    - **Who the caller is.** `sub` (the username) names the client in the bridge's table. An unknown `sub` is
      `Unauthenticated`.
-   - **Streams expire with their token.** The bridge ends a `Subscribe` or `Replay` stream 15 seconds before its
-     token's `exp`, so the Ack of the last delivery still carries a valid token, and the client reconnects with a fresh
-     one. A token with less than 15 seconds left cannot open a stream. Deactivating an account in authentik therefore takes effect within 10
+   - **Streams expire with their token.** The bridge ends a `Subscribe` or `Replay` stream at its token's `exp`, and the
+     client reconnects with a fresh token; an event in flight then is redelivered, as after any disconnect. A token with
+     less than 5 seconds left cannot open a stream (it would end at once), which stays under the 10-second refresh margin
+     of common OAuth clients. Deactivating an account in authentik therefore takes effect within 10
      minutes. Revoking a single token in authentik has no effect, because the bridge validates offline.
    - **The client table stays in the bridge, without secrets.** Its shape is `{name: {kind, publish_types,
      publish_subjects, subscribe, privileged}}`, where `subscribe` is a list of rules `{types, subjects}` (Decision 2).
