@@ -177,8 +177,8 @@ Several parts of ADR-0060 and of the code don't fit that:
 
 6. **Retention: events are deleted by age, 30 days** (ADR-0060 §2). The bridge is the transport, not the record. Each
    consumer keeps its own durable state, idempotent on `(source, id)`.
-   - **Parked events are kept.** Deletion skips any event behind an uncleared dead letter on its subscription and
-     subject. A Grafana alert fires on a dead letter left uncleared for 3 days.
+   - **Parked events are kept.** Deletion skips any event at or past an uncleared dead letter on its subject, for any
+     subscription. A Grafana alert fires on a dead letter left uncleared for 3 days.
    - **A gap is announced, never silent, and never false.** Amended 2026-10-23 after the build's review passes. Each
      deletion run deletes everything ingested before the cutoff (by the bridge's `ingested_at`, never the publisher's
      `time`), except events kept behind an uncleared dead letter, and, in the same transaction, for every subscription
@@ -190,8 +190,9 @@ Several parts of ADR-0060 and of the code don't fit that:
 
      The next `Subscribe` first sends one message carrying the gap and its version, then the events as usual; a gapped
      stream that is live is ended, so it reconnects to it. The consumer resyncs (the game from AgentService and its
-     own database) and **confirms the gap** with an `Ack` carrying that version. It is sent on every reconnect until
-     confirmed, and confirming an older version (one a later run widened) does nothing. A `Replay` from below the
+     own database) and **confirms the gap** (`ConfirmGap` with that version, from the live stream that received it). It
+     is sent on every reconnect until confirmed; confirming an older version (one a later run widened) is refused, and
+     the consumer reconnects for the current one. A stream a run gaps while it is connecting ends at once, too. A `Replay` from below the
      watermark streams what is kept, parked events included, after a first message saying that events in the range
      may have been deleted; it is never refused. The run locks `dead_letters`, so an operator's unparking cannot land
      between its steps.
