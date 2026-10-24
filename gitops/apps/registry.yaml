@@ -305,15 +305,16 @@
   targetRevision: main
   hostname: hq.bnei.dev
 
-# mountain: a live 3D view of ukubi (ADR-0056) — a Go relay with an
-# embedded three.js page, fed by PromQL only.
+# mountain: atlas, a live 3D map of ukubi for platform-admins (ADR-0056,
+# ADR-0067) — a Go service with an embedded three.js page, fed by PromQL,
+# Alertmanager and a read-only token on the repos.
 #
 # Gated by its OWN forwardAuth since ADR-0065: mountain-forwardauth
 # (namespace default) on the `mountain-gate` provider, bound to
-# platform-admins and mountain-visitors (invitation-only). The ref lives in
+# platform-admins only (ADR-0067). The ref lives in
 # mountain's helm/values.yaml (ingress.middlewares), so the gate goes live
 # with that change; the callback route is
-# gitops/bootstrap/mountain-outpost-route.yaml (forward_single). The relay
+# gitops/bootstrap/mountain-outpost-route.yaml (forward_single). atlas
 # trusts no forwarded header (it signs people in through its own OIDC app),
 # so no NetworkPolicy is needed. The baseline chain (origin lock, rate
 # limit, headers) stays on — mountain's values must not set

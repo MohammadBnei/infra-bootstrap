@@ -4,7 +4,8 @@
 doubt cycles). Amends [ADR-0056](0056-mountain-public-live-cluster-view.md) (the view is no longer public) and
 [ADR-0064](0064-mountain-town-roles-and-guest-probes.md) (an app's other hosts, coarser replica counts). Supersedes
 [ADR-0057](0057-mountain-visitor-enrollment.md)'s open enrollment. Records an exception to
-[ADR-0039](0039-authentik-identity-layer.md) Decision 3.
+[ADR-0039](0039-authentik-identity-layer.md) Decision 3. **Amended by [ADR-0067](0067-mountain-atlas-platform-admins-only.md)**:
+the gate admits `platform-admins` only; invited visitors lost access in R10.
 **Date:** 2026-10-23
 **Related:** [ADR-0059](0059-drop-file-sharing.md) (drop: the forwardAuth shape copied here),
 [ADR-0051](0051-expose-hermes-dashboard.md) (hermes: a gate in front of an app with its own login),
