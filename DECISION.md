@@ -264,7 +264,10 @@ updated.
   are held on its PVC, not in git — an accepted deviation, like NetBird's
   dashboard. See [ADR-0058](docs/adr/0058-shared-notes-silverbullet.md).
 - **Events reach agents through `ukubi-bridge`** (ADR-0060, accepted, partly
-  built: the service and step 2; not deletion by age or steps 3–6).
+  built: the service and step 2; deletion by age (#10) and authentik API
+  clients (#9) merged in ukubi-bridge, not deployed; step 4 (core's
+  dispatcher, agent-fleet #324, and `PublishEvent`, #325) merged, not
+  released; steps 3, 5, 6 not done).
   A Postgres database on Pigsty holds an append-only CloudEvents log with one
   cursor per subscriber; the bridge alone touches it. GitHub (via a GitHub App),
   Alertmanager and Grafana post to the bridge; agent-fleet core stays private and
@@ -277,7 +280,8 @@ updated.
   deleted after 30 days, never behind a parked subject. See
   [ADR-0060](docs/adr/0060-event-bridge.md) and
   [ADR-0066](docs/adr/0066-bridge-clients-sign-in-through-authentik.md) (proposed).
-- **Credential broker: Infisical Agent Vault** (ADR-0061, accepted, not live).
+- **Credential broker: Infisical Agent Vault** (ADR-0061, accepted, live
+  2026-10-19).
   agent-fleet's definition pods hold placeholders; the vault's MITM proxy swaps in
   the real credential per host and path. A platform-common app, ClusterIP only, no
   IngressRoute, telemetry off, image pinned by digest. SQLite on a longhorn PVC,

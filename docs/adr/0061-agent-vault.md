@@ -1,7 +1,7 @@
 # ADR-0061: Agent Vault as a private platform service
 
-**Status:** Accepted, not live. Waits on merge, then one operator command
-(Rollout).
+**Status:** Accepted, live 2026-10-19: merged and bootstrapped (Rollout).
+Serves definition pods and, since ADR-0062, repo pods.
 **Date:** 2026-10-19
 **Related:** [ADR-0004](0004-gitops-pattern-c-registry-applicationset.md)
 (common-app-chart, no per-app chart), [ADR-0019](0019-longhorn-rollout-specifics.md)

@@ -623,11 +623,11 @@ graph LR
         E2 <-.-> E3
         E1 <-.-> E3
     end
-    P1 -- pgBackRest, local --> LocalBackup[local disk, each VM]
-    P1 -.->|pgBackRest, off-host target: open| Open["pg-backup Garage bucket exists,<br/>not yet wired into pgbackrest_repo — see §7"]
+    P1 -- pgBackRest, full daily + WAL --> PgBackup["pg-backup Garage bucket via s3.bnei.dev,<br/>one repo shared by both nodes — ADR-0042"]
+    P1 -.->|pre-migration repo, kept| LocalBackup["/pg/backup, each VM"]
 ```
 
-**Backups:** 7 daily / 4 weekly / 3 monthly, PITR 7 days — see §10 below
+**Backups:** daily full, `retention_full: 2` (about two days of full backups and PITR) — see §10 below
 for the full backup matrix across all data types.
 
 ---
@@ -722,10 +722,11 @@ all, which is stronger isolation than the pod design it replaced.
 
 ### Backup target
 
-Still open, but a candidate now exists: `garage-configure.yml` already
-provisions a `pg-backup` bucket + S3 keys in Garage (§7 above), it's just
-not wired into pigsty's `pgbackrest_repo` config yet. The original plan
-— the 149GB HDD on server1 slated to replace the dead Ceph OSD — was
+Postgres: Garage's `pg-backup` bucket, wired into pigsty's `pgbackrest_repo`
+as `pgbackrest_method: garage` (endpoint `s3.bnei.dev`) and live since
+2026-08-26 ([ADR-0042](docs/adr/0042-pgbackrest-shared-repo-and-restore-command.md)).
+Garage is on `.165`, so this is still inside the failure domain (§10).
+The original plan — the 149GB HDD on server1 slated to replace the dead Ceph OSD — was
 physically removed before server1's reinstall
 ([ADR-0024](docs/adr/0024-server1-single-disk-ext4-no-dedicated-zfs.md))
 and is dropped in favor of Garage.
@@ -785,7 +786,7 @@ Traefik. Passkeys are the answer instead.
 ### Agent Vault (agent-fleet's credential broker)
 
 Infisical Agent Vault, a platform-common app in namespace `agent-vault`
-([ADR-0061](docs/adr/0061-agent-vault.md); not live). agent-fleet's definition
+([ADR-0061](docs/adr/0061-agent-vault.md); live 2026-10-19). agent-fleet's definition
 pods carry placeholder credentials and an `HTTPS_PROXY` pointing at its MITM
 proxy, which injects the real credential per host and path. Only
 agent-fleet's provisioner holds a vault credential (agent-fleet ADR 0065).
@@ -979,7 +980,7 @@ Why this shape, in order:
 
 | Data | Method | Target | Frequency | Retention |
 | --- | --- | --- | --- | --- |
-| Postgres (full + WAL) | pgBackRest | local only; off-host target open — `pg-backup` Garage bucket provisioned but not yet wired into `pgbackrest_repo`, see §7 | daily + continuous WAL | 7d / 4w / 3m |
+| Postgres (full + WAL) | pgBackRest | Garage S3 `pg-backup` (`pgbackrest_method: garage`, one repo shared by both nodes, [ADR-0042](docs/adr/0042-pgbackrest-shared-repo-and-restore-command.md)); the pre-migration local repos at `/pg/backup` are kept, untouched | daily + continuous WAL | 2 full backups by count (`retention_full: 2`), so about 2 days of PITR |
 | K8s manifests | Git | `gitops/` in `github.com/MohammadBnei/infra-bootstrap` (this repo — not the legacy `k8s-cluster` submodule) | on commit | indefinite |
 | K8s PVs (`longhorn` class) | Longhorn snapshots (+ Velero if added) | Garage (S3) | daily | 7 daily |
 | K8s PVs (`nfs` class) | *none, by design* | nothing, and none planned — decided 2026-08-14. The class only ever holds regenerable data, so a restore path would go unused; that scope restriction is the entire safety story, with no second line of defence ([ADR-0036](docs/adr/0036-nfs-storage-class-for-k8s.md)) | — | — |
@@ -998,8 +999,8 @@ Backup verification: monthly restore test to a sandbox VM.
 here rather than discovered during a restore.**
 
 Read the table by destination rather than by row and the shape is plain:
-Longhorn PVs land in Garage; Garage is an LXC on `.165`; Postgres is local
-only; Proxmox, Pi-hole and `/home` are open. **Nothing leaves the house.** A
+Longhorn PVs and Postgres land in Garage; Garage is an LXC on `.165`;
+Proxmox, Pi-hole and `/home` are open. **Nothing leaves the house.** A
 fire, a theft, or a `.165` disk failure takes the primary and its backup
 together — which is not a backup story, it is a copy.
 

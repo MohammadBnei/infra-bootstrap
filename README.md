@@ -4,8 +4,8 @@ Bootstrap configs for the homelab `ukubi-cluster`: kubespray inventory, Pigsty c
 
 **Target specs (WHAT):** [`ARCHITECTURE.md`](ARCHITECTURE.md)
 **Decisions & rationale (WHY):** [`DECISION.md`](DECISION.md) + [`docs/adr/`](docs/adr/README.md)
-**Current live state:** [`docs/infrastructure-actual.md`](docs/infrastructure-actual.md)
-**Runtime K8s manifests:** [`MohammadBnei/k8s-cluster`](https://github.com/MohammadBnei/k8s-cluster) (separate repo, GitOps via ArgoCD)
+**Live-state snapshot (historical, dated):** [`docs/infrastructure-actual.md`](docs/infrastructure-actual.md)
+**ArgoCD source of truth:** [`gitops/`](gitops/README.md). `k8s-cluster/` is a submodule of a separate repo, the GitOps runtime target, not managed from here
 
 ---
 
@@ -42,10 +42,11 @@ How to actually run a layer day-to-day: that layer's own README below.
 | `inventory/ukubi/` | our kubespray inventory (hosts, group_vars, addons) |
 | `pigsty/` | Pigsty config (`pigsty.yml` + files) |
 | `gitops/` | ArgoCD source of truth — Pattern C registry + ApplicationSet |
-| `ansible/playbooks/` | K8s bootstrap secrets (drafted); PVE post-install, VM provisioning, K8s node prereqs (pending — see `ansible/README.md`) |
+| `ansible/playbooks/` | ArgoCD bootstrap secrets, PVE post-install, K8s node prereqs, Garage/NFS/Pi-hole/build-runner config — done and run; NetBird config and enrollment run 2026-10-11, rollout still in progress (ADR-0055); only `vm-provision.yml` still pending (see `ansible/README.md` status table) |
 | `ansible/inventories/` | Ansible inventories (PVE hosts) |
 | `terraform/` | Proxmox VM/LXC provisioning (`.165`) |
 | `docs/` | runbooks (k8s bootstrap, pg bootstrap, pve post-install), ADRs |
+| `agent-fleet/` | git submodule → `MohammadBnei/agent-fleet` at a release tag; a cosmetic pointer only — ArgoCD deploys agent-fleet from its own repo (provisioner Application tracks its `main`, core via `gitops/apps/registry.yaml`) |
 
 ## Workflow
 
