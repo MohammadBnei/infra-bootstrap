@@ -237,17 +237,26 @@ updated.
   the server's embedded Dex. All three stores live on Pigsty. See
   [ADR-0054](docs/adr/0054-netbird-control-plane-hosting-only.md).
 - **`mountain.bnei.dev` reads the cluster through PromQL only** (ADR-0056).
-  A public, live 3D view of ukubi. Its relay holds no ServiceAccount token and no
+  A live 3D view of ukubi, **gated since ADR-0065**: the whole site sits behind its
+  own authentik forwardAuth (`mountain-gate`) for `platform-admins` and invited
+  `mountain-visitors`. Its relay holds no ServiceAccount token and no
   RBAC — kube-state-metrics, ArgoCD and node metrics in Prometheus carry every
-  signal — so ADR-0032's single broad read grant stays single. What it shows the
-  internet is built by **allowlist** (named apps only, hosts as `h1..h3`,
+  signal — so ADR-0032's single broad read grant stays single. What it shows is
+  built by **allowlist** (named apps only, hosts as `h1..h3`,
   bucketed values, no versions, alert fingerprints hashed), never by deleting
-  fields from a richer object. Sources with no metric (Garage, Pigsty) are drawn
-  as unmeasured, not guessed. Visitor accounts are self-service into
-  `mountain-visitors` only, behind a Turnstile captcha and email verification,
-  bound to the `mountain` application alone (ADR-0057). See
+  fields from a richer object. Platform services and the infra guests outside
+  k8s (Postgres pair, etcd witness, Garage, NFS, build-runner, hermesagent) are
+  public by **role key** only, never a product or host name; the guests are
+  measured by blackbox `guest-<role>` probes, drawn only once measured, and their
+  state is debounced 10 min; k9s-dashboard is never shown (ADR-0064). An app's
+  other hosts show as tents and replica counts are coarse buckets (ADR-0065).
+  Visitor accounts are **invitation-only** into `mountain-visitors` (an
+  invitation stage, email verification; ADR-0065 superseded ADR-0057's open,
+  Turnstile-guarded sign-up). See
   [ADR-0056](docs/adr/0056-mountain-public-live-cluster-view.md) and
-  [ADR-0057](docs/adr/0057-mountain-visitor-enrollment.md).
+  [ADR-0057](docs/adr/0057-mountain-visitor-enrollment.md), amended by
+  [ADR-0064](docs/adr/0064-mountain-town-roles-and-guest-probes.md) and
+  [ADR-0065](docs/adr/0065-mountain-behind-forwardauth-invited-visitors.md).
 - **Shared notes are markdown in git, edited through SilverBullet** (ADR-0058).
   `notes.bnei.dev` serves a clone of `MohammadBnei/notes`; SilverBullet commits
   and pushes each person's edits and pulls what Claude Code pushes. Login is
@@ -255,14 +264,21 @@ updated.
   are held on its PVC, not in git — an accepted deviation, like NetBird's
   dashboard. See [ADR-0058](docs/adr/0058-shared-notes-silverbullet.md).
 - **Events reach agents through `ukubi-bridge`** (ADR-0060, accepted, partly
-  built: the bridge is deployed; Alertmanager and Grafana still post to core,
-  and core's consumer, agent-fleet `adr/0071`, is unbuilt).
+  built: the service and step 2; deletion by age merged in ukubi-bridge
+  #10, not deployed; core's consumer merged in agent-fleet #324/#325, not
+  released; steps 3, 5, 6 not done).
   A Postgres database on Pigsty holds an append-only CloudEvents log with one
   cursor per subscriber; the bridge alone touches it. GitHub (via a GitHub App),
   Alertmanager and Grafana post to the bridge; agent-fleet core stays private and
   queue-free, publishing through `PublishEvent` and consuming as one dispatcher
   subscriber. Trust comes from the PR author and head repo, never the webhook
-  sender. See [ADR-0060](docs/adr/0060-event-bridge.md).
+  sender. API clients (core, apps) are authentik service accounts with 10-min
+  `client_credentials` tokens, each bounded by publish and subscribe allowlists;
+  app events are never trusted; core announces only opted-in clients' sessions
+  waiting on a person, and nothing an agent runs reads those types. Events are
+  deleted after 30 days, never behind a parked subject. See
+  [ADR-0060](docs/adr/0060-event-bridge.md) and
+  [ADR-0066](docs/adr/0066-bridge-clients-sign-in-through-authentik.md) (proposed).
 - **Credential broker: Infisical Agent Vault** (ADR-0061, accepted, live
   2026-10-19).
   agent-fleet's definition pods hold placeholders; the vault's MITM proxy swaps in

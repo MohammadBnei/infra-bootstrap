@@ -749,8 +749,8 @@ Four access tiers:
 | Tier | Mechanism | Status |
 |---|---|---|
 | Public | none | — |
-| Native OIDC | the app is an OIDC relying party | **Live.** ArgoCD, Grafana, agent-fleet `core`, Wird, and the Hermes dashboard (`hermes.bnei.dev`, live 2026-10-02 and the only app on *both* this tier and forwardAuth — [ADR-0051](docs/adr/0051-expose-hermes-dashboard.md)) |
-| forwardAuth | Traefik `Middleware/authentik-forwardauth` in front of the route | **Live.** e2e preview hosts, `wedding.bnei.dev/admin`, `blog.bnei.dev/linkedin`, `hermes.bnei.dev` (ADR-0051 — also a native OIDC client, deliberately both). Alertmanager, pgweb and Proxmox still to move |
+| Native OIDC | the app is an OIDC relying party | **Live.** ArgoCD, Grafana, agent-fleet `core`, Wird, the Hermes dashboard (`hermes.bnei.dev`, live 2026-10-02, on *both* this tier and forwardAuth — [ADR-0051](docs/adr/0051-expose-hermes-dashboard.md)), and mountain's relay (also gated, [ADR-0065](docs/adr/0065-mountain-behind-forwardauth-invited-visitors.md)) |
+| forwardAuth | Traefik `Middleware/authentik-forwardauth` in front of the route | **Live.** e2e preview hosts, `wedding.bnei.dev/admin`, `blog.bnei.dev/linkedin`, `hermes.bnei.dev` (ADR-0051 — also a native OIDC client, deliberately both), `mountain.bnei.dev` behind its own `Middleware/mountain-forwardauth` (ADR-0065, both tiers like hermes; merged, live once mountain references it). Alertmanager, pgweb and Proxmox still to move |
 | Critical | adds a WebAuthn passkey policy | Not built |
 
 Three properties that are load-bearing rather than incidental:
@@ -882,6 +882,13 @@ per-session certs would have exhausted issuance domain-wide.
 - Prometheus + Grafana in K8s (existing).
 - pg_exporter on Postgres (via Pigsty).
 - node_exporter on every host (Pi 4, ex-laptop, PVE hosts).
+- blackbox-exporter (`gitops/platform/values/blackbox-exporter/values.yaml`):
+  TCP to `pveproxy:8006` on the three PVE hosts (alerting), NetBird's public
+  path (alerting), and — [ADR-0064](docs/adr/0064-mountain-town-roles-and-guest-probes.md) —
+  seven infra guests outside k8s as `guest-<role>` (Patroni `/health` on
+  pg01/pg02, etcd TLS on the witness, Garage S3, NFS, build-runner sshd,
+  hermesagent's dashboard), read by mountain's town (gated since ADR-0065) and never
+  alerting. k9s-dashboard is deliberately not probed.
 - Hubble for Cilium L3/L4 observability, exporting flow metrics
   `[dns, drop, tcp, flow, icmp]` to Prometheus. `http` is deliberately
   excluded — L7 means Hubble parses application payloads, a different

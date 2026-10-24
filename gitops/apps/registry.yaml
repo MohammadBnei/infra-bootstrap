@@ -305,10 +305,17 @@
   targetRevision: main
   hostname: hq.bnei.dev
 
-# mountain: a public live 3D view of ukubi (ADR-0056) — a Go relay with an
+# mountain: a live 3D view of ukubi (ADR-0056) — a Go relay with an
 # embedded three.js page, fed by PromQL only.
 #
-# NO forwardAuth: it is a public page. The baseline chain (origin lock, rate
+# Gated by its OWN forwardAuth since ADR-0065: mountain-forwardauth
+# (namespace default) on the `mountain-gate` provider, bound to
+# platform-admins and mountain-visitors (invitation-only). The ref lives in
+# mountain's helm/values.yaml (ingress.middlewares), so the gate goes live
+# with that change; the callback route is
+# gitops/bootstrap/mountain-outpost-route.yaml (forward_single). The relay
+# trusts no forwarded header (it signs people in through its own OIDC app),
+# so no NetworkPolicy is needed. The baseline chain (origin lock, rate
 # limit, headers) stays on — mountain's values must not set
 # ingress.baseline.enabled: false. Everything else is in the app's own
 # helm/values.yaml: replicaCount 1 + Recreate (one relay owns the world, never

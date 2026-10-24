@@ -1,9 +1,10 @@
-# Self-service enrollment for mountain's visitor layer (ADR-0057). A visitor
-# passes a Cloudflare Turnstile check, picks a handle, verifies their email,
-# and lands in `mountain-visitors` and nothing else. That group is bound to the
-# `mountain` application only (authentik-blueprint-mountain-policy.yaml); every
-# other application is bound to a group a visitor is never in, so enrolling here
-# grants mountain marks and nothing else.
+# Invitation-only enrollment for mountain's visitors (ADR-0065, which supersedes
+# ADR-0057's open sign-up). An invited visitor opens the invitation link, picks
+# a handle, verifies their email, and lands in `mountain-visitors` and nothing
+# else. That group passes the mountain.bnei.dev gate
+# (authentik-blueprint-mountain-gate-policy.yaml) and signs in to the relay for
+# plants (authentik-blueprint-mountain-policy.yaml); every other application is
+# bound to a group a visitor is never in.
 #
 # CLONED FROM authentik-blueprint-wird-enrollment.yaml — read its header for the
 # group-declared-locally rule (`!KeyOf`, never `!Find`: a `!Find` miss on
@@ -11,28 +12,30 @@
 # no group, permanently), the deliberately unset brand `enrollment_flow`, and
 # the SMTP dependency. The differences:
 #
-# - A CAPTCHA STAGE FIRST. Stage fields verified against upstream
-#   authentik/stages/captcha/models.py at version/2026.8.0 and the Turnstile
-#   preset in web/src/admin/stages/captcha/shared.ts. The keys come from
-#   MOUNTAIN_TURNSTILE_SITE_KEY / MOUNTAIN_TURNSTILE_SECRET_KEY in authentik's
-#   env (authentik-secret.yaml). `!Env` with no default resolves to None when
-#   the variable is missing, public_key/private_key are required fields, so
-#   this whole blueprint fails to validate and no flow exists: there is never a
-#   mountain enrollment without a captcha.
-#   ROTATION does not re-apply this file: discovery re-applies only when the
-#   FILE hash changes, and an env change leaves it identical. After rotating,
-#   restart the worker (env is bound at start), then
-#     kubectl -n authentik exec deploy/platform-authentik-worker -- ak apply_blueprint \
-#       /blueprints/mounted/cm-authentik-blueprint-mountain-enrollment/mountain-enrollment.yaml
+# - AN INVITATION STAGE FIRST, `continue_flow_without_invitation: false`: with
+#   no valid invitation token the flow stops there, so nothing behind it (handle
+#   lookups, the mail send) is reachable by a stranger. It replaced the
+#   Cloudflare Turnstile captcha of the open sign-up (ADR-0057), which is
+#   deleted below (`state: absent`; its flow binding goes with it). The
+#   Turnstile keys are no longer read here.
 # - NO NAME FIELD. The handle (username) is the only thing a visitor types that
 #   anyone else sees, and it is moderated by mountain-handle below. A free-text
 #   `name` would ride along in the ID token's profile claims unmoderated.
+# - The group entry stays (no `users:`) and must never be marked absent: that
+#   would delete mountain-visitors and every membership with it.
 #
-# Reached at its own URL, the mountain page's "Sign in to play":
-#   https://authentik.bnei.dev/if/flow/mountain-enrollment/
+# INVITING SOMEONE (the owner, in authentik: Directory > Invitations > Create):
+# flow `mountain-enrollment`, single use, an expiry of a few days, no fixed
+# data. Send the link it shows, of the form
+#   https://authentik.bnei.dev/if/flow/mountain-enrollment/?itoken=<uuid>
+# An invitation is runtime state, like the memberships it creates; the flow and
+# its stages are what this file declares.
 #
-# A plain ConfigMap: the secret key arrives by `!Env`, so nothing here is
-# secret.
+# Verify the flow refuses without an invitation through the flow executor API,
+# not the /if/flow/ page shell (that loads either way):
+#   curl -s https://authentik.bnei.dev/api/v3/flows/executor/mountain-enrollment/
+#
+# A plain ConfigMap: nothing here is secret.
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -46,8 +49,8 @@ data:
       labels:
         blueprints.goauthentik.io/instantiate: "true"
     entries:
-      # Same declaration as in authentik-blueprint-mountain-policy.yaml, on
-      # purpose. No `users:` — membership is runtime state (wird header).
+      # Same declaration as in authentik-blueprint-mountain-policy.yaml and
+      # mountain-gate-policy, on purpose. No `users:` — membership is runtime state (wird header).
       - model: authentik_core.group
         id: mountain-visitors
         identifiers:
@@ -61,26 +64,24 @@ data:
           slug: mountain-enrollment
         attrs:
           name: Mountain enrollment
-          title: Sign in to play
+          title: Join the town
           designation: enrollment
           authentication: require_unauthenticated
 
-      # Turnstile in managed mode (the widget decides whether to show a
-      # challenge). Turnstile returns no score, so the thresholds are unused;
-      # error_on_invalid_score stays true, which is what makes a failed
-      # `success` an error rather than a context value.
+      # ADR-0057's Turnstile captcha, gone with the open sign-up. Deleting the
+      # stage deletes its flow binding (order 5) with it.
       - model: authentik_stages_captcha.captchastage
-        id: stage-captcha
+        state: absent
         identifiers:
           name: mountain-enrollment-captcha
+
+      # Without a valid invitation the flow ends here (ADR-0065).
+      - model: authentik_stages_invitation.invitationstage
+        id: stage-invitation
+        identifiers:
+          name: mountain-enrollment-invitation
         attrs:
-          public_key: !Env MOUNTAIN_TURNSTILE_SITE_KEY
-          private_key: !Env MOUNTAIN_TURNSTILE_SECRET_KEY
-          js_url: https://challenges.cloudflare.com/turnstile/v0/api.js
-          api_url: https://challenges.cloudflare.com/turnstile/v0/siteverify
-          request_content_type: application/x-www-form-urlencoded
-          interactive: true
-          error_on_invalid_score: true
+          continue_flow_without_invitation: false
 
       # --- prompts -------------------------------------------------------
       - model: authentik_stages_prompt.prompt
@@ -226,12 +227,12 @@ data:
           name: mountain-enrollment-user-login
 
       # --- bindings ------------------------------------------------------
-      # Captcha first: nothing behind it (handle lookups, the mail send) is
-      # reachable without passing it.
+      # The invitation first: nothing behind it (handle lookups, the mail
+      # send) is reachable without one.
       - model: authentik_flows.flowstagebinding
         identifiers:
           target: !KeyOf flow
-          stage: !KeyOf stage-captcha
+          stage: !KeyOf stage-invitation
           order: 5
       - model: authentik_flows.flowstagebinding
         identifiers:
