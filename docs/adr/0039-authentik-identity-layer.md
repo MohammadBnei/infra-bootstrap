@@ -1,6 +1,6 @@
 # ADR-0039: authentik as the cluster's identity layer
 
-**Status:** Accepted (Native OIDC tier implemented 2026-08-19; forwardAuth, WebAuthn and `basic-admin-auth` retirement still pending — see the implementation notes at the end. Decision 2's Redis clause is wrong)
+**Status:** Accepted (Native OIDC tier implemented 2026-08-19, forwardAuth tier 2026-08-21; WebAuthn and `basic-admin-auth` retirement still pending — see the implementation notes at the end. Decision 2's Redis clause is wrong)
 **Date:** 2026-08-18
 **Depends on:** [ADR-0038](0038-cloudflare-proxy-dns01-and-origin-lock.md)
 (`externalTrafficPolicy: Local` is what makes the LAN break-glass route below

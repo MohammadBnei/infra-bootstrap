@@ -1,7 +1,8 @@
 # ADR-0060: Event bridge — `ukubi-bridge`, a Postgres-backed event bus feeding fleet agents
 
 **Status:** Accepted, partly built: the service (ingest, reconcile, alert endpoints, the bus API; `MohammadBnei/ukubi-bridge`)
-and rollout step 2 (#340). Not built: deletion by age, steps 3–6. Decisions 2 (retention: 30 days, parked events kept, gaps announced) and 4 (API callers) amended, and 8 (apps) replaced, by
+and rollout step 2 (#340). Merged, not deployed: deletion by age (ukubi-bridge #10). Merged, not released: step 4, core's
+`PublishEvent` and dispatcher (agent-fleet #324/#325). Not built: steps 3, 5, 6. Decisions 2 (retention: 30 days, parked events kept, gaps announced) and 4 (API callers) amended, and 8 (apps) replaced, by
 [ADR-0066](0066-bridge-clients-sign-in-through-authentik.md).
 **Date:** 2026-10-18
 **Related:** [ADR-0031](0031-defer-hpa-scale-to-zero.md) (Knative/KEDA deferred),
