@@ -42,7 +42,7 @@ How to actually run a layer day-to-day: that layer's own README below.
 | `inventory/ukubi/` | our kubespray inventory (hosts, group_vars, addons) |
 | `pigsty/` | Pigsty config (`pigsty.yml` + files) |
 | `gitops/` | ArgoCD source of truth — Pattern C registry + ApplicationSet |
-| `ansible/playbooks/` | ArgoCD bootstrap secrets, PVE post-install, K8s node prereqs, Garage/NFS/Pi-hole/build-runner/NetBird config — done and run; only `vm-provision.yml` still pending (see `ansible/README.md` status table) |
+| `ansible/playbooks/` | ArgoCD bootstrap secrets, PVE post-install, K8s node prereqs, Garage/NFS/Pi-hole/build-runner config — done and run; NetBird config and enrollment run 2026-10-11, rollout still in progress (ADR-0055); only `vm-provision.yml` still pending (see `ansible/README.md` status table) |
 | `ansible/inventories/` | Ansible inventories (PVE hosts) |
 | `terraform/` | Proxmox VM/LXC provisioning (`.165`) |
 | `docs/` | runbooks (k8s bootstrap, pg bootstrap, pve post-install), ADRs |

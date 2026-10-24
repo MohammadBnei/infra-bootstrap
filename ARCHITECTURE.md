@@ -627,7 +627,7 @@ graph LR
     P1 -.->|pre-migration repo, kept| LocalBackup["/pg/backup, each VM"]
 ```
 
-**Backups:** 7 daily / 4 weekly / 3 monthly, PITR 7 days — see §10 below
+**Backups:** daily full, `retention_full: 2` (about two days of full backups and PITR) — see §10 below
 for the full backup matrix across all data types.
 
 ---
@@ -980,7 +980,7 @@ Why this shape, in order:
 
 | Data | Method | Target | Frequency | Retention |
 | --- | --- | --- | --- | --- |
-| Postgres (full + WAL) | pgBackRest | Garage S3 `pg-backup` (`pgbackrest_method: garage`, one repo shared by both nodes, [ADR-0042](docs/adr/0042-pgbackrest-shared-repo-and-restore-command.md)); the pre-migration local repos at `/pg/backup` are kept, untouched | daily + continuous WAL | 7d / 4w / 3m |
+| Postgres (full + WAL) | pgBackRest | Garage S3 `pg-backup` (`pgbackrest_method: garage`, one repo shared by both nodes, [ADR-0042](docs/adr/0042-pgbackrest-shared-repo-and-restore-command.md)); the pre-migration local repos at `/pg/backup` are kept, untouched | daily + continuous WAL | 2 full backups by count (`retention_full: 2`), so about 2 days of PITR |
 | K8s manifests | Git | `gitops/` in `github.com/MohammadBnei/infra-bootstrap` (this repo — not the legacy `k8s-cluster` submodule) | on commit | indefinite |
 | K8s PVs (`longhorn` class) | Longhorn snapshots (+ Velero if added) | Garage (S3) | daily | 7 daily |
 | K8s PVs (`nfs` class) | *none, by design* | nothing, and none planned — decided 2026-08-14. The class only ever holds regenerable data, so a restore path would go unused; that scope restriction is the entire safety story, with no second line of defence ([ADR-0036](docs/adr/0036-nfs-storage-class-for-k8s.md)) | — | — |

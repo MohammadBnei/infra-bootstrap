@@ -179,7 +179,9 @@ Direction only; sequencing and feasibility belong in `DECISION.md` and
   Reversible, and it does not couple the ability to work to cluster uptime.
 - **A restore path that leaves the failure domain, before autonomy.** Garage
   is in-cluster too; a backup story terminating there is not one (principle
-  8). *2026-10-22: out of scope for now, risk accepted.*
+  8). *2026-10-22: out of scope for now, risk accepted.* *2026-10-24:* the
+  semi-autonomous fleet goes ahead without it, so this ordering is waived,
+  not met; principle 8 stays unmet until a restore path exists.
 
 Next, in order (2026-10-22):
 
