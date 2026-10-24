@@ -1,5 +1,5 @@
 # prometheus-blackbox-exporter — probes the three PVE hosts themselves, NetBird's public
-# path, and (ADR-0064) the infra guests mountain's town draws as `guest-<role>`.
+# path, and (ADR-0064) the infra guests mountain's atlas reads as `guest-<role>`.
 #
 # Why this exists: until 2026-08-25 nothing in this cluster watched the
 # hypervisors. Only their guests were monitored, so when server1 (.200) lost
@@ -90,12 +90,13 @@ serviceMonitor:
     - name: netbird
       url: https://netbird.bnei.dev/oauth2/.well-known/openid-configuration
       module: http_2xx
-    # ADR-0064: the infra guests outside Kubernetes, for mountain's public town.
-    # Named by their PUBLIC ROLE KEY (never the hostname): the relay reads
-    # max by (target)(probe_success{target=~"guest-.*"}) and the key is what the
-    # page shows. Mirrored by hand in mountain `relay/config.yaml` (an unmapped
-    # guest-* target raises mountain's MountainUnmapped). No alert rule: the
-    # rules below are scoped to pve-* and netbird. k9s-dashboard is never probed.
+    # ADR-0064: the infra guests outside Kubernetes. Named by the town's role
+    # keys (ADR-0064); since ADR-0067 mountain's atlas reads
+    # max by (target)(probe_success{target=~"guest-.*|pve-.*"}) and maps each
+    # target to the machine it probes in mountain `internal/realms/realms.yaml`
+    # (probes:). A guest-* target not listed there is ignored by atlas: add it
+    # there too. No alert rule: the rules below are scoped to pve-* and
+    # netbird. k9s-dashboard is never probed.
     - name: guest-archive-h1          # pg02, Patroni
       url: http://192.168.1.207:8008/health
       module: patroni_health
