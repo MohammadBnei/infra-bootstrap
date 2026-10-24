@@ -138,8 +138,19 @@ the real open question, and it is not answered here.
 
 *Amended 2026-10-22.* Agents may **originate** proposals: new work, not only
 convergent fixes. Sources, in order: drift and alerts; usage and
-observability; repo activity; cross-project synergy. I still select every
-one, through agent-fleet's proposals table. Agents still never merge.
+observability; repo activity; cross-project synergy. I still select new
+intent, through agent-fleet's proposals table.
+
+*Amended 2026-10-24.* The fleet is **semi-autonomous**: sessions start and
+wake from events and from each other's hand-offs, not only from me. How much a
+human gates is not a rule written here; it follows from the system: trust per
+actor and event, budgets (depth, hops, per-thread caps), grants that widen or
+narrow per session, and which definitions a bridge client lists. **The
+delivery process is the quality gate**: ideation, design, interviews, doubt,
+plan, implementation, quality gates, live QA, PR, code review, merge, watch
+the deploy, light QA. Work I selected runs through it, and merge follows code
+review in the process. Principle 4's germline rule is unchanged: a change to
+the spec is mine to select.
 
 ## Where the metaphor breaks
 
@@ -189,8 +200,12 @@ Next, in order (2026-10-22):
   (agent-fleet is the pilot). Later, apps call an embedded agent through
   agent-fleet's `AgentService`. Resident agents last.
 - **Structural guard on `main`.** The infra repos (infra-bootstrap,
-  agent-fleet, ukubi-bridge) get branch rulesets: PR plus code-owner review,
-  and the fleet's GitHub App is never a bypass actor. In progress.
+  agent-fleet, ukubi-bridge) get branch rulesets, and the fleet's GitHub App
+  is never a bypass actor. Now: no deletion or force-push on `main`, and
+  immutable release tags. Later (amended 2026-10-24): the PR rule requires the
+  delivery process's own checks rather than a code-owner review, once the
+  stages leave checks. infra-bootstrap keeps its human review until those
+  checks are proven.
 - **Known gap, accepted for now.** Every build repo's CI runs as root
   (`sudo buildah`) on the one shared `build-runner` box — PRs and unprotected
   app repos included. A compromise there can reach a release image of a
