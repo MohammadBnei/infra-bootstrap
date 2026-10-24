@@ -122,14 +122,15 @@ blueprints:
   # stale username cannot stop platform-admins reconciling. The provider is
   # under `secrets:` below — it carries a client secret.
   - authentik-blueprint-netbird-policy
-  # mountain (ADR-0056/0057): the platform-admins and mountain-visitors
-  # bindings on the relay's OIDC app, in their own file (hermes convention).
+  # mountain (ADR-0056, ADR-0067): the platform-admins binding on atlas's OIDC
+  # app (the visitors' one deleted), in its own file (hermes convention).
   # The provider is under `secrets:` below.
   - authentik-blueprint-mountain-policy
-  # mountain visitors (ADR-0057, invitation-only since ADR-0065): enrollment
-  # into mountain-visitors behind an invitation stage. Nothing secret in it.
+  # mountain visitors (ADR-0057, invitation-only since ADR-0065, inert since
+  # ADR-0067: the group reaches nothing; removal is a follow-up). Nothing
+  # secret in it.
   - authentik-blueprint-mountain-enrollment
-  # mountain's gate (ADR-0065): platform-admins and mountain-visitors on the
+  # mountain's gate (ADR-0065): platform-admins only (ADR-0067) on the
   # `mountain-gate` forwardAuth application. Its provider lives in
   # authentik-blueprint-forwardauth, wird-admin's reason.
   - authentik-blueprint-mountain-gate-policy

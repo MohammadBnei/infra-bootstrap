@@ -2,11 +2,12 @@
 #
 # WHY NOT THE SHARED `authentik-forwardauth`: drop's reason
 # (drop-forwardauth-middleware.yaml). That one is the previews gate, bound to
-# platform-admins; mountain's provider `mountain-gate` admits mountain-visitors
-# too (authentik-blueprint-mountain-gate-policy.yaml). The outpost picks the
+# platform-admins; mountain's provider `mountain-gate` has its own binding
+# (authentik-blueprint-mountain-gate-policy.yaml; platform-admins only since
+# ADR-0067, mountain-visitors before). The outpost picks the
 # provider from the forwarded host either way; a dedicated object keeps the ref
-# honest. No authResponseHeaders: the relay trusts no forwarded identity, it
-# signs people in through its own OIDC app for its roles (ADR-0056).
+# honest. No authResponseHeaders: atlas trusts no forwarded identity, it
+# signs people in through its own OIDC app (ADR-0056, ADR-0067).
 #
 # Referenced from mountain's own helm/values.yaml (ingress.middlewares), so the
 # gate is live only once that ref ships. Revert order: mountain's ref first,

@@ -1,9 +1,9 @@
-# Who may sign in to the `mountain` application (mountain detail mode,
-# ADR-0056; visitors, ADR-0057). Reaching mountain.bnei.dev at all is the
-# separate `mountain-gate` decision (authentik-blueprint-mountain-gate-policy.yaml,
-# ADR-0065); this gates only detail frames (platform-admins) and marks
-# (mountain-visitors). The application keeps the default policy_engine_mode
-# `any`, so either group admits; the relay maps the `groups` claim to a role.
+# Who may sign in to the `mountain` application: platform-admins only
+# (ADR-0067: mountain became atlas, an internal tool; its callback also refuses
+# anyone outside platform-admins). Reaching mountain.bnei.dev at all is the
+# separate `mountain-gate` decision (authentik-blueprint-mountain-gate-policy.yaml).
+# The mountain-visitors binding of ADR-0057/0065 is deleted below
+# (`state: absent`): a blueprint never removes an object it stops declaring.
 #
 # SEPARATE FROM authentik-blueprint-mountain.yaml, the hermes convention
 # (authentik-blueprint-hermes-policy.yaml): a blueprint applies as one
@@ -68,10 +68,11 @@ data:
           order: 0
         attrs:
           enabled: true
+      # ADR-0067: visitors no longer sign in. An absent entry, so the binding the
+      # earlier version created is deleted.
       - model: authentik_policies.policybinding
+        state: absent
         identifiers:
           target: !Find [authentik_core.application, [slug, mountain]]
           group: !KeyOf mountain-visitors
           order: 1
-        attrs:
-          enabled: true

@@ -1,9 +1,11 @@
-# Who may reach mountain.bnei.dev at all (ADR-0065): the `mountain-gate`
-# forwardAuth application, declared in authentik-blueprint-forwardauth.yaml.
-# platform-admins and mountain-visitors; a visitor joins only through an
-# invitation (authentik-blueprint-mountain-enrollment.yaml). The relay's own
-# sign-in for its roles stays authentik-blueprint-mountain-policy.yaml, on the
-# OIDC application `mountain`: the same two groups, a separate decision.
+# Who may reach mountain.bnei.dev at all (ADR-0065, ADR-0067): the
+# `mountain-gate` forwardAuth application, declared in
+# authentik-blueprint-forwardauth.yaml. platform-admins only since ADR-0067
+# (mountain became atlas, an internal tool): the mountain-visitors binding is
+# deleted below (`state: absent`), not just left out, since a blueprint never
+# removes an object it stops declaring. atlas's own sign-in is
+# authentik-blueprint-mountain-policy.yaml, on the OIDC application `mountain`:
+# the same one group, a separate decision.
 #
 # Its own file, drop-policy's reason: a !Find miss here rolls back this
 # binding, never the forwardAuth tier. With core_default_app_access false, a
@@ -58,10 +60,11 @@ data:
           order: 0
         attrs:
           enabled: true
+      # ADR-0067: visitors no longer pass the gate. Kept as an absent entry so
+      # every instance deletes the binding the ADR-0065 version created.
       - model: authentik_policies.policybinding
+        state: absent
         identifiers:
           target: !Find [authentik_core.application, [slug, mountain-gate]]
           group: !KeyOf mountain-visitors
           order: 1
-        attrs:
-          enabled: true

@@ -198,11 +198,11 @@ data:
           meta_launch_url: https://files.bnei.dev
           meta_description: Files shared from the SilverBullet spaces, on Garage
       # ----------------------------------------------------------------
-      # mountain-gate (ADR-0065): the whole of mountain.bnei.dev, the town,
-      # for platform-admins and invited mountain-visitors. A second gate in
-      # front of an app that federates (ADR-0039's exception, hermes' shape,
-      # ADR-0051): the relay keeps its own OIDC app `mountain` for its roles
-      # (admin detail, plants), this one only decides who reaches it. Its
+      # mountain-gate (ADR-0065): the whole of mountain.bnei.dev, for
+      # platform-admins only since ADR-0067 (invited mountain-visitors
+      # before). A second gate in front of an app that federates (ADR-0039's
+      # exception, hermes' shape, ADR-0051): atlas keeps its own OIDC app
+      # `mountain`, this one only decides who reaches it. Its
       # binding is authentik-blueprint-mountain-gate-policy.yaml; callback
       # leg gitops/bootstrap/mountain-outpost-route.yaml.
       - model: authentik_providers_proxy.proxyprovider
