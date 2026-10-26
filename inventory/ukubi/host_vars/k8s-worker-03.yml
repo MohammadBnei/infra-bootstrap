@@ -1,0 +1,6 @@
+# See k8s-worker-01.yml for the full reasoning. One of the two session nodes
+# on the Fujitsu G558 minis (this one on pve-mini-01): 6 vCPU, 28 GB, and its OS
+# disk sized for local-path session volumes. If this label is lost, sessions
+# do not fail loudly — they sit Pending.
+node_labels:
+  agent-fleet.dev/session-node: "true"

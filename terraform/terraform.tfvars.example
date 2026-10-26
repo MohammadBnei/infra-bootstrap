@@ -50,6 +50,38 @@ build_runner_ip                  = "" # static IP for build-runner (ADR-0034) �
 #     node_name             = "server1"   # confirmed via `pvesh get /nodes`
 #     datastore_id          = "local-lvm" # confirmed via `pvesm status` — ADR-0024, server1 has no ZFS pool
 #   }
+#   # agent-fleet session nodes, one per Fujitsu G558 mini (i5-9400 6c/6t,
+#   # 32 GB, 1 TB SSD). The VM takes all 6 cores; corosync runs at real-time
+#   # priority, so the host keeps quorum under load. The OS disk is large
+#   # because local-path session volumes live on it.
+#   "k8s-worker-03" = {
+#     vm_id                 = 208
+#     ip                    = "192.168.1.208"
+#     cpu_cores             = 6
+#     memory_dedicated_mb   = 28672
+#     os_disk_size_gb       = 400
+#     longhorn_disk_size_gb = 300
+#     control_plane         = false
+#     etcd                  = false
+#     worker                = true
+#     gpu                   = false
+#     node_name             = "pve-mini-01" # confirm via `pvesh get /nodes`
+#     datastore_id          = "local-lvm"   # confirm via `pvesm status` — no ZFS pool
+#   }
+#   "k8s-worker-04" = {
+#     vm_id                 = 209
+#     ip                    = "192.168.1.209"
+#     cpu_cores             = 6
+#     memory_dedicated_mb   = 28672
+#     os_disk_size_gb       = 400
+#     longhorn_disk_size_gb = 300
+#     control_plane         = false
+#     etcd                  = false
+#     worker                = true
+#     gpu                   = false
+#     node_name             = "pve-mini-02" # confirm via `pvesh get /nodes`
+#     datastore_id          = "local-lvm"   # confirm via `pvesm status` — no ZFS pool
+#   }
 # }
 #
 # Cross-host cloning needs the nfs_storage_id/template_shared_storage_id

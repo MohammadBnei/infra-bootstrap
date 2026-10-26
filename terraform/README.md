@@ -42,6 +42,8 @@ build against — expect it to change:
 | `k8s-cp-02` | VM | 204 | new-create on `server1`, cloned cross-host — 2nd control-plane/etcd member, ADR-0017 |
 | `k8s-cp-03` | VM | 206 | new-create on `ex-laptop`, cloned cross-host — 3rd control-plane/etcd member, ADR-0017 |
 | `pg-etcd-witness` | VM | 303 | new-create on `ex-laptop`, cloned cross-host — 3rd Patroni DCS/etcd-only member, no PG data, ADR-0029 |
+| `k8s-worker-03` | VM | 208 | **planned**, new-create on `pve-mini-01`, cloned cross-host — agent-fleet session node |
+| `k8s-worker-04` | VM | 209 | **planned**, new-create on `pve-mini-02`, cloned cross-host — agent-fleet session node |
 
 ## Prerequisites (one-time, by hand)
 
