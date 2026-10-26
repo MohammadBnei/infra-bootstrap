@@ -2,7 +2,7 @@
 Baseline Traefik middlewares, rendered per-release in the app's OWN namespace.
 
 Deliberately NOT a single shared Middleware in `default` (the shape
-basic-admin-auth uses). A shared object lives in gitops/bootstrap/, which is a
+authentik-forwardauth uses). A shared object lives in gitops/bootstrap/, which is a
 separate ArgoCD Application from the one rendering this IngressRoute — so on a
 fresh app, or a rebuild, the route can reference a Middleware that has not
 synced yet, and Traefik puts the router in error until it does. Rendering here

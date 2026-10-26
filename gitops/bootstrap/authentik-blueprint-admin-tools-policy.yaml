@@ -1,0 +1,43 @@
+# Restricts the admin tools' gates (`pgweb-gate`, `alertmanager-gate`, declared
+# in authentik-blueprint-forwardauth.yaml) to the platform-admins group.
+# ADR-0039 Decision 3, #183.
+#
+# The binding IS the authorization: neither pgweb nor Alertmanager has a login
+# of its own behind the gate (the shared basic-admin-auth credential they had
+# is retired with this change).
+#
+# Both in one file: their applications are declared together, so a cold
+# rebuild has both or neither, and a !Find miss on either rolls the file back
+# whole. With core_default_app_access false (ADR-0050 Decision 12) that fails
+# CLOSED: no binding denies everyone. First apply may race the applications or
+# the group, and the blueprint goes to `error`; one more worker restart applies
+# it (drop's note).
+#
+# A plain ConfigMap: no credential here.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: authentik-blueprint-admin-tools-policy
+  namespace: authentik
+data:
+  admin-tools-policy.yaml: |
+    version: 1
+    metadata:
+      name: admin-tools-policy
+      labels:
+        blueprints.goauthentik.io/instantiate: "true"
+    entries:
+      - model: authentik_policies.policybinding
+        identifiers:
+          target: !Find [authentik_core.application, [slug, pgweb-gate]]
+          group: !Find [authentik_core.group, [name, platform-admins]]
+          order: 0
+        attrs:
+          enabled: true
+      - model: authentik_policies.policybinding
+        identifiers:
+          target: !Find [authentik_core.application, [slug, alertmanager-gate]]
+          group: !Find [authentik_core.group, [name, platform-admins]]
+          order: 0
+        attrs:
+          enabled: true
