@@ -96,6 +96,13 @@ metrics:
       # 15s, not 60s: mountain (ADR-0056) turns per-service request rate into
       # motion, and a 1m scrape makes a deploy show up a minute late.
       interval: 15s
+    # The request-duration histogram's buckets, seconds. The chart's default
+    # (0.1,0.3,1.2,5.0) puts every fast answer in one bucket, so mountain's p95
+    # per service (its `lat` signal) would be an interpolation inside 0-100 ms.
+    # Seven buckets instead of four: about 1.6x the series of this one
+    # histogram (per service x code x method), kept small on purpose because
+    # Prometheus is memory-capped (prometheus/values.yaml).
+    buckets: "0.05,0.1,0.25,0.5,1,2.5,5"
     # Both the serviceMonitor and prometheusRule templates `fail` the whole
     # chart render if monitoring.coreos.com/v1 is absent. Traefik is sync-wave
     # 2; the Prometheus CRDs arrive with platform-prometheus at wave 5. Without
