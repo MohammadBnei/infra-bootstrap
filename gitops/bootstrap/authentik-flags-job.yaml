@@ -1,5 +1,11 @@
 # Asserts `core_default_app_access = false` on every sync of the bootstrap
-# Application (ADR-0050 Decision 12).
+# Application (ADR-0050 Decision 12), and that users cannot change their own
+# username (ADR-0066, ADR-0068: a service account is matched on its username,
+# so a visitor renaming into `atlas-game` or `bridge-<client>` before its
+# blueprint lands would be taken over and handed its binding). The username
+# setting is a field on the same tenant row, not a flag, so its container
+# writes it through `ak shell`; saving with update_fields fails loudly if the
+# field is ever renamed, rather than setting a stray attribute.
 #
 # WHY A JOB AND NOT A BLUEPRINT. The flag lives on `authentik_tenants.tenant`,
 # and `Tenant` is declared `InternallyManagedMixin, TenantMixin,
@@ -69,6 +75,26 @@ spec:
           # The same Secret the server and worker read: Postgres coordinates and
           # AUTHENTIK_SECRET_KEY, which `ak` needs to reach the tenant row. No
           # new credential, and nothing here is Wird-specific.
+          envFrom:
+            - secretRef:
+                name: authentik-config
+          resources:
+            requests:
+              cpu: 50m
+              memory: 256Mi
+            limits:
+              memory: 512Mi
+        - name: username-change-off
+          image: ghcr.io/goauthentik/server:2026.8.4
+          args:
+            - shell
+            - -c
+            - |
+              from authentik.tenants.utils import get_current_tenant
+              t = get_current_tenant()
+              t.default_user_change_username = False
+              t.save(update_fields=["default_user_change_username"])
+              print("default_user_change_username:", get_current_tenant().default_user_change_username)
           envFrom:
             - secretRef:
                 name: authentik-config

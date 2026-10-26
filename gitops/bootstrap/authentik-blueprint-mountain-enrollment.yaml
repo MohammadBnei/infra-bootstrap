@@ -180,7 +180,12 @@ data:
             parts = ("admin", "authentik", "ukubi", "bnei", "moderat",
                      "official", "support", "operator", "fuck", "shit",
                      "cunt", "bitch", "nigg", "fag", "nazi", "hitler", "porn")
-            if handle in exact or any(p in handle for p in parts):
+            # Service-account prefixes (ADR-0066, ADR-0068): a handle is a
+            # username, and a blueprint matches its service account on the
+            # username, so an enrolled `atlas-game` would be taken over.
+            # The same tuple as wird-username.
+            reserved = ("atlas-", "bridge-", "netbird-", "ak-")
+            if handle in exact or any(p in handle for p in parts) or handle.startswith(reserved):
                 ak_message("That handle is not available.")
                 return False
             return True
