@@ -22,14 +22,14 @@ gitops/
 │   ├── argocd-ingressroute.yaml           # Traefik IngressRoute → argocd.bnei.dev
 │   ├── infisical-ingressroute.yaml       # Traefik IngressRoute → infisical.bnei.dev
 │   ├── grafana-admin-secret.yaml          # InfisicalSecret → Grafana admin credentials
-│   ├── basic-admin-auth-middleware.yaml   # Shared Traefik BasicAuth Middleware (ns default), for admin-only tools
-│   ├── basic-admin-auth-secret.yaml       # InfisicalSecret → the above Middleware's htpasswd credential
+│   ├── admin-forwardauth-middleware.yaml  # forwardAuth Middleware (ns default) for the admin tools: pgweb, Alertmanager
+│   ├── admin-tools-outpost-route.yaml      # Their forward_single providers' callback legs (ADR-0039 Decision 3)
 │   ├── longhorn-backup-secret.yaml        # InfisicalSecret → Longhorn's Garage S3 backup-target credentials
 │   ├── argocd-redis-secret.yaml            # InfisicalSecret → shared Pigsty Redis password, for argocd-application.yaml's externalRedis
 │   ├── longhorn-daily-snapshot-recurringjob.yaml  # Longhorn RecurringJob CR, daily snapshot schedule
 │   ├── node-drainer-rbac.yaml              # ServiceAccount+ClusterRole+ClusterRoleBinding for .165's self-drain automation (ansible/playbooks/self-drain-configure.yml) — least-privilege, cordon/evict/read-daemonsets only
 │   ├── grafana-ingressroute.yaml           # Traefik IngressRoute → grafana.bnei.dev
-│   ├── alertmanager-ingressroute.yaml      # Traefik IngressRoute → alertmanager.bnei.dev, gated by basic-admin-auth
+│   ├── alertmanager-ingressroute.yaml      # Traefik IngressRoute → alertmanager.bnei.dev, gated by admin-forwardauth
 │   ├── alertmanager-discord-secret.yaml    # InfisicalSecret → Discord webhook Alertmanager posts to
 │   ├── provisioner-application.yaml        # Standalone Application: agent-fleet's provisioner (plain manifests, own RBAC, sourced from agent-fleet's own k8s/provisioner/) — see agent-fleet docs/adr/0012/0019/0020/0021
 │   ├── fleet-repo-overrides.yaml           # ConfigMap: agent-fleet repo exceptions (name/baseBranch/image/clusterAccess); the repo list itself is the bot's GitHub collaborator list — agent-fleet docs/adr/0074

@@ -1,6 +1,7 @@
-# Alertmanager has no built-in auth (unlike Grafana), so it's gated by the
-# same shared basic-admin-auth Middleware pgweb uses — never expose it
-# without that middleware ref.
+# Alertmanager has no built-in auth (unlike Grafana), so it's gated by
+# authentik forwardAuth for platform-admins, the same admin-forwardauth
+# Middleware pgweb uses (its own forward_single provider `alertmanager-gate`;
+# ADR-0039 Decision 3, #183) — never expose it without that middleware ref.
 #
 # Also fixes the "View in Alertmanager" links Discord alerts render with:
 # without externalUrl set (see gitops/platform/values/prometheus/values.yaml),
@@ -20,7 +21,7 @@ spec:
     middlewares:
     - name: cloudflare-origin-lock
       namespace: default
-    - name: basic-admin-auth
+    - name: admin-forwardauth
       namespace: default
     services:
     - name: platform-prometheus-kube-p-alertmanager

@@ -7,8 +7,8 @@
 # whichever applied last as the only working app and no error anywhere.
 #
 # So every proxy provider that wants the embedded outpost lives here, and the
-# single outpost binding at the bottom lists all of them. Adding Alertmanager,
-# pgweb or Proxmox later means editing this file, not adding another.
+# single outpost binding at the bottom lists all of them. Adding a provider
+# (Proxmox, later) means editing this file, not adding another.
 #
 # WHY forwardAuth HERE AND NOT NATIVE OIDC: the e2e preview hosts route to a
 # session's own dev-server pod — whatever the agent happened to start and pass
@@ -230,6 +230,65 @@ data:
           meta_launch_url: https://mountain.bnei.dev
           meta_description: The ukubi cluster as a live town
       # ----------------------------------------------------------------
+      # The admin tools (ADR-0039 Decision 3, #183): pgweb.bnei.dev (a raw
+      # Postgres console) and alertmanager.bnei.dev (silences), off the old
+      # shared basic-admin-auth. Bound to platform-admins by
+      # authentik-blueprint-admin-tools-policy.yaml; callback legs
+      # gitops/bootstrap/admin-tools-outpost-route.yaml.
+      #
+      # forward_single, NOT the previews provider above, though both are
+      # platform-admins. The previews provider is forward_domain on
+      # cookie_domain bnei.dev: its session cookie is sent to every host in the
+      # zone, including the per-session preview hosts, which serve whatever
+      # an agent session started. A preview pod would receive the operator's
+      # cookie and could replay it here, and these two hosts are worth more
+      # than a preview. A forward_single provider's cookie stays on its own
+      # host. Bearer interception off: every caller is a browser.
+      - model: authentik_providers_proxy.proxyprovider
+        id: pgweb-gate-proxy-provider
+        identifiers:
+          name: pgweb-gate
+        attrs:
+          name: pgweb-gate
+          mode: forward_single
+          external_host: https://pgweb.bnei.dev
+          intercept_header_auth: false
+          basic_auth_enabled: false
+          access_token_validity: "hours=8"
+          authorization_flow: !Find [authentik_flows.flow, [slug, default-provider-authorization-implicit-consent]]
+          invalidation_flow: !Find [authentik_flows.flow, [slug, default-provider-invalidation-flow]]
+      - model: authentik_core.application
+        identifiers:
+          slug: pgweb-gate
+        attrs:
+          name: pgweb
+          slug: pgweb-gate
+          provider: !KeyOf pgweb-gate-proxy-provider
+          meta_launch_url: https://pgweb.bnei.dev
+          meta_description: Postgres admin console
+      - model: authentik_providers_proxy.proxyprovider
+        id: alertmanager-gate-proxy-provider
+        identifiers:
+          name: alertmanager-gate
+        attrs:
+          name: alertmanager-gate
+          mode: forward_single
+          external_host: https://alertmanager.bnei.dev
+          intercept_header_auth: false
+          basic_auth_enabled: false
+          access_token_validity: "hours=8"
+          authorization_flow: !Find [authentik_flows.flow, [slug, default-provider-authorization-implicit-consent]]
+          invalidation_flow: !Find [authentik_flows.flow, [slug, default-provider-invalidation-flow]]
+      - model: authentik_core.application
+        identifiers:
+          slug: alertmanager-gate
+        attrs:
+          name: Alertmanager
+          slug: alertmanager-gate
+          provider: !KeyOf alertmanager-gate-proxy-provider
+          meta_launch_url: https://alertmanager.bnei.dev
+          meta_description: Alerts and silences (the "View in Alertmanager" links)
+      # ----------------------------------------------------------------
       # THE TRAP. A proxy provider does nothing at all until it is bound
       # to an outpost, and the embedded outpost ships with providers = [].
       # Verified live: `authentik Embedded Outpost :: proxy :: providers= []`.
@@ -252,3 +311,6 @@ data:
             - !KeyOf drop-proxy-provider
             # mountain-gate (ADR-0065), declared above in this same file.
             - !KeyOf mountain-gate-proxy-provider
+            # the admin tools (ADR-0039 Decision 3), declared above in this same file.
+            - !KeyOf pgweb-gate-proxy-provider
+            - !KeyOf alertmanager-gate-proxy-provider

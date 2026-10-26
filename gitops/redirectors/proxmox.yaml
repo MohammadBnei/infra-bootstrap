@@ -67,7 +67,5 @@ spec:
     middlewares:
     - name: cloudflare-origin-lock
       namespace: default
-    #   - name: basic-admin-auth
-    #     namespace: default
   tls:
     certResolver: le

@@ -2,7 +2,7 @@
 # (ADR-0039 Decision 3, provider declared in
 # authentik-blueprint-forwardauth.yaml).
 #
-# In `default`, alongside basic-admin-auth and for the same reason: a
+# In `default`, like the other shared Middlewares and for the same reason: a
 # cross-namespace `{name, namespace: default}` reference is what lets any app
 # point at one shared object instead of each rendering its own copy. That
 # matters here beyond tidiness — agent-fleet's provisioner builds preview

@@ -1,0 +1,20 @@
+# The admin tools' forwardAuth Middleware (pgweb.bnei.dev, alertmanager.bnei.dev).
+# ADR-0039 Decision 3, #183.
+#
+# WHY NOT THE SHARED `authentik-forwardauth`: that one is the previews gate
+# (authentik-blueprint-forwardauth.yaml says why these two have providers of
+# their own). The outpost picks the provider from the forwarded host, so one
+# Middleware serves both hosts; a dedicated object keeps the ref honest. No
+# authResponseHeaders: neither app reads a forwarded identity.
+#
+# Address and trustForwardHeader copied from mountain-forwardauth-middleware.yaml,
+# for its reasons (same embedded outpost, port 80).
+apiVersion: traefik.io/v1alpha1
+kind: Middleware
+metadata:
+  name: admin-forwardauth
+  namespace: default
+spec:
+  forwardAuth:
+    address: http://platform-authentik-server.authentik.svc.cluster.local/outpost.goauthentik.io/auth/traefik
+    trustForwardHeader: true
