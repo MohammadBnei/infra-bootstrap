@@ -1,0 +1,19 @@
+# Refuses vendor attribution in a PR's own commits (message, author, committer),
+# title and body: CLAUDE.md's trailer rule, the part a machine can check.
+# The check lives in ukubi-ci, pinned by sha; bump the sha to take its fixes.
+#
+# agent-trailers stays `any`: CLAUDE.md asks for Agent-Session only "where one
+# exists", so `pair` would refuse a valid agent commit. Conventional subjects
+# are not a rule here, so that check is off.
+name: trailers
+
+on:
+  pull_request:
+    types: [opened, edited, synchronize, reopened]
+
+permissions:
+  contents: read
+
+jobs:
+  trailers:
+    uses: MohammadBnei/ukubi-ci/.github/workflows/trailers.yml@f7f0634e00f1dc037dd3302cb8445ae99bc57e17
