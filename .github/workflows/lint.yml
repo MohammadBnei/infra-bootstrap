@@ -105,8 +105,20 @@ jobs:
             -schema-location 'https://raw.githubusercontent.com/datreeio/CRDs-catalog/main/{{.Group}}/{{.ResourceKind}}_{{.ResourceAPIVersion}}.json' \
             gitops/platform/actions-runner/*.yaml \
             gitops/redirectors/*.yaml \
+            gitops/platform/ukubi-game/*.yaml \
             gitops/bootstrap/*.yaml \
             "$RUNNER_TEMP/rendered.yaml"
+
+      # ADR-0069: the game's read grant names its resources. Fails on a
+      # wildcard, secrets, configmaps, RBAC or CRD objects, or an exec-family
+      # subresource; widening it is an ADR-0069 amendment, which edits this too.
+      - name: the game's read RBAC stays inside ADR-0069 part 1
+        run: |
+          set -euo pipefail
+          bad=$(yq 'select(.kind == "ClusterRole" or .kind == "Role") | .rules[] |
+            select((.apiGroups + .resources + .verbs)[] as $x | ["*", "secrets", "configmaps", "pods/exec", "pods/attach", "pods/portforward", "rbac.authorization.k8s.io", "apiextensions.k8s.io"] | any_c(. == $x))' \
+            gitops/platform/ukubi-game/rbac.yaml)
+          if [ -n "$bad" ]; then echo "::error::gitops/platform/ukubi-game/rbac.yaml grants outside ADR-0069 part 1:"; echo "$bad"; exit 1; fi
 
       - name: registry.yaml <-> apps.applicationset.yaml sync check
         run: bash gitops/scripts/check-app-registry-sync.sh

@@ -1,0 +1,42 @@
+# Standalone Application for the game's bounds (ADR-0069): its ServiceAccount,
+# its read RBAC and its egress fence, as plain manifests. Not common-app-chart,
+# which renders no ServiceAccount, RBAC or Role in another namespace; and not
+# the game's own repo, so the grant is reviewed here, where the cluster's
+# other standing grants are (thot's precedent, thot-application.yaml).
+#
+# Wave 1, before user apps (10): the account exists before the game runs as it.
+# The game itself (image, app entry, hostname, sign-in) is deployed by its own
+# change, into this same namespace, as `serviceAccountName: ukubi-game`.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: platform-ukubi-game-bounds
+  namespace: argocd
+  labels:
+    gitops.bnei.dev/tier: platform
+  annotations:
+    argocd.argoproj.io/sync-wave: "1"
+  finalizers:
+  - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: git@github.com:MohammadBnei/infra-bootstrap.git
+    targetRevision: main
+    path: gitops/platform/ukubi-game
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: ukubi-game
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+    - CreateNamespace=true
+    - ServerSideApply=true
+    retry:
+      limit: 5
+      backoff:
+        duration: 5s
+        factor: 2
+        maxDuration: 3m

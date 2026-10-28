@@ -1,0 +1,86 @@
+# ADR-0069 part 1 (C1, the console's reads): get/list/watch on exactly the
+# resources the read providers use, each named. Narrower than thot-executor
+# (gitops/platform/thot/rbac.yaml), which stays the broadest read grant
+# (ADR-0032): no configmaps, no traefik objects, no write verb.
+#
+# Never granted here, any verb (the gitops lint job checks each one):
+#   - wildcards, in groups, resources or verbs;
+#   - secrets: which Secrets a workload references is read from its pod
+#     spec, and the value is reached only through Infisical;
+#   - rbac.authorization.k8s.io and apiextensions.k8s.io (no self-escalation,
+#     no CRD definitions);
+#   - pods/exec, pods/attach, pods/portforward: exec is ADR-0069 part 2, in
+#     per-namespace Roles with their exclusions;
+#   - configmaps: rendered config the reads never show (ADR-0069, Decision 3).
+# Widening this file is an ADR-0069 amendment, never a drive-by edit.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: ukubi-game-read
+rules:
+  - apiGroups: [""]
+    resources:
+      - pods
+      - nodes
+      - services
+      - persistentvolumeclaims
+    verbs: ["get", "list", "watch"]
+  # Logs, one-shot and followed (follow=true is still a get).
+  - apiGroups: [""]
+    resources: ["pods/log"]
+    verbs: ["get"]
+  - apiGroups: ["apps"]
+    resources:
+      - deployments
+      - statefulsets
+      - daemonsets
+      - replicasets
+    verbs: ["get", "list", "watch"]
+  # describe: a Service's backends and every object's events, through the
+  # current APIs (v1 Endpoints is deprecated since 1.33; core v1 events are
+  # the same objects as events.k8s.io's).
+  - apiGroups: ["discovery.k8s.io"]
+    resources: ["endpointslices"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["events.k8s.io"]
+    resources: ["events"]
+    verbs: ["get", "list", "watch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: ukubi-game-read
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: ukubi-game-read
+subjects:
+  - kind: ServiceAccount
+    name: ukubi-game
+    namespace: ukubi-game
+---
+# Applications live in argocd only, so their read is a Role there, never a
+# ClusterRole. Part 3 (C3) widens this same Role by amendment.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: ukubi-game
+  namespace: argocd
+rules:
+  - apiGroups: ["argoproj.io"]
+    resources: ["applications"]
+    verbs: ["get", "list", "watch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: ukubi-game
+  namespace: argocd
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: ukubi-game
+subjects:
+  - kind: ServiceAccount
+    name: ukubi-game
+    namespace: ukubi-game
