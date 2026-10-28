@@ -32,6 +32,7 @@ gitops/
 │   ├── alertmanager-ingressroute.yaml      # Traefik IngressRoute → alertmanager.bnei.dev, gated by admin-forwardauth
 │   ├── alertmanager-discord-secret.yaml    # InfisicalSecret → Discord webhook Alertmanager posts to
 │   ├── provisioner-application.yaml        # Standalone Application: agent-fleet's provisioner (plain manifests, own RBAC, sourced from agent-fleet's own k8s/provisioner/) — see agent-fleet docs/adr/0012/0019/0020/0021
+│   ├── ukubi-game-application.yaml         # Standalone Application: the game's ServiceAccount, read RBAC and egress fence (plain manifests in platform/ukubi-game/) — ADR-0069
 │   ├── fleet-repo-overrides.yaml           # ConfigMap: agent-fleet repo exceptions (name/baseBranch/image/clusterAccess); the repo list itself is the bot's GitHub collaborator list — agent-fleet docs/adr/0074
 │   ├── platform.applicationset.yaml       # ApplicationSet for remaining platform apps (not traefik)
 │   ├── platform-common-apps.applicationset.yaml  # ApplicationSet for common-app-chart-based platform tools (public image, no app-specific code)
@@ -54,6 +55,7 @@ gitops/
 │   │       ├── poddisruptionbudget.yaml
 │   │       └── extra-manifests.yaml      # Raw extra objects (ConfigMaps, Middlewares, ...) via values.extraManifests
 │   ├── actions-runner/                    # Standalone Application's manifests: self-hosted GitHub Actions runner (ADR-0022)
+│   ├── ukubi-game/                        # Standalone Application's manifests: the game's ServiceAccount, ClusterRole/Role and CiliumNetworkPolicy (ADR-0069)
 │   └── values/                            # Helm values for platform apps (including platform-common-apps)
 │       ├── traefik/values.yaml
 │       ├── infisical/values.yaml

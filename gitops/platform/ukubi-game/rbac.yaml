@@ -1,0 +1,417 @@
+# ADR-0069 part 1 (C1, the console's reads): get/list/watch on exactly the
+# resources the read providers use, each named. Narrower than thot-executor
+# (gitops/platform/thot/rbac.yaml), which stays the broadest read grant
+# (ADR-0032): no configmaps, no traefik objects, no write verb.
+#
+# Never granted here, any verb. The gitops lint job holds every rule and
+# binding in this directory to an exact list, so none of these can slip in:
+#   - wildcards, in groups, resources or verbs;
+#   - secrets: which Secrets a workload references is read from its pod
+#     spec, and the value is reached only through Infisical;
+#   - rbac.authorization.k8s.io and apiextensions.k8s.io (no self-escalation,
+#     no CRD definitions);
+#   - pods/exec, pods/attach, pods/portforward: exec is ADR-0069 part 2, in
+#     per-namespace Roles with their exclusions;
+#   - configmaps: rendered config the reads never show (ADR-0069, Decision 3);
+#   - pods/log, cluster-wide: logs are granted per namespace, below.
+# Widening this file is an ADR-0069 amendment, never a drive-by edit.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: ukubi-game-read
+rules:
+  - apiGroups: [""]
+    resources:
+      - pods
+      - nodes
+      - services
+      - persistentvolumeclaims
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["apps"]
+    resources:
+      - deployments
+      - statefulsets
+      - daemonsets
+      - replicasets
+    verbs: ["get", "list", "watch"]
+  # describe: a Service's backends and every object's events, through the
+  # current APIs (v1 Endpoints is deprecated since 1.33; core v1 events are
+  # the same objects as events.k8s.io's).
+  - apiGroups: ["discovery.k8s.io"]
+    resources: ["endpointslices"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["events.k8s.io"]
+    resources: ["events"]
+    verbs: ["get", "list", "watch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: ukubi-game-read
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: ukubi-game-read
+subjects:
+  - kind: ServiceAccount
+    name: ukubi-game
+    namespace: ukubi-game
+---
+# Applications live in argocd only, so their read is a Role there, never a
+# ClusterRole. Brought forward from part 3 (C3): C1's building view shows an
+# app's ArgoCD Application. Part 3 widens this same Role by amendment.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: ukubi-game
+  namespace: argocd
+rules:
+  - apiGroups: ["argoproj.io"]
+    resources: ["applications"]
+    verbs: ["get", "list", "watch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: ukubi-game
+  namespace: argocd
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: ukubi-game
+subjects:
+  - kind: ServiceAccount
+    name: ukubi-game
+    namespace: ukubi-game
+---
+# Logs, one-shot and followed (follow=true is still a get), in an allowlist of
+# namespaces (ADR-0069, Decision 2). A RoleBinding to a ClusterRole grants
+# only inside the RoleBinding's own namespace, so this ClusterRole on its own
+# grants nothing anywhere.
+#
+# Never bound in kube-system, cilium, longhorn-system, argocd, infisical,
+# authentik, agent-fleet or agent-vault: their pods are privileged or hold
+# platform secrets, and their logs can carry tokens (agent-vault logs reset
+# codes in clear, ADR-0061). Nor in thot, netbird or actions-runner: an
+# agent's cluster commands, the VPN control plane and CI job output. A namespace not listed here gets no logs, so a
+# new app namespace stays dark until an ADR-0069 amendment adds it.
+#
+# Every namespace below must exist before this Application syncs (no
+# CreateNamespace for them here): ArgoCD dry-runs every object first, so one
+# missing namespace fails the whole sync. On a running cluster they all exist.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: ukubi-game-logs
+rules:
+  - apiGroups: [""]
+    resources: ["pods/log"]
+    verbs: ["get"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: ukubi-game-logs
+  namespace: dream-analyst
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: ukubi-game-logs
+subjects:
+  - kind: ServiceAccount
+    name: ukubi-game
+    namespace: ukubi-game
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: ukubi-game-logs
+  namespace: drop
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: ukubi-game-logs
+subjects:
+  - kind: ServiceAccount
+    name: ukubi-game
+    namespace: ukubi-game
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: ukubi-game-logs
+  namespace: editable-blog
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: ukubi-game-logs
+subjects:
+  - kind: ServiceAccount
+    name: ukubi-game
+    namespace: ukubi-game
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: ukubi-game-logs
+  namespace: ente
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: ukubi-game-logs
+subjects:
+  - kind: ServiceAccount
+    name: ukubi-game
+    namespace: ukubi-game
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: ukubi-game-logs
+  namespace: has-journal
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: ukubi-game-logs
+subjects:
+  - kind: ServiceAccount
+    name: ukubi-game
+    namespace: ukubi-game
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: ukubi-game-logs
+  namespace: hq
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: ukubi-game-logs
+subjects:
+  - kind: ServiceAccount
+    name: ukubi-game
+    namespace: ukubi-game
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: ukubi-game-logs
+  namespace: local-path-storage
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: ukubi-game-logs
+subjects:
+  - kind: ServiceAccount
+    name: ukubi-game
+    namespace: ukubi-game
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: ukubi-game-logs
+  namespace: monitoring
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: ukubi-game-logs
+subjects:
+  - kind: ServiceAccount
+    name: ukubi-game
+    namespace: ukubi-game
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: ukubi-game-logs
+  namespace: mountain
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: ukubi-game-logs
+subjects:
+  - kind: ServiceAccount
+    name: ukubi-game
+    namespace: ukubi-game
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: ukubi-game-logs
+  namespace: pgweb
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: ukubi-game-logs
+subjects:
+  - kind: ServiceAccount
+    name: ukubi-game
+    namespace: ukubi-game
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: ukubi-game-logs
+  namespace: pi-lab
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: ukubi-game-logs
+subjects:
+  - kind: ServiceAccount
+    name: ukubi-game
+    namespace: ukubi-game
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: ukubi-game-logs
+  namespace: searxng
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: ukubi-game-logs
+subjects:
+  - kind: ServiceAccount
+    name: ukubi-game
+    namespace: ukubi-game
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: ukubi-game-logs
+  namespace: silverbullet
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: ukubi-game-logs
+subjects:
+  - kind: ServiceAccount
+    name: ukubi-game
+    namespace: ukubi-game
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: ukubi-game-logs
+  namespace: traefik
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: ukubi-game-logs
+subjects:
+  - kind: ServiceAccount
+    name: ukubi-game
+    namespace: ukubi-game
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: ukubi-game-logs
+  namespace: ukubi-bridge
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: ukubi-game-logs
+subjects:
+  - kind: ServiceAccount
+    name: ukubi-game
+    namespace: ukubi-game
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: ukubi-game-logs
+  namespace: ukubi-game
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: ukubi-game-logs
+subjects:
+  - kind: ServiceAccount
+    name: ukubi-game
+    namespace: ukubi-game
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: ukubi-game-logs
+  namespace: ukubi-stt
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: ukubi-game-logs
+subjects:
+  - kind: ServiceAccount
+    name: ukubi-game
+    namespace: ukubi-game
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: ukubi-game-logs
+  namespace: vos
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: ukubi-game-logs
+subjects:
+  - kind: ServiceAccount
+    name: ukubi-game
+    namespace: ukubi-game
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: ukubi-game-logs
+  namespace: vos-dev
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: ukubi-game-logs
+subjects:
+  - kind: ServiceAccount
+    name: ukubi-game
+    namespace: ukubi-game
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: ukubi-game-logs
+  namespace: wedding-2026
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: ukubi-game-logs
+subjects:
+  - kind: ServiceAccount
+    name: ukubi-game
+    namespace: ukubi-game
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: ukubi-game-logs
+  namespace: wird
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: ukubi-game-logs
+subjects:
+  - kind: ServiceAccount
+    name: ukubi-game
+    namespace: ukubi-game
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: ukubi-game-logs
+  namespace: zot
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: ukubi-game-logs
+subjects:
+  - kind: ServiceAccount
+    name: ukubi-game
+    namespace: ukubi-game

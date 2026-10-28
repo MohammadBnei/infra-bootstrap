@@ -1,0 +1,116 @@
+# The game's egress fence (ADR-0069 part 1). Egress only: ingress stays
+# unenforced, so Traefik and the kubelet's probes are untouched. Once this
+# policy exists every pod in the namespace is default-deny on egress, so
+# each later slice widens it by an ADR-0069 amendment (part 3: ArgoCD's API;
+# part 4: Patroni :8008 and Postgres :5432; Loki when the logs provider lands).
+#
+# The DNS, in-cluster and world rule shapes are searxng's and silverbullet's
+# (ADR-0040 practice), for their reasons: read gitops/platform/values/searxng/values.yaml and
+# docs/bootstrap-test-notes.md (2026-08-25, corrected 2026-10-18) before
+# changing one. In short:
+#   - DNS is the `host` entity on :53; no CIDR rule can carry it.
+#   - In-cluster Services: toEndpoints WITH toPorts. Cilium's BPF LB DNATs a
+#     ClusterIP before egress policy, so the port is the backend pod's.
+#   - Never toEntities: [host] beyond :53, never toServices without toPorts.
+#
+# UNVERIFIED on the live cluster (down when this was written). Verify after
+# the first sync, with the game running:
+#   hubble observe --namespace ukubi-game --verdict DROPPED
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: ukubi-game-egress-lock
+  namespace: ukubi-game
+spec:
+  endpointSelector: {}
+  egress:
+    - toEntities:
+        - host
+      toPorts:
+        - ports:
+            - port: "53"
+              protocol: UDP
+            - port: "53"
+              protocol: TCP
+    # Belt and braces, searxng's reason: cilium#18644.
+    - toCIDR:
+        - 169.254.25.10/32
+      toPorts:
+        - ports:
+            - port: "53"
+              protocol: UDP
+            - port: "53"
+              protocol: TCP
+    # The read slice itself: the API server, which carries every Kubernetes
+    # read and the Applications in argocd (kube_apiserver_port, 6443).
+    # NEW on this cluster: no other policy here has a kube-apiserver rule, so
+    # it has no searxng or silverbullet precedent. The reasoning is theirs
+    # (the ClusterIP 10.233.0.1:443 is DNATed before egress policy, so policy
+    # sees the node's API server on 6443), but the kube-apiserver entity is
+    # untested: ADR-0069's Rollout lists a real list from inside a game pod.
+    - toEntities:
+        - kube-apiserver
+      toPorts:
+        - ports:
+            - port: "6443"
+              protocol: TCP
+    # The town's reads, which the game already makes: atlas (ADR-0068, its
+    # /api/graph and /ws on :8080), authentik's in-cluster token endpoint
+    # (ADR-0068 §4, server :9000), agent-fleet core's AgentService (:9091,
+    # its client port) and Alertmanager (:9093). Namespace and port, no pod
+    # labels, for the first three: each port has one listener in its
+    # namespace, and each checks its caller (a token, a bearer).
+    # agent-fleet core admits only namespaces labelled fleet.bnei.dev/client,
+    # which the Application sets on this one (ukubi-game-application.yaml).
+    - toEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: mountain
+      toPorts:
+        - ports:
+            - port: "8080"
+              protocol: TCP
+    - toEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: authentik
+      toPorts:
+        - ports:
+            - port: "9000"
+              protocol: TCP
+    - toEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: agent-fleet
+      toPorts:
+        - ports:
+            - port: "9091"
+              protocol: TCP
+    # Alertmanager has no auth in-cluster (the forwardAuth gate is on its
+    # IngressRoute only), so a bare L4 rule would let the game POST silences
+    # and mute every alert. L7: the one read the game makes, GET /api/v2/alerts
+    # (with its query), and nothing else; Alertmanager's pods only.
+    # UNVERIFIED: this is the first L7 HTTP rule here (rules.dns, which works,
+    # is the DNS proxy, not Envoy). If Envoy is off, the read fails closed.
+    - toEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: monitoring
+            app.kubernetes.io/name: alertmanager
+      toPorts:
+        - ports:
+            - port: "9093"
+              protocol: TCP
+          rules:
+            http:
+              - method: GET
+                path: "/api/v2/alerts([?].*)?"
+    # GitHub's API, and the sign-in's OIDC discovery and code exchange
+    # (authentik.bnei.dev resolves to Cloudflare from a pod, silverbullet's
+    # note). HTTPS only; the LAN and the pod and Service CIDRs are excepted.
+    - toCIDRSet:
+        - cidr: 0.0.0.0/0
+          except:
+            - 10.0.0.0/8
+            - 172.16.0.0/12
+            - 192.168.0.0/16
+      toPorts:
+        - ports:
+            - port: "443"
+              protocol: TCP

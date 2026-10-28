@@ -1,0 +1,50 @@
+# Standalone Application for the game's bounds (ADR-0069): its ServiceAccount,
+# its read RBAC and its egress fence, as plain manifests. Not common-app-chart,
+# which renders no ServiceAccount, RBAC or Role in another namespace; and not
+# the game's own repo, so the grant is reviewed here, where the cluster's
+# other standing grants are (thot's precedent, thot-application.yaml).
+#
+# Wave 1, before user apps (10): the account exists before the game runs as it.
+# The game itself (image, app entry, hostname, sign-in) is deployed by its own
+# change, into this same namespace, as `serviceAccountName: ukubi-game`.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: platform-ukubi-game-bounds
+  namespace: argocd
+  labels:
+    gitops.bnei.dev/tier: platform
+  annotations:
+    argocd.argoproj.io/sync-wave: "1"
+  finalizers:
+  - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: git@github.com:MohammadBnei/infra-bootstrap.git
+    targetRevision: main
+    path: gitops/platform/ukubi-game
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: ukubi-game
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    # agent-fleet core's NetworkPolicy admits :9091 only from namespaces
+    # carrying this label (its k8s/core.yaml); the bearer is agent-fleet's
+    # client registration. Granting the label is this repo's call (ADR-0069).
+    managedNamespaceMetadata:
+      labels:
+        fleet.bnei.dev/client: "ukubi-game"
+    syncOptions:
+    - CreateNamespace=true
+    - ServerSideApply=true
+    # No limit: the logs RoleBindings need namespaces the wave-10 apps create
+    # (ADR-0069 Decision 7), so on a rebuild this retries until they exist.
+    retry:
+      limit: -1
+      backoff:
+        duration: 5s
+        factor: 2
+        maxDuration: 3m
