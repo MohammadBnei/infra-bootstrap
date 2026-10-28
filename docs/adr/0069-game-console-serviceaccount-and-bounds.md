@@ -2,10 +2,12 @@
 
 **Status:** Proposed. Part 1 (the console's reads) is decided here; parts 2 to 4 are named only, and each is
 decided with its slice, by amendment. Decided by M BN in mountain's R13 console design (the private repo), which
-moves the cluster's day-to-day control into the game's server.
+moves the cluster's day-to-day control into the game's server. Amends
+[ADR-0068](0068-atlas-machine-principal-for-the-game.md) Decision 2: the game's copy of the app password moves to the
+game's own project (Decision 5).
 **Date:** 2026-10-28
-**Related:** [ADR-0068](0068-atlas-machine-principal-for-the-game.md) (the game reads atlas as `atlas-game`; it
-stays), [ADR-0032](0032-thot-rbac-and-alerting.md) (thot's read grant, the precedent and the upper bound),
+**Related:** [ADR-0068](0068-atlas-machine-principal-for-the-game.md) (the game reads atlas as `atlas-game`; that
+grant stays, and only where the game's copy of its password lives changes), [ADR-0032](0032-thot-rbac-and-alerting.md) (thot's read grant, the precedent and the upper bound),
 [ADR-0040](0040-cluster-internal-hardening-baseline.md) (the API audit log, and the `CiliumNetworkPolicy` practice),
 [ADR-0049](0049-shared-commons-secrets-in-common-app-chart.md) and [ADR-0062](0062-fleet-github-app.md) (an own
 Infisical project read by an own identity).
@@ -67,7 +69,8 @@ This ADR prepares the identity that deployment runs as.
 4. **Applications are read through a Role in `argocd`, not a ClusterRole.** Applications live in `argocd` only
    (apps in other namespaces are not enabled), so the Role `ukubi-game` there grants `get`, `list` and `watch` on
    `applications.argoproj.io`, and the RoleBinding of the same name binds it. The game takes an app's namespace from
-   the Application's own `destination`. Part 3 widens this same Role.
+   the Application's own `destination`. The Role is brought forward from part 3: C1's building view shows an app's
+   ArgoCD Application, so its reads land with the other reads. Part 3 widens this same Role.
 5. **The game's own Infisical project, read by its own identity.** This is a human step (Rollout 2).
    - Project `ukubi-game` (env `dev`), read by machine identity `ukubi-game-reader` (universal auth, `viewer` on
      that project only). Its credentials are the k8s Secret `infisical/ukubi-game-universal-auth`, which the game's
@@ -84,10 +87,17 @@ This ADR prepares the identity that deployment runs as.
    cannot express DNS or the API server under this Cilium (ADR-0040's pilot). Egress only; ingress stays unenforced.
    It allows:
    - DNS: the `host` entity on 53, plus the `169.254.25.10` rule kept for cilium#18644 (searxng's shape);
-   - the `kube-apiserver` entity on 6443: every read of this part;
+   - the `kube-apiserver` entity on 6443: every read of this part. This rule is new on this cluster: no other policy
+     has one, so it has no searxng or silverbullet precedent. It follows their reasoning (the API server's ClusterIP
+     is DNATed before egress policy, so policy sees the node's API server on 6443), but it is untested (Rollout 3);
    - the town's reads, which the game already makes: atlas (`mountain`, 8080), authentik's in-cluster token
-     endpoint (`authentik`, 9000), agent-fleet core's client port (`agent-fleet`, 9091) and Alertmanager
-     (`monitoring`, 9093). These are `toEndpoints` on namespace and port, with no pod labels;
+     endpoint (`authentik`, 9000) and agent-fleet core's client port (`agent-fleet`, 9091), as `toEndpoints` on
+     namespace and port, with no pod labels. Each of them checks its caller;
+   - Alertmanager (`monitoring`, 9093), its pods only, and at L7: `GET /api/v2/alerts` and nothing else.
+     Alertmanager has no auth in-cluster (its forwardAuth gate is on the IngressRoute), so an L4 rule would also let
+     the game create and delete silences and post alerts, a write. It is the cluster's first L7 HTTP rule (the
+     working `rules.dns` is the DNS proxy, not Envoy), so it is untested too; if it does not hold, the read fails
+     closed;
    - HTTPS (443) to the world, RFC 1918 excepted: GitHub's API, and the sign-in's OIDC calls, since
      `authentik.bnei.dev` resolves to Cloudflare from a pod.
 
@@ -97,8 +107,13 @@ This ADR prepares the identity that deployment runs as.
    - `common-app-chart` renders no ServiceAccount, no RBAC and no object in another namespace. thot is the precedent:
      its grant is plain manifests here.
    - The grant stays out of the game's repo: this repo reviews every standing grant on the cluster.
-   - CI fails if `ukubi-game-read` or the `argocd` Role ever names a wildcard, `secrets`, `configmaps`, an RBAC or CRD resource, or
-     an exec-family subresource.
+   - The namespace carries `fleet.bnei.dev/client`, set by the Application (`managedNamespaceMetadata`). agent-fleet
+     core's NetworkPolicy admits 9091 only from namespaces with that label, so granting it is this repo's call.
+   - CI holds the grant to an exact list: every (group, resource, verb) of every Role and ClusterRole, every
+     binding with its role and subject, and any `aggregationRule` or `nonResourceURLs`, across every file in
+     `gitops/platform/ukubi-game/`. Anything added fails, whether a wildcard, `secrets`, an exec-equivalent
+     (`nodes/proxy`, `pods/ephemeralcontainers`, `serviceaccounts/token`), `impersonate`, `escalate` or `bind`, a
+     binding to `cluster-admin` or `view`, or an aggregated role.
 
 ### Part 2: Kubernetes writes (C2)
 
@@ -142,7 +157,7 @@ egress to Patroni and Postgres.
   the game's own: `platform-admins` only, the session's lifetime and its revocation. None of them is at the API
   server, so part 1 is a read grant to whoever holds a valid session.
 - **A compromised game pod reads the same,** with its ServiceAccount token, and it reaches only the destinations in
-  Decision 6.
+  Decision 6. It cannot silence an alert: the Alertmanager rule passes `GET /api/v2/alerts` only.
 - **Reads never include a Secret's value.** RBAC grants no verb on `secrets`, so even a bug in the game cannot fetch
   one. The two ways a secret can still show are a literal in a pod spec and a line in a log. The game redacts both
   before it shows them, and the API server does not.
@@ -153,8 +168,9 @@ egress to Patroni and Postgres.
 - **The namespace is default-deny on egress** from the first sync. Each new destination is an amendment here, and a
   missed one shows as a drop in Hubble, not a silent success. Tracing (`OTEL_EXPORTER_OTLP_TRACES_ENDPOINT`) is not
   allowed yet: the game treats a failed exporter as a warning, and the collector is added when it is chosen.
-- **agent-fleet admits the game on core's client port.** core's NetworkPolicy lets only client namespaces reach 9091,
-  so agent-fleet adds `ukubi-game` to it when the game is deployed. That is agent-fleet's change.
+- **This repo admits the game to core's client port.** core's NetworkPolicy lets only namespaces labelled
+  `fleet.bnei.dev/client` reach 9091, and this repo labels `ukubi-game` (Decision 7). agent-fleet's part is the
+  game's client registration, the bearer core checks, when the game is deployed.
 - **The game's deployment change carries `serviceAccountName: ukubi-game`.** `common-app-chart` has no
   `serviceAccountName` value today. That change adds one, or deploys the game as plain manifests.
 - **One more standalone plain-manifest Application** (`platform-ukubi-game-bounds`), for thot's reason.
@@ -173,6 +189,9 @@ egress to Patroni and Postgres.
      `list applications.argoproj.io -n argocd`;
    - and **no** for `get secrets -A`, `list configmaps -A`, `create pods --subresource=exec -A`,
      `list clusterroles`, `list customresourcedefinitions`, `patch deployments.apps -A`,
-     `list applications.argoproj.io -n default`.
+     `list applications.argoproj.io -n default`;
+   - and, because `can-i --as` never crosses the egress fence, a real `list pods -A` from inside a pod running as
+     the account succeeds (the `kube-apiserver` rule), and from the same pod a `GET` on Alertmanager's
+     `/api/v2/alerts` succeeds while a `POST /api/v2/silences` is refused (the L7 rule).
 4. **When the game is deployed:** `hubble observe --namespace ukubi-game --verdict DROPPED` stays empty while the
    town loads and a pod's logs follow. A drop names the destination the fence is missing.

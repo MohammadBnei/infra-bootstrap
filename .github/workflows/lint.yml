@@ -109,16 +109,68 @@ jobs:
             gitops/bootstrap/*.yaml \
             "$RUNNER_TEMP/rendered.yaml"
 
-      # ADR-0069: the game's read grant names its resources. Fails on a
-      # wildcard, secrets, configmaps, RBAC or CRD objects, or an exec-family
-      # subresource; widening it is an ADR-0069 amendment, which edits this too.
-      - name: the game's read RBAC stays inside ADR-0069 part 1
+      # ADR-0069: the game's grant is an allowlist. Every rule tuple (group,
+      # resource, verb), aggregationRule, nonResourceURLs and binding in any
+      # file of gitops/platform/ukubi-game/ is listed and must equal this list
+      # exactly, so nothing can be added (a verb, an exec-equivalent like
+      # nodes/proxy or serviceaccounts/token, a binding to cluster-admin, an
+      # aggregated role, a second file) without editing it. Widening the grant
+      # is an ADR-0069 amendment, which edits this list too.
+      - name: the game's RBAC is exactly ADR-0069 part 1
         run: |
           set -euo pipefail
-          bad=$(yq 'select(.kind == "ClusterRole" or .kind == "Role") | .rules[] |
-            select((.apiGroups + .resources + .verbs)[] as $x | ["*", "secrets", "configmaps", "pods/exec", "pods/attach", "pods/portforward", "rbac.authorization.k8s.io", "apiextensions.k8s.io"] | any_c(. == $x))' \
-            gitops/platform/ukubi-game/rbac.yaml)
-          if [ -n "$bad" ]; then echo "::error::gitops/platform/ukubi-game/rbac.yaml grants outside ADR-0069 part 1:"; echo "$bad"; exit 1; fi
+          allowed=$(cat <<'ALLOW'
+          ClusterRole -/ukubi-game-read |pods|get
+          ClusterRole -/ukubi-game-read |pods|list
+          ClusterRole -/ukubi-game-read |pods|watch
+          ClusterRole -/ukubi-game-read |nodes|get
+          ClusterRole -/ukubi-game-read |nodes|list
+          ClusterRole -/ukubi-game-read |nodes|watch
+          ClusterRole -/ukubi-game-read |services|get
+          ClusterRole -/ukubi-game-read |services|list
+          ClusterRole -/ukubi-game-read |services|watch
+          ClusterRole -/ukubi-game-read |persistentvolumeclaims|get
+          ClusterRole -/ukubi-game-read |persistentvolumeclaims|list
+          ClusterRole -/ukubi-game-read |persistentvolumeclaims|watch
+          ClusterRole -/ukubi-game-read |pods/log|get
+          ClusterRole -/ukubi-game-read apps|deployments|get
+          ClusterRole -/ukubi-game-read apps|deployments|list
+          ClusterRole -/ukubi-game-read apps|deployments|watch
+          ClusterRole -/ukubi-game-read apps|statefulsets|get
+          ClusterRole -/ukubi-game-read apps|statefulsets|list
+          ClusterRole -/ukubi-game-read apps|statefulsets|watch
+          ClusterRole -/ukubi-game-read apps|daemonsets|get
+          ClusterRole -/ukubi-game-read apps|daemonsets|list
+          ClusterRole -/ukubi-game-read apps|daemonsets|watch
+          ClusterRole -/ukubi-game-read apps|replicasets|get
+          ClusterRole -/ukubi-game-read apps|replicasets|list
+          ClusterRole -/ukubi-game-read apps|replicasets|watch
+          ClusterRole -/ukubi-game-read discovery.k8s.io|endpointslices|get
+          ClusterRole -/ukubi-game-read discovery.k8s.io|endpointslices|list
+          ClusterRole -/ukubi-game-read discovery.k8s.io|endpointslices|watch
+          ClusterRole -/ukubi-game-read events.k8s.io|events|get
+          ClusterRole -/ukubi-game-read events.k8s.io|events|list
+          ClusterRole -/ukubi-game-read events.k8s.io|events|watch
+          ClusterRoleBinding -/ukubi-game-read -> ClusterRole/ukubi-game-read for ServiceAccount ukubi-game/ukubi-game
+          Role argocd/ukubi-game argoproj.io|applications|get
+          Role argocd/ukubi-game argoproj.io|applications|list
+          Role argocd/ukubi-game argoproj.io|applications|watch
+          RoleBinding argocd/ukubi-game -> Role/ukubi-game for ServiceAccount ukubi-game/ukubi-game
+          ALLOW
+          )
+          actual=$(yq -o=json -I=0 '.' gitops/platform/ukubi-game/*.yaml | jq -r '
+            select(.kind | IN("ClusterRole", "Role", "ClusterRoleBinding", "RoleBinding")) |
+            "\(.kind) \(.metadata.namespace // "-")/\(.metadata.name)" as $id |
+            (select(.aggregationRule) | "\($id) aggregationRule"),
+            (.rules // [] | .[] |
+              if .nonResourceURLs then "\($id) nonResourceURLs"
+              else .apiGroups[] as $g | .resources[] as $r | .verbs[] as $v | "\($id) \($g)|\($r)|\($v)" end),
+            (select(.roleRef) | .roleRef as $ref | .subjects // [] | .[] |
+              "\($id) -> \($ref.kind)/\($ref.name) for \(.kind) \(.namespace // "-")/\(.name)")')
+          if ! d=$(diff <(sed 's/^ *//' <<<"$allowed" | sort) <(sort <<<"$actual")); then
+            echo "::error::gitops/platform/ukubi-game grants differ from ADR-0069 part 1 (> added, < removed):"
+            echo "$d"; exit 1
+          fi
 
       - name: registry.yaml <-> apps.applicationset.yaml sync check
         run: bash gitops/scripts/check-app-registry-sync.sh

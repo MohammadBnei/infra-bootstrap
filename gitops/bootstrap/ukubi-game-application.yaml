@@ -31,6 +31,12 @@ spec:
     automated:
       prune: true
       selfHeal: true
+    # agent-fleet core's NetworkPolicy admits :9091 only from namespaces
+    # carrying this label (its k8s/core.yaml); the bearer is agent-fleet's
+    # client registration. Granting the label is this repo's call (ADR-0069).
+    managedNamespaceMetadata:
+      labels:
+        fleet.bnei.dev/client: "ukubi-game"
     syncOptions:
     - CreateNamespace=true
     - ServerSideApply=true

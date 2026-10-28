@@ -3,7 +3,8 @@
 # (gitops/platform/thot/rbac.yaml), which stays the broadest read grant
 # (ADR-0032): no configmaps, no traefik objects, no write verb.
 #
-# Never granted here, any verb (the gitops lint job checks each one):
+# Never granted here, any verb. The gitops lint job holds every rule and
+# binding in this directory to an exact list, so none of these can slip in:
 #   - wildcards, in groups, resources or verbs;
 #   - secrets: which Secrets a workload references is read from its pod
 #     spec, and the value is reached only through Infisical;
@@ -60,7 +61,8 @@ subjects:
     namespace: ukubi-game
 ---
 # Applications live in argocd only, so their read is a Role there, never a
-# ClusterRole. Part 3 (C3) widens this same Role by amendment.
+# ClusterRole. Brought forward from part 3 (C3): C1's building view shows an
+# app's ArgoCD Application. Part 3 widens this same Role by amendment.
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
 metadata:
