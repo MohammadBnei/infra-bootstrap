@@ -155,6 +155,24 @@ data:
             Use at least 8 characters, and a password that has not appeared in
             a known data breach.
 
+      # The service accounts' username prefixes (ADR-0066, ADR-0068), the same
+      # tuple as mountain-handle: a blueprint matches a service account on its
+      # username, so an enrolled `atlas-game` or `bridge-core` would be taken
+      # over when its blueprint lands. Lowercased: authentik's uniqueness
+      # check is case-sensitive.
+      - model: authentik_policies_expression.expressionpolicy
+        id: wird-username-policy
+        identifiers:
+          name: wird-username
+        attrs:
+          name: wird-username
+          expression: |
+            username = request.context.get("prompt_data", {}).get("username", "")
+            if username.lower().startswith(("atlas-", "bridge-", "netbird-", "ak-")):
+                ak_message("That username is not available.")
+                return False
+            return True
+
       - model: authentik_stages_prompt.promptstage
         id: stage-prompt
         identifiers:
@@ -168,6 +186,7 @@ data:
             - !KeyOf prompt-password-repeat
           validation_policies:
             - !KeyOf wird-password-policy
+            - !KeyOf wird-username-policy
 
       # create_users_as_inactive + the email stage's activate_user_on_success
       # are one mechanism: the account exists but cannot log in until the

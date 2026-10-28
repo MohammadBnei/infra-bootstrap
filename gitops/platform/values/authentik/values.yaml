@@ -151,6 +151,10 @@ blueprints:
   - authentik-blueprint-netbird
   - authentik-blueprint-mountain
   - authentik-blueprint-silverbullet
+  # atlas's machine principal (ADR-0068): the atlas-api provider, the
+  # atlas-game service account, its app password and binding, in one
+  # blueprint. Its Infisical key must exist before this line merges.
+  - authentik-blueprint-atlas-api
 
 server:
   replicas: 1

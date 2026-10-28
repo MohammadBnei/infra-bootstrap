@@ -262,6 +262,9 @@ updated.
   [ADR-0064](docs/adr/0064-mountain-town-roles-and-guest-probes.md) and
   [ADR-0065](docs/adr/0065-mountain-behind-forwardauth-invited-visitors.md), and
   [ADR-0067](docs/adr/0067-mountain-atlas-platform-admins-only.md) (admins only).
+  One machine principal, the service account `atlas-game`, reads `GET /api/graph`
+  and `GET /ws` for the game's town with a 10-min token checked against a pinned
+  certificate; nothing else ([ADR-0068](docs/adr/0068-atlas-machine-principal-for-the-game.md)).
 - **Shared notes are markdown in git, edited through SilverBullet** (ADR-0058).
   `notes.bnei.dev` serves a clone of `MohammadBnei/notes`; SilverBullet commits
   and pushes each person's edits and pulls what Claude Code pushes. Login is
