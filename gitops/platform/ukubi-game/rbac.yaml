@@ -92,7 +92,8 @@ subjects:
 # Never bound in kube-system, cilium, longhorn-system, argocd, infisical,
 # authentik, agent-fleet or agent-vault: their pods are privileged or hold
 # platform secrets, and their logs can carry tokens (agent-vault logs reset
-# codes in clear, ADR-0061). A namespace not listed here gets no logs, so a
+# codes in clear, ADR-0061). Nor in thot, netbird or actions-runner: an
+# agent's cluster commands, the VPN control plane and CI job output. A namespace not listed here gets no logs, so a
 # new app namespace stays dark until an ADR-0069 amendment adds it.
 #
 # Every namespace below must exist before this Application syncs (no
@@ -106,20 +107,6 @@ rules:
   - apiGroups: [""]
     resources: ["pods/log"]
     verbs: ["get"]
----
-apiVersion: rbac.authorization.k8s.io/v1
-kind: RoleBinding
-metadata:
-  name: ukubi-game-logs
-  namespace: actions-runner
-roleRef:
-  apiGroup: rbac.authorization.k8s.io
-  kind: ClusterRole
-  name: ukubi-game-logs
-subjects:
-  - kind: ServiceAccount
-    name: ukubi-game
-    namespace: ukubi-game
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
@@ -251,20 +238,6 @@ apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
 metadata:
   name: ukubi-game-logs
-  namespace: netbird
-roleRef:
-  apiGroup: rbac.authorization.k8s.io
-  kind: ClusterRole
-  name: ukubi-game-logs
-subjects:
-  - kind: ServiceAccount
-    name: ukubi-game
-    namespace: ukubi-game
----
-apiVersion: rbac.authorization.k8s.io/v1
-kind: RoleBinding
-metadata:
-  name: ukubi-game-logs
   namespace: pgweb
 roleRef:
   apiGroup: rbac.authorization.k8s.io
@@ -308,20 +281,6 @@ kind: RoleBinding
 metadata:
   name: ukubi-game-logs
   namespace: silverbullet
-roleRef:
-  apiGroup: rbac.authorization.k8s.io
-  kind: ClusterRole
-  name: ukubi-game-logs
-subjects:
-  - kind: ServiceAccount
-    name: ukubi-game
-    namespace: ukubi-game
----
-apiVersion: rbac.authorization.k8s.io/v1
-kind: RoleBinding
-metadata:
-  name: ukubi-game-logs
-  namespace: thot
 roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: ClusterRole

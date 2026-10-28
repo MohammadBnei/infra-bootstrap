@@ -40,8 +40,10 @@ spec:
     syncOptions:
     - CreateNamespace=true
     - ServerSideApply=true
+    # No limit: the logs RoleBindings need namespaces the wave-10 apps create
+    # (ADR-0069 Decision 7), so on a rebuild this retries until they exist.
     retry:
-      limit: 5
+      limit: -1
       backoff:
         duration: 5s
         factor: 2

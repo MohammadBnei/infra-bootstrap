@@ -63,14 +63,15 @@ This ADR prepares the identity that deployment runs as.
      inside its own namespace, so the ClusterRole alone grants nothing.
    - **The allowed namespaces are an allowlist:** the namespaces this repo deploys workloads into (the `apps`,
      `platform` and `platform-common-apps` ApplicationSets and the standalone Applications in `gitops/bootstrap/`),
-     minus the excluded ones below. That is `actions-runner`, `dream-analyst`, `drop`, `editable-blog`, `ente`,
-     `has-journal`, `hq`, `local-path-storage`, `monitoring`, `mountain`, `netbird`, `pgweb`, `pi-lab`, `searxng`,
-     `silverbullet`, `thot`, `traefik`, `ukubi-bridge`, `ukubi-game`, `ukubi-stt`, `vos`, `vos-dev`, `wedding-2026`,
-     `wird` and `zot`.
+     minus the excluded ones below. That is `dream-analyst`, `drop`, `editable-blog`, `ente`, `has-journal`, `hq`,
+     `local-path-storage`, `monitoring`, `mountain`, `pgweb`, `pi-lab`, `searxng`, `silverbullet`, `traefik`,
+     `ukubi-bridge`, `ukubi-game`, `ukubi-stt`, `vos`, `vos-dev`, `wedding-2026`, `wird` and `zot`.
    - **Excluded, by the same rule as part 2's exec Roles:** `kube-system`, `cilium`, `longhorn-system`, `argocd`,
      `infisical`, `authentik`, `agent-fleet` and `agent-vault`. Their pods are privileged or hold platform secrets,
      and their logs can carry tokens (Agent Vault logs password-reset codes in clear, ADR-0061 Consequences). The
      redirector namespaces (`default`, `garage`, `hermes`, `proxmox`) run no pods, so they get no binding.
+   - **Also excluded, for what their logs carry:** `thot` (an agent's cluster commands and their output), `netbird`
+     (the VPN control plane) and `actions-runner` (CI job output, where a step can print a credential).
    - **Fail-closed.** A namespace that is not listed gets no logs. A new app namespace shows in the town (the reads
      are cluster-wide) but its logs stay closed until an amendment of this ADR adds its RoleBinding.
 3. **ConfigMaps are not in the read set.**
@@ -138,8 +139,8 @@ This ADR prepares the identity that deployment runs as.
      namespaces, so each must exist when it syncs. ArgoCD dry-runs every object before it applies any, so one
      missing namespace fails the whole sync, the ServiceAccount included. On a running cluster they all exist (the
      Role in `argocd` relies on the same). On a rebuild from nothing, this wave-1 Application syncs before the
-     wave-10 apps create their namespaces: its retry policy (5 tries, about 2.5 minutes) usually covers that, and if
-     it runs out, one manual sync after the apps are up does.
+     wave-10 apps create their namespaces: its retry policy has no limit (`retry.limit: -1`, backoff capped at 3
+     minutes), so it keeps retrying until the apps have created them, with no manual sync.
 
 ### Part 2: Kubernetes writes (C2)
 
