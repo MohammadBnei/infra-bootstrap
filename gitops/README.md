@@ -246,6 +246,18 @@ Annotations: `annotations` (Deployment), `podAnnotations` (pod template), `servi
 
 The chart can template its own `InfisicalSecret` CR — set `infisical.enabled: true` and `infisical.projectSlug` in the app's `values.yaml` and the resulting K8s Secret is auto-wired into the Deployment's `envFrom` (no manual `secretRef` needed). It reuses the cluster's shared `universal-auth-credentials` machine identity (ns `infisical`) — grant that identity access to your app's Infisical project in the Infisical UI, don't mint new K8s credentials per app. Defaults: `envSlug: dev`, `secretsPath: "/"`, in-cluster `hostAPI`. Set `infisical.autoReload: true` to have the chart add `secrets.infisical.com/auto-reload: "true"` to the Deployment automatically (restarts it when the managed secret changes) — no need to hand-add it under `annotations:`. Apps that need a manually-authored `InfisicalSecret` (e.g. field remapping via `template:`) can still define one in their private repo and reference it manually via `envFrom`.
 
+**Golden render.** `gitops/scripts/chart-golden.sh` renders the chart at the merge-base and at head for every element of both ApplicationSets, the way ArgoCD does: each user app gets its own `valuesPath` files at its own `targetRevision` and its `ingress.hostname` parameter. Only the chart varies. The element lists and all values come from head, so adding an app or changing values is not a diff. It prints only `<app>: unchanged|changed <sha256>` lines and exits 1 on any change. A chart PR must render every app unchanged. An app opts in to new chart behaviour through its own values in a separate PR, which this check does not compare.
+
+The `Chart render` workflow runs it on PRs that touch the chart, on GitHub-hosted runners with `github.token`. That covers platform apps and the user apps whose repo is public. Apps with a private repo are printed as `skipped (not public)`. The run that covers every app is local, uses your own `gh auth`, and is the proof a chart PR carries:
+
+```sh
+git fetch origin
+bash gitops/scripts/chart-golden.sh origin/main HEAD           # committed chart
+bash gitops/scripts/chart-golden.sh origin/main DIR:gitops/platform/common-app-chart   # uncommitted edits
+```
+
+To see what changed, set `GOLDEN_OUT=<dir>` to keep the renders (`<app>.base.yaml`/`.head.yaml`). The dir must be outside any git work tree, because private apps' manifests land there. Never paste renders or helm errors of private apps into a PR: this repo is public. Hashes from a local run and from CI are not comparable, because the helm versions differ.
+
 `apps.applicationset.yaml` and `platform-common-apps.applicationset.yaml` both set `ignoreDifferences` for `InfisicalSecret`'s `.status` so the operator's periodic resync doesn't leave the Application permanently `OutOfSync`.
 
 ---

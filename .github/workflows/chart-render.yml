@@ -1,0 +1,70 @@
+name: Chart render
+
+# Golden render of common-app-chart (gitops/scripts/chart-golden.sh): renders
+# the chart at the PR's merge-base and head for every app in the two
+# ApplicationSets and fails on any difference. CI covers platform apps and
+# the user apps whose repo is public only: github.token reads no private
+# repo, and this public repo holds no token that could. The full run over
+# every app is local, with your own gh auth (gitops/README.md, "Golden
+# render"). Output is status lines and hashes only; no render is uploaded.
+
+on:
+  pull_request:
+    paths:
+      - "gitops/platform/common-app-chart/**"
+      - "gitops/bootstrap/apps.applicationset.yaml"
+      - "gitops/bootstrap/platform-common-apps.applicationset.yaml"
+      - "gitops/scripts/chart-golden.sh"
+      - ".github/workflows/chart-render.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  golden:
+    name: golden render (public apps)
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+      BASE: ${{ github.event.pull_request.base.sha }}
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          fetch-depth: 0
+
+      - uses: azure/setup-helm@v5.0.1
+        with:
+          version: "v4.2.3"
+
+      - name: Install yq
+        run: |
+          set -euo pipefail
+          curl -sSL https://github.com/mikefarah/yq/releases/download/v4.53.3/yq_linux_amd64 \
+            -o /usr/local/bin/yq
+          chmod +x /usr/local/bin/yq
+
+      - name: golden render, merge-base vs head (public apps)
+        run: bash gitops/scripts/chart-golden.sh "$BASE" HEAD --public-only
+
+      # The gate must go red for each reason it exists: a changed render, a
+      # failed render, and an unusable token (which must not pass as a run
+      # of skips). Each fixture is a scratch copy of the chart, never committed.
+      - name: self-test, the gate fails on a change, a render failure and a bad token
+        run: |
+          set -uo pipefail
+          C=gitops/platform/common-app-chart
+          err() { echo "::error::$*"; exit 1; }
+          cp -R "$C" "$RUNNER_TEMP/add"
+          printf 'apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: golden-selftest\n' > "$RUNNER_TEMP/add/templates/zz-selftest.yaml"
+          cp -R "$C" "$RUNNER_TEMP/fail"
+          printf '{{ fail "selftest" }}\n' > "$RUNNER_TEMP/fail/templates/zz-selftest.yaml"
+
+          rc=0; out=$(bash gitops/scripts/chart-golden.sh HEAD "DIR:$RUNNER_TEMP/add" --public-only 2>&1) || rc=$?
+          [ "$rc" = 1 ] && grep -qE '^[^ ]+: changed [0-9a-f]{64}$' <<<"$out" || err "added template not flagged as changed (exit $rc)"
+
+          rc=0; out=$(bash gitops/scripts/chart-golden.sh HEAD "DIR:$RUNNER_TEMP/fail" --public-only 2>&1) || rc=$?
+          [ "$rc" = 1 ] && grep -q ': render failed$' <<<"$out" || err "failing template not flagged as render failed (exit $rc)"
+
+          rc=0; out=$(GH_TOKEN=invalid bash gitops/scripts/chart-golden.sh HEAD HEAD --public-only 2>&1) || rc=$?
+          [ "$rc" = 1 ] && grep -q ': fetch failed$' <<<"$out" || err "bad token not flagged as fetch failed (exit $rc)"
+          echo "self-test: all three mutations caught"
