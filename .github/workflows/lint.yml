@@ -116,9 +116,17 @@ jobs:
       # nodes/proxy or serviceaccounts/token, a binding to cluster-admin, an
       # aggregated role, a second file) without editing it. Widening the grant
       # is an ADR-0069 amendment, which edits this list too.
+      # pods/log is never cluster-wide: it is a RoleBinding per namespace in
+      # log_ns, and pods/log in a no_log_ns namespace fails even if someone
+      # also adds that namespace to log_ns.
       - name: the game's RBAC is exactly ADR-0069 part 1
         run: |
           set -euo pipefail
+          log_ns="actions-runner dream-analyst drop editable-blog ente has-journal hq
+            local-path-storage monitoring mountain netbird pgweb pi-lab searxng
+            silverbullet thot traefik ukubi-bridge ukubi-game ukubi-stt vos vos-dev
+            wedding-2026 wird zot"
+          no_log_ns="kube-system cilium longhorn-system argocd infisical authentik agent-fleet agent-vault"
           allowed=$(cat <<'ALLOW'
           ClusterRole -/ukubi-game-read |pods|get
           ClusterRole -/ukubi-game-read |pods|list
@@ -132,7 +140,6 @@ jobs:
           ClusterRole -/ukubi-game-read |persistentvolumeclaims|get
           ClusterRole -/ukubi-game-read |persistentvolumeclaims|list
           ClusterRole -/ukubi-game-read |persistentvolumeclaims|watch
-          ClusterRole -/ukubi-game-read |pods/log|get
           ClusterRole -/ukubi-game-read apps|deployments|get
           ClusterRole -/ukubi-game-read apps|deployments|list
           ClusterRole -/ukubi-game-read apps|deployments|watch
@@ -156,8 +163,12 @@ jobs:
           Role argocd/ukubi-game argoproj.io|applications|list
           Role argocd/ukubi-game argoproj.io|applications|watch
           RoleBinding argocd/ukubi-game -> Role/ukubi-game for ServiceAccount ukubi-game/ukubi-game
+          ClusterRole -/ukubi-game-logs |pods/log|get
           ALLOW
           )
+          for ns in $log_ns; do
+            allowed+=$'\n'"RoleBinding $ns/ukubi-game-logs -> ClusterRole/ukubi-game-logs for ServiceAccount ukubi-game/ukubi-game"
+          done
           actual=$(yq -o=json -I=0 '.' gitops/platform/ukubi-game/*.yaml | jq -r '
             select(.kind | IN("ClusterRole", "Role", "ClusterRoleBinding", "RoleBinding")) |
             "\(.kind) \(.metadata.namespace // "-")/\(.metadata.name)" as $id |
@@ -167,6 +178,11 @@ jobs:
               else .apiGroups[] as $g | .resources[] as $r | .verbs[] as $v | "\($id) \($g)|\($r)|\($v)" end),
             (select(.roleRef) | .roleRef as $ref | .subjects // [] | .[] |
               "\($id) -> \($ref.kind)/\($ref.name) for \(.kind) \(.namespace // "-")/\(.name)")')
+          for ns in $no_log_ns; do
+            if grep -Eq "^[A-Za-z]+ $ns/.*(pods/log|ukubi-game-logs)" <<<"$actual"; then
+              echo "::error::gitops/platform/ukubi-game grants pods/log in $ns, which ADR-0069 excludes"; exit 1
+            fi
+          done
           if ! d=$(diff <(sed 's/^ *//' <<<"$allowed" | sort) <(sort <<<"$actual")); then
             echo "::error::gitops/platform/ukubi-game grants differ from ADR-0069 part 1 (> added, < removed):"
             echo "$d"; exit 1

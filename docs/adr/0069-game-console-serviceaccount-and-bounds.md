@@ -46,7 +46,6 @@ This ADR prepares the identity that deployment runs as.
    | Group | Resources | Why |
    |---|---|---|
    | core | `pods`, `nodes`, `services`, `persistentvolumeclaims` | a building's parts, the houses (nodes), and describe |
-   | core | `pods/log` (`get` only) | logs, once and followed |
    | `apps` | `deployments`, `statefulsets`, `daemonsets`, `replicasets` | an app's workloads and add-ons, and a Deployment's describe |
    | `discovery.k8s.io` | `endpointslices` | a Service's backends (v1 `Endpoints` is deprecated since 1.33) |
    | `events.k8s.io` | `events` | every describe's events (core v1 events are the same objects; one API is enough) |
@@ -56,16 +55,35 @@ This ADR prepares the identity that deployment runs as.
    - **Which Secrets a workload references** is read from its pod spec (`envFrom`, `valueFrom`, volumes): names
      only. Each name links to the app's Infisical project. The game never reads a Secret's value.
    - It is cluster-wide because a town spans every namespace, thot's reason (ADR-0032). It is narrower than thot's
-     grant: no ConfigMaps, no Traefik objects, no write verb. thot stays the broadest standing read grant.
+     grant: no ConfigMaps, no Traefik objects, no cluster-wide logs, no write verb. thot stays the broadest standing
+     read grant.
+   - **Logs are per namespace, never cluster-wide.** `ukubi-game-read` has no `pods/log`. A second ClusterRole,
+     `ukubi-game-logs`, holds only `get` on `pods/log` (logs once and followed; `follow=true` is still a `get`), and
+     a RoleBinding `ukubi-game-logs` in each allowed namespace binds it. A RoleBinding to a ClusterRole grants only
+     inside its own namespace, so the ClusterRole alone grants nothing.
+   - **The allowed namespaces are an allowlist:** the namespaces this repo deploys workloads into (the `apps`,
+     `platform` and `platform-common-apps` ApplicationSets and the standalone Applications in `gitops/bootstrap/`),
+     minus the excluded ones below. That is `actions-runner`, `dream-analyst`, `drop`, `editable-blog`, `ente`,
+     `has-journal`, `hq`, `local-path-storage`, `monitoring`, `mountain`, `netbird`, `pgweb`, `pi-lab`, `searxng`,
+     `silverbullet`, `thot`, `traefik`, `ukubi-bridge`, `ukubi-game`, `ukubi-stt`, `vos`, `vos-dev`, `wedding-2026`,
+     `wird` and `zot`.
+   - **Excluded, by the same rule as part 2's exec Roles:** `kube-system`, `cilium`, `longhorn-system`, `argocd`,
+     `infisical`, `authentik`, `agent-fleet` and `agent-vault`. Their pods are privileged or hold platform secrets,
+     and their logs can carry tokens (Agent Vault logs password-reset codes in clear, ADR-0061 Consequences). The
+     redirector namespaces (`default`, `garage`, `hermes`, `proxmox`) run no pods, so they get no binding.
+   - **Fail-closed.** A namespace that is not listed gets no logs. A new app namespace shows in the town (the reads
+     are cluster-wide) but its logs stay closed until an amendment of this ADR adds its RoleBinding.
 3. **ConfigMaps are not in the read set.**
    - No C1 read needs a ConfigMap's content. A workload's ConfigMap references come from its pod spec, as its
      Secret references do, and show as names.
    - A cluster-wide ConfigMap read would hand the game every component's rendered configuration, platform
      components included (ArgoCD's, Cilium's, Grafana's), which the console never shows.
-   - That does not make rendered values invisible. The YAML of a Deployment carries its literal `env:` values, as
-     `common-app-chart` renders them with `toYaml`. Reading workloads reads those. The game redacts what it shows,
-     but redaction is in the game's code, not a boundary at the API server. A value that matters belongs in a
-     Secret, which is the repo's rule already.
+   - That does not make rendered values invisible. A pod spec, which `get` on `pods` returns, carries the literal
+     `env:` values the chart renders (`common-app-chart` renders them with `toYaml`), and so does a Deployment's
+     template. That is the same kind of exposure ConfigMaps were left out for. The game's own redaction pass covers
+     it before anything is shown, but that redaction is enforced in the game's code, not at the API server: the
+     ServiceAccount itself reads the values. A value that matters belongs in a Secret, which is the repo's rule
+     already.
 4. **Applications are read through a Role in `argocd`, not a ClusterRole.** Applications live in `argocd` only
    (apps in other namespaces are not enabled), so the Role `ukubi-game` there grants `get`, `list` and `watch` on
    `applications.argoproj.io`, and the RoleBinding of the same name binds it. The game takes an app's namespace from
@@ -110,10 +128,18 @@ This ADR prepares the identity that deployment runs as.
    - The namespace carries `fleet.bnei.dev/client`, set by the Application (`managedNamespaceMetadata`). agent-fleet
      core's NetworkPolicy admits 9091 only from namespaces with that label, so granting it is this repo's call.
    - CI holds the grant to an exact list: every (group, resource, verb) of every Role and ClusterRole, every
-     binding with its role and subject, and any `aggregationRule` or `nonResourceURLs`, across every file in
-     `gitops/platform/ukubi-game/`. Anything added fails, whether a wildcard, `secrets`, an exec-equivalent
+     binding with its namespace, role and subject, and any `aggregationRule` or `nonResourceURLs`, across every file
+     in `gitops/platform/ukubi-game/`. Anything added fails, whether a wildcard, `secrets`, an exec-equivalent
      (`nodes/proxy`, `pods/ephemeralcontainers`, `serviceaccounts/token`), `impersonate`, `escalate` or `bind`, a
-     binding to `cluster-admin` or `view`, or an aggregated role.
+     binding to `cluster-admin` or `view`, an aggregated role, `pods/log` cluster-wide, or a logs RoleBinding in a
+     namespace not on the list. `pods/log` in an excluded namespace fails even if that namespace is also added to
+     the list.
+   - The logs RoleBindings carry an explicit `metadata.namespace` and this Application does not create those
+     namespaces, so each must exist when it syncs. ArgoCD dry-runs every object before it applies any, so one
+     missing namespace fails the whole sync, the ServiceAccount included. On a running cluster they all exist (the
+     Role in `argocd` relies on the same). On a rebuild from nothing, this wave-1 Application syncs before the
+     wave-10 apps create their namespaces: its retry policy (5 tries, about 2.5 minutes) usually covers that, and if
+     it runs out, one manual sync after the apps are up does.
 
 ### Part 2: Kubernetes writes (C2)
 
@@ -140,7 +166,11 @@ egress to Patroni and Postgres.
 - **Reusing `thot-executor`.** It patches workloads and deletes pods, and one identity for two systems would make the
   API audit log unable to say which one acted.
 - **Per-namespace Roles for the reads.** Every new app namespace would need an edit before the town could show it.
-  (Part 2's exec is per-namespace on purpose: there, each namespace is a decision.)
+  (Logs and part 2's exec are per-namespace on purpose: there, each namespace is a decision.)
+- **`pods/log` cluster-wide.** It reads every platform pod's output, the excluded namespaces included, and a log
+  line is where a token leaks. Showing a building's shape needs every namespace; reading what it prints does not.
+- **A denylist for logs** (bind everywhere except the excluded namespaces). Kubernetes has no deny rule, so it
+  would still be a binding per namespace, and a new namespace would be open by default. The allowlist fails closed.
 - **A ClusterRole for Applications.** They live in `argocd` only, so a Role there grants the same reads with less.
 - **Reading Secrets to list a workload's references.** The pod spec already names them.
 - **ConfigMaps in the read set:** Decision 3.
@@ -152,10 +182,11 @@ egress to Patroni and Postgres.
 ## Consequences
 
 - **A stolen admin session reads what the role reads.** That is the shape of every workload, node and Service in the
-  cluster, the literal env values in their pod specs, every Application, and the logs of every pod, platform pods
-  included. Logs are the widest of these: whatever an app prints, a token included, can be read. Its limits are
-  the game's own: `platform-admins` only, the session's lifetime and its revocation. None of them is at the API
-  server, so part 1 is a read grant to whoever holds a valid session.
+  cluster, the literal env values in their pod specs, every Application, and the logs of the pods in the allowed
+  namespaces (Decision 2). Logs are the widest of these: whatever an app there prints, a token included, can be
+  read. The excluded namespaces' logs cannot be. Its limits are the game's own: `platform-admins` only, the
+  session's lifetime and its revocation. None of them is at the API server, so part 1 is a read grant to whoever
+  holds a valid session.
 - **A compromised game pod reads the same,** with its ServiceAccount token, and it reaches only the destinations in
   Decision 6. It cannot silence an alert: the Alertmanager rule passes `GET /api/v2/alerts` only.
 - **Reads never include a Secret's value.** RBAC grants no verb on `secrets`, so even a bug in the game cannot fetch
@@ -163,6 +194,8 @@ egress to Patroni and Postgres.
   before it shows them, and the API server does not.
 - **Every read is in the API server's audit log** as `system:serviceaccount:ukubi-game:ukubi-game` (ADR-0040
   Decision 2). The game's own journal is never the only record.
+- **A new namespace gets no logs until it is added.** The town shows it at once; its logs need an amendment here
+  (a RoleBinding and the CI list). That is the price of failing closed.
 - **The cluster has two broad read grants now:** thot's, which stays the broadest, and this narrower one. ADR-0032's
   consequence still holds.
 - **The namespace is default-deny on egress** from the first sync. Each new destination is an amendment here, and a
@@ -185,9 +218,10 @@ egress to Patroni and Postgres.
      `fleet-github-app-universal-auth` was made (ADR-0062). It is never committed.
 3. **After the first sync** (the cluster was down when this was written, so none of it is verified yet):
    - `kubectl auth can-i --as=system:serviceaccount:ukubi-game:ukubi-game` answers **yes** for `list pods -A`,
-     `get pods --subresource=log -A`, `list deployments.apps -A`, `list events.events.k8s.io -A`, `list nodes`,
-     `list applications.argoproj.io -n argocd`;
-   - and **no** for `get secrets -A`, `list configmaps -A`, `create pods --subresource=exec -A`,
+     `get pods --subresource=log -n mountain` (and each allowed namespace), `list deployments.apps -A`,
+     `list events.events.k8s.io -A`, `list nodes`, `list applications.argoproj.io -n argocd`;
+   - and **no** for `get pods --subresource=log -A`, `get pods --subresource=log -n kube-system` (and each excluded
+     namespace), `get secrets -A`, `list configmaps -A`, `create pods --subresource=exec -A`,
      `list clusterroles`, `list customresourcedefinitions`, `patch deployments.apps -A`,
      `list applications.argoproj.io -n default`;
    - and, because `can-i --as` never crosses the egress fence, a real `list pods -A` from inside a pod running as
