@@ -46,7 +46,7 @@ How to actually run a layer day-to-day: that layer's own README below.
 | `ansible/inventories/` | Ansible inventories (PVE hosts) |
 | `terraform/` | Proxmox VM/LXC provisioning (`.165`) |
 | `docs/` | runbooks (k8s bootstrap, pg bootstrap, pve post-install), ADRs |
-| `agent-fleet/` | git submodule → `MohammadBnei/agent-fleet` at a release tag; a cosmetic pointer only — ArgoCD deploys agent-fleet from its own repo (provisioner Application tracks its `main`, core via `gitops/apps/registry.yaml`) |
+| `agent-fleet` (sibling repo) | [github.com/MohammadBnei/agent-fleet](https://github.com/MohammadBnei/agent-fleet), checked out beside this repo, not part of this tree — ArgoCD deploys agent-fleet from its own repo (provisioner Application tracks its `main`, core via `gitops/apps/registry.yaml`) |
 
 ## Workflow
 

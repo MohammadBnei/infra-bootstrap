@@ -22,6 +22,11 @@ kubespray-venv/
 # K8s
 .kube/
 
+# agent-fleet was a submodule until #378; old clones keep its stale checkout
+# here (ignored so `git add -A` can't re-add it as a gitlink). Delete it:
+#   rm -rf agent-fleet .git/modules/agent-fleet
+/agent-fleet/
+
 # kubespray runtime artifacts (submodule owns these, but just in case)
 kubespray/cluster.yml
 kubespray/inventory/*.retry
