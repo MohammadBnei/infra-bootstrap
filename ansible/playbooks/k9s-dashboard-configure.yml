@@ -290,8 +290,8 @@
         - name: Clone infra-bootstrap
           # Public repo, so HTTPS and no deploy key. Submodules are NOT
           # initialised: k8s-cluster is a git@ URL needing a key, and nothing
-          # in an ops run reads it. kubespray is only needed
-          # if a kubespray run is ever driven from here.
+          # in an ops run reads it. kubespray is only needed if a kubespray
+          # run is ever driven from here.
           ansible.builtin.git:
             repo: https://github.com/MohammadBnei/infra-bootstrap.git
             dest: /opt/infra-bootstrap
