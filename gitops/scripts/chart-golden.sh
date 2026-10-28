@@ -14,10 +14,11 @@
 # - `DIR:<path>` renders a chart directory on disk as head (uncommitted
 #   edits); lists and platform values then come from the working tree.
 #   A plain ref ignores uncommitted edits.
-# - Output is only `<app>: unchanged|changed <sha256 of head render>`,
-#   `<app>: skipped (not public)`, `<app>: skipped (unreadable by token)`,
+# - Output is only `<app>: unchanged|changed <sha256 of head render>`
+#   (`changed ... (base render failed)` when only head renders, e.g. a chart
+#   fix), `<app>: skipped (not public)`, `<app>: skipped (unreadable by token)`,
 #   `<app>: render failed|fetch failed`, plus a
-#   `user-apps-rendered: N` line. This repo is public and the app repos are
+#   `user-apps-rendered: N` line (user apps whose head render succeeded). This repo is public and the app repos are
 #   not all public: never add output that prints values or manifests. helm
 #   stderr is shown only for platform apps and apps whose repo is public.
 # - --public-only renders only apps whose repo is public (CI: github.token
@@ -81,15 +82,18 @@ CB=$T/base/$CHART
 USER_AS=$SRC/gitops/bootstrap/apps.applicationset.yaml
 PLAT_AS=$SRC/gitops/bootstrap/platform-common-apps.applicationset.yaml
 
-# The renders below hard-code ArgoCD's helm block: one ingress.hostname
-# parameter, 2 valueFiles (user) or 1 (platform), nothing else. If either
-# template grows a parameter, releaseName or inline values, stop here
-# rather than render something ArgoCD would not.
-helm_is() { yq -o=json "$1" "$2" | jq -e "((keys|sort) == [\"parameters\",\"valueFiles\"]) and ((.parameters|map(.name)) == [\"ingress.hostname\"]) and $3" >/dev/null; }
-helm_is .spec.template.spec.sources[0].helm "$USER_AS" '(.valueFiles|length) == 2' \
-  || die "apps.applicationset.yaml helm block changed shape; update this script"
-helm_is .spec.template.spec.source.helm "$PLAT_AS" '.valueFiles == ["../values/{{.name}}/values.yaml"]' \
-  || die "platform-common-apps.applicationset.yaml helm block changed shape; update this script"
+# The renders below hard-code ArgoCD's helm block exactly: ingress.hostname
+# set to the element's hostname, valuesPath[0] then valuesPath[1] (or [0]
+# again) for user apps, the platform values file for platform apps, nothing
+# else. Any edit to either block, however small, stops here rather than
+# render something ArgoCD would not.
+helm_is() { # <yq path> <file> <expected valueFiles json>
+  yq -o=json "$1" "$2" | jq -e --argjson vf "$3" '. == {valueFiles: $vf, parameters: [{name: "ingress.hostname", value: "{{.hostname}}"}]}' >/dev/null
+}
+helm_is .spec.template.spec.sources[0].helm "$USER_AS" '["$values/{{ index .valuesPath 0 }}", "$values/{{ if gt (len .valuesPath) 1 }}{{ index .valuesPath 1 }}{{ else }}{{ index .valuesPath 0 }}{{ end }}"]' \
+  || die "apps.applicationset.yaml helm block changed; update this script"
+helm_is .spec.template.spec.source.helm "$PLAT_AS" '["../values/{{.name}}/values.yaml"]' \
+  || die "platform-common-apps.applicationset.yaml helm block changed; update this script"
 
 US=$'\x1f'
 elements() { # <file> <jq fields>: one US-separated line per element; error on a missing hostname
@@ -107,12 +111,17 @@ compare() {
   local l=$1 loud=$2 o=$OUT/$1 err=/dev/null; shift 2
   $loud && err=/dev/stderr
   mkdir -p "$(dirname "$o")"
-  if ! helm template "$1" "$CB" -n "$2" -f "$4" -f "$5" --set "ingress.hostname=$3" >"$o.base.yaml" 2>"$err" </dev/null \
-    || ! helm template "$1" "$CH" -n "$2" -f "$4" -f "$5" --set "ingress.hostname=$3" >"$o.head.yaml" 2>"$err" </dev/null; then
+  local base_ok=true note=''
+  helm template "$1" "$CB" -n "$2" -f "$4" -f "$5" --set "ingress.hostname=$3" >"$o.base.yaml" 2>"$err" </dev/null || base_ok=false
+  if ! helm template "$1" "$CH" -n "$2" -f "$4" -f "$5" --set "ingress.hostname=$3" >"$o.head.yaml" 2>"$err" </dev/null; then
     echo "$l: render failed"; return 1
   fi
-  if cmp -s "$o.base.yaml" "$o.head.yaml"; then echo "$l: unchanged $(sha "$o.head.yaml")"
-  else echo "$l: changed $(sha "$o.head.yaml")"; $ALLOW_CHANGES || return 1; fi
+  case $l in platform/*) ;; *) n_user=$((n_user + 1)) ;; esac
+  # A base that fails while head renders is a change (a chart fix), not a
+  # render failure, so --allow-changes can accept it.
+  if $base_ok && cmp -s "$o.base.yaml" "$o.head.yaml"; then echo "$l: unchanged $(sha "$o.head.yaml")"; return 0; fi
+  $base_ok || note=' (base render failed)'
+  echo "$l: changed $(sha "$o.head.yaml")$note"; $ALLOW_CHANGES || return 1
 }
 
 # visibility <owner/repo>: prints public|private|unreadable. Only a 404 is
@@ -137,12 +146,13 @@ while IFS=$US read -r name ns repo rev vpaths host; do
     f=$T/values/$name.$i.yaml; mkdir -p "$T/values"
     gh api -H 'Accept: application/vnd.github.raw' "repos/$repo/contents/$p?ref=$rev" >"$f" 2>/dev/null </dev/null \
       || { echo "$name: fetch failed"; fail=1; continue 2; }
-    [ $i = 0 ] && v0=$f; v1=$f; i=$((i + 1))
+    # ArgoCD reads valuesPath[0] and [1] only (or [0] twice); ignore the rest.
+    case $i in 0) v0=$f v1=$f ;; 1) v1=$f ;; esac
+    i=$((i + 1)); [ $i = 2 ] && break
   done
   [ -n "$v0" ] || { echo "$name: fetch failed"; fail=1; continue; }
   loud=false; [ "$vis" = public ] && loud=true
   compare "$name" $loud "$name" "$ns" "$host" "$v0" "$v1" || fail=1
-  n_user=$((n_user + 1))
 done < "$T/user"
 
 while IFS=$US read -r name ns host; do

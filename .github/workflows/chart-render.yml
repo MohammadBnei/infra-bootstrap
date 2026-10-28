@@ -21,6 +21,11 @@ on:
 
 permissions:
   contents: read
+  pull-requests: write # only to drop chart-golden-accept on a new commit
+
+concurrency:
+  group: chart-render-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
 
 jobs:
   golden:
@@ -30,11 +35,19 @@ jobs:
       GH_TOKEN: ${{ github.token }}
       # chart-golden-accept label: the PR's chart change is intended for the
       # apps it touches; `changed` lines still print but do not fail the run.
-      ACCEPT: ${{ contains(github.event.pull_request.labels.*.name, 'chart-golden-accept') && '--allow-changes' || '' }}
+      # It accepts the commit it was added on only: a push (or reopen) runs
+      # without it and removes it, so the next change is read again before
+      # the label goes back on.
+      ACCEPT: ${{ contains(github.event.pull_request.labels.*.name, 'chart-golden-accept') && github.event.action != 'synchronize' && github.event.action != 'reopened' && '--allow-changes' || '' }}
     steps:
+      - name: drop chart-golden-accept on a new commit
+        if: (github.event.action == 'synchronize' || github.event.action == 'reopened') && contains(github.event.pull_request.labels.*.name, 'chart-golden-accept')
+        run: gh api -X DELETE "repos/${{ github.repository }}/issues/${{ github.event.pull_request.number }}/labels/chart-golden-accept"
+
+      # Depth 2: HEAD (the merge commit) and its parents are all the script needs.
       - uses: actions/checkout@v7.0.1
         with:
-          fetch-depth: 0
+          fetch-depth: 2
 
       - uses: azure/setup-helm@v5.0.1
         with:
@@ -48,8 +61,8 @@ jobs:
           chmod +x /usr/local/bin/yq
 
       # HEAD is refs/pull/N/merge; HEAD^1 is the base tip that merge was built
-      # on, so a re-run after main moves still compares against the right base
-      # (the event payload's base.sha would be stale).
+      # on. A re-run reuses the same merge commit, so it does not pick up a
+      # newer main; push or close/reopen for that.
       - name: golden render, merge-base vs head (public apps)
         run: bash gitops/scripts/chart-golden.sh HEAD^1 HEAD --public-only $ACCEPT
 
@@ -78,5 +91,5 @@ jobs:
           [ "$rc" = 0 ] && grep -qE '^[^ ]+: changed [0-9a-f]{64}$' <<<"$out" || err "--allow-changes did not accept a change (exit $rc)"
 
           rc=0; out=$(bash gitops/scripts/chart-golden.sh HEAD "DIR:$RUNNER_TEMP/fail" --public-only --allow-changes 2>&1) || rc=$?
-          [ "$rc" = 1 ] || err "--allow-changes let a render failure pass (exit $rc)"
+          [ "$rc" = 1 ] && grep -q ': render failed$' <<<"$out" || err "--allow-changes let a render failure pass (exit $rc)"
           echo "self-test: all mutations caught, --allow-changes accepts only changes"
