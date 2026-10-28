@@ -48,7 +48,7 @@ then here. When in doubt, open those files.
 | `pigsty/` | Vendored Pigsty deployment (own docs/CLAUDE.md) |
 | `gitops/` | ArgoCD source of truth — see `gitops/README.md` |
 | `k8s-cluster/` | Submodule, separate repo, the GitOps *runtime target* (not managed from here) |
-| `agent-fleet/` | Submodule, a cosmetic pointer to the agent-fleet repo, pinned at a release tag. ArgoCD deploys agent-fleet from its own repo — `gitops/bootstrap/provisioner-application.yaml` tracks agent-fleet `main`, core comes via `gitops/apps/registry.yaml` — so this pin deploys nothing |
+| `agent-fleet` (sibling repo) | github.com/MohammadBnei/agent-fleet, checked out beside this repo, not part of this tree. ArgoCD deploys agent-fleet from its own repo — `gitops/bootstrap/provisioner-application.yaml` tracks agent-fleet `main`, core comes via `gitops/apps/registry.yaml` |
 | `terraform/` | Terraform for Proxmox VM/LXC provisioning on `.165` — see `terraform/README.md` |
 | `docs/bootstrap-test-notes.md` | Real-run incident log — what actually broke and why, distilled into the `k8s-ops`/`ansible-ops` skills. Read before repeating an operation that has been done once |
 
