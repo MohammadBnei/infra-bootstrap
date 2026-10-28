@@ -22,6 +22,9 @@ kubespray-venv/
 # K8s
 .kube/
 
+# agent-fleet was a submodule until #378; old clones keep its checkout here
+/agent-fleet/
+
 # kubespray runtime artifacts (submodule owns these, but just in case)
 kubespray/cluster.yml
 kubespray/inventory/*.retry

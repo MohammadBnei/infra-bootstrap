@@ -7,7 +7,7 @@
 # error condition. This file is what makes the label a property of the node.
 #
 # Why only the workers: agent-fleet's per-session working volumes are on the
-# `local-path` StorageClass (agent-fleet/k8s/provisioner/deployment.yaml,
+# `local-path` StorageClass (agent-fleet repo, k8s/provisioner/deployment.yaml,
 # SESSION_STORAGE_CLASS), which is a hostPath on the node's OS disk. The
 # control-plane nodes have ~33 GiB allocatable; filling one is a cluster
 # incident rather than a session failure. The workers have ~85 (this node) and
