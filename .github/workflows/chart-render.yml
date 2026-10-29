@@ -42,7 +42,12 @@ jobs:
     steps:
       - name: drop chart-golden-accept on a new commit
         if: (github.event.action == 'synchronize' || github.event.action == 'reopened') && contains(github.event.pull_request.labels.*.name, 'chart-golden-accept')
-        run: gh api -X DELETE "repos/${{ github.repository }}/issues/${{ github.event.pull_request.number }}/labels/chart-golden-accept"
+        # The payload's labels are a snapshot: on a re-run, or a second push
+        # racing the first run, the label is already gone and DELETE is a 404.
+        # That is the state we want; any other error still fails the step.
+        run: |
+          out=$(gh api -X DELETE "repos/${{ github.repository }}/issues/${{ github.event.pull_request.number }}/labels/chart-golden-accept" 2>&1) \
+            || grep -q 'HTTP 404' <<<"$out" || { echo "$out"; exit 1; }
 
       # Depth 2: HEAD (the merge commit) and its parents are all the script needs.
       - uses: actions/checkout@v7.0.1
