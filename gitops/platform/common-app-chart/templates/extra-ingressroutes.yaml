@@ -28,6 +28,9 @@ then the entry's own middlewares. Field docs in values.yaml.
 {{- if not (or (kindIs "int64" $prio) (kindIs "float64" $prio) (kindIs "int" $prio)) }}
 {{- fail (printf "ingress.extraRoutes.%s.priority must be an integer of 1 or more, not %q" $key (toString $prio)) }}
 {{- end }}
+{{- if ne (float64 $prio) (floor $prio) }}
+{{- fail (printf "ingress.extraRoutes.%s.priority must be an integer of 1 or more, not %v" $key $prio) }}
+{{- end }}
 {{- if lt (int $prio) 1 }}
 {{- fail (printf "ingress.extraRoutes.%s.priority must be an integer of 1 or more, not %q (0 is Traefik's rule-length default)" $key (toString $prio)) }}
 {{- end }}
@@ -39,6 +42,11 @@ check needs a rule parser. */ -}}
 {{- fail (printf "ingress.extraRoutes.%s.match must contain Host(...): without it the route takes that path on every host" $key) }}
 {{- end }}
 {{- $own := $r.middlewares | default list }}
+{{- range $i, $m := $own }}
+{{- if not (and (kindIs "map" $m) $m.name) }}
+{{- fail (printf "ingress.extraRoutes.%s.middlewares[%d] needs a name" $key $i) }}
+{{- end }}
+{{- end }}
 {{- $fa := include "common-app-chart.hasForwardAuth" $own }}
 {{- if and $trusts (not $fa) }}
 {{- fail (printf "ingress.extraRoutes.%s needs a *-forwardauth Middleware because auth.trustsHeaders is true (standard A3: without forwardAuth, Traefik passes a client's X-authentik-* headers through; public: true does not apply)" $key) }}

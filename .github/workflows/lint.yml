@@ -187,6 +187,9 @@ jobs:
           refuse empty-match 'ingress.extraRoutes.adminApi.match must contain Host(' --set ingress.extraRoutes.adminApi.match=
           refuse no-priority 'ingress.extraRoutes.adminApi.priority is required' --set ingress.extraRoutes.adminApi.priority=null
           refuse bad-priority 'ingress.extraRoutes.adminApi.priority must be an integer of 1 or more' --set ingress.extraRoutes.adminApi.priority=abc
+          refuse float-priority 'ingress.extraRoutes.adminApi.priority must be an integer of 1 or more' --set-json ingress.extraRoutes.adminApi.priority=1.9
+          refuse nameless-middleware 'ingress.extraRoutes.adminApi.middlewares[0] needs a name' \
+            --set-json 'ingress.extraRoutes.adminApi.middlewares=[{"namespace":"x"}]'
           refuse zero-priority 'ingress.extraRoutes.adminApi.priority must be an integer of 1 or more' --set ingress.extraRoutes.adminApi.priority=0
           refuse case-collision 'keys must differ once lowercased' \
             --set-json 'ingress.extraRoutes.AdminApi={"match":"Host(`a`)","priority":2,"middlewares":[{"name":"authentik-forwardauth"}]}'

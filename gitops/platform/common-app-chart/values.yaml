@@ -107,7 +107,8 @@ ingress:
   # Refused: a list, a key that is not a DNS-1123 label once lowercased, any
   # entry while ingress.enabled or ingress.hostname is unset (the baseline
   # Middlewares render only then), a match without Host(, a missing or
-# non-integer priority or one below 1, two keys equal once lowercased.
+  # non-integer priority or one below 1, an own middleware without a name,
+  # two keys equal once lowercased.
   # The baseline toggles are per release: an extra host must have the SAME
   # Cloudflare proxy status as the main host. A grey host in a proxied
   # release is 403'd by the origin lock (fails closed); a proxied host in a
