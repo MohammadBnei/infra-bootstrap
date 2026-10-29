@@ -411,7 +411,6 @@ jobs:
           rc=0
           out=$(VALUES_DIR=$F/values bash gitops/scripts/check-data-lifecycle.sh \
             $F/apps.applicationset.yaml $F/platform.applicationset.yaml $F/platform-values) || rc=$?
-          echo "$out"
           want='fx-layered: declared
           fx-bogus: invalid pii, missing backup
           fx-absent: skipped (values unreadable)
@@ -420,6 +419,9 @@ jobs:
           declared: 2, undeclared: 2, skipped: 1
           ::warning::2 apps missing a valid dataLifecycle pii/backup declaration (warn-only; see gitops/scripts/check-data-lifecycle.sh)'
           if [ "$rc" -ne 0 ] || [ "$out" != "$want" ]; then
+            # fixture output is printed only on failure, with :: defused, so its
+            # ::warning:: line never becomes a real PR annotation
+            printf '%s\n' "$out" | sed 's/^::/  ::/'
             echo "::error::check-data-lifecycle.sh fixture output differs (exit $rc)"; exit 1
           fi
           # a broken lint (here: a platform app with no values file) exits 1
