@@ -8,15 +8,23 @@
 # requested here, and that header is the drop provider's SIGNED access token,
 # not an identity hint. The shared object reaches preview pods, whose provider
 # has intercept_header_auth on (wird-admin-forwardauth-middleware.yaml has the
-# full reason). Here the token reaches drop alone.
+# full reason). This Middleware hands its token to drop alone.
+#
+# BUT NOT ALWAYS THE DROP PROVIDER'S TOKEN. With trustForwardHeader (below) and
+# Cloudflare in the entrypoint's trustedIPs, a client can set X-Forwarded-Host
+# to another forward_single host it has a session or Bearer token for (e.g.
+# wird-admin.bnei.dev, intercept_header_auth on), and the outpost answers under
+# THAT provider's policy, identity and token. Until drop D1 this gets past the
+# shared-notes policy, because drop trusts X-authentik-username (pre-dates this
+# file's jwt; unverified, the cluster is down). The reverse swap hands drop's
+# token to another app, whose own key rejects it.
 #
 # drop verifies that token (HS256 under the provider's client_secret, aud MUST
 # equal its client_id, both from drop-secret.yaml) instead of trusting
-# X-authentik-username; drop D1 ships the check. The aud pin is required: this
-# outpost signs tokens for several forward_single providers, and only aud says
-# a token was minted for drop. Proposed, owner to confirm in D1/K2: keep the
-# NetworkPolicy admitting Traefik alone (drop's helm/values.yaml) after D1 as
-# defence in depth, moved to the chart's networkPolicy in K2.
+# X-authentik-username; drop D1 ships the check. Each proxy provider signs with
+# its own client_secret, so the signature check is what rejects a swapped
+# token; the aud pin is defence in depth on top (an empty or leaked key, see
+# drop-secret.yaml). NetworkPolicy after D1: ADR-0059 decision 5 (amended).
 #
 # Listing the header also makes Traefik delete a client-sent X-authentik-jwt
 # before copying in the outpost's (Traefik v3.7.14

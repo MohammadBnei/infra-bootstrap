@@ -49,7 +49,10 @@ to `platform-admins`, and N MG is deliberately not in it (ADR-0058).
    > the `drop` provider's HS256-signed access token, and `drop-secret.yaml`
    > delivers the provider's client pair (`DROP_OIDC_CLIENT_ID` is the `aud`,
    > `DROP_OIDC_CLIENT_SECRET` the key). drop moves from trusting
-   > `X-authentik-username` to verifying that token in drop D1. Proposed,
+   > `X-authentik-username` to verifying that token in drop D1. Until D1, a
+   > client-set `X-Forwarded-Host` naming another forward_single host can get
+   > past the `shared-notes` policy (`drop-forwardauth-middleware.yaml`;
+   > unverified, cluster down); D1's signature check closes it. Proposed,
    > for the owner to confirm in D1/K2: keep the NetworkPolicy after D1 as
    > defence in depth, moved to the chart's `networkPolicy` (K2).
 
