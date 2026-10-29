@@ -11,6 +11,7 @@ against `.205`, Patroni leader; `ignored=0` both). Verified past the recap:
 connect revoked, and a login with the Infisical plaintext through the `.232`
 VIP that could create and drop a table.
 **Date:** 2026-10-08
+**Note 2026-10-29:** `hq-secret.yaml` and the Secret `hq-config` were removed (hq PR #16 dropped the DATABASE_URL mount); `dbuser_hq`, `hqdb` and `DBUSER_HQ_PASSWORD` stay.
 **Related:** [ADR-0050](0050-public-oidc-client-for-native-apps.md) (public
 clients, and the Decision 2 this makes an exception to),
 [ADR-0051](0051-expose-hermes-dashboard.md) (the hermes policy-file convention),
