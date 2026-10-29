@@ -375,8 +375,8 @@
 # gitops/bootstrap/drop-outpost-route.yaml (forward_single). The Middleware
 # forwards X-authentik-jwt, which drop verifies from drop D1 on; until then drop
 # trusts X-authentik-username. Its values also carry a NetworkPolicy admitting
-# Traefik alone (has-journal's lesson), kept after D1 as defence in depth.
-# Baseline chain stays on.
+# Traefik alone (has-journal's lesson); keeping it after D1 as defence in
+# depth is proposed, owner to confirm in D1/K2. Baseline chain stays on.
 #
 # S3 keys and the provider's OIDC client pair:
 # gitops/bootstrap/drop-secret.yaml (Secret drop-config, envFrom).

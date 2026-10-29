@@ -519,7 +519,7 @@ Tick in order. "Done" means the verify column passed, not that the value was wri
 - [ ] `PVE_SSH_PRIVATE_KEY`, `SSH_OLDPG_KEY`, `SSH_SERVER1/LAPTOP/PI4/PG_ETCD_WITNESS_KEY` replaced on their hosts.
 - [ ] Five `pg_users` DB passwords rotated (Infisical + verifier + `pgsql-user.yml` + app restart).
 - [ ] `DBUSER_WIRD_ADMIN_PASSWORD` rotated by SQL.
-- [ ] `GARAGE_ROOT_TOKEN`, `CA_PIGSTY_*`, `REDIS_MAIN_PASSWORD`, `PIHOLE_WEBPASSWORD`, `WIRD_ADMIN_OIDC_*` scheduled or done.
+- [ ] `GARAGE_ROOT_TOKEN`, `CA_PIGSTY_*`, `REDIS_MAIN_PASSWORD`, `PIHOLE_WEBPASSWORD`, `WIRD_ADMIN_OIDC_*`, `DROP_OIDC_*` scheduled or done.
 
 ### T10 and §7
 - [ ] OIDC client secrets rotated one at a time, or explicitly deferred.

@@ -8,21 +8,22 @@
 # requested here, and that header is the drop provider's SIGNED access token,
 # not an identity hint. The shared object reaches preview pods, whose provider
 # has intercept_header_auth on (wird-admin-forwardauth-middleware.yaml has the
-# full reason). Here the token reaches drop alone, but it is not always the
-# drop provider's: with trustForwardHeader (below) and Cloudflare in the
-# entrypoint's trustedIPs, a client can set X-Forwarded-Host to another
-# forward_single host it has a session for, and the outpost then answers with
-# THAT provider's identity and token. drop's aud pin is what rejects it.
+# full reason). Here the token reaches drop alone.
 #
 # drop verifies that token (HS256 under the provider's client_secret, aud MUST
 # equal its client_id, both from drop-secret.yaml) instead of trusting
-# X-authentik-username; drop D1 ships the check. Until D1, that swap can get
-# past the shared-notes policy (unverified: the cluster is down). The
-# NetworkPolicy admitting Traefik alone (drop's helm/values.yaml) stays after
-# D1 as defence in depth, and later moves to the chart's networkPolicy (K2).
+# X-authentik-username; drop D1 ships the check. The aud pin is required: this
+# outpost signs tokens for several forward_single providers, and only aud says
+# a token was minted for drop. Proposed, owner to confirm in D1/K2: keep the
+# NetworkPolicy admitting Traefik alone (drop's helm/values.yaml) after D1 as
+# defence in depth, moved to the chart's networkPolicy in K2.
 #
-# Listing the header also makes Traefik delete any client-sent X-authentik-jwt
-# before copying in the outpost's, so a browser cannot supply its own.
+# Listing the header also makes Traefik delete a client-sent X-authentik-jwt
+# before copying in the outpost's (Traefik v3.7.14
+# pkg/middlewares/auth/forward.go:322-328), so a browser cannot supply its own.
+# That covers the canonical name only: an alias such as X_authentik_jwt passes
+# through untouched (aliasHeadersStrategy is not set), so drop reads
+# r.Header.Get("X-authentik-jwt") and nothing else.
 #
 # No X-authentik-meta-jwks: a proxy provider has no signing key, so a JWKS
 # cannot verify its token.

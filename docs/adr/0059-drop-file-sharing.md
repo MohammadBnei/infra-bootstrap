@@ -49,9 +49,9 @@ to `platform-admins`, and N MG is deliberately not in it (ADR-0058).
    > the `drop` provider's HS256-signed access token, and `drop-secret.yaml`
    > delivers the provider's client pair (`DROP_OIDC_CLIENT_ID` is the `aud`,
    > `DROP_OIDC_CLIENT_SECRET` the key). drop moves from trusting
-   > `X-authentik-username` to verifying that token in drop D1. The
-   > NetworkPolicy stays after D1 as defence in depth, and later moves to the
-   > chart's `networkPolicy` (K2).
+   > `X-authentik-username` to verifying that token in drop D1. Proposed,
+   > for the owner to confirm in D1/K2: keep the NetworkPolicy after D1 as
+   > defence in depth, moved to the chart's `networkPolicy` (K2).
 
 PDF export is not part of drop: SilverBullet renders a page to HTML and
 prints it in the browser (a Space Lua exporter in each space's `CONFIG`).
