@@ -519,6 +519,29 @@ metrics:
     path: /metrics
     interval: 30s
 
+# Data lifecycle declaration: what personal data the app holds, how it is
+# backed up, how long it is kept, and what happens to it when the app goes.
+# Off by default ({}); an app opts in through its own values file. Renders
+# on the Deployment's metadata only (never the pod template, so opting in
+# rolls no pod and leaves selectors and Loki/Alloy pod labels alone):
+#   pii          -> label      data.bnei.dev/pii (selectable)
+#   backup, retention, decommission
+#                -> annotation data.bnei.dev/<field>, each only when set
+# Every field is a string; quote numbers and words YAML 1.1 reads as bools
+# (`retention: "90d"`, `backup: "no"`): anything else is refused at render,
+# as is an unknown key or a pii outside the enum.
+#   pii: none | personal | sensitive
+#     sensitive = special-category data (GDPR Art. 9), e.g. wird's
+#     religious-practice data.
+#   backup: free text naming the mechanism and where it lives, e.g.
+#     "pgBackRest to Garage via Pigsty". "none" is a valid declaration.
+#   retention: free text, e.g. "90d" or "until account deletion".
+#   decommission: free text or a runbook path, e.g. "export, then drop the
+#     DB role and the bucket".
+# gitops/scripts/check-data-lifecycle.sh warns (does not fail) for apps
+# without a pii and backup declaration.
+dataLifecycle: {}
+
 # Per-app Grafana dashboards. Renders a ConfigMap labeled
 # grafana_dashboard: "1", picked up dynamically by Grafana's dashboards
 # sidecar (sidecar.dashboards, see

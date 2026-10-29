@@ -40,6 +40,9 @@ needs a PVC or health probes.
      tag: "0.1.0"
    service:
      port: 8080
+   dataLifecycle:    # declare it; check-data-lifecycle.sh warns without
+     pii: personal   # none | personal | sensitive
+     backup: "pgBackRest to Garage via Pigsty"   # or "none"
    # optional:
    livenessProbe:
      enabled: true

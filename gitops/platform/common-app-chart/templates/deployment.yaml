@@ -3,11 +3,41 @@ kind: Deployment
 metadata:
   name: {{ .Release.Name }}
   namespace: {{ .Release.Namespace }}
+  {{- /* dataLifecycle (values.yaml): pii becomes a label, the free-text
+  fields annotations. Deployment metadata only, so opting in rolls no pod.
+  Every set field must be a string: an int or a YAML 1.1 bool (`no`) would
+  render a non-string annotation the API server rejects, or vanish. */}}
+  {{- $pii := "" }}
+  {{- $dl := dict }}
+  {{- with .Values.dataLifecycle }}
+  {{- if not (kindIs "map" .) }}{{ fail "dataLifecycle must be a map of pii, backup, retention, decommission" }}{{ end }}
+  {{- range $k, $v := . }}
+  {{- if not (has $k (list "pii" "backup" "retention" "decommission")) }}{{ fail (printf "dataLifecycle.%s is not a known key (pii, backup, retention, decommission)" $k) }}{{ end }}
+  {{- if not (kindIs "invalid" $v) }}
+  {{- if not (kindIs "string" $v) }}{{ fail (printf "dataLifecycle.%s must be a string; quote it" $k) }}{{ end }}
+  {{- if eq $k "pii" }}
+  {{- if not (has $v (list "none" "personal" "sensitive")) }}{{ fail (printf "dataLifecycle.pii must be none, personal or sensitive, not %q" $v) }}{{ end }}
+  {{- $pii = $v }}
+  {{- else if $v }}
+  {{- $_ := set $dl (printf "data.bnei.dev/%s" $k) $v }}
+  {{- end }}
+  {{- end }}
+  {{- end }}
+  {{- end }}
   labels:
     {{- include "common-app-chart.labels" . | nindent 4 }}
+    {{- with $pii }}
+    data.bnei.dev/pii: {{ . | quote }}
+    {{- end }}
   {{- $annotations := .Values.annotations | default dict }}
   {{- if .Values.infisical.autoReload }}
   {{- $annotations = merge (dict "secrets.infisical.com/auto-reload" "true") $annotations }}
+  {{- end }}
+  {{- /* $dl is a fresh dict and the merge destination, so .Values.annotations
+  is never mutated, and dataLifecycle wins over a hand-set
+  annotations["data.bnei.dev/..."] key. */}}
+  {{- if $dl }}
+  {{- $annotations = merge $dl $annotations }}
   {{- end }}
   {{- with $annotations }}
   annotations:

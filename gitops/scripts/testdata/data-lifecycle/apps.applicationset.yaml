@@ -1,0 +1,18 @@
+# Fixture for check-data-lifecycle.sh (lint.yml): user elements read from
+# VALUES_DIR=testdata/data-lifecycle/values, never the network.
+spec:
+  generators:
+  - list:
+      elements:
+      - name: fx-layered
+        repoURL: https://github.com/MohammadBnei/layered.git
+        targetRevision: main
+        valuesPath: [helm/values.yaml, helm/values-prod.yaml]
+      - name: fx-bogus
+        repoURL: https://github.com/MohammadBnei/bogus.git
+        targetRevision: v1
+        valuesPath: [values.yaml]
+      - name: fx-absent
+        repoURL: https://github.com/MohammadBnei/absent.git
+        targetRevision: main
+        valuesPath: [values.yaml]

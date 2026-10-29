@@ -96,3 +96,11 @@ metrics:
     enabled: true
     port: metrics
     interval: 15s
+
+# dataLifecycle: renders the pii label and two of the three annotations on
+# the Deployment (decommission left unset, so lint.yml can check an unset
+# field renders nothing) for kubeconform and the lint.yml asserts.
+dataLifecycle:
+  pii: personal
+  backup: pgBackRest to Garage via Pigsty
+  retention: "90d"

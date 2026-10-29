@@ -1,0 +1,3 @@
+# base sets backup; the override sets pii: declared only when merged
+dataLifecycle:
+  backup: none
