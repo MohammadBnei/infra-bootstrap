@@ -91,6 +91,34 @@ jobs:
           helm lint gitops/platform/common-app-chart -f gitops/platform/common-app-chart/ci-values.yaml
           helm template ci-check gitops/platform/common-app-chart -f gitops/platform/common-app-chart/ci-values.yaml > "$RUNNER_TEMP/rendered.yaml"
 
+      # Standard A3: auth.trustsHeaders: true renders only with
+      # networkPolicy.ingressFrom exactly [traefik] on a ClusterIP Service.
+      # ci-values.yaml takes the valid path; its policy must admit traefik on
+      # service.port (80) and nothing else.
+      - name: common-app-chart A3 refusal (auth.trustsHeaders)
+        run: |
+          set -euo pipefail
+          C=gitops/platform/common-app-chart
+          must_fail() {
+            local label=$1; shift
+            if err=$(helm template t "$C" --set auth.trustsHeaders=true "$@" 2>&1 >/dev/null); then
+              echo "::error::$label rendered; the chart must refuse it"; exit 1
+            fi
+            grep -q 'standard A3' <<<"$err" || { echo "::error::$label failed without the A3 message: $err"; exit 1; }
+            echo "$label: refused"
+          }
+          must_fail no-ingressFrom
+          must_fail traefik-and-monitoring --set 'networkPolicy.ingressFrom={traefik,monitoring}'
+          must_fail loadbalancer --set 'networkPolicy.ingressFrom={traefik}' --set service.type=LoadBalancer
+          r="$RUNNER_TEMP/rendered.yaml"
+          np='select(.kind=="NetworkPolicy")'
+          test "$(yq ea "[$np] | length" "$r")" = 1
+          test "$(yq ea "$np | .spec.ingress | length" "$r")" = 1
+          test "$(yq ea "$np | .spec.ingress[0].from | length" "$r")" = 1
+          test "$(yq ea "$np | .spec.ingress[0].from[0].namespaceSelector.matchLabels[\"kubernetes.io/metadata.name\"]" "$r")" = traefik
+          test "$(yq ea "$np | .spec.ingress[0].ports[0].port" "$r")" = 80
+          echo "ci-values NetworkPolicy: traefik only, port 80"
+
       - name: Install kubeconform
         run: |
           set -euo pipefail

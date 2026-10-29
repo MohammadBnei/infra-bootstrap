@@ -181,6 +181,7 @@ A minimal Helm chart for standard web apps. Renders:
 - `Service` — ClusterIP on `service.port`
 - `IngressRoute` — Traefik CRD, `entryPoints: [websecure]`, native ACME via `tls.certResolver`
 - `PersistentVolumeClaim` — optional, gated by `persistence.enabled`
+- `NetworkPolicy` — optional, gated by a non-empty `networkPolicy.ingressFrom`: admits only those namespaces, on `service.port` (see below)
 - `InfisicalSecret` — optional, gated by `infisical.enabled`, auto-wired into the Deployment's `envFrom`
 - `hooks:` — guard-railed ArgoCD PreSync/PostSync `Job`s (schema migrations, etc. — see ADR-0023)
 - `oneOffJobs:` — suspended `CronJob`s for one-time scripts, triggered via `kubectl create job --from=cronjob/...` and a ledger-driven reusable CI workflow (see ADR-0022/0023)
@@ -243,6 +244,19 @@ dashboards:
   lives in the app's own repo, lands in Grafana's default ("General")
   folder (no dedicated folder yet — see the `sidecar.dashboards` comment
   in `grafana/values.yaml` for why one isn't set).
+
+Ingress NetworkPolicy and header trust (standard A3):
+```yaml
+networkPolicy:
+  ingressFrom: [traefik]   # namespaces admitted to service.port, nothing else
+auth:
+  trustsHeaders: true      # this app reads a raw X-authentik-* header
+```
+A non-empty `networkPolicy.ingressFrom` renders one `NetworkPolicy` named after the release that admits only pods in those namespaces, only to `service.port` over TCP. Opting in denies every other pod-to-pod ingress: other namespaces, the app's own namespace, `service.extraPorts` and a Prometheus scrape from `monitoring`. Still admitted: the host identity on the pod's node (the kubelet, any hostNetwork pod, probably NodePort/LoadBalancer traffic: Cilium chaining with kube-proxy IPVS, agent-fleet ADR-0069), anything Traefik proxies, including an IngressRoute from any namespace that names the Service with no forwardAuth (`allowCrossNamespace` is on), and whatever another NetworkPolicy selecting the same pods allows (policies are additive).
+
+`auth.trustsHeaders: true` makes the chart refuse to render unless `networkPolicy.ingressFrom` is exactly `[traefik]` and `service.type` is `ClusterIP`. ArgoCD then shows a ComparisonError for that one Application and leaves its running objects alone. The refusal is a necessary condition, not a sufficient one: the residual paths above still reach the app, and an app that trusts the header without setting the flag is not detected. To monitor such an app, give Prometheus its own port-scoped policy; never add `monitoring` to `ingressFrom`.
+
+Moving an app's own `extraManifests` NetworkPolicy onto `ingressFrom`: if it is already named `{{ .Release.Name }}` with the same spec (has-journal), set `ingressFrom` and remove the extraManifests entry in the same PR; the object is unchanged, so there is no window without a policy. If its name differs (drop), use two PRs: add `ingressFrom` first (both policies apply), then remove the old one. A policy that needs more than namespace peers on one port (agent-fleet-core, agent-vault) stays in its own manifest.
 
 Annotations: `annotations` (Deployment), `podAnnotations` (pod template), `service.annotations` (Service), `ingress.annotations` (IngressRoute) — plain key/value maps, rendered as-is.
 

@@ -57,3 +57,10 @@ securityContext:
 # kubeconform would never schema-check it — same reasoning as the
 # securityContext blocks above.
 runtimeClassName: nvidia
+
+# Standard A3 path: renders templates/networkpolicy.yaml so kubeconform
+# schema-checks it, and lint.yml asserts its peer and port.
+networkPolicy:
+  ingressFrom: [traefik]
+auth:
+  trustsHeaders: true
