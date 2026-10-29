@@ -4,8 +4,8 @@ reachable from Traefik, and only on a ClusterIP Service (NodePort/LB traffic
 arrives as the node's host identity, which the policy admits). A necessary
 condition, not a sufficient one: see networkPolicy in values.yaml.
 */ -}}
-{{- $from := .Values.networkPolicy.ingressFrom | default list }}
-{{- if .Values.auth.trustsHeaders }}
+{{- $from := (.Values.networkPolicy | default dict).ingressFrom | default list }}
+{{- if (.Values.auth | default dict).trustsHeaders }}
 {{- if not (and (eq (len $from) 1) (eq (index $from 0) "traefik")) }}
 {{- fail "auth.trustsHeaders: true needs networkPolicy.ingressFrom: [traefik] exactly (standard A3: any other admitted namespace can forge X-authentik-* headers)" }}
 {{- end }}
@@ -32,7 +32,7 @@ spec:
     {{- range $from }}
     - namespaceSelector:
         matchLabels:
-          kubernetes.io/metadata.name: {{ . }}
+          kubernetes.io/metadata.name: {{ . | quote }}
     {{- end }}
     ports:
     - port: {{ .Values.service.port }}
