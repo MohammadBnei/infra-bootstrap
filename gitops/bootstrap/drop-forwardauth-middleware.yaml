@@ -3,9 +3,38 @@
 # WHY NOT THE SHARED `authentik-forwardauth`. That one is the previews
 # provider's gate, bound to platform-admins; drop is gated on shared-notes
 # (authentik-blueprint-drop-policy.yaml), and the outpost picks the provider
-# from the forwarded host, so a dedicated object only keeps the header list
-# honest. No X-authentik-jwt: drop trusts X-authentik-username and admits
-# Traefik alone through its NetworkPolicy (drop's helm/values.yaml).
+# from the forwarded host, so a dedicated object keeps the header list honest.
+# It also keeps a bearer token off the shared Middleware: X-authentik-jwt is
+# requested here, and that header is the drop provider's SIGNED access token,
+# not an identity hint. The shared object reaches preview pods, whose provider
+# has intercept_header_auth on (wird-admin-forwardauth-middleware.yaml has the
+# full reason). This Middleware hands its token to drop alone.
+#
+# BUT NOT ALWAYS THE DROP PROVIDER'S TOKEN. With trustForwardHeader (below) and
+# Cloudflare in the entrypoint's trustedIPs, a client can set X-Forwarded-Host
+# to another forward_single host it has a session or Bearer token for (e.g.
+# wird-admin.bnei.dev, intercept_header_auth on), and the outpost answers under
+# THAT provider's policy, identity and token. Until drop D1 this gets past the
+# shared-notes policy, because drop trusts X-authentik-username (pre-dates this
+# file's jwt; unverified, the cluster is down). The reverse swap hands drop's
+# token to another app, whose own key rejects it.
+#
+# drop verifies that token (HS256 under the provider's client_secret, aud MUST
+# equal its client_id, both from drop-secret.yaml) instead of trusting
+# X-authentik-username; drop D1 ships the check. Each proxy provider signs with
+# its own client_secret, so the signature check is what rejects a swapped
+# token; the aud pin is defence in depth on top (an empty or leaked key, see
+# drop-secret.yaml). NetworkPolicy after D1: ADR-0059 decision 5 (amended).
+#
+# Listing the header also makes Traefik delete a client-sent X-authentik-jwt
+# before copying in the outpost's (Traefik v3.7.14
+# pkg/middlewares/auth/forward.go:322-328), so a browser cannot supply its own.
+# That covers the canonical name only: an alias such as X_authentik_jwt passes
+# through untouched (aliasHeadersStrategy is not set), so drop reads
+# r.Header.Get("X-authentik-jwt") and nothing else.
+#
+# No X-authentik-meta-jwks: a proxy provider has no signing key, so a JWKS
+# cannot verify its token.
 #
 # Address and trustForwardHeader copied from wird-admin-forwardauth-middleware.yaml,
 # for its reasons (same embedded outpost, port 80).
@@ -23,3 +52,5 @@ spec:
       - X-authentik-email
       - X-authentik-groups
       - X-authentik-uid
+      # The signed token drop verifies with HS256. Reaches only this one app.
+      - X-authentik-jwt

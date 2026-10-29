@@ -321,6 +321,30 @@ not use it.
 Rotating: delete the provider's secret in authentik and re-run this step; the
 blueprint will not fight you, because it never owned these values.
 
+### The same for drop (`DROP_OIDC_*`, ADR-0059)
+
+Do **not** reuse the block above with only the name changed: its `set` lines
+would overwrite `WIRD_ADMIN_OIDC_*` with drop's pair and 401 every adminweb
+user. drop's own block:
+
+```bash
+PROJ=8a3fa54f-be22-488a-bf51-55158f65c0f2
+read -r CID CSEC < <(kubectl -n authentik exec deploy/platform-authentik-server -- \
+  ak shell -c "
+from authentik.providers.proxy.models import ProxyProvider
+p = ProxyProvider.objects.get(name='drop')
+print(p.client_id, p.client_secret)
+" | tail -1)
+
+infisical secrets set "DROP_OIDC_CLIENT_ID=$CID"     --projectId="$PROJ" --env=dev --type=shared
+infisical secrets set "DROP_OIDC_CLIENT_SECRET=$CSEC" --projectId="$PROJ" --env=dev --type=shared
+unset CID CSEC
+```
+
+`gitops/bootstrap/drop-secret.yaml` delivers both into `drop-config`; then
+`kubectl -n drop rollout restart deploy`. A new secret on the same provider
+keeps `client_id`; a recreated provider changes both, so always re-read both.
+
 ## 3b. The old, wrong instruction — kept so nobody repeats it
 
 `WIRD_ADMIN_OIDC_CLIENT_SECRET` was originally generated here and declared in the

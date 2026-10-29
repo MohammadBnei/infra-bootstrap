@@ -372,11 +372,14 @@
 # Gated by its OWN forwardAuth, drop-forwardauth (namespace default), bound to
 # shared-notes, not platform-admins: N MG uses it for the opus space. The ref
 # lives in drop's helm/values.yaml; the callback route is
-# gitops/bootstrap/drop-outpost-route.yaml (forward_single). drop trusts
-# X-authentik-username, so its values also carry a NetworkPolicy admitting
-# Traefik alone (has-journal's lesson). Baseline chain stays on.
+# gitops/bootstrap/drop-outpost-route.yaml (forward_single). The Middleware
+# forwards X-authentik-jwt, which drop verifies from drop D1 on; until then drop
+# trusts X-authentik-username. Its values also carry a NetworkPolicy admitting
+# Traefik alone (has-journal's lesson); its fate after D1: ADR-0059
+# decision 5 (amended). Baseline chain stays on.
 #
-# S3 keys: gitops/bootstrap/drop-secret.yaml (Secret drop-config, envFrom).
+# S3 keys and the provider's OIDC client pair:
+# gitops/bootstrap/drop-secret.yaml (Secret drop-config, envFrom).
 # Merge only after drop's CI has replaced image.tag "unreleased" with a built
 # SHA (hq/wird rule).
 - name: drop
