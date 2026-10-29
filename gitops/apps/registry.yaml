@@ -291,9 +291,9 @@
 # baseline chain (origin lock, rate limit, headers) still applies — hq's values
 # must not set ingress.baseline.enabled: false.
 #
-# DATABASE_URL comes from gitops/bootstrap/hq-secret.yaml as the Secret
-# `hq-config`, assembled from DBUSER_HQ_PASSWORD — wird's arrangement, for
-# wird's reasons (see the wird entry above). hq's values pick it up by envFrom.
+# hq mounts no DATABASE_URL: it uses no database yet (hq PR #16). The role
+# dbuser_hq, hqdb and DBUSER_HQ_PASSWORD stay for the inbox, which will need
+# them; the Secret `hq-config` is no longer rendered (it was wird's arrangement).
 #
 # valuesPath is under app/ because the repo is mostly markdown; the app lives in
 # a subdirectory. Image tag bumped by hq's own CI on the build-runner LXC.
