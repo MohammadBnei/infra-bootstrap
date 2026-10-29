@@ -82,3 +82,17 @@ networkPolicy:
   ingressFrom: [traefik]
 auth:
   trustsHeaders: true
+
+# metrics.serviceMonitor on a service.extraPorts port: renders
+# templates/servicemonitor.yaml so kubeconform schema-checks it and lint.yml
+# asserts its fields. The extra port leaves the NetworkPolicy asserts alone
+# (the policy only admits service.port).
+service:
+  extraPorts:
+  - name: metrics
+    port: 9090
+metrics:
+  serviceMonitor:
+    enabled: true
+    port: metrics
+    interval: 15s

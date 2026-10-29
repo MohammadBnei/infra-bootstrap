@@ -493,6 +493,29 @@ logAlerts:
   #     for: 5m                          # optional, defaults to 5m
   #     severity: warning                # optional, defaults to warning
 
+# Prometheus scrape (templates/servicemonitor.yaml), off by default. On, it
+# renders one ServiceMonitor named after the release, selecting this
+# release's Service. Prometheus adopts it with no label
+# (serviceMonitorSelectorNilUsesHelmValues: false in
+# gitops/platform/values/prometheus/values.yaml).
+#   - port is a Service port NAME: http (service.port) or a
+#     service.extraPorts name. Anything else is refused at render, since a
+#     wrong name creates no target and TargetDown could never fire.
+#   - With networkPolicy.ingressFrom set, that policy does not admit
+#     namespace monitoring on the metrics port. Add a port-scoped
+#     NetworkPolicy in extraManifests that admits monitoring on it
+#     (agent-fleet-core's pattern); without one the target shows up==0 and
+#     TargetDown fires.
+#   - An app moving from a hand-rolled extraManifests ServiceMonitor named
+#     after the release must drop that entry in the same PR: both render
+#     with the same name, and this chart's object (rendered later) wins.
+metrics:
+  serviceMonitor:
+    enabled: false
+    port: http
+    path: /metrics
+    interval: 30s
+
 # Per-app Grafana dashboards. Renders a ConfigMap labeled
 # grafana_dashboard: "1", picked up dynamically by Grafana's dashboards
 # sidecar (sidecar.dashboards, see

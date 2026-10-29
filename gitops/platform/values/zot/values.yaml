@@ -354,8 +354,8 @@ extraManifests:
             }
           }
         }
-  # common-app-chart has no ServiceMonitor template, and every other
-  # scraped component brings its own from an upstream chart. Prometheus'
+  # Hand-rolled; move to common-app-chart's metrics.serviceMonitor later.
+  # Every other scraped component brings its own from an upstream chart. Prometheus'
   # serviceMonitorSelectorNilUsesHelmValues is false, so a hand-written one
   # is picked up.
   #

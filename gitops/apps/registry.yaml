@@ -322,7 +322,7 @@
 # helm/values.yaml: replicaCount 1 + Recreate (one relay owns the world, never
 # two writers), /metrics on service.extraPorts 9090 which the chart's
 # IngressRoute never routes, and the ServiceMonitor for it in extraManifests
-# (common-app-chart has no ServiceMonitor template).
+# (hand-rolled; move to metrics.serviceMonitor later).
 #
 # Merge only after mountain's CI has replaced image.tag "unreleased" with a
 # built SHA, or the first sync is an ImagePullBackOff (hq/wird rule).
