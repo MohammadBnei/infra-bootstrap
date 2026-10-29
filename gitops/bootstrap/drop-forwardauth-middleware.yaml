@@ -8,13 +8,18 @@
 # requested here, and that header is the drop provider's SIGNED access token,
 # not an identity hint. The shared object reaches preview pods, whose provider
 # has intercept_header_auth on (wird-admin-forwardauth-middleware.yaml has the
-# full reason). Here the token reaches drop alone.
+# full reason). Here the token reaches drop alone, but it is not always the
+# drop provider's: with trustForwardHeader (below) and Cloudflare in the
+# entrypoint's trustedIPs, a client can set X-Forwarded-Host to another
+# forward_single host it has a session for, and the outpost then answers with
+# THAT provider's identity and token. drop's aud pin is what rejects it.
 #
-# drop verifies that token (HS256 under the provider's client_secret, aud = its
-# client_id, both from drop-secret.yaml) instead of trusting
-# X-authentik-username; drop D1 ships the check. The NetworkPolicy admitting
-# Traefik alone (drop's helm/values.yaml) stays after D1 as defence in depth,
-# and later moves to the chart's networkPolicy (K2).
+# drop verifies that token (HS256 under the provider's client_secret, aud MUST
+# equal its client_id, both from drop-secret.yaml) instead of trusting
+# X-authentik-username; drop D1 ships the check. Until D1, that swap can get
+# past the shared-notes policy (unverified: the cluster is down). The
+# NetworkPolicy admitting Traefik alone (drop's helm/values.yaml) stays after
+# D1 as defence in depth, and later moves to the chart's networkPolicy (K2).
 #
 # Listing the header also makes Traefik delete any client-sent X-authentik-jwt
 # before copying in the outpost's, so a browser cannot supply its own.
