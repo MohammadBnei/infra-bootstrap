@@ -92,7 +92,8 @@ jobs:
           helm template ci-check gitops/platform/common-app-chart -f gitops/platform/common-app-chart/ci-values.yaml > "$RUNNER_TEMP/rendered.yaml"
 
       # Standard A3: auth.trustsHeaders: true renders only with
-      # networkPolicy.ingressFrom exactly [traefik] on a ClusterIP Service.
+      # networkPolicy.ingressFrom exactly [traefik] on a ClusterIP Service,
+      # and a *-forwardauth middleware when the IngressRoute renders.
       # ci-values.yaml takes the valid path; its policy must admit traefik on
       # service.port (80) and nothing else.
       - name: common-app-chart A3 refusal (auth.trustsHeaders)
@@ -110,6 +111,11 @@ jobs:
           must_fail no-ingressFrom
           must_fail traefik-and-monitoring --set 'networkPolicy.ingressFrom={traefik,monitoring}'
           must_fail loadbalancer --set 'networkPolicy.ingressFrom={traefik}' --set service.type=LoadBalancer
+          must_fail nodeport --set 'networkPolicy.ingressFrom={traefik}' --set service.type=NodePort
+          must_fail no-forwardauth --set 'networkPolicy.ingressFrom={traefik}' --set ingress.hostname=x.example.com
+          if helm template t "$C" --set networkPolicy.ingressFrom=traefik >/dev/null 2>&1; then
+            echo "::error::scalar ingressFrom rendered; the chart must refuse it"; exit 1
+          fi
           r="$RUNNER_TEMP/rendered.yaml"
           np='select(.kind=="NetworkPolicy")'
           test "$(yq ea "[$np] | length" "$r")" = 1
@@ -117,6 +123,9 @@ jobs:
           test "$(yq ea "$np | .spec.ingress[0].from | length" "$r")" = 1
           test "$(yq ea "$np | .spec.ingress[0].from[0].namespaceSelector.matchLabels[\"kubernetes.io/metadata.name\"]" "$r")" = traefik
           test "$(yq ea "$np | .spec.ingress[0].ports[0].port" "$r")" = 80
+          test "$(yq ea "$np | .spec.ingress[0].ports | length" "$r")" = 1
+          test "$(yq ea "$np | .spec.policyTypes | join(\",\")" "$r")" = Ingress
+          test "$(yq ea "$np | .spec.podSelector.matchLabels[\"app.kubernetes.io/name\"]" "$r")" = ci-check
           echo "ci-values NetworkPolicy: traefik only, port 80"
 
       - name: Install kubeconform

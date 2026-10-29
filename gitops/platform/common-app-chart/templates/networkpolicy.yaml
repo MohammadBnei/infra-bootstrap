@@ -5,12 +5,26 @@ arrives as the node's host identity, which the policy admits). A necessary
 condition, not a sufficient one: see networkPolicy in values.yaml.
 */ -}}
 {{- $from := (.Values.networkPolicy | default dict).ingressFrom | default list }}
+{{- if not (kindIs "slice" $from) }}
+{{- fail "networkPolicy.ingressFrom must be a list of namespaces, e.g. [traefik]" }}
+{{- end }}
 {{- if (.Values.auth | default dict).trustsHeaders }}
 {{- if not (and (eq (len $from) 1) (eq (index $from 0) "traefik")) }}
 {{- fail "auth.trustsHeaders: true needs networkPolicy.ingressFrom: [traefik] exactly (standard A3: any other admitted namespace can forge X-authentik-* headers)" }}
 {{- end }}
 {{- if ne (.Values.service.type | default "ClusterIP") "ClusterIP" }}
 {{- fail "auth.trustsHeaders: true needs service.type: ClusterIP (standard A3: NodePort/LoadBalancer traffic arrives as the host identity, which the NetworkPolicy admits)" }}
+{{- end }}
+{{- /* ponytail: a name match on "-forwardauth" (every forwardAuth Middleware
+here is named *-forwardauth); it cannot see the Middleware's spec. */ -}}
+{{- if and .Values.ingress.enabled .Values.ingress.hostname }}
+{{- $fa := false }}
+{{- range (.Values.ingress.middlewares | default list) }}
+{{- if hasSuffix "-forwardauth" (.name | default "") }}{{ $fa = true }}{{ end }}
+{{- end }}
+{{- if not $fa }}
+{{- fail "auth.trustsHeaders: true with an IngressRoute needs a *-forwardauth Middleware in ingress.middlewares (standard A3: without forwardAuth, Traefik passes a client's X-authentik-* headers through)" }}
+{{- end }}
 {{- end }}
 {{- end }}
 {{- if $from }}

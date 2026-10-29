@@ -52,7 +52,9 @@ networkPolicy:
 # Standard A3. Set trustsHeaders: true if the app reads a raw X-authentik-*
 # header (it trusts authentik's forwardAuth instead of checking a token). The
 # chart then refuses to render unless networkPolicy.ingressFrom is exactly
-# [traefik] and service.type is ClusterIP. That is a necessary condition, not
+# [traefik], service.type is ClusterIP and, when the IngressRoute renders,
+# ingress.middlewares names a *-forwardauth Middleware (matched by name, not
+# by spec). That is a necessary condition, not
 # a sufficient one: the residual paths listed under networkPolicy above
 # still reach the app, and an app that trusts the header without setting
 # this flag is not detected.
