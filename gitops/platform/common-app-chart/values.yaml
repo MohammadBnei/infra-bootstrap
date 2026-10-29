@@ -508,7 +508,7 @@ logAlerts:
 #     TargetDown fires.
 #   - An app moving from a hand-rolled extraManifests ServiceMonitor named
 #     after the release must drop that entry in the same PR: both render
-#     with the same name, and this chart's object (rendered later) wins.
+#     with the same name and Argo CD flags the duplicate.
 metrics:
   serviceMonitor:
     enabled: false
