@@ -45,6 +45,14 @@ to `platform-admins`, and N MG is deliberately not in it (ADR-0058).
 5. **drop trusts `X-authentik-username`.** A NetworkPolicy in drop's values
    admits only the `traefik` namespace, so no pod can forge that header.
 
+   > **Amended 2026-10-29.** `drop-forwardauth` now forwards `X-authentik-jwt`,
+   > the `drop` provider's HS256-signed access token, and `drop-secret.yaml`
+   > delivers the provider's client pair (`DROP_OIDC_CLIENT_ID` is the `aud`,
+   > `DROP_OIDC_CLIENT_SECRET` the key). drop moves from trusting
+   > `X-authentik-username` to verifying that token in drop D1. The
+   > NetworkPolicy stays after D1 as defence in depth, and later moves to the
+   > chart's `networkPolicy` (K2).
+
 PDF export is not part of drop: SilverBullet renders a page to HTML and
 prints it in the browser (a Space Lua exporter in each space's `CONFIG`).
 
