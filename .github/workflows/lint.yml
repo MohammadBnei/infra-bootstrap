@@ -125,7 +125,7 @@ jobs:
           log_ns="dream-analyst drop editable-blog ente has-journal hq
             local-path-storage monitoring mountain pgweb pi-lab searxng
             silverbullet traefik ukubi-bridge ukubi-game ukubi-stt vos vos-dev
-            wedding-2026 wird zot"
+            wird zot"
           no_log_ns="kube-system cilium longhorn-system argocd infisical authentik agent-fleet agent-vault
             thot netbird actions-runner"
           allowed=$(cat <<'ALLOW'

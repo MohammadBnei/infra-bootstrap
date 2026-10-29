@@ -65,8 +65,6 @@
         home: /opt/actions-runner
       - name: agent-fleet
         url: https://github.com/MohammadBnei/agent-fleet
-      - name: wedding-2026
-        url: https://github.com/MohammadBnei/wedding-2026
       - name: ukubi-stt
         url: https://github.com/MohammadBnei/ukubi-stt
       # Re-declared after the #243 revert. That revert removed this entry because

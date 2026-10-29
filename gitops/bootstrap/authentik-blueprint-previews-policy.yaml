@@ -3,13 +3,13 @@
 # Without this, the forwardAuth tier authenticates but does not authorize: the
 # provider is domain-level (cookie_domain bnei.dev), so ONE application object
 # gates every host carrying the `authentik-forwardauth` middleware — today the
-# runtime-minted preview hosts and wedding.bnei.dev/admin — and an application
+# runtime-minted preview hosts, blog.bnei.dev/linkedin and hermes.bnei.dev —
+# and an application
 # with no policy binding admits any user the directory can authenticate.
 #
 # Unlike fleet, there is no second gate behind this one. core checks the
 # `groups` claim itself and fails closed (ADR-0041); a preview host is whatever
-# dev server an agent happened to start, and wedding's /admin is the app's own
-# admin surface. The binding IS the authorization for both.
+# dev server an agent happened to start. The binding IS the authorization there.
 #
 # SEPARATE FILE, same reasoning as authentik-blueprint-fleet-policy.yaml: the
 # policybinding model shape is still unverified against the running 2026.8.0

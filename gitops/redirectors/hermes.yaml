@@ -47,7 +47,7 @@
 #      it covers any *.bnei.dev host, and authentik-blueprint-previews-policy
 #      already restricts that application to platform-admins. No
 #      /outpost.goauthentik.io/ route is needed here either, because
-#      external_host is authentik.bnei.dev — same as wedding.bnei.dev/admin.
+#      external_host is authentik.bnei.dev — same as the e2e preview hosts.
 #   2. The dashboard's own OIDC gate (authentik-blueprint-hermes.yaml), which is
 #      not optional in any case: Hermes fails closed at startup on a
 #      non-loopback bind until an auth provider is configured, and a reverse
