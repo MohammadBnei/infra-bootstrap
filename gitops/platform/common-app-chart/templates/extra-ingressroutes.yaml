@@ -16,6 +16,9 @@ then the entry's own middlewares. Field docs in values.yaml.
 {{- $mainFA := include "common-app-chart.hasForwardAuth" (.Values.ingress.middlewares | default list) }}
 {{- $seen := dict }}
 {{- range $key, $r := $routes }}
+{{- if not (kindIs "map" $r) }}
+{{- fail (printf "ingress.extraRoutes.%s must be a map with match and priority, not %q" $key (toString $r)) }}
+{{- end }}
 {{- $name := lower $key }}
 {{- if not (regexMatch "^[a-z0-9]([-a-z0-9]*[a-z0-9])?$" $name) }}
 {{- fail (printf "ingress.extraRoutes.%s: the key must be a DNS-1123 label once lowercased (it names the IngressRoute %s-%s)" $key $.Release.Name $name) }}
@@ -33,6 +36,10 @@ then the entry's own middlewares. Field docs in values.yaml.
 {{- end }}
 {{- if lt (int $prio) 1 }}
 {{- fail (printf "ingress.extraRoutes.%s.priority must be an integer of 1 or more, not %q (0 is Traefik's rule-length default)" $key (toString $prio)) }}
+{{- end }}
+{{- $port := ternary $r.port $.Values.service.port (and (hasKey $r "port") (not (kindIs "invalid" $r.port))) }}
+{{- if not (and (or (kindIs "int64" $port) (kindIs "float64" $port) (kindIs "int" $port)) (eq (float64 $port) (floor $port)) (ge (int $port) 1) (le (int $port) 65535)) }}
+{{- fail (printf "ingress.extraRoutes.%s.port must be an integer from 1 to 65535, not %q" $key (toString $port)) }}
 {{- end }}
 {{- $match := tpl ($r.match | default "" | toString) $ }}
 {{- /* ponytail: necessary, not sufficient. A substring check: it cannot
@@ -73,7 +80,7 @@ spec:
     priority: {{ $prio | int }}
     services:
     - name: {{ $r.service | default $.Release.Name }}
-      port: {{ $r.port | default $.Values.service.port | int }}
+      port: {{ $port | int }}
     {{- with concat $base $own }}
     middlewares:
       {{- toYaml . | nindent 4 }}

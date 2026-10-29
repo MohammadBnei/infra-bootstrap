@@ -97,9 +97,10 @@ ingress:
   #   middlewares: optional [{name, namespace}], after the baseline.
   #   service:     optional, defaults to the release's Service; same
   #                namespace only (cross-namespace routes stay hand-written).
-  #   port:        optional, defaults to service.port. A NetworkPolicy from
-  #                networkPolicy.ingressFrom admits service.port only, so
-  #                another port on this release's pods is blocked there.
+  #   port:        optional, defaults to service.port; an integer 1-65535.
+  #                A NetworkPolicy from networkPolicy.ingressFrom admits
+  #                service.port only, so another port on this release's
+  #                pods is blocked there.
   #   public:      optional. When ingress.middlewares names a *-forwardauth
   #                Middleware, every extra route must name one too, or set
   #                public: true to say it is meant to skip auth. Never

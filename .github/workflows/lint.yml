@@ -190,6 +190,11 @@ jobs:
           refuse float-priority 'ingress.extraRoutes.adminApi.priority must be an integer of 1 or more' --set-json ingress.extraRoutes.adminApi.priority=1.9
           refuse nameless-middleware 'ingress.extraRoutes.adminApi.middlewares[0] needs a name' \
             --set-json 'ingress.extraRoutes.adminApi.middlewares=[{"namespace":"x"}]'
+          refuse bad-port 'ingress.extraRoutes.adminApi.port must be an integer from 1 to 65535' --set ingress.extraRoutes.adminApi.port=http
+          refuse zero-port 'ingress.extraRoutes.adminApi.port must be an integer from 1 to 65535' --set ingress.extraRoutes.adminApi.port=0
+          refuse big-port 'ingress.extraRoutes.adminApi.port must be an integer from 1 to 65535' --set ingress.extraRoutes.adminApi.port=65536
+          refuse null-entry 'ingress.extraRoutes.other must be a map with match and priority' -f <(printf 'ingress:\n  extraRoutes:\n    other: null\n')
+          refuse scalar-entry 'ingress.extraRoutes.other must be a map with match and priority' --set-json 'ingress.extraRoutes.other="x"'
           refuse zero-priority 'ingress.extraRoutes.adminApi.priority must be an integer of 1 or more' --set ingress.extraRoutes.adminApi.priority=0
           refuse case-collision 'keys must differ once lowercased' \
             --set-json 'ingress.extraRoutes.AdminApi={"match":"Host(`a`)","priority":2,"middlewares":[{"name":"authentik-forwardauth"}]}'
