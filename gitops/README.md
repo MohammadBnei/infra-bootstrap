@@ -178,7 +178,7 @@ Currently: `proxmox.yaml` (proxmox.bnei.dev), `garage-s3.yaml` (s3.bnei.dev, [AD
 ### common-app-chart
 
 A minimal Helm chart for standard web apps. Renders:
-- `Deployment` — image, env, envFrom, resources, optional health probes (HTTP or TCP), optional PVC mount
+- `Deployment` — image, args, env, envFrom, resources, optional health probes (HTTP or TCP), optional PVC mount, optional `serviceAccountName` (an existing account; the chart renders none) and `automountServiceAccountToken` (a bool; `false` for a pod that must hold no credential)
 - `Service` — ClusterIP on `service.port`
 - `IngressRoute` — Traefik CRD, `entryPoints: [websecure]`, native ACME via `tls.certResolver`
 - `PersistentVolumeClaim` — optional, gated by `persistence.enabled`

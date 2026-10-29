@@ -1,0 +1,90 @@
+# authentik blueprint declaring the game's OIDC provider + application
+# (mountain plan/17, the world disc), authentik-blueprint-mountain.yaml's shape.
+#
+# The OWNER pod's sign-in, at game.bnei.dev. That host is NEVER behind a
+# forwardAuth gate: the game signs people in itself (internal/gate/auth.go),
+# admits the ID token's `groups` claim only when it holds platform-admins, and
+# keeps a signed 1 h session cookie. The public pod (world.bnei.dev) holds no
+# credential and never signs anyone in, so it has no client here.
+#
+# A SECRET, not a ConfigMap: the game is server-side, so this is a confidential
+# client and the blueprint embeds its client secret. The game also sends PKCE
+# (S256), state and nonce; no PKCE policy, same as mountain (confidential).
+#
+# The SAME client pair is read twice from the root project: here (authentik's
+# copy) and by gitops/bootstrap/ukubi-game-secret.yaml (the game's env). One
+# Infisical entry each, so a rotation is one edit plus a pod restart.
+#
+# Bindings live in authentik-blueprint-ukubi-game-policy.yaml (the hermes
+# convention): with core_default_app_access false, this file alone admits
+# nobody.
+#
+# BEFORE THE FIRST APPLY: UKUBI_GAME_OIDC_CLIENT_ID and
+# UKUBI_GAME_OIDC_CLIENT_SECRET exist in infra-bootstrap-1-ge1, or the Secret
+# never renders (docs/secrets.md).
+apiVersion: secrets.infisical.com/v1alpha1
+kind: InfisicalSecret
+metadata:
+  name: authentik-blueprint-ukubi-game
+  namespace: infisical
+spec:
+  hostAPI: http://platform-infisical-backend.infisical.svc.cluster.local:8080/api
+  resyncInterval: 60
+  authentication:
+    universalAuth:
+      secretsScope:
+        projectSlug: "infra-bootstrap-1-ge1"
+        envSlug: dev
+        secretsPath: "/"
+      credentialsRef:
+        secretName: universal-auth-credentials
+        secretNamespace: infisical
+  managedSecretReference:
+    secretName: authentik-blueprint-ukubi-game
+    secretNamespace: authentik
+    creationPolicy: Orphan
+    template:
+      data:
+        ukubi-game-oidc.yaml: |
+          version: 1
+          metadata:
+            name: ukubi-game-oidc
+            labels:
+              blueprints.goauthentik.io/instantiate: "true"
+          entries:
+            - model: authentik_providers_oauth2.oauth2provider
+              id: ukubi-game-provider
+              identifiers:
+                name: ukubi-game
+              attrs:
+                name: ukubi-game
+                client_type: confidential
+                client_id: "{{ .UKUBI_GAME_OIDC_CLIENT_ID.Value }}"
+                client_secret: "{{ .UKUBI_GAME_OIDC_CLIENT_SECRET.Value }}"
+                # Object form is required in 2026.x. Strict: a fullmatch of
+                # --origin + /auth/callback, the URI the game builds.
+                redirect_uris:
+                  - matching_mode: strict
+                    url: https://game.bnei.dev/auth/callback
+                # Empty permits no grant. authorization_code only: the game
+                # verifies the ID token once and keeps no token.
+                grant_types:
+                  - authorization_code
+                authorization_flow: !Find [authentik_flows.flow, [slug, default-provider-authorization-implicit-consent]]
+                invalidation_flow: !Find [authentik_flows.flow, [slug, default-provider-invalidation-flow]]
+                signing_key: !Find [authentik_crypto.certificatekeypair, [name, "authentik Self-signed Certificate"]]
+                # `profile` carries `groups` in the ID token, where the game
+                # reads it. The signing key is shared across apps, so the game
+                # checks iss + aud, not only the signature.
+                property_mappings:
+                  - !Find [authentik_providers_oauth2.scopemapping, [managed, "goauthentik.io/providers/oauth2/scope-openid"]]
+                  - !Find [authentik_providers_oauth2.scopemapping, [managed, "goauthentik.io/providers/oauth2/scope-profile"]]
+            - model: authentik_core.application
+              identifiers:
+                slug: ukubi-game
+              attrs:
+                name: ukubi game
+                slug: ukubi-game
+                provider: !KeyOf ukubi-game-provider
+                meta_launch_url: https://game.bnei.dev
+                meta_description: The cluster as a town (owner)

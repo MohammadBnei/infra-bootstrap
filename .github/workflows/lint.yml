@@ -296,6 +296,26 @@ jobs:
           refuse yaml11-bool-backup 'dataLifecycle.backup must be a string; quote it' -f "$RUNNER_TEMP/backup-no.yaml"
           refuse unknown-key 'dataLifecycle.bakup is not a known key' --set dataLifecycle.bakup=x
 
+      # Pod identity and args (templates/deployment.yaml): ci-values.yaml sets
+      # all three; the default render has none; a non-bool automount is
+      # refused, so a quoted "false" cannot pass as a mounted token.
+      - name: common-app-chart serviceAccountName, automountServiceAccountToken, args
+        run: |
+          set -euo pipefail
+          C=gitops/platform/common-app-chart
+          r="$RUNNER_TEMP/rendered.yaml"
+          pod='select(.kind=="Deployment") | .spec.template.spec'
+          test "$(yq ea "$pod | .serviceAccountName" "$r")" = ci-check
+          test "$(yq ea "$pod | .automountServiceAccountToken" "$r")" = false
+          test "$(yq ea "$pod | .containers[0].args | join(\",\")" "$r")" = --world,real
+          test "$(helm template t "$C" | grep -cE 'serviceAccountName|automountServiceAccountToken|args:' || true)" = 0
+          test "$(helm template t "$C" --set automountServiceAccountToken=true | yq ea "$pod | .automountServiceAccountToken")" = true
+          if err=$(helm template t "$C" --set-string automountServiceAccountToken=false 2>&1 >/dev/null); then
+            echo "::error::a string automountServiceAccountToken rendered; the chart must refuse it"; exit 1
+          fi
+          grep -qF 'automountServiceAccountToken must be true, false or unset' <<<"$err" || { echo "::error::refused without its message: $err"; exit 1; }
+          echo "string-automount: refused"
+
       - name: Install kubeconform
         run: |
           set -euo pipefail

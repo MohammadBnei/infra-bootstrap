@@ -258,6 +258,20 @@ resources: {}
 #                     capabilities: {drop: [ALL]}}
 podSecurityContext: {}
 securityContext: {}
+
+# Pod identity. serviceAccountName: an account the app's namespace already has
+# (the chart renders no ServiceAccount: a standing grant is reviewed here, in
+# gitops/platform/, e.g. gitops/platform/ukubi-game). Empty = the namespace's
+# `default`. automountServiceAccountToken: null renders nothing (Kubernetes
+# mounts the token); false keeps the token out of the pod, for a workload
+# that must hold no credential. A bool, or the render fails.
+serviceAccountName: ""
+automountServiceAccountToken: null
+
+# The main container's args, verbatim (the image's ENTRYPOINT stays). For a
+# flag-configured binary, e.g. one image run as two Deployments in two modes.
+# Empty = the image's CMD.
+args: []
 # requests:
 #   cpu: 100m
 #   memory: 128Mi

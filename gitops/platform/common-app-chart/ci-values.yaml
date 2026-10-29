@@ -104,3 +104,10 @@ dataLifecycle:
   pii: personal
   backup: pgBackRest to Garage via Pigsty
   retention: "90d"
+
+# Pod identity and args: renders serviceAccountName, automountServiceAccountToken
+# and the container args for kubeconform and the lint.yml asserts. The default
+# render has none of the three.
+serviceAccountName: ci-check
+automountServiceAccountToken: false
+args: ["--world", "real"]

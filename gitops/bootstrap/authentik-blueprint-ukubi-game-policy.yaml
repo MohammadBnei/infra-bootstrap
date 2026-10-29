@@ -1,0 +1,46 @@
+# Who may sign in to the `ukubi-game` application: platform-admins only. The
+# game's callback refuses anyone outside platform-admins too
+# (internal/gate/auth.go).
+#
+# SEPARATE FROM authentik-blueprint-ukubi-game.yaml, the hermes convention: a
+# blueprint applies as one transaction and PolicyBinding.target is a required
+# FK, so a !Find miss on a not-yet-registered `ukubi-game` rolls back this file
+# only. The metaapplyblueprint entries remove that race (mountain-policy's
+# shape): each applies the named instance first, and `required: true` fails
+# this file, retried on the next discovery, until it exists.
+#
+# Verify in the database, selecting the FKs explicitly:
+#   psql -d authentik -tAc 'SELECT target_id, group_id, enabled
+#                           FROM authentik_policies_policybinding'
+#
+# A plain ConfigMap: no credential to interpolate.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: authentik-blueprint-ukubi-game-policy
+  namespace: authentik
+data:
+  ukubi-game-policy.yaml: |
+    version: 1
+    metadata:
+      name: ukubi-game-policy
+      labels:
+        blueprints.goauthentik.io/instantiate: "true"
+    entries:
+      - model: authentik_blueprints.metaapplyblueprint
+        attrs:
+          identifiers:
+            name: platform-groups
+          required: true
+      - model: authentik_blueprints.metaapplyblueprint
+        attrs:
+          identifiers:
+            name: ukubi-game-oidc
+          required: true
+      - model: authentik_policies.policybinding
+        identifiers:
+          target: !Find [authentik_core.application, [slug, ukubi-game]]
+          group: !Find [authentik_core.group, [name, platform-admins]]
+          order: 0
+        attrs:
+          enabled: true
