@@ -221,6 +221,47 @@ jobs:
           renders trusts-extramanifests-configmap --set-json 'extraManifests=["apiVersion: v1\nkind: ConfigMap\nmetadata: {name: x}\n"]'
           renders untrusted-extramanifests-route --set auth.trustsHeaders=false --set-json "extraManifests=[\"$im\"]"
 
+      # metrics.serviceMonitor (templates/servicemonitor.yaml): off renders
+      # nothing; ci-values.yaml turns it on for an extraPorts port; a port
+      # name that is not a Service port is refused with its message.
+      - name: common-app-chart metrics.serviceMonitor
+        run: |
+          set -euo pipefail
+          C=gitops/platform/common-app-chart
+          r="$RUNNER_TEMP/rendered.yaml"
+          sm='select(.kind=="ServiceMonitor")'
+          test "$(helm template t "$C" | yq ea "[$sm] | length")" = 0
+          test "$(yq ea "[$sm] | length" "$r")" = 1
+          test "$(yq ea "$sm | .metadata.name" "$r")" = ci-check
+          test "$(yq ea "$sm | .metadata.namespace" "$r")" = default
+          test "$(yq ea "$sm | .metadata.labels[\"app.kubernetes.io/name\"]" "$r")" = ci-check
+          test "$(yq ea "$sm | .spec.selector.matchLabels | to_entries | map(.key + \"=\" + .value) | join(\",\")" "$r")" \
+            = app.kubernetes.io/name=ci-check,app.kubernetes.io/instance=ci-check
+          test "$(yq ea "$sm | .spec.endpoints | length" "$r")" = 1
+          test "$(yq ea "$sm | .spec.endpoints[0].port" "$r")" = metrics
+          test "$(yq ea "$sm | .spec.endpoints[0].path" "$r")" = /metrics
+          test "$(yq ea "$sm | .spec.endpoints[0].interval" "$r")" = 15s
+          # positive control: the default port http renders without extraPorts
+          test "$(helm template t "$C" --set metrics.serviceMonitor.enabled=true | yq ea "$sm | .spec.endpoints[0].port")" = http
+          refuse() {
+            local label=$1; shift
+            if err=$(helm template t "$C" --set metrics.serviceMonitor.enabled=true "$@" 2>&1 >/dev/null); then
+              echo "::error::$label rendered; the chart must refuse it"; exit 1
+            fi
+            grep -qF 'must name a Service port' <<<"$err" || { echo "::error::$label failed without the port message: $err"; exit 1; }
+            echo "$label: refused"
+          }
+          refuse unknown-port --set metrics.serviceMonitor.port=metricz
+          refuse numeric-port --set metrics.serviceMonitor.port=9090
+          refuse extraports-typo --set metrics.serviceMonitor.port=metrics \
+            --set 'service.extraPorts[0].name=metric' --set 'service.extraPorts[0].port=9090'
+          # A3: a header-trusting app may not be scraped on its app port
+          if err=$(helm template t "$C" -f "$C/ci-values.yaml" --set metrics.serviceMonitor.port=http 2>&1 >/dev/null); then
+            echo "::error::trustsHeaders + port http rendered; the chart must refuse it"; exit 1
+          fi
+          grep -qF 'port http with auth.trustsHeaders: true is refused' <<<"$err" || { echo "::error::trustsHeaders + port http failed without the A3 message: $err"; exit 1; }
+          echo "trustsheaders-http-port: refused"
+
       - name: Install kubeconform
         run: |
           set -euo pipefail

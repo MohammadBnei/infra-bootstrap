@@ -1,0 +1,34 @@
+{{- /*
+Opt-in Prometheus scrape (metrics.serviceMonitor in values.yaml). Same shape
+as the hand-rolled zot/netbird/mountain ServiceMonitors, so moving one here
+keeps its scrape pool, job and series.
+ponytail: one endpoint, no scheme/scrapeTimeout/relabelings/basicAuth; add
+them when an app needs one.
+*/ -}}
+{{- $sm := (.Values.metrics | default dict).serviceMonitor | default dict }}
+{{- if $sm.enabled }}
+{{- $port := toString ($sm.port | default "http") }}
+{{- $names := list "http" }}
+{{- range .Values.service.extraPorts | default list }}{{ $names = append $names (toString .name) }}{{ end }}
+{{- if not (has $port $names) }}
+{{- fail (printf "metrics.serviceMonitor.port %q must name a Service port: http or a service.extraPorts name (a wrong name selects no target, so TargetDown never fires)" $port) }}
+{{- end }}
+{{- if and (.Values.auth | default dict).trustsHeaders (eq $port "http") }}
+{{- fail "metrics.serviceMonitor.port http with auth.trustsHeaders: true is refused (standard A3: a policy admitting monitoring on the app port lets it forge X-authentik-* headers); serve metrics on a service.extraPorts port" }}
+{{- end }}
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: {{ .Release.Name }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "common-app-chart.labels" . | nindent 4 }}
+spec:
+  selector:
+    matchLabels:
+      {{- include "common-app-chart.selectorLabels" . | nindent 6 }}
+  endpoints:
+  - port: {{ $port | quote }}
+    path: {{ $sm.path | default "/metrics" | quote }}
+    interval: {{ $sm.interval | default "30s" | quote }}
+{{- end }}

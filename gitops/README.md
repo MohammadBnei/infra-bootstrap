@@ -188,6 +188,7 @@ A minimal Helm chart for standard web apps. Renders:
 - `oneOffJobs:` — suspended `CronJob`s for one-time scripts, triggered via `kubectl create job --from=cronjob/...` and a ledger-driven reusable CI workflow (see ADR-0022/0023)
 - `ConfigMap` (log alert rules) — optional, gated by `logAlerts.enabled`, labeled `grafana_alert: "1"` so Grafana's alerts sidecar picks it up dynamically (see `gitops/platform/values/grafana/values.yaml`'s `sidecar.alerts`) — routes through the platform's shared Discord contact point, the app only declares the LogQL condition/threshold
 - `ConfigMap` (dashboards) — optional, gated by `dashboards.enabled`, labeled `grafana_dashboard: "1"` so Grafana's dashboards sidecar picks it up dynamically (see `gitops/platform/values/grafana/values.yaml`'s `sidecar.dashboards`) — the app ships its own dashboard JSON from its own repo, no platform file edits needed
+- `ServiceMonitor` — optional, gated by `metrics.serviceMonitor.enabled`: one endpoint on a named Service port (`http` or a `service.extraPorts` name; any other name is refused), adopted by Prometheus with no label. With `networkPolicy.ingressFrom` set, add a port-scoped policy admitting `monitoring` (see below); with `auth.trustsHeaders: true` port `http` is refused (A3)
 
 Key values a per-app `values.yaml` must set:
 

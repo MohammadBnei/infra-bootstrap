@@ -110,8 +110,8 @@ extraVolumeMounts:
     readOnly: true
 
 extraManifests:
-  # Scrape for the metrics port above, zot's pattern (common-app-chart has no
-  # ServiceMonitor template). ADR-0055 makes NetBird the daily SSH path to
+  # Scrape for the metrics port above, zot's pattern (hand-rolled; move to
+  # common-app-chart's metrics.serviceMonitor later). ADR-0055 makes NetBird the daily SSH path to
   # every host, so it is alerted on like one.
   - |
     apiVersion: monitoring.coreos.com/v1
