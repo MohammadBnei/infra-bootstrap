@@ -186,6 +186,10 @@ jobs:
           refuse no-host 'ingress.extraRoutes.adminApi.match must contain Host(' --set 'ingress.extraRoutes.adminApi.match=PathPrefix(`/x`)'
           refuse empty-match 'ingress.extraRoutes.adminApi.match must contain Host(' --set ingress.extraRoutes.adminApi.match=
           refuse no-priority 'ingress.extraRoutes.adminApi.priority is required' --set ingress.extraRoutes.adminApi.priority=null
+          refuse bad-priority 'ingress.extraRoutes.adminApi.priority must be an integer of 1 or more' --set ingress.extraRoutes.adminApi.priority=abc
+          refuse zero-priority 'ingress.extraRoutes.adminApi.priority must be an integer of 1 or more' --set ingress.extraRoutes.adminApi.priority=0
+          refuse case-collision 'keys must differ once lowercased' \
+            --set-json 'ingress.extraRoutes.AdminApi={"match":"Host(`a`)","priority":2,"middlewares":[{"name":"authentik-forwardauth"}]}'
           refuse trusts-no-forwardauth 'ingress.extraRoutes.adminApi needs a *-forwardauth Middleware because auth.trustsHeaders' \
             --set-json 'ingress.extraRoutes.adminApi.middlewares=[]'
           refuse trusts-public-ignored 'ingress.extraRoutes.adminApi needs a *-forwardauth Middleware because auth.trustsHeaders' \
@@ -200,6 +204,12 @@ jobs:
           # A3: a header-trusting app may not hand-write an IngressRoute
           im='apiVersion: traefik.io/v1alpha1\nkind: IngressRoute\nmetadata: {name: x}\n'
           refuse trusts-extramanifests-route 'auth.trustsHeaders: true refuses an IngressRoute in extraManifests' --set-json "extraManifests=[\"$im\"]"
+          refuse trusts-extramanifests-quoted 'auth.trustsHeaders: true refuses an IngressRoute in extraManifests' \
+            --set-json 'extraManifests=["apiVersion: traefik.io/v1alpha1\nkind: \"IngressRoute\"\nmetadata: {name: x}\n"]'
+          refuse trusts-extramanifests-flow 'auth.trustsHeaders: true refuses an IngressRoute in extraManifests' \
+            --set-json 'extraManifests=["{apiVersion: traefik.io/v1alpha1, kind: IngressRoute, metadata: {name: x}}"]'
+          refuse trusts-extramanifests-tpl 'auth.trustsHeaders: true refuses an IngressRoute in extraManifests' \
+            --set-json 'extraManifests=["apiVersion: traefik.io/v1alpha1\nkind: {{ \"Ingress\" }}Route\nmetadata: {name: x}\n"]'
           renders trusts-extramanifests-configmap --set-json 'extraManifests=["apiVersion: v1\nkind: ConfigMap\nmetadata: {name: x}\n"]'
           renders untrusted-extramanifests-route --set auth.trustsHeaders=false --set-json "extraManifests=[\"$im\"]"
 

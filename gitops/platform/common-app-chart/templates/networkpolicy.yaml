@@ -22,9 +22,18 @@ condition, not a sufficient one: see networkPolicy in values.yaml.
 {{- end }}
 {{- /* extraRoutes (extra-ingressroutes.yaml) is the guarded way to add a
 route; a hand-written one in extraManifests is not checked, so refuse it.
-Matches IngressRouteTCP/UDP too: they bypass forwardAuth as well. */ -}}
+Two checks on the tpl'd entry: each "---" document's parsed .kind, and a
+text match (quoted or flow-style kind too) for what fromYaml cannot parse.
+Matches IngressRouteTCP/UDP too: they bypass forwardAuth as well.
+ponytail: textual best effort, fails closed on a ConfigMap quoting
+"kind: IngressRoute"; not a YAML stream parser. */ -}}
 {{- range .Values.extraManifests }}
-{{- if regexMatch "(?m)^\\s*kind:\\s*IngressRoute" (toString .) }}
+{{- $out := tpl (toString .) $ }}
+{{- $hit := regexMatch "kind[\"']?\\s*:\\s*[\"']?IngressRoute" $out }}
+{{- range regexSplit "(?m)^---.*$" $out -1 }}
+{{- if hasPrefix "IngressRoute" (toString (fromYaml .).kind) }}{{ $hit = true }}{{ end }}
+{{- end }}
+{{- if $hit }}
 {{- fail "auth.trustsHeaders: true refuses an IngressRoute in extraManifests (standard A3: the chart cannot check its forwardAuth); declare it in ingress.extraRoutes instead" }}
 {{- end }}
 {{- end }}

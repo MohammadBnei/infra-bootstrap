@@ -14,10 +14,22 @@ then the entry's own middlewares. Field docs in values.yaml.
 {{- $base := include "common-app-chart.baselineMiddlewares" . | fromYamlArray }}
 {{- $trusts := (.Values.auth | default dict).trustsHeaders }}
 {{- $mainFA := include "common-app-chart.hasForwardAuth" (.Values.ingress.middlewares | default list) }}
+{{- $seen := dict }}
 {{- range $key, $r := $routes }}
 {{- $name := lower $key }}
 {{- if not (regexMatch "^[a-z0-9]([-a-z0-9]*[a-z0-9])?$" $name) }}
 {{- fail (printf "ingress.extraRoutes.%s: the key must be a DNS-1123 label once lowercased (it names the IngressRoute %s-%s)" $key $.Release.Name $name) }}
+{{- end }}
+{{- if hasKey $seen $name }}
+{{- fail (printf "ingress.extraRoutes.%s and ingress.extraRoutes.%s both name the IngressRoute %s-%s: keys must differ once lowercased" (get $seen $name) $key $.Release.Name $name) }}
+{{- end }}
+{{- $_ := set $seen $name $key }}
+{{- $prio := required (printf "ingress.extraRoutes.%s.priority is required" $key) $r.priority }}
+{{- if not (or (kindIs "int64" $prio) (kindIs "float64" $prio) (kindIs "int" $prio)) }}
+{{- fail (printf "ingress.extraRoutes.%s.priority must be an integer of 1 or more, not %q" $key (toString $prio)) }}
+{{- end }}
+{{- if lt (int $prio) 1 }}
+{{- fail (printf "ingress.extraRoutes.%s.priority must be an integer of 1 or more, not %q (0 is Traefik's rule-length default)" $key (toString $prio)) }}
 {{- end }}
 {{- $match := tpl ($r.match | default "" | toString) $ }}
 {{- /* ponytail: necessary, not sufficient. A substring check: it cannot
@@ -50,7 +62,7 @@ spec:
     match: {{ $match | toJson }}
     {{- /* explicit (ADR-0039 Decision 5) so a later rule edit cannot
     reorder routes; `| int` so 1000000 does not render as 1e+06 */}}
-    priority: {{ required (printf "ingress.extraRoutes.%s.priority is required" $key) $r.priority | int }}
+    priority: {{ $prio | int }}
     services:
     - name: {{ $r.service | default $.Release.Name }}
       port: {{ $r.port | default $.Values.service.port | int }}
