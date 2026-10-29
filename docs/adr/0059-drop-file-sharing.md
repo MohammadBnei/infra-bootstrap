@@ -43,7 +43,11 @@ to `platform-admins`, and N MG is deliberately not in it (ADR-0058).
    - Which space each user sees is drop's `DROP_SPACES` map: M BN gets opus
      and notes, N MG gets opus. This follows ADR-0058.
 5. **drop trusts `X-authentik-username`.** A NetworkPolicy in drop's values
-   admits only the `traefik` namespace, so no pod can forge that header.
+   admits only the `traefik` namespace, so no other namespace's pod can
+   send that header directly. (Amended 2026-10-29: the host identity and any
+   cross-namespace IngressRoute through Traefik still reach drop; see the
+   common-app-chart `networkPolicy`/`auth.trustsHeaders` section of
+   gitops/README.md.)
 
 PDF export is not part of drop: SilverBullet renders a page to HTML and
 prints it in the browser (a Space Lua exporter in each space's `CONFIG`).

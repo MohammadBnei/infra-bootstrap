@@ -29,6 +29,38 @@ service:
   # targetPort (optional), protocol (optional, default TCP)}.
   extraPorts: []
 
+# Ingress NetworkPolicy (templates/networkpolicy.yaml), off by default. A
+# non-empty list renders one NetworkPolicy, named after the release, that
+# admits only pods in these namespaces, and only to service.port (TCP).
+# Opting in denies every other pod-to-pod ingress: other namespaces, the
+# app's own namespace, service.extraPorts and a Prometheus scrape.
+# Still admitted, because no NetworkPolicy can stop them here:
+#   - the host identity on the pod's node: the kubelet, any hostNetwork pod,
+#     and probably NodePort/LoadBalancer traffic (Cilium chaining, kube-proxy
+#     IPVS masquerade; agent-fleet ADR-0069);
+#   - anything Traefik proxies, including an IngressRoute from ANY namespace
+#     that names this Service with no forwardAuth (allowCrossNamespace is on
+#     in gitops/platform/values/traefik/values.yaml);
+#   - whatever another NetworkPolicy selecting the same pods allows
+#     (policies are additive, e.g. one in extraManifests).
+# The policy is named {{ .Release.Name }}, so an app that already declares a
+# NetworkPolicy of that name in extraManifests must drop it in the same PR.
+networkPolicy:
+  ingressFrom: []
+  # ingressFrom: [traefik]
+
+# Standard A3. Set trustsHeaders: true if the app reads a raw X-authentik-*
+# header (it trusts authentik's forwardAuth instead of checking a token). The
+# chart then refuses to render unless networkPolicy.ingressFrom is exactly
+# [traefik], service.type is ClusterIP and, when the IngressRoute renders,
+# ingress.middlewares names a *-forwardauth Middleware (matched by name, not
+# by spec). That is a necessary condition, not
+# a sufficient one: the residual paths listed under networkPolicy above
+# still reach the app, and an app that trusts the header without setting
+# this flag is not detected.
+auth:
+  trustsHeaders: false
+
 ingress:
   enabled: true
   hostname: ""
