@@ -787,7 +787,7 @@ user ID. Treat it as immutable.
 - **forwardAuth tier, the rest of it** — Alertmanager, pgweb, Proxmox. The
   provider, the middleware and the group binding exist and gate the e2e preview
   hosts, `blog.bnei.dev/linkedin` and `hermes.bnei.dev` today
-  (`wedding.bnei.dev/admin` until wedding-2026 was decommissioned, 2026-10-29); `fleet.bnei.dev` went the other way
+  (`wedding.bnei.dev/admin` until wedding-2026 was retired by PR #385); `fleet.bnei.dev` went the other way
   (native OIDC in core, ADR-0041). Adding a host is one `middlewares:` entry —
   the provider is domain-level, so it needs no blueprint change. Design and task
   list in infra-bootstrap issue
