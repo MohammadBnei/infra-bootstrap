@@ -52,9 +52,11 @@ networkPolicy:
 # Standard A3. Set trustsHeaders: true if the app reads a raw X-authentik-*
 # header (it trusts authentik's forwardAuth instead of checking a token). The
 # chart then refuses to render unless networkPolicy.ingressFrom is exactly
-# [traefik], service.type is ClusterIP and, when the IngressRoute renders,
-# ingress.middlewares names a *-forwardauth Middleware (matched by name, not
-# by spec). That is a necessary condition, not
+# [traefik], service.type is ClusterIP, when the IngressRoute renders
+# ingress.middlewares and every ingress.extraRoutes entry name a
+# *-forwardauth Middleware (matched by name, not by spec), and no
+# extraManifests entry is an IngressRoute (the chart cannot check its
+# middlewares; use ingress.extraRoutes). That is a necessary condition, not
 # a sufficient one: the residual paths listed under networkPolicy above
 # still reach the app, and an app that trusts the header without setting
 # this flag is not detected.
@@ -78,6 +80,50 @@ ingress:
   # These are APPENDED after the baseline chain below, not instead of it.
   middlewares: []
 
+  # More IngressRoutes for this release, keyed by route name (a map, so a
+  # layered values file merges one entry instead of replacing a list). Each
+  # renders an IngressRoute `<release>-<key | lower>` in the release namespace
+  # on websecure, with tls.certResolver above, the chart labels (not
+  # ingress.annotations), and the SAME baseline chain as the main route
+  # prepended to its own middlewares. ingress.middlewares is NOT inherited.
+  #   match:       required; tpl'd, so Host(`{{ .Values.ingress.hostname }}`)
+  #                works for a host the ApplicationSet sets. Must contain
+  #                Host(: necessary, not sufficient (Host(`a`) || P(`/x`)
+  #                passes and still matches every host).
+  #   priority:    required, an integer. Traefik's default is the rule
+  #                length, so a same-host carve-out silently beats the main
+  #                route; say it explicitly (ADR-0039 Decision 5).
+  #   middlewares: optional [{name, namespace}], after the baseline.
+  #   service:     optional, defaults to the release's Service; same
+  #                namespace only (cross-namespace routes stay hand-written).
+  #   port:        optional, defaults to service.port. A NetworkPolicy from
+  #                networkPolicy.ingressFrom admits service.port only, so
+  #                another port on this release's pods is blocked there.
+  #   public:      optional. When ingress.middlewares names a *-forwardauth
+  #                Middleware, every extra route must name one too, or set
+  #                public: true to say it is meant to skip auth. Never
+  #                honoured with auth.trustsHeaders: true.
+  # Refused: a list, a key that is not a DNS-1123 label once lowercased, any
+  # entry while ingress.enabled or ingress.hostname is unset (the baseline
+  # Middlewares render only then), a match without Host(, a missing priority.
+  # The baseline toggles are per release: an extra host must have the SAME
+  # Cloudflare proxy status as the main host. A grey host in a proxied
+  # release is 403'd by the origin lock (fails closed); a proxied host in a
+  # grey release (originLock off, sourceHeader "") has no origin lock, so a
+  # direct connection to the origin with a forged Host skips the WAF, and
+  # its limiter buckets on Cloudflare edge IPs (fails OPEN).
+  # Names collide: release `wird` with key `adminweb` IS release
+  # wird-adminweb's main route in a shared namespace, and moving an
+  # extraManifests IngressRoute here under the same name needs the old entry
+  # removed in the same PR.
+  # extraRoutes:
+  #   admin:
+  #     match: Host(`{{ .Values.ingress.hostname }}`) && PathPrefix(`/admin`)
+  #     priority: 100
+  #     middlewares:
+  #     - {name: authentik-forwardauth, namespace: default}
+  extraRoutes: {}
+
   # Baseline protection applied to every exposed app (ADR-0038). On by
   # default and deliberately so: `middlewares` above is opt-in, which meant
   # an app was unprotected unless someone remembered to protect it. The
@@ -91,10 +137,12 @@ ingress:
   # repo, which is also why they pick this up with no ApplicationSet change.
   #
   # LIMITATION, worth knowing before assuming coverage: the baseline is
-  # prepended only to the IngressRoute templates/ingressroute.yaml renders.
-  # Two escape hatches bypass it and must wire the refs themselves —
+  # prepended only to the IngressRoutes this chart renders (the main one and
+  # ingress.extraRoutes). Two escape hatches bypass it and must wire the
+  # refs themselves —
   #   1. any IngressRoute declared through `extraManifests` (ente-web's
-  #      album.ente route does this; it references the Middlewares by name)
+  #      album.ente route does this; it references the Middlewares by name).
+  #      Use ingress.extraRoutes instead to get the baseline automatically
   #   2. agent-fleet's e2e preview routes, which are built in Go by the
   #      provisioner and never touch this chart at all
   baseline:

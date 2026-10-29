@@ -32,18 +32,7 @@ spec:
       ingress.baseline.enabled: false in that app's values file — which works
       for the external-repo apps too, since their values.yaml is a real source.
     */}}
-    {{- $mw := list }}
-    {{- if .Values.ingress.baseline.enabled }}
-    {{- if .Values.ingress.baseline.originLock.enabled }}
-    {{- $mw = append $mw (dict "name" (printf "%s-baseline-originlock" .Release.Name) "namespace" .Release.Namespace) }}
-    {{- end }}
-    {{- if .Values.ingress.baseline.rateLimit.enabled }}
-    {{- $mw = append $mw (dict "name" (printf "%s-baseline-ratelimit" .Release.Name) "namespace" .Release.Namespace) }}
-    {{- end }}
-    {{- if .Values.ingress.baseline.headers.enabled }}
-    {{- $mw = append $mw (dict "name" (printf "%s-baseline-headers" .Release.Name) "namespace" .Release.Namespace) }}
-    {{- end }}
-    {{- end }}
+    {{- $mw := include "common-app-chart.baselineMiddlewares" . | fromYamlArray }}
     {{- $mw = concat $mw (.Values.ingress.middlewares | default list) }}
     {{- with $mw }}
     middlewares:

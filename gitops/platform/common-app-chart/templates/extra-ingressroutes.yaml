@@ -1,0 +1,64 @@
+{{- /*
+ingress.extraRoutes: one IngressRoute per key, with the same ADR-0038
+baseline chain the main route gets (common-app-chart.baselineMiddlewares),
+then the entry's own middlewares. Field docs in values.yaml.
+*/ -}}
+{{- $routes := .Values.ingress.extraRoutes | default dict }}
+{{- if not (kindIs "map" $routes) }}
+{{- fail "ingress.extraRoutes must be a map keyed by route name, not a list" }}
+{{- end }}
+{{- if $routes }}
+{{- if not (and .Values.ingress.enabled .Values.ingress.hostname) }}
+{{- fail "ingress.extraRoutes needs ingress.enabled and ingress.hostname: the baseline Middlewares it references render only then" }}
+{{- end }}
+{{- $base := include "common-app-chart.baselineMiddlewares" . | fromYamlArray }}
+{{- $trusts := (.Values.auth | default dict).trustsHeaders }}
+{{- $mainFA := include "common-app-chart.hasForwardAuth" (.Values.ingress.middlewares | default list) }}
+{{- range $key, $r := $routes }}
+{{- $name := lower $key }}
+{{- if not (regexMatch "^[a-z0-9]([-a-z0-9]*[a-z0-9])?$" $name) }}
+{{- fail (printf "ingress.extraRoutes.%s: the key must be a DNS-1123 label once lowercased (it names the IngressRoute %s-%s)" $key $.Release.Name $name) }}
+{{- end }}
+{{- $match := tpl ($r.match | default "" | toString) $ }}
+{{- /* ponytail: necessary, not sufficient. A substring check: it cannot
+see that Host(`a`) || PathPrefix(`/x`) still matches every host. A real
+check needs a rule parser. */ -}}
+{{- if not (contains "Host(" $match) }}
+{{- fail (printf "ingress.extraRoutes.%s.match must contain Host(...): without it the route takes that path on every host" $key) }}
+{{- end }}
+{{- $own := $r.middlewares | default list }}
+{{- $fa := include "common-app-chart.hasForwardAuth" $own }}
+{{- if and $trusts (not $fa) }}
+{{- fail (printf "ingress.extraRoutes.%s needs a *-forwardauth Middleware because auth.trustsHeaders is true (standard A3: without forwardAuth, Traefik passes a client's X-authentik-* headers through; public: true does not apply)" $key) }}
+{{- end }}
+{{- if and $mainFA (not $fa) (not $r.public) }}
+{{- fail (printf "ingress.extraRoutes.%s has no *-forwardauth Middleware but the main route has one: add it, or set public: true if this route is meant to skip auth" $key) }}
+{{- end }}
+---
+apiVersion: traefik.io/v1alpha1
+kind: IngressRoute
+metadata:
+  name: {{ $.Release.Name }}-{{ $name }}
+  namespace: {{ $.Release.Namespace }}
+  labels:
+    {{- include "common-app-chart.labels" $ | nindent 4 }}
+spec:
+  entryPoints:
+  - websecure
+  routes:
+  - kind: Rule
+    match: {{ $match | toJson }}
+    {{- /* explicit (ADR-0039 Decision 5) so a later rule edit cannot
+    reorder routes; `| int` so 1000000 does not render as 1e+06 */}}
+    priority: {{ required (printf "ingress.extraRoutes.%s.priority is required" $key) $r.priority | int }}
+    services:
+    - name: {{ $r.service | default $.Release.Name }}
+      port: {{ $r.port | default $.Values.service.port | int }}
+    {{- with concat $base $own }}
+    middlewares:
+      {{- toYaml . | nindent 4 }}
+    {{- end }}
+  tls:
+    certResolver: {{ $.Values.ingress.certResolver }}
+{{- end }}
+{{- end }}

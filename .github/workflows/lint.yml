@@ -128,6 +128,81 @@ jobs:
           test "$(yq ea "$np | .spec.podSelector.matchLabels[\"app.kubernetes.io/name\"]" "$r")" = ci-check
           echo "ci-values NetworkPolicy: traefik only, port 80"
 
+      # ingress.extraRoutes (templates/extra-ingressroutes.yaml): every extra
+      # route gets the main route's baseline chain first, under every baseline
+      # toggle, and each refusal fires with its OWN message, so one refusal
+      # cannot stand in for another. Cases run on ci-values.yaml.
+      - name: common-app-chart extraRoutes (baseline prepended, refusals)
+        run: |
+          set -euo pipefail
+          C=gitops/platform/common-app-chart
+          V=$C/ci-values.yaml
+          r="$RUNNER_TEMP/rendered.yaml"
+          main='select(.kind=="IngressRoute" and .metadata.name=="ci-check")'
+          xr='select(.kind=="IngressRoute" and .metadata.name=="ci-check-adminapi")'
+          mw() { yq ea "$1 | [.spec.routes[0].middlewares[].name] | join(\",\")" "$2"; }
+          test "$(yq ea '[select(.kind=="IngressRoute")] | length' "$r")" = 2
+          test "$(yq ea "$xr | .metadata.namespace" "$r")" = default
+          test "$(yq ea "$xr | .metadata.labels[\"app.kubernetes.io/name\"]" "$r")" = ci-check
+          test "$(yq ea "$xr | .spec.entryPoints | join(\",\")" "$r")" = websecure
+          test "$(yq ea "$xr | .spec.routes[0].match" "$r")" = 'Host(`ci-check.example.com`) && PathPrefix(`/admin`)'
+          test "$(yq ea "$xr | .spec.routes[0].priority" "$r")" = 1000000
+          test "$(yq ea "$xr | .spec.routes[0].services[0].name" "$r")" = ci-check-admin
+          test "$(yq ea "$xr | .spec.routes[0].services[0].port" "$r")" = 8080
+          test "$(yq ea "$xr | .spec.tls.certResolver" "$r")" = le
+          b=ci-check-baseline-originlock,ci-check-baseline-ratelimit,ci-check-baseline-headers
+          test "$(mw "$xr" "$r")" = "$b,authentik-forwardauth,ci-check-admin-strip"
+          test "$(mw "$main" "$r")" = "$b,authentik-forwardauth"
+          # each baseline toggle: main and extra route drop the same refs
+          t="$RUNNER_TEMP/toggle.yaml"
+          for c in "ingress.baseline.enabled=false|" \
+                   "ingress.baseline.originLock.enabled=false|ci-check-baseline-ratelimit,ci-check-baseline-headers," \
+                   "ingress.baseline.rateLimit.enabled=false|ci-check-baseline-originlock,ci-check-baseline-headers," \
+                   "ingress.baseline.headers.enabled=false|ci-check-baseline-originlock,ci-check-baseline-ratelimit,"; do
+            helm template ci-check "$C" -f "$V" --set "${c%%|*}" > "$t"
+            test "$(mw "$main" "$t")" = "${c#*|}authentik-forwardauth" || { echo "::error::main route wrong under ${c%%|*}"; exit 1; }
+            test "$(mw "$xr" "$t")" = "${c#*|}authentik-forwardauth,ci-check-admin-strip" || { echo "::error::extra route wrong under ${c%%|*}"; exit 1; }
+          done
+          # default (no extraRoutes): only the main route
+          test "$(helm template t "$C" --set ingress.hostname=x.example.com | yq ea '[select(.kind=="IngressRoute")] | length')" = 1
+          refuse() {
+            local label=$1 want=$2; shift 2
+            if err=$(helm template ci-check "$C" -f "$V" "$@" 2>&1 >/dev/null); then
+              echo "::error::$label rendered; the chart must refuse it"; exit 1
+            fi
+            grep -qF -- "$want" <<<"$err" || { echo "::error::$label failed without '$want': $err"; exit 1; }
+            echo "$label: refused"
+          }
+          renders() {
+            local label=$1; shift
+            helm template ci-check "$C" -f "$V" "$@" > "$t" || { echo "::error::$label must render"; exit 1; }
+            echo "$label: renders"
+          }
+          refuse list 'ingress.extraRoutes must be a map' --set-json 'ingress.extraRoutes=[{"match":"Host(`a`)","priority":1}]'
+          refuse no-hostname 'ingress.extraRoutes needs ingress.enabled and ingress.hostname' --set ingress.hostname=
+          refuse ingress-disabled 'ingress.extraRoutes needs ingress.enabled and ingress.hostname' --set ingress.enabled=false
+          refuse bad-key 'ingress.extraRoutes.my_route: the key must be a DNS-1123 label' \
+            --set-json 'ingress.extraRoutes.my_route={"match":"Host(`a`)","priority":1,"middlewares":[{"name":"authentik-forwardauth"}]}'
+          refuse no-host 'ingress.extraRoutes.adminApi.match must contain Host(' --set 'ingress.extraRoutes.adminApi.match=PathPrefix(`/x`)'
+          refuse empty-match 'ingress.extraRoutes.adminApi.match must contain Host(' --set ingress.extraRoutes.adminApi.match=
+          refuse no-priority 'ingress.extraRoutes.adminApi.priority is required' --set ingress.extraRoutes.adminApi.priority=null
+          refuse trusts-no-forwardauth 'ingress.extraRoutes.adminApi needs a *-forwardauth Middleware because auth.trustsHeaders' \
+            --set-json 'ingress.extraRoutes.adminApi.middlewares=[]'
+          refuse trusts-public-ignored 'ingress.extraRoutes.adminApi needs a *-forwardauth Middleware because auth.trustsHeaders' \
+            --set-json 'ingress.extraRoutes.adminApi.middlewares=[]' --set ingress.extraRoutes.adminApi.public=true
+          refuse main-gated-no-forwardauth 'ingress.extraRoutes.adminApi has no *-forwardauth Middleware but the main route has one' \
+            --set auth.trustsHeaders=false --set-json 'ingress.extraRoutes.adminApi.middlewares=[]'
+          renders main-gated-public --set auth.trustsHeaders=false --set-json 'ingress.extraRoutes.adminApi.middlewares=[]' \
+            --set ingress.extraRoutes.adminApi.public=true
+          test "$(mw "$xr" "$t")" = "$b"
+          renders ungated-no-forwardauth --set auth.trustsHeaders=false --set-json 'ingress.middlewares=[]' \
+            --set-json 'ingress.extraRoutes.adminApi.middlewares=[]'
+          # A3: a header-trusting app may not hand-write an IngressRoute
+          im='apiVersion: traefik.io/v1alpha1\nkind: IngressRoute\nmetadata: {name: x}\n'
+          refuse trusts-extramanifests-route 'auth.trustsHeaders: true refuses an IngressRoute in extraManifests' --set-json "extraManifests=[\"$im\"]"
+          renders trusts-extramanifests-configmap --set-json 'extraManifests=["apiVersion: v1\nkind: ConfigMap\nmetadata: {name: x}\n"]'
+          renders untrusted-extramanifests-route --set auth.trustsHeaders=false --set-json "extraManifests=[\"$im\"]"
+
       - name: Install kubeconform
         run: |
           set -euo pipefail
