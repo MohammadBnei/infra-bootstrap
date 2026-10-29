@@ -1,0 +1,4 @@
+# the chart refuses pii: "" so the lint calls it invalid, not missing
+dataLifecycle:
+  pii: ""
+  backup: daily

@@ -16,8 +16,9 @@
 #   `<app>: missing pii,backup`, `<app>: invalid pii` (and combinations),
 #   `<app>: skipped (values unreadable)`, `<app>: fetch failed`, then a
 #   counts line and one ::warning:: with the undeclared count.
-# - A field is declared when it is a non-empty string; pii must also be
-#   none, personal or sensitive (the chart refuses anything else).
+# - A field is declared when it is a string; pii must be none, personal or
+#   sensitive (the chart refuses anything else, "" included, so pii: "" is
+#   invalid), while backup: "" counts as missing (the chart accepts it).
 # - Exits 0 whatever the declarations say (warn-only for now). Exits 1 only
 #   when the lint itself is broken: a fetch failed for a reason other than
 #   a 404 (bad token, rate limit, 5xx), a values file does not parse, or a
@@ -63,12 +64,12 @@ status() {
   dl=$(yq ea -o=json '. as $i ireduce ({}; . * $i) | .dataLifecycle' "$@" 2>/dev/null) \
     || { echo "$app: fetch failed (values do not parse)"; broken=1; return; }
   r=$(jq -r '
-    def st($v; $ok): if $v == null or $v == "" then "missing" elif $ok then "ok" else "invalid" end;
+    def st($v; $ok): if $v == null then "missing" elif $ok then "ok" else "invalid" end;
     if . == null then {} else . end
     | if type != "object" then "invalid pii,backup"
       else
         [ {f: "pii", s: st(.pii; (.pii | type) == "string" and (.pii | IN("none", "personal", "sensitive")))},
-          {f: "backup", s: st(.backup; (.backup | type) == "string")} ] as $r
+          {f: "backup", s: st(if .backup == "" then null else .backup end; (.backup | type) == "string")} ] as $r
         | ([$r[] | select(.s == "invalid") | .f] | join(",")) as $inv
         | ([$r[] | select(.s == "missing") | .f] | join(",")) as $mis
         | [ (if $inv != "" then "invalid " + $inv else empty end),

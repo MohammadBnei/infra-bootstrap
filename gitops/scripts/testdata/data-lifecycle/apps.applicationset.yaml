@@ -16,3 +16,15 @@ spec:
         repoURL: https://github.com/MohammadBnei/absent.git
         targetRevision: main
         valuesPath: [values.yaml]
+      - name: fx-numeric
+        repoURL: https://github.com/MohammadBnei/numeric.git
+        targetRevision: main
+        valuesPath: [values.yaml]
+      - name: fx-list
+        repoURL: https://github.com/MohammadBnei/list.git
+        targetRevision: main
+        valuesPath: [values.yaml]
+      - name: fx-blank
+        repoURL: https://github.com/MohammadBnei/blank.git
+        targetRevision: main
+        valuesPath: [values.yaml]
