@@ -506,6 +506,9 @@ logAlerts:
 #     NetworkPolicy in extraManifests that admits monitoring on it
 #     (agent-fleet-core's pattern); without one the target shows up==0 and
 #     TargetDown fires.
+#   - With auth.trustsHeaders: true, port http is refused (standard A3:
+#     admitting monitoring on the app port lets it forge X-authentik-*
+#     headers). Serve metrics on a service.extraPorts port instead.
 #   - An app moving from a hand-rolled extraManifests ServiceMonitor named
 #     after the release must drop that entry in the same PR: both render
 #     with the same name and Argo CD flags the duplicate.

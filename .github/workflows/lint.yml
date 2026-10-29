@@ -255,6 +255,12 @@ jobs:
           refuse numeric-port --set metrics.serviceMonitor.port=9090
           refuse extraports-typo --set metrics.serviceMonitor.port=metrics \
             --set 'service.extraPorts[0].name=metric' --set 'service.extraPorts[0].port=9090'
+          # A3: a header-trusting app may not be scraped on its app port
+          if err=$(helm template t "$C" -f "$C/ci-values.yaml" --set metrics.serviceMonitor.port=http 2>&1 >/dev/null); then
+            echo "::error::trustsHeaders + port http rendered; the chart must refuse it"; exit 1
+          fi
+          grep -qF 'port http with auth.trustsHeaders: true is refused' <<<"$err" || { echo "::error::trustsHeaders + port http failed without the A3 message: $err"; exit 1; }
+          echo "trustsheaders-http-port: refused"
 
       - name: Install kubeconform
         run: |

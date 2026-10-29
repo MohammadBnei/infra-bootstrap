@@ -13,6 +13,9 @@ them when an app needs one.
 {{- if not (has $port $names) }}
 {{- fail (printf "metrics.serviceMonitor.port %q must name a Service port: http or a service.extraPorts name (a wrong name selects no target, so TargetDown never fires)" $port) }}
 {{- end }}
+{{- if and (.Values.auth | default dict).trustsHeaders (eq $port "http") }}
+{{- fail "metrics.serviceMonitor.port http with auth.trustsHeaders: true is refused (standard A3: a policy admitting monitoring on the app port lets it forge X-authentik-* headers); serve metrics on a service.extraPorts port" }}
+{{- end }}
 apiVersion: monitoring.coreos.com/v1
 kind: ServiceMonitor
 metadata:
