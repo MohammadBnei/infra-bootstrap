@@ -189,6 +189,7 @@ A minimal Helm chart for standard web apps. Renders:
 - `ConfigMap` (log alert rules) — optional, gated by `logAlerts.enabled`, labeled `grafana_alert: "1"` so Grafana's alerts sidecar picks it up dynamically (see `gitops/platform/values/grafana/values.yaml`'s `sidecar.alerts`) — routes through the platform's shared Discord contact point, the app only declares the LogQL condition/threshold
 - `ConfigMap` (dashboards) — optional, gated by `dashboards.enabled`, labeled `grafana_dashboard: "1"` so Grafana's dashboards sidecar picks it up dynamically (see `gitops/platform/values/grafana/values.yaml`'s `sidecar.dashboards`) — the app ships its own dashboard JSON from its own repo, no platform file edits needed
 - `ServiceMonitor` — optional, gated by `metrics.serviceMonitor.enabled`: one endpoint on a named Service port (`http` or a `service.extraPorts` name; any other name is refused), adopted by Prometheus with no label. With `networkPolicy.ingressFrom` set, add a port-scoped policy admitting `monitoring` (see below); with `auth.trustsHeaders: true` port `http` is refused (A3)
+- Data lifecycle declaration on the `Deployment` metadata — optional, from `dataLifecycle`: `pii` (`none|personal|sensitive`) as label `data.bnei.dev/pii`, and `backup`, `retention`, `decommission` (free-text strings) as `data.bnei.dev/<field>` annotations. Never on the pod template, so opting in rolls no pod. Non-string values, unknown keys and a `pii` outside the enum are refused at render. `gitops/scripts/check-data-lifecycle.sh` lists the apps of both common-app-chart ApplicationSets that lack a `pii`/`backup` declaration; it is warn-only. It does not cover `platform.applicationset.yaml`'s upstream charts, standalone Applications or the Pigsty/Garage stores. Its lint.yml output is a snapshot from the last infra-bootstrap PR (github.token skips private repos); run it locally with your own `gh auth` for the real report
 
 Key values a per-app `values.yaml` must set:
 
@@ -376,6 +377,9 @@ kubectl -n argocd get applications
      tag: "0.1.0"
    service:
      port: 3000
+   dataLifecycle:           # declare what data the app keeps (warn-only lint)
+     pii: personal          # none | personal | sensitive
+     backup: "pgBackRest to Garage via Pigsty"   # or "none"
    ```
 
 2. No per-repo credential needed — `repo-creds-github-bnei` already grants ArgoCD HTTPS read access to every `MohammadBnei/*` repo (see "Bootstrap credential chain" above). Just make sure the repo is under that account/org.

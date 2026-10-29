@@ -262,6 +262,40 @@ jobs:
           grep -qF 'port http with auth.trustsHeaders: true is refused' <<<"$err" || { echo "::error::trustsHeaders + port http failed without the A3 message: $err"; exit 1; }
           echo "trustsheaders-http-port: refused"
 
+      # dataLifecycle (templates/deployment.yaml): ci-values.yaml opts in, so
+      # the Deployment carries the pii label and the set annotations and
+      # nothing else; the default render has no data.bnei.dev/ key on any
+      # object; non-strings, unknown keys and a pii outside the enum are
+      # refused with their messages.
+      - name: common-app-chart dataLifecycle
+        run: |
+          set -euo pipefail
+          C=gitops/platform/common-app-chart
+          r="$RUNNER_TEMP/rendered.yaml"
+          dep='select(.kind=="Deployment")'
+          kv='to_entries | map(select(.key | test("^data\\.bnei\\.dev/")) | .key + "=" + .value) | join(",")'
+          test "$(yq ea "$dep | .metadata.labels | $kv" "$r")" = data.bnei.dev/pii=personal
+          test "$(yq ea "$dep | .metadata.annotations | $kv" "$r")" \
+            = "data.bnei.dev/backup=pgBackRest to Garage via Pigsty,data.bnei.dev/retention=90d"
+          # the pod template and selector stay untouched (no roll, no selector change)
+          test "$(yq ea -o=json "$dep | [.spec.template.metadata, .spec.selector]" "$r" | grep -c 'data\.bnei\.dev' || true)" = 0
+          test "$(helm template t "$C" | grep -c 'data\.bnei\.dev/' || true)" = 0
+          # positive control for the line above: grep sees the key when it is set
+          test "$(helm template t "$C" --set dataLifecycle.pii=none | grep -c 'data\.bnei\.dev/')" = 1
+          refuse() {
+            local label=$1 msg=$2; shift 2
+            if err=$(helm template t "$C" "$@" 2>&1 >/dev/null); then
+              echo "::error::$label rendered; the chart must refuse it"; exit 1
+            fi
+            grep -qF "$msg" <<<"$err" || { echo "::error::$label failed without its message: $err"; exit 1; }
+            echo "$label: refused"
+          }
+          refuse bogus-pii 'dataLifecycle.pii must be none, personal or sensitive' --set dataLifecycle.pii=bogus
+          refuse int-retention 'dataLifecycle.retention must be a string; quote it' --set dataLifecycle.retention=90
+          printf 'dataLifecycle:\n  backup: no\n' > "$RUNNER_TEMP/backup-no.yaml"
+          refuse yaml11-bool-backup 'dataLifecycle.backup must be a string; quote it' -f "$RUNNER_TEMP/backup-no.yaml"
+          refuse unknown-key 'dataLifecycle.bakup is not a known key' --set dataLifecycle.bakup=x
+
       - name: Install kubeconform
         run: |
           set -euo pipefail
@@ -362,6 +396,43 @@ jobs:
 
       - name: registry.yaml <-> apps.applicationset.yaml sync check
         run: bash gitops/scripts/check-app-registry-sync.sh
+
+      # Warn-only: lists apps without a dataLifecycle pii/backup declaration.
+      # github.token reads public app repos only; private ones are skipped.
+      # It still fails when the lint itself breaks (non-404 gh error). The
+      # fixture run is offline and checks the exact lines and exit codes.
+      - name: data lifecycle declarations (warn-only) and fixture self-test
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          bash gitops/scripts/check-data-lifecycle.sh
+          F=gitops/scripts/testdata/data-lifecycle
+          rc=0
+          out=$(VALUES_DIR=$F/values bash gitops/scripts/check-data-lifecycle.sh \
+            $F/apps.applicationset.yaml $F/platform.applicationset.yaml $F/platform-values) || rc=$?
+          want='fx-layered: declared
+          fx-bogus: invalid pii, missing backup
+          fx-absent: skipped (values unreadable)
+          fx-numeric: invalid backup
+          fx-list: invalid pii,backup
+          fx-blank: invalid pii
+          platform/plat-declared: declared
+          platform/plat-missing: missing pii,backup
+          declared: 2, undeclared: 5, skipped: 1
+          ::warning::5 apps missing a valid dataLifecycle pii/backup declaration (warn-only; see gitops/scripts/check-data-lifecycle.sh)'
+          if [ "$rc" -ne 0 ] || [ "$out" != "$want" ]; then
+            # fixture output is printed only on failure, with :: defused, so its
+            # ::warning:: line never becomes a real PR annotation
+            printf '%s\n' "$out" | sed 's/^::/  ::/'
+            echo "::error::check-data-lifecycle.sh fixture output differs (exit $rc)"; exit 1
+          fi
+          # a broken lint (here: a platform app with no values file) exits 1
+          printf 'spec: {generators: [{list: {elements: [{name: nope}]}}]}\n' > "$RUNNER_TEMP/nope-as.yaml"
+          rc=0
+          VALUES_DIR=$F/values bash gitops/scripts/check-data-lifecycle.sh \
+            $F/apps.applicationset.yaml "$RUNNER_TEMP/nope-as.yaml" $F/platform-values >/dev/null || rc=$?
+          test "$rc" = 1 || { echo "::error::a missing platform values file exited $rc, want 1"; exit 1; }
 
       - name: agent-vault-bootstrap.sh fails closed (stubbed, offline)
         run: sh gitops/scripts/test-agent-vault-bootstrap.sh

@@ -31,6 +31,9 @@
 #
 # Per-app repo must have at minimum:
 #   image.repository, image.tag, service.port
+# and should declare dataLifecycle.pii and dataLifecycle.backup
+# (common-app-chart values.yaml); gitops/scripts/check-data-lifecycle.sh
+# warns for apps that don't.
 
 # n8n, openweb-ui(+pipelines), whodb, api, ukubi-ai are deferred — no
 # working per-app repo yet (see docs/bootstrap-test-notes.md). Re-add once

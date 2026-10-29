@@ -1,0 +1,7 @@
+# Fixture for check-data-lifecycle.sh: values in platform-values/<name>/.
+spec:
+  generators:
+  - list:
+      elements:
+      - name: plat-declared
+      - name: plat-missing
