@@ -15,6 +15,20 @@ ingress:
   middlewares:
   - name: authentik-forwardauth
     namespace: default
+  # ingress.extraRoutes: tpl'd match, explicit priority (1000000 checks the
+  # `| int`), service/port override, and a camelCase key (checks `| lower`).
+  # Carries a forwardauth ref: auth.trustsHeaders below requires one.
+  extraRoutes:
+    adminApi:
+      match: Host(`{{ .Values.ingress.hostname }}`) && PathPrefix(`/admin`)
+      priority: 1000000
+      service: ci-check-admin
+      port: 8080
+      middlewares:
+      - name: authentik-forwardauth
+        namespace: default
+      - name: ci-check-admin-strip
+        namespace: default
 
 persistence:
   enabled: true

@@ -72,3 +72,34 @@ is a flat map.
 {{ . }}: "{{ printf "{{ if .%s }}{{ .%s.Value }}{{ end }}" . . }}"
 {{- end }}
 {{- end }}
+
+{{/*
+The ADR-0038 baseline Middleware refs, as a YAML list, for the main
+IngressRoute and every ingress.extraRoutes entry. One source of truth, so an
+extra route cannot drift from the main one. Order is cheapest rejection first
+(see ingressroute.yaml). Read with `include ... . | fromYamlArray`.
+*/}}
+{{- define "common-app-chart.baselineMiddlewares" -}}
+{{- $mw := list }}
+{{- if .Values.ingress.baseline.enabled }}
+{{- if .Values.ingress.baseline.originLock.enabled }}
+{{- $mw = append $mw (dict "name" (printf "%s-baseline-originlock" .Release.Name) "namespace" .Release.Namespace) }}
+{{- end }}
+{{- if .Values.ingress.baseline.rateLimit.enabled }}
+{{- $mw = append $mw (dict "name" (printf "%s-baseline-ratelimit" .Release.Name) "namespace" .Release.Namespace) }}
+{{- end }}
+{{- if .Values.ingress.baseline.headers.enabled }}
+{{- $mw = append $mw (dict "name" (printf "%s-baseline-headers" .Release.Name) "namespace" .Release.Namespace) }}
+{{- end }}
+{{- end }}
+{{- toYaml $mw }}
+{{- end }}
+
+{{/*
+Non-empty when a list of Middleware refs names a *-forwardauth one.
+ponytail: a name match (every forwardAuth Middleware here is named
+*-forwardauth); it cannot see the Middleware's spec.
+*/}}
+{{- define "common-app-chart.hasForwardAuth" -}}
+{{- range . }}{{ if hasSuffix "-forwardauth" (.name | default "") }}true{{ end }}{{ end }}
+{{- end }}

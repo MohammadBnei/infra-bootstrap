@@ -15,15 +15,26 @@ condition, not a sufficient one: see networkPolicy in values.yaml.
 {{- if ne (.Values.service.type | default "ClusterIP") "ClusterIP" }}
 {{- fail "auth.trustsHeaders: true needs service.type: ClusterIP (standard A3: NodePort/LoadBalancer traffic arrives as the host identity, which the NetworkPolicy admits)" }}
 {{- end }}
-{{- /* ponytail: a name match on "-forwardauth" (every forwardAuth Middleware
-here is named *-forwardauth); it cannot see the Middleware's spec. */ -}}
 {{- if and .Values.ingress.enabled .Values.ingress.hostname }}
-{{- $fa := false }}
-{{- range (.Values.ingress.middlewares | default list) }}
-{{- if hasSuffix "-forwardauth" (.name | default "") }}{{ $fa = true }}{{ end }}
-{{- end }}
-{{- if not $fa }}
+{{- if not (include "common-app-chart.hasForwardAuth" (.Values.ingress.middlewares | default list)) }}
 {{- fail "auth.trustsHeaders: true with an IngressRoute needs a *-forwardauth Middleware in ingress.middlewares (standard A3: without forwardAuth, Traefik passes a client's X-authentik-* headers through)" }}
+{{- end }}
+{{- end }}
+{{- /* extraRoutes (extra-ingressroutes.yaml) is the guarded way to add a
+route; a hand-written one in extraManifests is not checked, so refuse it.
+Two checks on the tpl'd entry: each "---" document's parsed .kind, and a
+text match (quoted or flow-style kind too) for what fromYaml cannot parse.
+Matches IngressRouteTCP/UDP too: they bypass forwardAuth as well.
+ponytail: textual best effort, fails closed on a ConfigMap quoting
+"kind: IngressRoute"; not a YAML stream parser. */ -}}
+{{- range .Values.extraManifests }}
+{{- $out := tpl (toString .) $ }}
+{{- $hit := regexMatch "kind[\"']?\\s*:\\s*[\"']?IngressRoute" $out }}
+{{- range regexSplit "(?m)^---.*$" $out -1 }}
+{{- if hasPrefix "IngressRoute" (toString (fromYaml .).kind) }}{{ $hit = true }}{{ end }}
+{{- end }}
+{{- if $hit }}
+{{- fail "auth.trustsHeaders: true refuses an IngressRoute in extraManifests (standard A3: the chart cannot check its forwardAuth); declare it in ingress.extraRoutes instead" }}
 {{- end }}
 {{- end }}
 {{- end }}
