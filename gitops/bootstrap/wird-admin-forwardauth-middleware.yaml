@@ -4,7 +4,7 @@
 # token itself rather than trusting X-authentik-groups, so it needs
 # `X-authentik-jwt` in authResponseHeaders. That header is the SIGNED access
 # token — a bearer credential, not an identity hint — and the shared Middleware
-# is referenced by the e2e preview hosts, wedding.bnei.dev/admin and
+# is referenced by the e2e preview hosts, blog.bnei.dev/linkedin and
 # hermes.bnei.dev. Preview pods run whatever code an agent session started, and
 # `intercept_header_auth` defaults to True on the previews provider, so handing
 # them the operator's token would let them replay it as `Authorization: Bearer`

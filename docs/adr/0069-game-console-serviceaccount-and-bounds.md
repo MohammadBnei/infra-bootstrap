@@ -65,7 +65,9 @@ This ADR prepares the identity that deployment runs as.
      `platform` and `platform-common-apps` ApplicationSets and the standalone Applications in `gitops/bootstrap/`),
      minus the excluded ones below. That is `dream-analyst`, `drop`, `editable-blog`, `ente`, `has-journal`, `hq`,
      `local-path-storage`, `monitoring`, `mountain`, `pgweb`, `pi-lab`, `searxng`, `silverbullet`, `traefik`,
-     `ukubi-bridge`, `ukubi-game`, `ukubi-stt`, `vos`, `vos-dev`, `wedding-2026`, `wird` and `zot`.
+     `ukubi-bridge`, `ukubi-game`, `ukubi-stt`, `vos`, `vos-dev`, `wird` and `zot`. (PR #385 retires wedding-2026, and
+     `wedding-2026` leaves the list with it. This repo no longer deploys into it, so the rule above drops it; the rule
+     itself is unchanged.)
    - **Excluded, by the same rule as part 2's exec Roles:** `kube-system`, `cilium`, `longhorn-system`, `argocd`,
      `infisical`, `authentik`, `agent-fleet` and `agent-vault`. Their pods are privileged or hold platform secrets,
      and their logs can carry tokens (Agent Vault logs password-reset codes in clear, ADR-0061 Consequences). The

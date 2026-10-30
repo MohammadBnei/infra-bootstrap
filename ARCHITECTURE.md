@@ -750,7 +750,7 @@ Four access tiers:
 |---|---|---|
 | Public | none | — |
 | Native OIDC | the app is an OIDC relying party | **Live.** ArgoCD, Grafana, agent-fleet `core`, Wird, the Hermes dashboard (`hermes.bnei.dev`, live 2026-10-02, on *both* this tier and forwardAuth — [ADR-0051](docs/adr/0051-expose-hermes-dashboard.md)), and mountain's relay (also gated, [ADR-0065](docs/adr/0065-mountain-behind-forwardauth-invited-visitors.md)) |
-| forwardAuth | Traefik `Middleware/authentik-forwardauth` in front of the route | **Live.** e2e preview hosts, `wedding.bnei.dev/admin`, `blog.bnei.dev/linkedin`, `hermes.bnei.dev` (ADR-0051 — also a native OIDC client, deliberately both), `mountain.bnei.dev` behind its own `Middleware/mountain-forwardauth` (ADR-0065, both tiers like hermes; merged, live once mountain references it). Alertmanager, pgweb and Proxmox still to move |
+| forwardAuth | Traefik `Middleware/authentik-forwardauth` in front of the route | **Live.** e2e preview hosts, `blog.bnei.dev/linkedin`, `hermes.bnei.dev` (ADR-0051 — also a native OIDC client, deliberately both), `mountain.bnei.dev` behind its own `Middleware/mountain-forwardauth` (ADR-0065, both tiers like hermes; merged, live once mountain references it). Alertmanager, pgweb and Proxmox still to move |
 | Critical | adds a WebAuthn passkey policy | Not built |
 
 Three properties that are load-bearing rather than incidental:
