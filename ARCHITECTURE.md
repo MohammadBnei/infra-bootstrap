@@ -69,6 +69,8 @@ graph TD
 | **proxmox** (bnei) | 192.168.1.165 | PVE 9.2.3 (keep) | Primary PVE host: K8s VMs + Postgres VMs + Garage LXC |
 | **server1** | 192.168.1.200 | PVE 9.2 (reinstalled, joined corosync cluster) | PVE host: future K8s/PG placement |
 | **ex-laptop** | 192.168.1.161 | PVE 9.2 (reinstalled, joined corosync cluster) | 3rd PVE node, sleep-risk mitigation open ([ADR-0013](docs/adr/0013-pve-node-161-sleep-risk-mitigation.md)) |
+| **pve-mini-01** | 192.168.1.20 | PVE 9.2 (planned — hardware ordered 2026-10-26) | Fujitsu Esprimo G558 (i5-9400 6c/6t, 32GB, 1TB SSD): hosts only `k8s-worker-03` |
+| **pve-mini-02** | 192.168.1.21 | PVE 9.2 (planned — hardware ordered 2026-10-26) | Same model: hosts only `k8s-worker-04` |
 | **Pi 4** | 192.168.1.55 | Debian 13 trixie (fresh) | Pi-hole / local DNS helper |
 
 ### proxmox PVE (192.168.1.165) — 32GB RAM, 12 threads, 2× NVMe 1TB
@@ -147,6 +149,8 @@ install on this Pi 4 held no data).
 | k8s-cp-03 | ex-laptop | 192.168.1.206 | 2 vCPU / 4GB | Control plane + etcd |
 | k8s-worker-01 | `.165` | 192.168.1.202 | 6 vCPU / 15GB | Standard workloads + GPU passthrough, NVIDIA device plugin |
 | k8s-worker-02 | server1 | 192.168.1.203 | 6 vCPU / 16GB | Standard workloads, first cross-host worker (Stage 2 Phase C) |
+| k8s-worker-03 | pve-mini-01 | 192.168.1.208 | 6 vCPU / 28GB | **Planned.** agent-fleet session node (`agent-fleet.dev/session-node`), OS disk 400GB for local-path session volumes, Longhorn 300GB |
+| k8s-worker-04 | pve-mini-02 | 192.168.1.209 | 6 vCPU / 28GB | **Planned.** Same as worker-03 |
 
 ### GPU passthrough
 
@@ -226,6 +230,7 @@ graph LR
 | **proxmox** (`.165`) | room switch → structured cabling → TL-SG108E | 1000Mb/s |
 | server1 (`.200`) | direct to Freebox | 1000Mb/s |
 | ex-laptop (`.161`) | direct to Freebox | 1000Mb/s |
+| pve-mini-01/02 (`.20`/`.21`) | TL-SG108E (planned) | not measured yet |
 
 `.165` is the **only** host behind the switch; the other two are plugged
 straight into the Freebox. Their speeds therefore say nothing about

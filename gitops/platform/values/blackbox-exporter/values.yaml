@@ -74,6 +74,12 @@ serviceMonitor:
     - name: pve-ex-laptop
       url: 192.168.1.161:8006
       module: pve_tcp
+    - name: pve-pve-mini-01
+      url: 192.168.1.20:8006
+      module: pve_tcp
+    - name: pve-pve-mini-02
+      url: 192.168.1.21:8006
+      module: pve_tcp
     # NetBird's public name, from inside the cluster: Pi-hole answers with the
     # public IP, so this goes out and back through the Freebox (NAT hairpin)
     # and Traefik. It proves the hairpin path ADR-0055's LAN peers depend on,
