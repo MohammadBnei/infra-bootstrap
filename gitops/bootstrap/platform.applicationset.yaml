@@ -160,8 +160,8 @@ spec:
       # nodes go away but had no signal for "the host under them died". Probes
       # pveproxy:8006 on all three PVE hosts over TCP. See the values file for
       # why it is TCP and not ICMP, and for the blind spot it does NOT cover.
-      # Since ADR-0064 it also probes seven infra guests (`guest-<role>`) for
-      # mountain's public town; those targets have no alert rule.
+      # Since ADR-0064 it also probes seven infra guests (`guest-<role>`) and
+      # three external hosts (`ext-<name>`) for mountain's public town; those targets have no alert rule.
       - name: blackbox-exporter
         namespace: monitoring
         syncWave: "5"
