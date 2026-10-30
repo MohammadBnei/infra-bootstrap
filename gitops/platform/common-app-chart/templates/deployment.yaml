@@ -64,6 +64,16 @@ spec:
         {{- toYaml . | nindent 8 }}
       {{- end }}
     spec:
+      {{- with .Values.serviceAccountName }}
+      serviceAccountName: {{ . }}
+      {{- end }}
+      {{- $automount := .Values.automountServiceAccountToken }}
+      {{- if not (kindIs "invalid" $automount) }}
+      {{- if not (kindIs "bool" $automount) }}
+      {{- fail "automountServiceAccountToken must be true, false or unset (a bool, not a string)" }}
+      {{- end }}
+      automountServiceAccountToken: {{ $automount }}
+      {{- end }}
       {{- with .Values.runtimeClassName }}
       runtimeClassName: {{ . }}
       {{- end }}
@@ -86,6 +96,10 @@ spec:
       - name: {{ .Release.Name }}
         image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
         imagePullPolicy: {{ .Values.image.pullPolicy }}
+        {{- with .Values.args }}
+        args:
+          {{- toYaml . | nindent 10 }}
+        {{- end }}
         {{- with .Values.securityContext }}
         securityContext:
           {{- toYaml . | nindent 10 }}

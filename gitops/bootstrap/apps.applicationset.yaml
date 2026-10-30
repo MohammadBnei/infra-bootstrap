@@ -198,6 +198,23 @@ spec:
         valuesPath: [helm/values.yaml]
         targetRevision: main
         hostname: pi-lab.bnei.dev
+      # ukubi-game (owner, own OIDC, never forwardAuth) and ukubi-game-public
+      # (--public, no credential, standalone values): mountain plan/17, see
+      # gitops/apps/registry.yaml's entries.
+      - name: ukubi-game
+        namespace: ukubi-game
+        syncWave: "10"
+        repoURL: https://github.com/MohammadBnei/ukubi-game.git
+        valuesPath: [helm/values.yaml]
+        targetRevision: main
+        hostname: game.bnei.dev
+      - name: ukubi-game-public
+        namespace: ukubi-game-public
+        syncWave: "10"
+        repoURL: https://github.com/MohammadBnei/ukubi-game.git
+        valuesPath: [helm/public.yaml]
+        targetRevision: main
+        hostname: world.bnei.dev
   template:
     metadata:
       name: '{{.name}}'

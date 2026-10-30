@@ -144,6 +144,10 @@ blueprints:
   # the fleet application, so members can sign in from an island. Core admits
   # them to AgentService only.
   - authentik-blueprint-fleet-members-policy
+  # ukubi-game (mountain plan/17): the platform-admins binding on the owner
+  # pod's OIDC app, in its own file (hermes convention). The provider is under
+  # `secrets:` below.
+  - authentik-blueprint-ukubi-game-policy
   secrets:
   - authentik-blueprint-grafana
   - authentik-blueprint-argocd
@@ -155,6 +159,9 @@ blueprints:
   # atlas-game service account, its app password and binding, in one
   # blueprint. Its Infisical key must exist before this line merges.
   - authentik-blueprint-atlas-api
+  # The game owner pod's own sign-in (game.bnei.dev, never forwardAuth). Its
+  # Infisical keys must exist before this line merges.
+  - authentik-blueprint-ukubi-game
 
 server:
   replicas: 1

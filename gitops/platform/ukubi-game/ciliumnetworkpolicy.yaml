@@ -2,7 +2,8 @@
 # unenforced, so Traefik and the kubelet's probes are untouched. Once this
 # policy exists every pod in the namespace is default-deny on egress, so
 # each later slice widens it by an ADR-0069 amendment (part 3: ArgoCD's API;
-# part 4: Patroni :8008 and Postgres :5432; Loki when the logs provider lands).
+# Loki when the logs provider lands). Part 4's egress (Patroni :8008, Postgres
+# :5432) and OTLP :4318 landed with the game's deploy.
 #
 # The DNS, in-cluster and world rule shapes are searxng's and silverbullet's
 # (ADR-0040 practice), for their reasons: read gitops/platform/values/searxng/values.yaml and
@@ -101,6 +102,33 @@ spec:
             http:
               - method: GET
                 path: "/api/v2/alerts([?].*)?"
+    # ADR-0069 part 4 (amended with mountain plan/17's deploy): the game log on
+    # Pigsty, gamedb as dbuser_game, direct :5432 (pgbouncer: false), and
+    # Patroni's REST API :8008 (/health, read-only) for the database's state.
+    # The pg nodes and the VIP by address: they are LAN hosts outside the
+    # cluster, so no toEndpoints can name them, and the world rule below
+    # excepts 192.168.0.0/16. Keep in step with pigsty/pigsty.yml's pg-meta
+    # hosts and pg_vip_address.
+    - toCIDR:
+        - 192.168.1.205/32
+        - 192.168.1.207/32
+        - 192.168.1.232/32
+      toPorts:
+        - ports:
+            - port: "5432"
+              protocol: TCP
+            - port: "8008"
+              protocol: TCP
+    # Traces, OTLP/HTTP, to the cluster's OTLP receiver in monitoring (infra
+    # PR obs/otlp-servicegraph, stacked on this one). Namespace and port, the
+    # town's-reads shape: until that receiver exists nothing listens there.
+    - toEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: monitoring
+      toPorts:
+        - ports:
+            - port: "4318"
+              protocol: TCP
     # GitHub's API, and the sign-in's OIDC discovery and code exchange
     # (authentik.bnei.dev resolves to Cloudflare from a pod, silverbullet's
     # note). HTTPS only; the LAN and the pod and Service CIDRs are excepted.

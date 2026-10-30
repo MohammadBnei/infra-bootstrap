@@ -157,6 +157,17 @@ sync-policy changes that let a rollback hold.
 Decided with its slice, by amendment: the game's Postgres role, Patroni's credential in the game's project, and the
 egress to Patroni and Postgres.
 
+**Amendment 1 (2026-10-29, the game's deploy, mountain plan/17), proposed with infra-bootstrap PR `game/d0-deploy`:**
+- The game's own Postgres role is `dbuser_game` (SCRAM, `pgbouncer: false`), owning `gamedb`, which holds the game
+  log. Its password is `DBUSER_GAME_PASSWORD` in the root project, the one Pigsty's verifier is made from; the game
+  gets it as `UKUBI_GAME_DATABASE_URL` through `gitops/bootstrap/ukubi-game-secret.yaml`, so it is not copied into
+  the game's project (Decision 5's copy would be a second entry to rotate). The role is the game's own data, not a
+  console grant: a role on other databases stays this part's later decision.
+- Egress (`ukubi-game-egress-lock`): Postgres 5432 and Patroni's REST API 8008 on the pg nodes (192.168.1.205,
+  192.168.1.207) and the VIP (192.168.1.232), as `toCIDR`, since they are LAN hosts the world rule excepts. Plus
+  OTLP/HTTP 4318 to namespace `monitoring`, for the traces receiver stacked on this change.
+- Patroni's credential in the game's project is still undecided: 8008's `/health` and `/cluster` reads need none.
+
 ## Rejected options
 
 - **cluster-admin**, or any write verb in part 1. Writes are parts 2 to 4, each bounded on its own.

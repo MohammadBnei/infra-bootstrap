@@ -363,6 +363,42 @@
   targetRevision: main
   hostname: events.bnei.dev
 
+# ukubi-game: the game's OWNER pod (mountain plan/17, the world disc), one of
+# two Deployments of one binary. Signs in through its OWN authentik OIDC app
+# (authentik-blueprint-ukubi-game.yaml, platform-admins only), never a
+# forwardAuth gate, so its values carry no middleware ref. Baseline chain on.
+# Namespace ukubi-game is the one platform-ukubi-game-bounds (wave 1) already
+# creates, labels and fences (ADR-0069): the app's values run it as
+# serviceAccountName: ukubi-game. replicaCount 1 + Recreate (one writer of the
+# game log). It serves the public snapshot on a second listener, :7411, a
+# service.extraPorts port the IngressRoute never routes (mountain's /metrics
+# precedent); only the public pod below reads it. No networkPolicy.ingressFrom:
+# the chart's policy admits service.port only and would cut :7411 off.
+# Env: gitops/bootstrap/ukubi-game-secret.yaml (Secret ukubi-game-config).
+# Merge only after the game's CI has replaced image.tag "unreleased" (hq/wird
+# rule).
+- name: ukubi-game
+  namespace: ukubi-game
+  syncWave: "10"
+  repoURL: https://github.com/MohammadBnei/ukubi-game.git
+  valuesPath: [helm/values.yaml]
+  targetRevision: main
+  hostname: game.bnei.dev
+
+# ukubi-game-public: the same image in --public mode, the world disc anyone
+# may see. Its own namespace so it shares no ServiceAccount, Secret or fence
+# with the owner. helm/public.yaml is STANDALONE (not layered on values.yaml,
+# so no owner env, Secret or account can leak into it): no envFrom, no
+# Infisical, automountServiceAccountToken: false. Its egress CNP (DNS, and
+# ukubi-game:7411, nothing else) ships in that file's extraManifests.
+- name: ukubi-game-public
+  namespace: ukubi-game-public
+  syncWave: "10"
+  repoURL: https://github.com/MohammadBnei/ukubi-game.git
+  valuesPath: [helm/public.yaml]
+  targetRevision: main
+  hostname: world.bnei.dev
+
 # searxng and pgweb are NOT here: they're public-image tools with no
 # app-specific code, so they're driven as platform apps instead — see
 # gitops/bootstrap/platform-common-apps.applicationset.yaml and
