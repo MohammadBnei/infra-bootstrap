@@ -33,6 +33,9 @@ spec:
               protocol: UDP
             - port: "53"
               protocol: TCP
+          rules:
+            dns:
+              - matchPattern: "*"
     # Belt and braces, searxng's reason: cilium#18644.
     - toCIDR:
         - 169.254.25.10/32
@@ -42,6 +45,9 @@ spec:
               protocol: UDP
             - port: "53"
               protocol: TCP
+          rules:
+            dns:
+              - matchPattern: "*"
     # The read slice itself: the API server, which carries every Kubernetes
     # read and the Applications in argocd (kube_apiserver_port, 6443).
     # NEW on this cluster: no other policy here has a kube-apiserver rule, so
@@ -138,6 +144,21 @@ spec:
             - 10.0.0.0/8
             - 172.16.0.0/12
             - 192.168.0.0/16
+      toPorts:
+        - ports:
+            - port: "443"
+              protocol: TCP
+    # The owner pod's voice: Anthropic's API, HTTPS only. toFQDNs needs the DNS
+    # proxy to see the lookup, hence rules.dns on both DNS rules above. It is
+    # matchPattern "*", never a matchName: bootstrap-test-notes.md (2026-10-18)
+    # records that a matchName-only rule on host:53 REFUSES every other name,
+    # which would break GitHub, authentik and the in-cluster lookups.
+    # No precedent here (ADR-0069 kept toFQDNs out as untested).
+    # UNVERIFIED: while the world rule above exists this line grants nothing
+    # new; it pins the intent for the day that rule narrows. Verify with
+    # hubble observe --namespace ukubi-game, and that GitHub still resolves.
+    - toFQDNs:
+        - matchName: api.anthropic.com
       toPorts:
         - ports:
             - port: "443"
