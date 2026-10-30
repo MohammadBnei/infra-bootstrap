@@ -388,9 +388,11 @@
 # ukubi-game-public: the same image in --public mode, the world disc anyone
 # may see. Its own namespace so it shares no ServiceAccount, Secret or fence
 # with the owner. helm/public.yaml is STANDALONE (not layered on values.yaml,
-# so no owner env, Secret or account can leak into it): no envFrom, no
-# Infisical, automountServiceAccountToken: false. Its egress CNP (DNS, and
-# ukubi-game:7411, nothing else) ships in that file's extraManifests.
+# so no owner env, Secret or account can leak into it), automountServiceAccountToken:
+# false. Its one credential is the capped visitor voice key
+# (gitops/bootstrap/ukubi-game-public-secret.yaml, by envFrom). Its egress CNP
+# (DNS, ukubi-game:7411 and api.anthropic.com:443) ships in that file's
+# extraManifests.
 - name: ukubi-game-public
   namespace: ukubi-game-public
   syncWave: "10"
