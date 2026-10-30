@@ -121,3 +121,23 @@ Today it reads them from a local `atlas --dev` on loopback. To leave loopback it
    when the game is deployed.
 6. **ukubi-game:** the token client. Deploying the game (its image, app entry, hostname and own sign-in) is its own
    change, with its own decision on the hostname and gate.
+
+## Amendment (2026-10): the machine routes add `GET /api/read` and `GET /api/tree`
+
+Decided in mountain's world/d3-reads (the game's rooms and reader). Amends Decision 1's route list and §6's accepted
+risk. Nothing else in this ADR changes: the principal, the token, the pin and the rollback are as above.
+
+1. **Two more machine routes, both read-only.**
+   - `GET /api/tree`: the file names of a held repo.
+   - `GET /api/read`: one file, as the **redacted render** (the same text atlas shows an admin, not the raw bytes).
+   - The machine path still serves `GET /api/graph`, `GET /ws` and these two, and nothing else. The mountain PR for
+     the routes is world/d3-reads.
+2. **Restated accepted risk (§6).** A sniffed token now reads every held repo's source, private ones included, for up
+   to 10 minutes. Before this amendment it read the town graph only. It still writes nothing, and it still cannot
+   forge a token.
+3. **Where the game uses them.** Files and code are served only on the game's owner routes.
+   - Rooms for a non-public repo cross to the public pod as counts only; public-fields.txt pins this.
+   - A public repo's file names may cross; file contents never do.
+4. **Follow-up: a NetworkPolicy for the atlas namespace.** §6 notes it has none, and the routes above raise what the
+   gap exposes. A policy that admits only Traefik, the game and the monitoring scrape closes it. It is not part of
+   this amendment, and the risk in 2 stands until it lands.
