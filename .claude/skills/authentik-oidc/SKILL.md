@@ -534,7 +534,7 @@ What changes from the procedure above:
   Add a line to `docs/secrets.md` saying why there is no `<APP>_OIDC_CLIENT_ID`
   row, or the next audit reads its absence as a gap.
 - **The blueprint is a plain ConfigMap**, listed under `blueprints.configMaps`,
-  not `blueprints.secrets`. Nothing to interpolate means no Infisical operator
+  not as a Secret volume under `worker.volumes`. Nothing to interpolate means no Infisical operator
   in the propagation chain — the four-step chain below becomes three.
 - **Omit `client_secret` entirely.** `OAuth2Provider.client_secret` is
   `CharField(blank=True, default=generate_client_secret)` and its serializer

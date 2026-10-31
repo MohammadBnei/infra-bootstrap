@@ -15,7 +15,7 @@
 #
 # Delivered as a SECRET rather than a ConfigMap because it embeds an OAuth2
 # client secret. The chart discovers any key ending in `.yaml` under
-# blueprints.configMaps / blueprints.secrets; a ConfigMap would put the client
+# blueprints.configMaps / optional Secret volumes under worker.volumes; a ConfigMap would put the client
 # secret in plaintext in git. The blueprint's STRUCTURE still lives here —
 # reviewable and diffable — with only the two credential values interpolated by
 # the Infisical operator.

@@ -134,6 +134,11 @@ blueprints:
   # `mountain-gate` forwardAuth application. Its provider lives in
   # authentik-blueprint-forwardauth, wird-admin's reason.
   - authentik-blueprint-mountain-gate-policy
+  # pgweb's and Alertmanager's gates (#375): the platform-admins bindings on
+  # `pgweb-gate` and `alertmanager-gate`. Their providers live in
+  # authentik-blueprint-forwardauth, wird-admin's reason. Missing from this list
+  # until 2026-10-31, so both gates denied everyone.
+  - authentik-blueprint-admin-tools-policy
   # shared notes (ADR-0058): the shared-notes group and its binding. The
   # provider is under `worker.volumes` below.
   - authentik-blueprint-silverbullet-policy
@@ -161,7 +166,10 @@ blueprints:
   # Optional, a missing Secret only leaves its own blueprint absent (no
   # instance under System > Blueprints): that one app has no sign-in until its
   # keys exist and the worker restarts. Volume names and mount paths are the
-  # chart's own, so the blueprint instances keep their paths.
+  # chart's own, so the blueprint instances keep their paths. A Secret deleted
+  # under a running worker empties its directory, and the hourly
+  # clear_failed_blueprints task deletes that blueprint INSTANCE; the objects it
+  # created stay in authentik, and the instance comes back with the Secret.
 
 server:
   replicas: 1
