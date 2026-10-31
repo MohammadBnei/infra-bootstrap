@@ -2,9 +2,9 @@
 # (ADR-0039, "Native OIDC" tier).
 #
 # Delivered as a SECRET rather than a ConfigMap because it embeds an OAuth2
-# client secret. The chart mounts blueprints from either
-# (`blueprints.configMaps` / `blueprints.secrets`) and discovers any key ending
-# in `.yaml`; a ConfigMap would put the client secret in plaintext in git.
+# client secret. The worker mounts blueprints from either
+# (`blueprints.configMaps` / an optional Secret volume under `worker.volumes`)
+# and discovers any key ending in `.yaml`; a ConfigMap would put the client secret in plaintext in git.
 #
 # The blueprint's STRUCTURE still lives here in git — only the two credential
 # values are interpolated from Infisical by the operator. That keeps this

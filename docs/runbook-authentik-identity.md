@@ -125,8 +125,10 @@ it should be editable in git without touching Infisical.
 No provider, application or group is ever created by clicking in the UI. A clicked
 object is invisible to git, survives no rebuild, and cannot be reviewed.
 
-Blueprints are mounted from `blueprints.configMaps` **and** `blueprints.secrets`
-in the values file; the chart discovers any key ending in `.yaml`. There are two
+Blueprints are mounted from `blueprints.configMaps` **and** optional Secret
+volumes under `worker.volumes` in the values file (not `blueprints.secrets`,
+which mounts them as required: one missing Infisical key would leave the worker
+in ContainerCreating); the chart discovers any key ending in `.yaml`. There are two
 delivery shapes, and the choice between them is not cosmetic:
 
 | Shape | Used for | Why |
@@ -586,7 +588,8 @@ the reference and the rationale; the skill is what to follow. The shape it walks
    (never echoed), and add both rows to `docs/secrets.md`.
 2. Write `gitops/bootstrap/authentik-blueprint-<app>.yaml` — an `InfisicalSecret`
    whose template is the blueprint, with the §8 field shapes.
-3. Register the Secret name in `blueprints.secrets` in
+3. Register the Secret in `worker.volumes` (`optional: true`) and
+   `worker.volumeMounts` (`/blueprints/mounted/secret-<name>`) in
    `gitops/platform/values/authentik/values.yaml`. A blueprint not listed there is
    never mounted and never applies.
 4. Write `gitops/bootstrap/<app>-oidc-secret.yaml` to materialise the same pair
@@ -769,7 +772,7 @@ argocd-server 'user info endpoint' errors: 0
 | Grafana OIDC | Remove the `auth.generic_oauth` block from `gitops/platform/values/grafana/values.yaml`. The local admin from `admin:` still works |
 | ArgoCD OIDC | Remove `configs.cm.oidc.config` (and the `rbac` block if desired) from `gitops/bootstrap/argocd-application.yaml`. The local `admin` account still works |
 | Group membership | `git revert`, then confirm the mount and restart the worker (§9.1). Membership is replaced wholesale on apply, so a revert is exact |
-| A blueprint | Removing the file also requires removing its name from `blueprints.secrets`/`configMaps`. Deleting the blueprint does **not** delete the objects it created — those remain in authentik's database until removed there |
+| A blueprint | Removing the file also requires removing its entry from `worker.volumes`/`volumeMounts` or `blueprints.configMaps`. Deleting the blueprint does **not** delete the objects it created — those remain in authentik's database until removed there |
 | The whole layer | Delete the `authentik` entry from `platform.applicationset.yaml`. The Pigsty `authentik` database and `dbuser_authentik` survive; removing those is a `pigsty/pigsty.yml` change and a pigsty run |
 
 **An authentik outage does not lock you out of ArgoCD or Grafana** — because the
