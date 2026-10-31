@@ -1,7 +1,10 @@
 # Who may sign in to the `ukubi-world` application (the game's public pod,
 # world.bnei.dev): `visitors`, enrolled through GitHub or Google
 # (authentik-blueprint-game-visitors.yaml), and platform-admins, so the owner
-# plays the same world.
+# plays the same world. The world's sign-in page shows only the two sources, so
+# the owner signs in to authentik first (any other app, or authentik.bnei.dev);
+# a GitHub or Google click there enrolls a new visitor, never links to the
+# owner's account.
 #
 # `visitors` is bound HERE AND NOWHERE ELSE. With core_default_app_access
 # false (ADR-0050) an application admits only the groups bound to it, so a

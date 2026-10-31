@@ -28,7 +28,8 @@ ponytail: any resolved policy counts, as a group does. A policy that admits
 everyone (e.g. the PKCE guards, outside /authorize) would pass alone; require a
 group/user binding here if an app ever relies on a policy-only binding. The
 visitors rule reads group bindings only: an expression policy naming the group
-would pass unseen.
+would pass unseen. A binding of a parent group admits its children, so --live
+also fails when `visitors` has a parent.
 """
 import glob
 import os
@@ -148,7 +149,11 @@ for a in Application.objects.order_by("slug"):
     print("GATE", "ok" if ok else "UNBOUND", a.slug)
 for b in PolicyBinding.objects.filter(group__name="%s").exclude(target__application__slug="%s"):
     print("LEAK", getattr(getattr(b.target, "application", None), "slug", None) or b.target_id)
-""" % (VISITORS, VISITORS_APP)
+from authentik.core.models import Group
+for g in Group.objects.filter(name="%s").values_list("parents__name", flat=True):
+    if g:
+        print("LEAK", "parent-group:" + g.replace(" ", "_"))
+""" % (VISITORS, VISITORS_APP, VISITORS)
 
 
 def live():

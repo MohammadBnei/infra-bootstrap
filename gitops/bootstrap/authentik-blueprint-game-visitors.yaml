@@ -11,7 +11,7 @@
 #   see authentik-blueprint-wird-enrollment.yaml for why a `!Find` miss on
 #   create_users_group silently drops every user enrolled in that window);
 # - two OAuth sources, `github` and `google`, each with a property mapping
-#   that names the user after the source's own id (`gh-<id>`, `google-<sub>`).
+#   that names the user after the source's own id (`gh-<id>`, `google-<id>`).
 #   A GitHub login is free text another person can pick, and a blueprint
 #   matches service accounts by username (ADR-0066, ADR-0068): an enrolled
 #   `atlas-game` would be taken over. An id cannot collide with a person or a
@@ -129,7 +129,6 @@ spec:
                 create_users_as_inactive: false
                 create_users_group: !KeyOf visitors
                 user_type: external
-                user_path_template: visitors
 
             - model: authentik_stages_user_login.userloginstage
               id: enrollment-login
@@ -171,7 +170,9 @@ spec:
               attrs:
                 name: game-visitor-google-username
                 expression: |
-                  return {"username": "google-" + str(info["sub"])}
+                  # authentik's Google type reads the v1 userinfo endpoint,
+                  # which names the account `id`, not `sub`.
+                  return {"username": "google-" + str(info["id"])}
 
             - model: authentik_sources_oauth.oauthsource
               id: github
