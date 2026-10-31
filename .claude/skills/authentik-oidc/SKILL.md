@@ -41,8 +41,8 @@ pair, two namespaces.
 
 ### Why the blueprint is a Secret, not a ConfigMap
 
-The chart mounts blueprints from `blueprints.configMaps` *or*
-`blueprints.secrets` and discovers any key ending in `.yaml`. A blueprint
+The worker mounts blueprints from `blueprints.configMaps` *or* an optional
+Secret volume under `worker.volumes` and discovers any key ending in `.yaml`. A blueprint
 embeds an OAuth2 client secret, so a ConfigMap would put it in plaintext in git.
 
 Using an `InfisicalSecret` template keeps the blueprint's **structure** in git —
@@ -127,8 +127,11 @@ against the running 2026.8.0 instance**, not taken from docs.
     provider: !KeyOf <app>-provider
 ```
 
-Then add the Secret name to `blueprints.secrets` in
-`gitops/platform/values/authentik/values.yaml`.
+Then add the Secret to `worker.volumes` (`optional: true`) and
+`worker.volumeMounts` (`/blueprints/mounted/secret-<name>`) in
+`gitops/platform/values/authentik/values.yaml`. Never to the chart's
+`blueprints.secrets`: it mounts the Secret as required, so one missing
+Infisical key leaves the worker in ContainerCreating.
 
 ### 3. Wire the app
 
@@ -420,7 +423,7 @@ psql -d authentik -tAc "SELECT grant_types FROM authentik_providers_oauth2_oauth
 **This is the step that costs an hour if you do not know it.**
 
 Blueprints are applied by the **worker**, not the server — only the worker
-deployment gets the `blueprints.secrets` volume, so describing
+deployment gets the blueprint Secret volumes, so describing
 `platform-authentik-server` and finding no mount is expected and means nothing.
 
 `blueprints_discovery` is enqueued when the worker boots. Observed on 2026-08-19:
