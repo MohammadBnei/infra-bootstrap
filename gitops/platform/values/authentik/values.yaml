@@ -120,11 +120,11 @@ blueprints:
   # NetBird (ADR-0054): the netbird-users group, its declared membership, and
   # the binding that gates the `netbird` application on it. Its own file so a
   # stale username cannot stop platform-admins reconciling. The provider is
-  # under `secrets:` below — it carries a client secret.
+  # under `worker.volumes` below — it carries a client secret.
   - authentik-blueprint-netbird-policy
   # mountain (ADR-0056, ADR-0067): the platform-admins binding on atlas's OIDC
   # app (the visitors' one deleted), in its own file (hermes convention).
-  # The provider is under `secrets:` below.
+  # The provider is under `worker.volumes` below.
   - authentik-blueprint-mountain-policy
   # mountain visitors (ADR-0057, invitation-only since ADR-0065, inert since
   # ADR-0067: the group reaches nothing; removal is a follow-up). Nothing
@@ -134,8 +134,13 @@ blueprints:
   # `mountain-gate` forwardAuth application. Its provider lives in
   # authentik-blueprint-forwardauth, wird-admin's reason.
   - authentik-blueprint-mountain-gate-policy
+  # pgweb's and Alertmanager's gates (#375): the platform-admins bindings on
+  # `pgweb-gate` and `alertmanager-gate`. Their providers live in
+  # authentik-blueprint-forwardauth, wird-admin's reason. Missing from this list
+  # until 2026-10-31, so both gates denied everyone.
+  - authentik-blueprint-admin-tools-policy
   # shared notes (ADR-0058): the shared-notes group and its binding. The
-  # provider is under `secrets:` below.
+  # provider is under `worker.volumes` below.
   - authentik-blueprint-silverbullet-policy
   # drop (ADR-0059): the shared-notes binding for files.bnei.dev. Its
   # provider lives in authentik-blueprint-forwardauth, wird-admin's reason.
@@ -146,32 +151,25 @@ blueprints:
   - authentik-blueprint-fleet-members-policy
   # ukubi-game (mountain plan/17): the platform-admins binding on the owner
   # pod's OIDC app, in its own file (hermes convention). The provider is under
-  # `secrets:` below.
+  # `worker.volumes` below.
   - authentik-blueprint-ukubi-game-policy
   # The game's public world (mountain plan/18): `visitors` and platform-admins
   # on `ukubi-world`, the only binding `visitors` ever gets
   # (check-authentik-bindings.py enforces it). The provider is under
-  # `secrets:` below.
+  # `worker.volumes` below.
   - authentik-blueprint-ukubi-world-policy
-  secrets:
-  - authentik-blueprint-grafana
-  - authentik-blueprint-argocd
-  - authentik-blueprint-fleet
-  - authentik-blueprint-netbird
-  - authentik-blueprint-mountain
-  - authentik-blueprint-silverbullet
-  # atlas's machine principal (ADR-0068): the atlas-api provider, the
-  # atlas-game service account, its app password and binding, in one
-  # blueprint. Its Infisical key must exist before this line merges.
-  - authentik-blueprint-atlas-api
-  # The game owner pod's own sign-in (game.bnei.dev, never forwardAuth). Its
-  # Infisical keys must exist before this line merges.
-  - authentik-blueprint-ukubi-game
-  # Visitor sign-in for the public world (world.bnei.dev): the GitHub and
-  # Google sources, the `visitors` group and its enrollment, and the
-  # `ukubi-world` provider. Its six Infisical keys must exist before this line
-  # merges.
-  - authentik-blueprint-game-visitors
+  # NO `secrets:` list: the Secret-delivered blueprints are mounted under
+  # `worker.volumes` below, as OPTIONAL volumes. The chart's `blueprints.secrets`
+  # mounts them as required, and an InfisicalSecret whose template names a
+  # missing key never creates its Secret, so one missing key left the worker in
+  # ContainerCreating and stopped every blueprint and background task.
+  # Optional, a missing Secret only leaves its own blueprint absent (no
+  # instance under System > Blueprints): that one app has no sign-in until its
+  # keys exist and the worker restarts. Volume names and mount paths are the
+  # chart's own, so the blueprint instances keep their paths. A Secret deleted
+  # under a running worker empties its directory, and the hourly
+  # clear_failed_blueprints task deletes that blueprint INSTANCE; the objects it
+  # created stay in authentik, and the instance comes back with the Secret.
 
 server:
   replicas: 1
@@ -195,6 +193,46 @@ worker:
       memory: 512Mi
     limits:
       memory: 1Gi
+  # The Secret-delivered blueprints (see `blueprints:` above for why they are
+  # here). A new one is two entries: its volume, `optional: true`, and its
+  # mount at /blueprints/mounted/secret-<name>. Only the worker applies
+  # blueprints; the chart mounts them nowhere else either.
+  volumes:
+  - name: blueprints-secret-authentik-blueprint-grafana
+    secret: {secretName: authentik-blueprint-grafana, optional: true}
+  - name: blueprints-secret-authentik-blueprint-argocd
+    secret: {secretName: authentik-blueprint-argocd, optional: true}
+  - name: blueprints-secret-authentik-blueprint-fleet
+    secret: {secretName: authentik-blueprint-fleet, optional: true}
+  - name: blueprints-secret-authentik-blueprint-netbird
+    secret: {secretName: authentik-blueprint-netbird, optional: true}
+  - name: blueprints-secret-authentik-blueprint-mountain
+    secret: {secretName: authentik-blueprint-mountain, optional: true}
+  - name: blueprints-secret-authentik-blueprint-silverbullet
+    secret: {secretName: authentik-blueprint-silverbullet, optional: true}
+  # atlas's machine principal (ADR-0068): the atlas-api provider, the
+  # atlas-game service account, its app password and binding, in one
+  # blueprint.
+  - name: blueprints-secret-authentik-blueprint-atlas-api
+    secret: {secretName: authentik-blueprint-atlas-api, optional: true}
+  # The game owner pod's own sign-in (game.bnei.dev, never forwardAuth).
+  - name: blueprints-secret-authentik-blueprint-ukubi-game
+    secret: {secretName: authentik-blueprint-ukubi-game, optional: true}
+  # Visitor sign-in for the public world (world.bnei.dev): the GitHub and
+  # Google sources, the `visitors` group and its enrollment, and the
+  # `ukubi-world` provider.
+  - name: blueprints-secret-authentik-blueprint-game-visitors
+    secret: {secretName: authentik-blueprint-game-visitors, optional: true}
+  volumeMounts:
+  - {name: blueprints-secret-authentik-blueprint-grafana, mountPath: /blueprints/mounted/secret-authentik-blueprint-grafana}
+  - {name: blueprints-secret-authentik-blueprint-argocd, mountPath: /blueprints/mounted/secret-authentik-blueprint-argocd}
+  - {name: blueprints-secret-authentik-blueprint-fleet, mountPath: /blueprints/mounted/secret-authentik-blueprint-fleet}
+  - {name: blueprints-secret-authentik-blueprint-netbird, mountPath: /blueprints/mounted/secret-authentik-blueprint-netbird}
+  - {name: blueprints-secret-authentik-blueprint-mountain, mountPath: /blueprints/mounted/secret-authentik-blueprint-mountain}
+  - {name: blueprints-secret-authentik-blueprint-silverbullet, mountPath: /blueprints/mounted/secret-authentik-blueprint-silverbullet}
+  - {name: blueprints-secret-authentik-blueprint-atlas-api, mountPath: /blueprints/mounted/secret-authentik-blueprint-atlas-api}
+  - {name: blueprints-secret-authentik-blueprint-ukubi-game, mountPath: /blueprints/mounted/secret-authentik-blueprint-ukubi-game}
+  - {name: blueprints-secret-authentik-blueprint-game-visitors, mountPath: /blueprints/mounted/secret-authentik-blueprint-game-visitors}
 
 # GeoIP enrichment of login events needs a MaxMind account and license key.
 # Off until someone decides those are worth storing — it is an events-context

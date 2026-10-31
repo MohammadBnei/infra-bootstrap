@@ -93,6 +93,25 @@ jobs:
             -o /usr/local/bin/yq
           chmod +x /usr/local/bin/yq
 
+      # A required blueprint Secret whose Infisical key is missing never
+      # renders and leaves the authentik worker in ContainerCreating; optional,
+      # only that blueprint is absent (values.yaml `blueprints:` comment).
+      - name: authentik blueprint Secrets are optional mounts
+        run: |
+          set -euo pipefail
+          v=gitops/platform/values/authentik/values.yaml
+          test "$(yq '.blueprints.secrets // [] | length' "$v")" = 0
+          test "$(yq '[.worker.volumes[] | select(.secret and .secret.optional != true)] | length' "$v")" = 0
+          # Optional makes a slip silent, so: every volume has its mount, and
+          # every blueprint file is registered (a ConfigMap or a Secret volume).
+          diff <(yq '.worker.volumes[].name' "$v" | sort) \
+               <(yq '.worker.volumeMounts[].name' "$v" | sort)
+          diff <(yq -N 'select(.kind == "ConfigMap" or .kind == "InfisicalSecret")
+                        | (.spec.managedSecretReference.secretName // .metadata.name)' \
+                   gitops/bootstrap/authentik-blueprint-*.yaml | sort) \
+               <({ yq '.blueprints.configMaps[]' "$v"
+                   yq '.worker.volumes[].secret.secretName | select(. != null)' "$v"; } | sort)
+
       - name: helm lint / template common-app-chart
         run: |
           set -euo pipefail
