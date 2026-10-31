@@ -1,0 +1,275 @@
+# Visitor sign-in for the game's public world (mountain plan/18-villages.md,
+# "Owner decisions" 1): GitHub and Google OAuth sources, no local passwords, one
+# click. A first sign-in enrolls the person into `visitors` and nothing else;
+# `visitors` is bound to the `ukubi-world` application only
+# (authentik-blueprint-ukubi-world-policy.yaml), and
+# gitops/scripts/check-authentik-bindings.py fails CI if it is ever bound to
+# anything else.
+#
+# What this file declares, all new, nothing existing is edited:
+# - the `visitors` group (declared here and taken with `!KeyOf`, never `!Find`:
+#   see authentik-blueprint-wird-enrollment.yaml for why a `!Find` miss on
+#   create_users_group silently drops every user enrolled in that window);
+# - two OAuth sources, `github` and `google`, each with a property mapping
+#   that names the user after the source's own id (`gh-<id>`, `google-<id>`).
+#   A GitHub login is free text another person can pick, and a blueprint
+#   matches service accounts by username (ADR-0066, ADR-0068): an enrolled
+#   `atlas-game` would be taken over. An id cannot collide with a person or a
+#   service account;
+# - `user_matching_mode: identifier` (the default, stated on purpose): a
+#   returning visitor is matched by the source's id only. NEVER `email_link`:
+#   a Google account carrying an admin's address would sign in AS that admin;
+# - the enrollment flow `game-visitor-enrollment`: write the user (external,
+#   active, in `visitors`), log in. No prompt: the source supplies everything.
+#   Its gate refuses anyone not arriving through one of the two sources (the
+#   flow cannot be opened by hand) and anyone without an email, since the game
+#   reads a visitor's `email` claim;
+# - the authentication flow `ukubi-world-authentication`: an identification
+#   stage showing the two sources and no username field, set as the
+#   `ukubi-world` provider's authentication_flow. Only that application's
+#   sign-in page changes; the default login every other app uses is untouched;
+# - the `ukubi-world` provider and application, for the public pod at
+#   world.bnei.dev. The owner pod (`ukubi-game`, game.bnei.dev) is unchanged
+#   and stays platform-admins only.
+#
+# A SECRET, not a ConfigMap: the sources carry their OAuth client secrets and
+# the provider its own. Field shapes checked against authentik 2026.8.0's
+# source (core/models.py Provider.authentication_flow, Source.user_matching_mode,
+# sources/oauth/models.py, stages/identification, stages/user_write); the
+# GitHub type itself asks for `read:user user:email` and reads the primary
+# address from /user/emails when the profile hides it.
+#
+# BEFORE THE FIRST APPLY these exist in infra-bootstrap-1-ge1 (docs/secrets.md),
+# or the Secret never renders: AUTHENTIK_SOURCE_GITHUB_CLIENT_ID,
+# AUTHENTIK_SOURCE_GITHUB_CLIENT_SECRET, AUTHENTIK_SOURCE_GOOGLE_CLIENT_ID,
+# AUTHENTIK_SOURCE_GOOGLE_CLIENT_SECRET, UKUBI_WORLD_OIDC_CLIENT_ID,
+# UKUBI_WORLD_OIDC_CLIENT_SECRET. The OAuth apps' callback URLs are
+#   https://authentik.bnei.dev/source/oauth/callback/github/
+#   https://authentik.bnei.dev/source/oauth/callback/google/
+#
+# Verify after the apply (the DB is the honest answer, never `cat` the mount):
+#   psql -d authentik -tAc "SELECT slug, user_matching_mode FROM authentik_core_source"
+#   curl -s https://authentik.bnei.dev/application/o/ukubi-world/.well-known/openid-configuration | head -c 300
+# then one real sign-in per source, and check the new user's only group is
+# `visitors`.
+apiVersion: secrets.infisical.com/v1alpha1
+kind: InfisicalSecret
+metadata:
+  name: authentik-blueprint-game-visitors
+  namespace: infisical
+spec:
+  hostAPI: http://platform-infisical-backend.infisical.svc.cluster.local:8080/api
+  resyncInterval: 60
+  authentication:
+    universalAuth:
+      secretsScope:
+        projectSlug: "infra-bootstrap-1-ge1"
+        envSlug: dev
+        secretsPath: "/"
+      credentialsRef:
+        secretName: universal-auth-credentials
+        secretNamespace: infisical
+  managedSecretReference:
+    secretName: authentik-blueprint-game-visitors
+    secretNamespace: authentik
+    creationPolicy: Orphan
+    template:
+      data:
+        game-visitors.yaml: |
+          version: 1
+          metadata:
+            name: game-visitors
+            labels:
+              blueprints.goauthentik.io/instantiate: "true"
+          entries:
+            # No `users:` — membership is runtime state. Never mark this
+            # absent: that deletes every visitor's membership with it.
+            - model: authentik_core.group
+              id: visitors
+              identifiers:
+                name: visitors
+              attrs:
+                name: visitors
+
+            # --- enrollment ---------------------------------------------------
+            - model: authentik_flows.flow
+              id: enrollment-flow
+              identifiers:
+                slug: game-visitor-enrollment
+              attrs:
+                name: Game visitor enrollment
+                title: Welcome to the world
+                designation: enrollment
+                authentication: none
+
+            - model: authentik_policies_expression.expressionpolicy
+              id: enrollment-gate
+              identifiers:
+                name: game-visitor-enrollment-gate
+              attrs:
+                name: game-visitor-enrollment-gate
+                expression: |
+                  # Only through the two visitor sources, never by hand.
+                  if not ak_is_sso_flow:
+                      return False
+                  source = request.context.get("source")
+                  if source is None or source.slug not in ("github", "google"):
+                      return False
+                  if not request.context.get("prompt_data", {}).get("email"):
+                      ak_message("Your account has no email address we can read.")
+                      return False
+                  return True
+
+            - model: authentik_stages_user_write.userwritestage
+              id: enrollment-write
+              identifiers:
+                name: game-visitor-enrollment-write
+              attrs:
+                user_creation_mode: always_create
+                create_users_as_inactive: false
+                create_users_group: !KeyOf visitors
+                user_type: external
+
+            - model: authentik_stages_user_login.userloginstage
+              id: enrollment-login
+              identifiers:
+                name: game-visitor-enrollment-login
+
+            - model: authentik_policies.policybinding
+              identifiers:
+                target: !KeyOf enrollment-flow
+                policy: !KeyOf enrollment-gate
+                order: 0
+            - model: authentik_flows.flowstagebinding
+              identifiers:
+                target: !KeyOf enrollment-flow
+                stage: !KeyOf enrollment-write
+                order: 10
+            - model: authentik_flows.flowstagebinding
+              identifiers:
+                target: !KeyOf enrollment-flow
+                stage: !KeyOf enrollment-login
+                order: 20
+
+            # --- sources ------------------------------------------------------
+            # The username is the source's id, never the login or the name
+            # (header). Merged over the type's own properties, so email and
+            # name still come from the source.
+            - model: authentik_sources_oauth.oauthsourcepropertymapping
+              id: github-username
+              identifiers:
+                name: game-visitor-github-username
+              attrs:
+                name: game-visitor-github-username
+                expression: |
+                  return {"username": "gh-" + str(info["id"])}
+            - model: authentik_sources_oauth.oauthsourcepropertymapping
+              id: google-username
+              identifiers:
+                name: game-visitor-google-username
+              attrs:
+                name: game-visitor-google-username
+                expression: |
+                  # authentik's Google type reads the v1 userinfo endpoint,
+                  # which names the account `id`, not `sub`.
+                  return {"username": "google-" + str(info["id"])}
+
+            - model: authentik_sources_oauth.oauthsource
+              id: github
+              identifiers:
+                slug: github
+              attrs:
+                name: GitHub
+                slug: github
+                provider_type: github
+                consumer_key: "{{ .AUTHENTIK_SOURCE_GITHUB_CLIENT_ID.Value }}"
+                consumer_secret: "{{ .AUTHENTIK_SOURCE_GITHUB_CLIENT_SECRET.Value }}"
+                # The type already asks for these; stated so the email claim's
+                # dependency is visible here.
+                additional_scopes: "user:email"
+                user_matching_mode: identifier
+                enrollment_flow: !KeyOf enrollment-flow
+                authentication_flow: !Find [authentik_flows.flow, [slug, default-source-authentication]]
+                user_property_mappings:
+                  - !KeyOf github-username
+            - model: authentik_sources_oauth.oauthsource
+              id: google
+              identifiers:
+                slug: google
+              attrs:
+                name: Google
+                slug: google
+                provider_type: google
+                consumer_key: "{{ .AUTHENTIK_SOURCE_GOOGLE_CLIENT_ID.Value }}"
+                consumer_secret: "{{ .AUTHENTIK_SOURCE_GOOGLE_CLIENT_SECRET.Value }}"
+                user_matching_mode: identifier
+                enrollment_flow: !KeyOf enrollment-flow
+                authentication_flow: !Find [authentik_flows.flow, [slug, default-source-authentication]]
+                user_property_mappings:
+                  - !KeyOf google-username
+
+            # --- the world's sign-in page --------------------------------------
+            - model: authentik_stages_identification.identificationstage
+              id: world-identification
+              identifiers:
+                name: ukubi-world-identification
+              attrs:
+                # No username field: a visitor has no password to type.
+                user_fields: []
+                sources:
+                  - !KeyOf github
+                  - !KeyOf google
+                show_source_labels: true
+
+            - model: authentik_flows.flow
+              id: world-authentication
+              identifiers:
+                slug: ukubi-world-authentication
+              attrs:
+                name: ukubi world sign-in
+                title: Sign in to the world
+                designation: authentication
+                authentication: require_unauthenticated
+            - model: authentik_flows.flowstagebinding
+              identifiers:
+                target: !KeyOf world-authentication
+                stage: !KeyOf world-identification
+                order: 10
+
+            # --- the public world's client ---------------------------------------
+            - model: authentik_providers_oauth2.oauth2provider
+              id: ukubi-world-provider
+              identifiers:
+                name: ukubi-world
+              attrs:
+                name: ukubi-world
+                client_type: confidential
+                client_id: "{{ .UKUBI_WORLD_OIDC_CLIENT_ID.Value }}"
+                client_secret: "{{ .UKUBI_WORLD_OIDC_CLIENT_SECRET.Value }}"
+                redirect_uris:
+                  - matching_mode: strict
+                    url: https://world.bnei.dev/auth/callback
+                # Empty permits no grant (authentik-oidc skill).
+                grant_types:
+                  - authorization_code
+                # sub stays the default hashed_user_id: a visitor's address is
+                # mutable and not unique, so the game keys rows on `sub`.
+                authentication_flow: !KeyOf world-authentication
+                authorization_flow: !Find [authentik_flows.flow, [slug, default-provider-authorization-implicit-consent]]
+                invalidation_flow: !Find [authentik_flows.flow, [slug, default-provider-invalidation-flow]]
+                signing_key: !Find [authentik_crypto.certificatekeypair, [name, "authentik Self-signed Certificate"]]
+                # The signing key is shared across apps: the game checks iss
+                # and aud, not only the signature.
+                property_mappings:
+                  - !Find [authentik_providers_oauth2.scopemapping, [managed, "goauthentik.io/providers/oauth2/scope-openid"]]
+                  - !Find [authentik_providers_oauth2.scopemapping, [managed, "goauthentik.io/providers/oauth2/scope-email"]]
+                  - !Find [authentik_providers_oauth2.scopemapping, [managed, "goauthentik.io/providers/oauth2/scope-profile"]]
+            - model: authentik_core.application
+              identifiers:
+                slug: ukubi-world
+              attrs:
+                name: ukubi world
+                slug: ukubi-world
+                provider: !KeyOf ukubi-world-provider
+                meta_launch_url: https://world.bnei.dev
+                meta_description: The cluster as a town (visitors)

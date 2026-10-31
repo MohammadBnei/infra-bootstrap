@@ -1,0 +1,55 @@
+# Who may sign in to the `ukubi-world` application (the game's public pod,
+# world.bnei.dev): `visitors`, enrolled through GitHub or Google
+# (authentik-blueprint-game-visitors.yaml), and platform-admins, so the owner
+# plays the same world. The world's sign-in page shows only the two sources, so
+# the owner signs in to authentik first (any other app, or authentik.bnei.dev);
+# a GitHub or Google click there enrolls a new visitor, never links to the
+# owner's account.
+#
+# `visitors` is bound HERE AND NOWHERE ELSE. With core_default_app_access
+# false (ADR-0050) an application admits only the groups bound to it, so a
+# visitor reaches no other app; check-authentik-bindings.py fails CI if a
+# binding of `visitors` to any other application ever lands.
+#
+# SEPARATE FROM the provider's blueprint, the hermes convention: a !Find miss
+# on a not-yet-registered `ukubi-world` rolls back this file only, and the
+# metaapplyblueprint entries apply the named instances first.
+#
+# A plain ConfigMap: no credential to interpolate.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: authentik-blueprint-ukubi-world-policy
+  namespace: authentik
+data:
+  ukubi-world-policy.yaml: |
+    version: 1
+    metadata:
+      name: ukubi-world-policy
+      labels:
+        blueprints.goauthentik.io/instantiate: "true"
+    entries:
+      - model: authentik_blueprints.metaapplyblueprint
+        attrs:
+          identifiers:
+            name: platform-groups
+          required: true
+      - model: authentik_blueprints.metaapplyblueprint
+        attrs:
+          identifiers:
+            name: game-visitors
+          required: true
+      - model: authentik_policies.policybinding
+        identifiers:
+          target: !Find [authentik_core.application, [slug, ukubi-world]]
+          group: !Find [authentik_core.group, [name, visitors]]
+          order: 0
+        attrs:
+          enabled: true
+      - model: authentik_policies.policybinding
+        identifiers:
+          target: !Find [authentik_core.application, [slug, ukubi-world]]
+          group: !Find [authentik_core.group, [name, platform-admins]]
+          order: 10
+        attrs:
+          enabled: true

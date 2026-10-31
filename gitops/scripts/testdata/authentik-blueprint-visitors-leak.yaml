@@ -1,0 +1,30 @@
+# TEST FIXTURE for gitops/scripts/check-authentik-bindings.py, never deployed
+# (not under gitops/bootstrap/, not in authentik's values). CI asserts the gate
+# FAILS on it: `fixture-leak` is bound, so it is not unbound, but one of its
+# bindings admits the `visitors` group, which may reach `ukubi-world` only.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: authentik-blueprint-fixture-leak
+  namespace: authentik
+data:
+  fixture-leak.yaml: |
+    version: 1
+    metadata:
+      name: fixture-leak
+    entries:
+      - model: authentik_core.group
+        id: visitors
+        identifiers:
+          name: visitors
+      - model: authentik_core.application
+        id: app
+        identifiers:
+          slug: fixture-leak
+        attrs:
+          name: fixture-leak
+      - model: authentik_policies.policybinding
+        identifiers:
+          target: !KeyOf app
+          group: !KeyOf visitors
+          order: 0

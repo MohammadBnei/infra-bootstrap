@@ -20,9 +20,16 @@ Static mode treats a `!Find` group/policy as resolved only if a committed
 blueprint declares it; a `!Find` user is trusted (users are runtime state).
 Apps created outside blueprints (restores, provisioners) only show in --live.
 
+It also fails when the `visitors` group (game visitors, enrolled from GitHub
+or Google by anyone) is bound to anything but the `ukubi-world` application:
+that group must reach no other app (mountain plan/18, owner decision 1).
+
 ponytail: any resolved policy counts, as a group does. A policy that admits
 everyone (e.g. the PKCE guards, outside /authorize) would pass alone; require a
-group/user binding here if an app ever relies on a policy-only binding.
+group/user binding here if an app ever relies on a policy-only binding. The
+visitors rule reads group bindings only: an expression policy naming the group
+would pass unseen. A binding of a parent group admits its children, so --live
+also fails when `visitors` has a parent.
 """
 import glob
 import os
@@ -32,6 +39,7 @@ import sys
 
 APP = "authentik_core.application"
 BINDING = "authentik_policies.policybinding"
+VISITORS, VISITORS_APP = "visitors", "ukubi-world"
 
 
 class Tag(tuple):
@@ -102,7 +110,24 @@ def static(paths):
                 return {**e.get("attrs", {}), **e.get("identifiers", {})}.get("slug")
         return None
 
-    bound = set()
+    def group_name(ref, src):
+        if not isinstance(ref, Tag):
+            return None
+        name, val = ref
+        if name == "Find" and val[0] == "authentik_core.group":
+            return val[1][1]
+        if name == "KeyOf":
+            e = local_ids(src).get(val, {})
+            return {**e.get("attrs", {}), **e.get("identifiers", {})}.get("name")
+        return None
+
+    bound, leaks = set(), {}
+    for src, e in entries:
+        ids = {**(e.get("attrs") or {}), **(e.get("identifiers") or {})}
+        if e.get("model") == BINDING and group_name(ids.get("group"), src) == VISITORS:
+            slug = target_slug(ids["target"], src)
+            if slug != VISITORS_APP:
+                leaks[slug or "a non-application target"] = src
     for src, e in entries:
         attrs = e.get("attrs") or {}
         if e.get("model") != BINDING or attrs.get("enabled") is False or attrs.get("negate") is True:
@@ -111,7 +136,7 @@ def static(paths):
         slug = target_slug(ids["target"], src)
         if slug and any(resolves(ids.get(k), src) for k in ("group", "user", "policy")):
             bound.add(slug)
-    return {slug: src for slug, src in apps.items() if slug not in bound}, len(apps)
+    return {slug: src for slug, src in apps.items() if slug not in bound}, len(apps), leaks
 
 
 LIVE = """
@@ -122,7 +147,13 @@ valid = Q(group__isnull=False) | Q(user__isnull=False) | Q(policy__isnull=False)
 for a in Application.objects.order_by("slug"):
     ok = PolicyBinding.objects.filter(valid, target=a, enabled=True, negate=False).exists()
     print("GATE", "ok" if ok else "UNBOUND", a.slug)
-"""
+for b in PolicyBinding.objects.filter(group__name="%s").exclude(target__application__slug="%s"):
+    print("LEAK", getattr(getattr(b.target, "application", None), "slug", None) or b.target_id)
+from authentik.core.models import Group
+for g in Group.objects.filter(name="%s").values_list("parents__name", flat=True):
+    if g:
+        print("LEAK", "parent-group:" + g.replace(" ", "_"))
+""" % (VISITORS, VISITORS_APP, VISITORS)
 
 
 def live():
@@ -132,17 +163,20 @@ def live():
     rows = [line.split()[1:] for line in out.splitlines() if line.startswith("GATE ")]
     if not rows:
         sys.exit(f"no result from authentik:\n{out}")
-    return {slug: "live" for state, slug in rows if state == "UNBOUND"}, len(rows)
+    leaks = {line.split()[1]: "live" for line in out.splitlines() if line.startswith("LEAK ")}
+    return {slug: "live" for state, slug in rows if state == "UNBOUND"}, len(rows), leaks
 
 
 def main(argv):
     if argv[:1] == ["--live"]:
-        unbound, n = live()
+        unbound, n, leaks = live()
     else:
-        unbound, n = static(argv or sorted(glob.glob("gitops/bootstrap/authentik-blueprint-*.yaml")))
+        unbound, n, leaks = static(argv or sorted(glob.glob("gitops/bootstrap/authentik-blueprint-*.yaml")))
     for slug, src in sorted(unbound.items()):
         print(f"::error::authentik application '{slug}' has no valid policy binding ({src})")
-    if unbound:
+    for slug, src in sorted(leaks.items()):
+        print(f"::error::group '{VISITORS}' is bound to {slug} ({src}); it may reach '{VISITORS_APP}' only")
+    if unbound or leaks:
         return 1
     print(f"OK: all {n} authentik applications carry a valid policy binding.")
     return 0
