@@ -112,6 +112,18 @@ jobs:
                <({ yq '.blueprints.configMaps[]' "$v"
                    yq '.worker.volumes[].secret.secretName | select(. != null)' "$v"; } | sort)
 
+      # Same rule for Grafana's contact-point Secrets (values.yaml comment
+      # above extraSecretMounts): optional, behind the secret-files init.
+      - name: grafana Secret mounts are optional
+        run: |
+          set -euo pipefail
+          v=gitops/platform/values/grafana/values.yaml
+          test "$(yq '[.extraSecretMounts[] | select(.optional != true)] | length' "$v")" = 0
+          # Every optional mount reaches the init that copies it.
+          diff <(yq '.extraSecretMounts[].name' "$v" | sort) \
+               <(yq '.extraInitContainers[] | select(.name == "secret-files") | .volumeMounts[].name
+                     | select(. != "secret-files")' "$v" | sort)
+
       - name: helm lint / template common-app-chart
         run: |
           set -euo pipefail
