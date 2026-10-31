@@ -117,7 +117,12 @@ jobs:
       - name: grafana Secret mounts are optional
         run: |
           set -euo pipefail
-          test "$(yq '[.extraSecretMounts[] | select(.optional != true)] | length' gitops/platform/values/grafana/values.yaml)" = 0
+          v=gitops/platform/values/grafana/values.yaml
+          test "$(yq '[.extraSecretMounts[] | select(.optional != true)] | length' "$v")" = 0
+          # Every optional mount reaches the init that copies it.
+          diff <(yq '.extraSecretMounts[].name' "$v" | sort) \
+               <(yq '.extraInitContainers[] | select(.name == "secret-files") | .volumeMounts[].name
+                     | select(. != "secret-files")' "$v" | sort)
 
       - name: helm lint / template common-app-chart
         run: |

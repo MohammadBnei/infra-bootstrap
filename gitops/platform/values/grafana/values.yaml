@@ -198,7 +198,8 @@ grafana.ini:
 # not help: $__file{} on a missing file fails alerting provisioning, which
 # stops Grafana at startup. So each Secret is mounted OPTIONAL under
 # /etc/secrets-src, and the `secret-files` init container copies each file
-# to /etc/secrets (an emptyDir), writing a placeholder when it is absent: a
+# to /etc/secrets (an emptyDir), waiting up to ~3 min for it, then writing a
+# placeholder when it is still absent or empty: a
 # `.invalid` URL (RFC 6761, never resolves) or a token core rejects. Only that
 # contact point then fails to deliver (Alerting > Contact points shows the
 # error) until the Secret exists and the pod restarts. Provisioning reads the
@@ -228,11 +229,26 @@ extraInitContainers:
       - -c
       - |
         set -eu
-        mkdir -p /etc/secrets/discord /etc/secrets/thot
-        cp /etc/secrets-src/discord/webhook-url /etc/secrets/discord/webhook-url \
-          || echo https://missing-discord-webhook.invalid/ > /etc/secrets/discord/webhook-url
-        cp /etc/secrets-src/thot/token /etc/secrets/thot/token \
-          || echo missing-thot-token > /etc/secrets/thot/token
+        # copy <file under /etc/secrets-src> <placeholder>. Waits up to ~3 min
+        # for a non-empty file: on a fresh bootstrap the InfisicalSecret can
+        # land a minute after this pod, and a placeholder taken then would
+        # stay until someone restarts Grafana. An empty value counts as
+        # missing (an empty Slack url still fails provisioning).
+        copy() {
+          i=0
+          while [ ! -s "/etc/secrets-src/$1" ] && [ "$i" -lt 36 ]; do
+            sleep 5; i=$((i + 1))
+          done
+          mkdir -p "$(dirname "/etc/secrets/$1")"
+          if [ -s "/etc/secrets-src/$1" ]; then
+            cp "/etc/secrets-src/$1" "/etc/secrets/$1"
+          else
+            echo "secret-files: /etc/secrets-src/$1 missing, placeholder written"
+            echo "$2" > "/etc/secrets/$1"
+          fi
+        }
+        copy discord/webhook-url https://missing-discord-webhook.invalid/
+        copy thot/token missing-thot-token
     securityContext:
       allowPrivilegeEscalation: false
       capabilities:
