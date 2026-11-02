@@ -3,7 +3,7 @@
 **Status:** Accepted, partly built: the service (ingest, reconcile, alert endpoints, the bus API; `MohammadBnei/ukubi-bridge`)
 and rollout step 2 (#340). Merged, not deployed: deletion by age and authentik API clients (ukubi-bridge #10, #9). Merged, not released: step 4,
 core's dispatcher and `PublishEvent` (agent-fleet #324, #325). Not built: steps 3, 5, 6. Decisions 2 (retention: 30 days, parked events kept, gaps announced) and 4 (API callers) amended, and 8 (apps) replaced, by
-[ADR-0066](0066-bridge-clients-sign-in-through-authentik.md).
+[ADR-0066](0066-bridge-clients-sign-in-through-authentik.md). Decision 6 (trust) amended by agent-fleet ADR-0082 §12: two facts in place of one bit.
 **Date:** 2026-10-18
 **Related:** [ADR-0031](0031-defer-hpa-scale-to-zero.md) (Knative/KEDA deferred),
 [ADR-0032](0032-thot-rbac-and-alerting.md) (Alertmanager → thot webhook),
@@ -90,6 +90,16 @@ authorise is an approval button.
    trusted, whatever account the webhook names as `sender`. Events caused by
    the thread's own agent identity are dropped. An event published by an
    agent inherits the lowest trust along its `causationid` chain.
+   *Amended 2026-11-02 by agent-fleet ADR-0082 §12 (ukubi-bridge #19):* trust
+   is two facts, not one bit. `actor_trusted`: the actor is a trusted login.
+   `thread_owned`: the subject's author is a trusted login or a fleet agent,
+   and a PR's head is in the same repo (only `pull_request` and
+   `pull_request_review` payloads carry the head, so a comment on a fork PR
+   can read owned). Only core, a privileged client, sets `actor_trusted` on
+   `Publish`, true when a bridge event caused the publishing session; nobody
+   publishes `thread_owned`. The bus also carries `pull_request.labeled`,
+   `issues.opened` and `issues.labeled`, so the webhook subscribes to Issues
+   and Pull requests.
 7. **Agent-fleet core stays private and queue-free.** Agents never reach the
    bridge directly (definition pods may only talk to core, the vault and
    DNS). They publish through core's `PublishEvent`, which stamps the
