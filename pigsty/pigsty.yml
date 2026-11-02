@@ -304,21 +304,6 @@ all:
             comment: ukubi-bridge — event log and subscriptions (ADR-0060)
             roles: [dbrole_readwrite]
 
-          # ukubi-realm — the shared world's server (mountain plan/21, phase 0b).
-          # mountain's shape: the plaintext is DBUSER_REALM_PASSWORD in Infisical
-          # and only its SCRAM-SHA-256 verifier is committed, to this branch
-          # (infra-bootstrap#399) before it merges. NO verifier yet: until the
-          # owner fills `password` below, a Pigsty run creates the role with no
-          # password, so nothing can log in as it (safe, not broken).
-          # pgbouncer: false, the realm dials 5432 direct; connlimit 10, one
-          # replica with Recreate, mountain's reasoning.
-          - name: dbuser_realm
-            # password: '<SCRAM-SHA-256 verifier of DBUSER_REALM_PASSWORD>'
-            pgbouncer: false
-            connlimit: 10
-            comment: ukubi-realm — the shared world's event log (mountain plan/21)
-            roles: [dbrole_readwrite]
-
           # NetBird control plane (ADR-0054). hq's arrangement: the plaintext is
           # DBUSER_NETBIRD_PASSWORD in Infisical, only the verifier is here, and
           # netbird-server dials 5432 direct. It owns three databases because the
@@ -509,15 +494,6 @@ all:
           - name: bridge
             comment: ukubi-bridge — event log and subscriptions
             owner: dbuser_bridge
-            revokeconn: true
-            pgbouncer: false
-            register_datasource: false
-
-          # ukubi-realm (mountain plan/21), mountaindb's switches. Pieces,
-          # inventory and progression as events, folded on boot.
-          - name: realmdb
-            comment: ukubi-realm — the shared world's event log
-            owner: dbuser_realm
             revokeconn: true
             pgbouncer: false
             register_datasource: false

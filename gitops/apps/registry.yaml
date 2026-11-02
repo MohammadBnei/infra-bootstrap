@@ -401,27 +401,6 @@
   targetRevision: main
   hostname: world.bnei.dev
 
-# ukubi-realm: the shared world's server (mountain plan/21, cmd/realm): player
-# bodies, mobs, combat, items, pieces. Its own host because the chart routes
-# by host, not path; clients reach it by websocket (wss://realm.bnei.dev),
-# which Traefik and the baseline chain pass as-is (one Upgrade request through
-# the rate limit, then the stream). Cloudflare proxies the host and drops a
-# websocket idle for 100 s, so the realm pings below that. helm/realm.yaml is
-# STANDALONE, the public pod's reason. Namespace, egress and ingress fence:
-# platform-ukubi-realm-bounds (wave 1, gitops/platform/ukubi-realm). Env:
-# gitops/bootstrap/ukubi-realm-secret.yaml (Secret ukubi-realm-config: the
-# realmdb DSN and the two pods' ticket public keys). replicaCount 1 + Recreate
-# (one writer of the realm's event log). Prepared while the cluster was down
-# (plan/21 phase 0b): merge on the owner's word once cmd/realm has shipped and
-# the game's CI has replaced image.tag "unreleased".
-- name: ukubi-realm
-  namespace: ukubi-realm
-  syncWave: "10"
-  repoURL: https://github.com/MohammadBnei/ukubi-game.git
-  valuesPath: [helm/realm.yaml]
-  targetRevision: main
-  hostname: realm.bnei.dev
-
 # searxng and pgweb are NOT here: they're public-image tools with no
 # app-specific code, so they're driven as platform apps instead — see
 # gitops/bootstrap/platform-common-apps.applicationset.yaml and
