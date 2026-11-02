@@ -306,9 +306,10 @@ all:
 
           # ukubi-realm — the shared world's server (mountain plan/21, phase 0b).
           # mountain's shape: the plaintext is DBUSER_REALM_PASSWORD in Infisical
-          # and only its SCRAM-SHA-256 verifier is committed. NO verifier yet:
-          # until the owner fills `password` below, a Pigsty run creates the role
-          # with no password, so nothing can log in as it (safe, not broken).
+          # and only its SCRAM-SHA-256 verifier is committed, to this branch
+          # (infra-bootstrap#399) before it merges. NO verifier yet: until the
+          # owner fills `password` below, a Pigsty run creates the role with no
+          # password, so nothing can log in as it (safe, not broken).
           # pgbouncer: false, the realm dials 5432 direct; connlimit 10, one
           # replica with Recreate, mountain's reasoning.
           - name: dbuser_realm
