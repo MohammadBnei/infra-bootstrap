@@ -366,3 +366,52 @@ not a decision.
   `infisicaldb` circularity solved first.
 
 The result is three Talos machines, one API, and one GitOps repo.
+
+---
+
+## 11. New hardware (owner, 2026-11-09): two Fujitsu Esprimo G558
+
+Each one: Core i5 (6 cores; check the exact model with `lscpu`), 32 GB RAM,
+1 TB SSD. That takes the lab to 5 machines and ~143 GB RAM, and it changes
+the plan more than anything above.
+
+**Topology this allows:**
+
+| Machine | Role |
+| --- | --- |
+| Esprimo A, Esprimo B, server1 | Talos control plane + etcd + worker: the three always-on, stable machines |
+| `.165` | Talos **worker only**, with the GPU. Gaming reboots no longer touch etcd quorum |
+| ex-laptop | Optional extra worker, or retired (least trusted, 15 GB) |
+| Pi 4 | Pi-hole + jump host |
+
+**Migration with no degraded quorum.** The old cluster stays untouched while
+the new one is built next to it, which removes the main cost of Option C in
+§8:
+
+1. Off-site backup, unchanged.
+2. Talos on both Esprimos: A as a 1-node control plane, B as a worker.
+   Register the cluster as a second ArgoCD destination. 64 GB is more than
+   the 43 GB all five k8s VMs hold today, so everything fits.
+3. Move apps over: stateless first, then stateful (Longhorn backup →
+   Garage → restore), then Postgres → CNPG, then Garage itself off `.165`.
+4. With server1 empty, install Talos on it, and make server1 and B control
+   planes. etcd goes 1 → 3.
+5. `.165`: Talos on the second NVMe (Windows partition untouched), joined as
+   a GPU worker.
+6. Proxmox is gone. Decide what ex-laptop does.
+
+**Out-of-band access.** The G558 uses an Intel **H310** chipset, which has
+no AMT, so there's no free built-in remote console. Without a KVM, recovery
+looks like this:
+- Talos API for most problems.
+- Talos logs in Loki, to read the last messages before a crash.
+- Talos A/B rollback for a bad upgrade.
+- A local-API smart plug plus the BIOS power-failure recovery setting, for a
+  remote hard reset.
+
+Only "won't boot and rollback failed" needs a screen, and all these machines
+are in the house. A KVM can be added later, on `.165` first, if a real
+incident shows it's needed.
+
+To check: Talos user volumes on the system disk, so Longhorn gets space on a
+single-SSD machine, for the Talos version chosen.
