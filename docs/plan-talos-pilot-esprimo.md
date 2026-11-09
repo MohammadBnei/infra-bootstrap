@@ -20,10 +20,28 @@ Those come after the go/no-go (§5).
 on real hardware and the LAN. Claude prepares configs, patches, scripts and
 checklists, and reviews the outputs.
 
-**Storage stance (owner, 2026-11-09):** Longhorn stays the default,
-replicated storage class. The pilot also tests Longhorn RWX (T7) as the
-candidate replacement for the `nfs` class, whose VM disappears with
-Proxmox.
+**Storage stance (owner, 2026-11-09):** two requirements.
+
+1. **RWO volumes for any app must not be tied to a node.** That means
+   replicated block storage, which is what Longhorn is.
+2. **RWX is mainly for agent-fleet**: the `agent-fleet-workspace` volume
+   holding the clone cache and the irreplaceable `claude-home/` resume state.
+
+So Longhorn stays as the default class, but slimmed down. It holds only
+what needs to move between nodes:
+
+| Data | Where |
+| --- | --- |
+| App volumes (RWO), fleet RWX | **Longhorn**, backed up to Garage (+ off-site) |
+| Databases | CNPG on local disks (replicates itself) |
+| Prometheus TSDB | local (regenerable) |
+| Fleet per-session scratch | `local-path`, as today (agent-fleet ADR-0048) |
+| Loki | candidate: Garage S3 backend, so Loki's own volume becomes small |
+
+agent-fleet's ADR-0048 measured the RWX volume at 10 MB/s on today's VMs,
+so T7 re-measures it on bare metal. If Longhorn's numbers disappoint,
+Piraeus/LINSTOR (DRBD, with a Talos extension) is the replicated-block
+alternative to benchmark next. Ceph stays banned.
 
 ---
 
@@ -311,7 +329,8 @@ here. **G** marks a go-critical test (§5).
 | T4 **G** | Registry | Pod pulls from `registry.bnei.lan:5000` |
 | T5 **G** | DNS | **500 lookups** of `registry.bnei.lan` from a pod: zero NXDOMAIN. `kubernetes.default` and an internet name resolve. A `CiliumNetworkPolicy` modelled on ukubi-game's allows egress to `k8s-app: kube-dns` (**not** a host address: pods talk to CoreDNS, and CoreDNS alone forwards to `169.254.116.108`). Note the rewrite the three prod policies with `169.254.25.10` will need |
 | T6 **G** | Longhorn RWO | PVC binds, 2 replicas healthy. Backup to the pilot bucket; delete the PVC; restore; counter intact |
-| T7 **G** | Longhorn RWX | Two pods on two nodes append to the same file for 10 min, no errors or corruption. Record the share-manager pod's RAM (input for replacing the `nfs` class, ADR-0036) |
+| T7 **G** | Longhorn RWX, fleet-shaped | Two pods on two nodes append to the same file for 10 min, no errors or corruption. Then reproduce agent-fleet's workspace use: a `git clone` of a real repo into the RWX volume, read from a second node, and `fio` sequential and random throughput. **Compare to ADR-0048's 10 MB/s.** Record the share-manager pod's RAM. Kill the node running the share-manager: record how long the mount is unavailable on the other node |
+| T7b | Longhorn RWO, not tied to a node | Hard-cut the node holding a pod with an RWO volume: the pod restarts on the other node with its data. Record the time, with and without `node-down-pod-deletion-policy` |
 | T8 **G** | Workload isolation | T6/T7 pass with `workloadIsolation: true`; if not, they pass with `false` and the reason is recorded |
 | T9 **G** | Graceful node loss | `talosctl shutdown` on the worker: pods evicted, the RWO volume reattaches on Esprimo 1, no `Multi-Attach` |
 | T10 **G** | Upgrades | `talosctl upgrade --image <same schematic, newer patch>`, worker then CP; then `talosctl rollback` on one node; then `talosctl upgrade-k8s` one patch. After each: extensions still present; **Longhorn volume data intact**; workloads up. Record API downtime during the CP upgrade |
