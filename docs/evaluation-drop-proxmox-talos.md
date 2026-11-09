@@ -292,3 +292,77 @@ The RAM argument alone doesn't cover that until the measurements say it does.
 5. Which pain is driving this: RAM, upgrade toil, config drift, or
    wanting one control plane for its own sake? Options A and B answer the
    first one; only C answers the last.
+
+### Answers (owner, 2026-11-09)
+
+1. **Windows is on a partition next to PVE**, on the same disk. Talos wipes
+   its whole install disk, so Talos goes on `.165`'s *other* NVMe and the
+   Windows partition stays where it is. Still to check: what that second
+   NVMe holds today, whether Talos can put a user volume in the leftover free
+   space on the Windows disk, and the boot switch. Talos has no
+   `efibootmgr`, so choosing Windows is done from the firmware boot menu, and
+   a Windows update that resets the boot order can leave the node stuck in
+   Windows.
+2. RAM measurements: still pending.
+3. Postgres sizes: still pending.
+4. **Losing Proxmox snapshots is acceptable.** Losing data is a different
+   question, so A.1 (off-site backup) still comes before any rebuild.
+5. **Drivers: RAM and ease of management.** Option B only addresses RAM.
+   Ease of management is where C is actually better (no OS patching, no
+   kubespray runs, no PVE upgrades), so **C becomes the target**, with A.1
+   still first. To keep it easy, the goal becomes **no KubeVirt at all** (§10).
+
+---
+
+## 10. The fork question, and what "tailored" should mean
+
+The original idea was to fork Proxmox and Kubernetes and keep only the parts
+needed. What a fork actually involves:
+
+| | Kubernetes | Proxmox VE |
+| --- | --- | --- |
+| Codebase | Go, millions of lines incl. vendored deps | Perl (`pve-manager`, `qemu-server`, `pve-container`, `pve-storage`, `pve-ha-manager`), C (`pmxcfs`), Rust (backup), ExtJS UI, plus its own patched kernel and QEMU on Debian |
+| Release pace | 3 minors/year, monthly patches, ~14-month support window per minor | Tracks Debian + kernel + QEMU security updates |
+| State model | etcd + controllers | `pmxcfs` + corosync |
+
+The two can't be merged at the code level: each has its own state store,
+quorum and scheduler, so a merge means keeping one and rewriting the other's
+features on top of it. **That rewrite already exists:** KubeVirt is
+Proxmox's VM layer rebuilt as Kubernetes controllers, and Harvester is the
+whole product. A fork also stops at the first CVE: every upstream fix has to
+be ported by hand, forever. Licence (AGPL) isn't the obstacle here; the
+maintenance is.
+
+The projects that really did "take only what we need from Kubernetes" (k3s,
+k0s, Talos) are **distributions, not forks**. They stay on upstream code and
+cut and package it. The same model, scaled down to this lab:
+
+| Layer | What we own (small) | What upstream maintains |
+| --- | --- | --- |
+| OS | A Talos **Image Factory schematic**: only our extensions (NVIDIA, `iscsi-tools`, `util-linux-tools`) | Talos |
+| Node config | Machine configs in `terraform/` (`siderolabs/talos`): zot mirror, VIP, disks, kubelet reserves sized from §3 | Talos |
+| Cluster | Feature gates, admission policies, user namespaces | Kubernetes |
+| Platform | `gitops/` unchanged | each chart |
+| Our gaps | Small controllers for things nobody else will write (e.g. a gaming-mode drain/return for `.165`) | — |
+
+Upgrading becomes "bump one version, the machines replace themselves," which
+matches the ease-of-management goal. The custom part comes to a few hundred
+lines of config and controller code, not a codebase.
+
+**Tailored target, with no KubeVirt:** each item below is an option to check,
+not a decision.
+
+- **build-runner as a pod with user namespaces** (`hostUsers: false`).
+  buildah gets `CAP_SYS_ADMIN` only inside its own user namespace and isn't
+  privileged on the node. That breaks the specific reason ADR-0034 gave,
+  which needs re-reading and amending, not assuming. If it doesn't hold, a
+  single KubeVirt VM for build-runner is the fallback.
+- **Garage** as a pod (Helm chart): only once off-site backup exists.
+- **hermesagent** as a pod.
+- **k9s-dashboard** retired: `talosctl` + kubeconfig over NetBird.
+- **NFS** class: in-cluster NFS server or Longhorn RWX.
+- **Postgres → CNPG**: without KubeVirt, Pigsty has nowhere to run, so CNPG
+  is required. It's still done as its own stage (§6), with the
+  `infisicaldb` circularity solved first.
+
+The result is three Talos machines, one API, and one GitOps repo.
