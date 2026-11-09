@@ -1,9 +1,14 @@
 # Plan: the switch, then a Talos pilot on the two Esprimos
 
-**Status:** draft v2, 2026-11-09. Not run. Revised after a doubt cycle: two
-independent reviews, one against this repo's own facts and rules, one
-against upstream Talos 1.14 / Cilium / MetalLB / Longhorn docs. §6 lists
-what changed and why. The *why* of the whole effort is in
+**Status:** draft v3, 2026-11-09. Not run.
+
+- v2 came out of a first doubt cycle: two independent reviews, one against
+  this repo's own facts and rules, one against upstream Talos 1.14 /
+  Cilium / MetalLB / Longhorn docs.
+- v3 adds the order of work, the Pi move and the headless install, and went
+  through a final review.
+
+§6 lists what each review changed. The *why* of the whole effort is in
 [`evaluation-drop-proxmox-talos.md`](evaluation-drop-proxmox-talos.md).
 
 **Scope:**
@@ -41,7 +46,28 @@ what needs to move between nodes:
 agent-fleet's ADR-0048 measured the RWX volume at 10 MB/s on today's VMs,
 so T7 re-measures it on bare metal. If Longhorn's numbers disappoint,
 Piraeus/LINSTOR (DRBD, with a Talos extension) is the replicated-block
-alternative to benchmark next. Ceph stays banned.
+alternative to benchmark next. Ceph stays banned. Sharing agent tooling
+without installing onto RWX is tracked in agent-fleet
+[#363](https://github.com/MohammadBnei/agent-fleet/issues/363).
+
+**Order of work.** Cabling comes before Talos. Every cable move gets
+checked on its own, so a failure has exactly one suspect. The pilot then
+runs on the network it will live on, with the Pi (DNS + jump host) already
+in its final place.
+
+| # | Step | Prod impact | Done when |
+| --- | --- | --- | --- |
+| 0 | Prep: §0.1 prerequisites, §1.1 decisions, §1.2 hardware session per Esprimo, ADR-0070 + `talos/` PR, Infisical project, Pi tools | none | checklists done |
+| 1 | New switch, one cable to the TL-SG108E; both Esprimos plugged in | none | `1000M` LEDs |
+| 2 | ex-laptop → new switch | one etcd voter per quorum blips | §0.3 checks pass |
+| 3 | Pi → new switch | **cluster-wide DNS gap while the Pi is off** (§0.3) | §0.3 checks + DNS checks pass |
+| 4 | server1 → new switch, after a Patroni switchover | short blip; leader already moved | §0.3 checks pass |
+| 5 | `iperf3`, update `ARCHITECTURE.md` §3 | none | ~940 Mbit/s |
+| 6 | Talos install on the Esprimos (§1.5), add-ons | none | T1 passes |
+| 7 | Pilot tests (§2), with the Freebox reboot (§0.5) and T18 in one evening | planned Freebox blip | results table filled in |
+| 8 | T21 soak in the background; T22 rebuild last | none | go/no-go (§5) |
+
+**Never move two of ex-laptop, the Pi and server1 at the same time.**
 
 ---
 
@@ -51,8 +77,9 @@ alternative to benchmark next. Ceph stays banned.
 
 - `.165` and the Pi go room switch → wall → patch panel → TL-SG108E →
   Freebox. They're already off the Freebox's built-in switch.
-- **server1 and ex-laptop plug straight into the Freebox.** Those two
-  are the only ones to move.
+- **server1 and ex-laptop plug straight into the Freebox.**
+- **The Pi has to move physically** to sit with the others (owner,
+  2026-11-09).
 
 **Design:**
 
@@ -61,12 +88,12 @@ alternative to benchmark next. Ceph stays banned.
 - The new switch hangs off the TL-SG108E by **one** cable, never with a
   second cable to the Freebox: there's no spanning tree to save a loop,
   and a loop takes down the LAN and both etcd quorums.
-- server1, ex-laptop and both Esprimos go on the new switch.
+- server1, ex-laptop, the Pi and both Esprimos go on the new switch.
 
-The `.165`/Pi path isn't touched. Re-homing it would cut pg02/etcd-1,
-k8s-cp-01, k8s-worker-01, Garage and Pi-hole all at once. If it ever has to
-move, that's its own step with its own switchover plan, not part of this
-phase.
+**`.165` stays** behind the room switch and patch panel. Moving its path
+would cut pg02/etcd-1, k8s-cp-01, k8s-worker-01 and Garage all at once. If
+it ever has to move, that's its own step with its own switchover plan, not
+part of this phase. Only the Pi's own cable leaves that room switch.
 
 ### 0.1 Prerequisites
 
@@ -103,15 +130,36 @@ GS308E class) keeps the VLAN option for a later lab/household split.
 2. Esprimo 1 and Esprimo 2: no workloads yet, so no risk.
 3. **ex-laptop** (k8s-cp-03, pg-etcd-witness, hermesagent): move, then run
    the checks.
-4. **server1** (pg01 = Patroni **leader**, k8s-cp-02, k8s-worker-02,
+4. **The Pi** (Pi-hole, the **only** resolver for `bnei.lan`; NetBird peer
+   `pihole`). While it's off the network, CoreDNS falls back to `1.1.1.1`,
+   which answers "no such name" for:
+   - `postgres.bnei.lan`, `redis.bnei.lan`: new connections fail; open ones
+     keep working;
+   - `registry.bnei.lan`: image pulls from zot fail, so a pod restarting in
+     that window can't start.
+
+   How:
+   - pick a quiet window: no CI runs, no ArgoCD syncs, no agent sessions
+     starting;
+   - if the new position allows it, move only the network cable and keep the
+     Pi powered (seconds instead of a microSD reboot);
+   - its address is pinned (`nmcli`), so nothing needs reconfiguring.
+
+   Extra checks afterwards:
+   - `dig @192.168.1.55 registry.bnei.lan` from a node;
+   - `dig postgres.bnei.lan` from a pod;
+   - NetBird SSH to `pihole` works;
+   - no pod stuck in `ImagePullBackOff` or `ErrImagePull` from the window.
+5. **server1** (pg01 = Patroni **leader**, k8s-cp-02, k8s-worker-02,
    nfs-storage, Redis, k9s hub, build-runner):
    - first `patronictl switchover` to pg02 (on `.165`), so the leader isn't
      the machine being unplugged;
    - move the cable, run the checks;
    - switch back to pg01 if you want to.
 
-**Never move server1 and ex-laptop together.** Each holds a voter in both
-etcd quorums.
+**Never move two of ex-laptop, the Pi and server1 together.** ex-laptop
+and server1 each hold a voter in both etcd quorums, and the Pi is the
+cluster's DNS.
 
 **Checks after each move** (all must pass before the next):
 
@@ -132,9 +180,11 @@ etcd quorums.
 - Every port shows the `1000M` LED.
 - `iperf3` server1 ↔ ex-laptop and server1 ↔ `.165` reach ~940 Mbit/s.
 
-### 0.5 Freebox reboot test (optional, quiet evening)
+### 0.5 Freebox reboot test (quiet evening, once the pilot is up)
 
-Shows that the cluster no longer needs the Freebox to talk to itself.
+Shows that the cluster no longer needs the Freebox to talk to itself. It
+runs at step 7 of the order of work, after the pilot is installed, so the
+same reboot also covers T18.
 
 **Expected to break, and that's fine:**
 - the internet;
@@ -191,6 +241,9 @@ only. It says explicitly:
 
 ### 1.2 Hardware prep (operator, per Esprimo)
 
+This is the **only** session that needs a screen and keyboard. Everything
+after it is done over the network (§1.5).
+
 1. Boot a live Ubuntu USB and record:
    - `lscpu`;
    - `free -g`;
@@ -200,14 +253,21 @@ only. It says explicitly:
 2. **SSD health:** `smartctl -a`. Record power-on hours, wear and
    reallocated sectors. If wear is high, swap the disk or make that machine
    worker-only.
-3. **BIOS** (update first):
+3. **Wipe the SSD** from the live session: `wipefs -a /dev/<disk>`, then
+   `blkdiscard /dev/<disk>`. Refurbished units often ship with Windows,
+   which would boot first under the boot order below.
+4. **BIOS** (update first):
    - UEFI only;
    - power on after AC loss **on**;
    - Wake-on-LAN on;
-   - boot order USB → internal disk;
+   - **boot order: internal disk first, then USB.** The blank disk falls
+     through to USB; once Talos is installed the disk wins by itself, so
+     the stick can stay in and no boot menu is ever needed;
    - Secure Boot off for the pilot.
-4. **One local-API smart plug per Esprimo** (T11, T12).
-5. **ADR-0003's premise, measured where it matters:** run
+5. **Plug in the Talos USB stick** (ISO built from the §1.3 schematic) and
+   leave it in. Unplug screen and keyboard.
+6. **One local-API smart plug per Esprimo** (T11, T12).
+7. **ADR-0003's premise, measured where it matters:** run
    `bpftool feature probe kernel` on server1 and ex-laptop now, on their
    PVE hosts. The result settles whether "server1 lacks eBPF support" was
    ever true. The pilot only proves Cilium-without-kube-proxy on the
@@ -258,11 +318,37 @@ before applying.**
 | Logging | service logs: `machine.logging.destinations`, `json_lines` over **TCP**. Kernel logs: a `KmsgLogConfig` document | `destinations` carries service logs only |
 | `SysctlConfig` | `user.max_user_namespaces` > 0 | T19 (user namespaces) |
 
-Apply in order: Esprimo 1 as controlplane, Esprimo 2 as worker,
-`talosctl bootstrap`, `talosctl kubeconfig`. Nodes stay `NotReady` until
-Cilium is installed.
+### 1.5 Install, headless, from the Pi
 
-### 1.5 Add-ons: one script, run from the Pi
+1. Power on Esprimo 1. It boots the Talos USB into **maintenance mode**,
+   takes a DHCP lease and waits for a config. Expected: the address is
+   temporary.
+2. Find it without a screen: the Freebox DHCP lease list, or
+   ```bash
+   nmap -p 50000 --open 192.168.1.0/24
+   ```
+3. ```bash
+   talosctl apply-config --insecure -n <dhcp-ip> -f esprimo-1.yaml
+   ```
+   Talos installs itself on the SSD with the **schematic installer**
+   (§1.3), reboots from disk and comes back on `.21`. Check with
+   `talosctl get extensions` (T1).
+4. Same for Esprimo 2 (worker config, `.22`).
+5. `talosctl bootstrap -n 192.168.1.21`, then `talosctl kubeconfig`. Nodes
+   stay `NotReady` until Cilium is installed (§1.6).
+6. Add the `esprimo-1/2` records to `bnei-lan-records.yml` now that the
+   static addresses are live (§4).
+
+**After this, no physical access is needed again:**
+- `talosctl reset` returns a node to maintenance mode remotely; that is
+  how T13 and T22 rebuild;
+- `talosctl upgrade` is remote.
+
+PXE network boot is possible, but needs DHCP boot options the Freebox
+doesn't offer (proxy-DHCP on the Pi, the only DNS server). It isn't worth
+it for two machines.
+
+### 1.6 Add-ons: one script, run from the Pi
 
 `talos/addons.sh` (helm, pinned chart versions, values files in `talos/`).
 It's a script and not hand-typed commands, so T22's rebuild covers it. Prod
@@ -308,7 +394,7 @@ migration design item (§5).
    - two writer pods on one Longhorn RWX PVC, one per node;
    - an image pulled from zot.
 
-### 1.6 Access path
+### 1.7 Access path
 
 Laptop → NetBird SSH → `pihole` → `talosctl` / `kubectl` / `k9s` (arm64
 builds) over the LAN. The Esprimos are not NetBird peers and no route
@@ -371,7 +457,7 @@ from code.
 
 | Change | How | Undo |
 | --- | --- | --- |
-| Cables for server1, ex-laptop, the Esprimos | Phase 0 | Move back |
+| Cables for server1, ex-laptop, the Pi, the Esprimos | Phase 0 | Move back |
 | udev rejoin rule on ex-laptop, in a playbook | `pve-postinstall.yml` | Remove the file, reload udev |
 | Alertmanager silences | for the windows | Expire |
 | `ARCHITECTURE.md` §3: real cabling, real DHCP range, reserved pilot pool | PR | Revert |
@@ -399,7 +485,7 @@ owner considers worth it, and T22 fits in an evening.
    | ADR | What changes |
    | --- | --- |
    | New OS ADR | Talos. Amends ADR-0008's "Ubuntu 24.04 remains" clause. ADR-0008 rejects Flatcar, so it isn't superseded; its "Day-2 friction" argument gets answered with T10/T15/T22 results |
-   | 0003 + 0018 | Cilium replaces kube-proxy, with the 1.2.5 `bpftool` evidence |
+   | 0003 + 0018 | Cilium replaces kube-proxy, with the 1.2.7 `bpftool` evidence |
    | 0016 | kube-vip `.180` → Talos VIP |
    | 0017 | Control-plane placement: Esprimo 1, Esprimo 2, server1; `.165` worker only |
    | 0029 | Patroni DCS placement, or CNPG |
@@ -434,24 +520,24 @@ cluster as kubespray workers (bare-metal Ubuntu, or PVE nodes) instead.
 | Loop risk while re-cabling | repo review | Single-uplink design |
 | "streaming" is not proof of a healthy replica | repo review, 2026-08-15 incident | Check table in 0.3 |
 | Infisical has no folders; identities see the whole project; Terraform state holds the CA | repo review, `docs/secrets.md` | Dedicated project (1.1) |
-| Garage bucket creation rewrites every key unless `--tags bucket_ops`; shared 180G capacity | repo review | 1.5.4, §4 |
+| Garage bucket creation rewrites every key unless `--tags bucket_ops`; shared 180G capacity | repo review | 1.6.4, §4 |
 | `.55` + `1.1.1.1` caused ~50% NXDOMAIN in prod | repo review, `settings.yml` | `.55` only; T5 does 500 lookups |
 | Likely I219 NIC with a known hang history | repo review | `lspci -k`, T21 |
 | ADR before `talos/` | repo review, `DECISION.md` §5 | 1.0 |
-| KPR premise is about server1, not the Esprimos | repo review | 1.2.5 |
+| KPR premise is about server1, not the Esprimos | repo review | 1.2.7 |
 | ADR list incomplete; ADR-0008 can't be "superseded" | repo review | §5 table |
 | DHCP range in `ARCHITECTURE.md` contradicts the address plan | repo review | 0.1.4 |
 | `gen config` installs the empty schematic; upgrades need `--image` | upstream review | 1.3, T10 |
-| Longhorn data path is `/var/mnt/longhorn`, no `extraMounts` | upstream review, Talos Longhorn guide | 1.4, 1.5.4 |
-| Pod Security `baseline` rejects MetalLB/Longhorn | upstream review | 1.5.1, T20 |
+| Longhorn data path is `/var/mnt/longhorn`, no `extraMounts` | upstream review, Talos Longhorn guide | 1.4, 1.6.4 |
+| Pod Security `baseline` rejects MetalLB/Longhorn | upstream review | 1.6.1, T20 |
 | 1.14 uses separate config documents (`KubeProxyConfig`, `KubeFlannelCNIConfig`, …) | upstream review, 1.14 what's-new | §1.4 rewritten |
 | `reset` + `--recover-from` procedure was wrong | upstream review, disaster-recovery doc | T13 |
 | `destinations` carries service logs only; kernel needs `KmsgLogConfig`; `nc -lu` sees one peer | upstream review | 1.4, T17 |
 | Pods use CoreDNS, not host DNS | upstream review | T5 |
-| metrics-server needs rotated kubelet serving certs | upstream review | 1.4, 1.5.5 |
+| metrics-server needs rotated kubelet serving certs | upstream review | 1.4, 1.6.5 |
 | 1.14 workload isolation vs iscsid | upstream review | 1.4, T8 |
 | EPHEMERAL `maxSize` only on first provisioning | upstream review | 1.4 |
-| `bpf.masquerade` + host-DNS forwarding known issue | upstream review | 1.5.2 |
+| `bpf.masquerade` + host-DNS forwarding known issue | upstream review | 1.6.2 |
 | `os:reader` is also refused `pcap` | upstream review | T16 |
 | etcd metrics port changed to 2383 in 1.14 | upstream review | 1.4 |
 | k8s default would be 1.37.0 | upstream review | 1.1 pin |
