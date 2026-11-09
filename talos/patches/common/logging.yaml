@@ -1,0 +1,20 @@
+# Kernel logs off the node (T17). Point it at a socat TCP listener on the
+# Pi during the pilot; the real Alloy/Loki wiring is a migration item.
+# Port 5170 is a placeholder: use whatever the listener binds.
+apiVersion: v1alpha1
+kind: KmsgLogConfig
+name: pilot-kmsg
+url: tcp://192.168.1.55:5170/
+---
+# Service logs: still a v1alpha1 field. json_lines over TCP; `nc -lu` only
+# sees one UDP peer.
+#
+# UNVERIFIED: that this v1alpha1 section coexists with the 1.14 documents
+# above. Check with `talosctl validate`.
+machine:
+  logging:
+    destinations:
+      - endpoint: tcp://192.168.1.55:5171/
+        format: json_lines
+  sysctls:
+    user.max_user_namespaces: "11255" # T19, user-namespace pods for the build-runner question

@@ -1,0 +1,10 @@
+# No built-in CNI (Cilium is installed by addons.sh) and no kube-proxy
+# (Cilium replaces it, pilot only: ADR-0070 Decision 2). Form taken from
+# the Talos 1.14 Cilium guide.
+apiVersion: v1alpha1
+kind: KubeFlannelCNIConfig
+$patch: delete
+---
+apiVersion: v1alpha1
+kind: KubeProxyConfig
+enabled: false

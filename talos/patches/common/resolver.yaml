@@ -1,0 +1,11 @@
+# Pi-hole only. Prod hit ~50% NXDOMAIN on bnei.lan with .55 + 1.1.1.1 until
+# `policy: sequential` (inventory/ukubi/group_vars/all/settings.yml).
+# Host DNS stays at its default (on, forwarding cluster DNS to the host);
+# don't also set the old v1alpha1 hostDNS field, the two are mutually
+# exclusive in 1.14.
+#
+# UNVERIFIED field shape: check with `talosctl validate`.
+apiVersion: v1alpha1
+kind: ResolverConfig
+nameservers:
+  - address: 192.168.1.55

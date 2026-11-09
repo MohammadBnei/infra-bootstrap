@@ -1,0 +1,19 @@
+# MetalLB pool for the pilot. ${PILOT_LB_RANGE} is substituted by addons.sh
+# and must be the slice recorded as reserved in ARCHITECTURE.md §3 (plan
+# §1.1), outside prod's 192.168.1.233-250 and outside Freebox DHCP.
+apiVersion: metallb.io/v1beta1
+kind: IPAddressPool
+metadata:
+  name: pilot
+  namespace: metallb-system
+spec:
+  addresses:
+    - ${PILOT_LB_RANGE}
+---
+apiVersion: metallb.io/v1beta1
+kind: L2Advertisement
+metadata:
+  name: pilot
+  namespace: metallb-system
+spec:
+  ipAddressPools: [pilot]

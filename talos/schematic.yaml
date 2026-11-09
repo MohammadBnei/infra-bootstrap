@@ -1,0 +1,19 @@
+# Talos Image Factory schematic for the Esprimo pilot (ADR-0070, plan §1.3).
+#
+# Get its ID with:
+#   curl -sX POST --data-binary @talos/schematic.yaml https://factory.talos.dev/schematics
+# then record it here so every install and upgrade uses the same image:
+#   schematic id: <fill in after the first POST>
+#
+# Installer: factory.talos.dev/metal-installer/<id>:v1.14.x
+# ISO:       factory.talos.dev/image/<id>/v1.14.x/metal-amd64.iso
+# Every `talosctl upgrade` must pass --image with this same ID, or the
+# extensions and the kernel arg disappear (plan T10).
+customization:
+  extraKernelArgs:
+    - net.ifnames=0 # single-NIC machines: the NIC is eth0, so Cilium's devices: [eth0] carries over
+  systemExtensions:
+    officialExtensions:
+      - siderolabs/intel-ucode
+      - siderolabs/iscsi-tools # Longhorn
+      - siderolabs/util-linux-tools # Longhorn

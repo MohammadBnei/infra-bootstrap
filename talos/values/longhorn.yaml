@@ -1,0 +1,12 @@
+# Longhorn for the pilot (ADR-0070 Decision 4, plan §1.6.5).
+defaultSettings:
+  # The Talos user volume `longhorn` (patches/common/volumes.yaml).
+  defaultDataPath: /var/mnt/longhorn
+  # Two nodes, two replicas.
+  defaultReplicaCount: 2
+persistence:
+  defaultClassReplicaCount: 2
+# Backup target: set after the pilot bucket exists (talos-pilot-longhorn,
+# its own key, max_size), with the key read from the talos-pilot Infisical
+# project into a Secret. The exact values keys depend on the chart version
+# pinned in addons.sh: check them then, don't guess here.

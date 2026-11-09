@@ -1,0 +1,11 @@
+# Rotated kubelet serving certs (metrics-server needs a cert with the node
+# IP; kubelet-serving-cert-approver signs them, installed right after
+# Cilium) and graceful node shutdown, so `talosctl shutdown` drains (T9).
+apiVersion: v1alpha1
+kind: KubeletConfig
+config:
+  serverTLSBootstrap: true
+  shutdownGracePeriod: 60s
+  shutdownGracePeriodCriticalPods: 20s
+extraArgs:
+  rotate-server-certificates: "true"

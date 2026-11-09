@@ -1,0 +1,49 @@
+# Cilium for the Talos pilot (ADR-0070 Decision 2, plan §1.6.2).
+# Talos-specific values from the Talos 1.14 Cilium guide; the rest mirrors
+# prod's inventory/ukubi/group_vars/k8s_cluster/k8s-net-cilium.yml.
+ipam:
+  mode: kubernetes
+
+# Cilium replaces kube-proxy (pilot only; prod keeps ADR-0003's chaining).
+# KubePrism is Talos's local API endpoint on every node.
+kubeProxyReplacement: true
+k8sServiceHost: localhost
+k8sServicePort: 7445
+
+securityContext:
+  capabilities:
+    ciliumAgent: [CHOWN, KILL, NET_ADMIN, NET_RAW, IPC_LOCK, SYS_ADMIN, SYS_RESOURCE, DAC_OVERRIDE, FOWNER, SETGID, SETUID]
+    cleanCiliumState: [NET_ADMIN, SYS_ADMIN, SYS_RESOURCE]
+cgroup:
+  autoMount:
+    enabled: false
+  hostRoot: /sys/fs/cgroup
+
+# eth0 thanks to net.ifnames=0 in the schematic.
+devices: [eth0]
+
+# ADR-0040: transparent node-to-node encryption, as prod.
+encryption:
+  enabled: true
+  type: wireguard
+
+hubble:
+  enabled: true
+  relay:
+    enabled: true
+  ui:
+    enabled: true
+  metrics:
+    # The dns metric may stay empty without an L7 DNS policy: note it, don't chase it.
+    enabled: [dns, drop, tcp, flow, icmp]
+
+# MetalLB owns L2 and LoadBalancer IPs.
+l2announcements:
+  enabled: false
+# UNVERIFIED key: keeps Cilium's own LB IPAM from claiming LoadBalancer Services.
+defaultLBServiceIPAM: none
+
+# Documented known issue: bpf.masquerade together with Talos host-DNS
+# forwarding breaks CoreDNS. Keep it off.
+bpf:
+  masquerade: false

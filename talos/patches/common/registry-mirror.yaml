@@ -1,0 +1,6 @@
+# Pull from zot over plain HTTP, as prod's containerd_registries_mirrors does.
+apiVersion: v1alpha1
+kind: RegistryMirrorConfig
+name: registry.bnei.lan:5000
+endpoints:
+  - url: http://registry.bnei.lan:5000

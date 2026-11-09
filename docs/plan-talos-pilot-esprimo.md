@@ -60,7 +60,7 @@ in its final place.
 | **Prep** | §0.1 prerequisites (incl. Freebox DHCP reservations), §1.1 decisions, §1.2 hardware session per Esprimo, ADR-0070 + `talos/` PR, Infisical project, Pi tools (§1.7) | none | checklists done |
 | **Switch** | New switch, one cable to the TL-SG108E. Esprimos cabled but **left off mains power** until *Talos* | none | `1000M` LEDs |
 | **Move ex-laptop** | §0.3 | one etcd voter per quorum blips | §0.3 checks pass |
-| **Move Pi** | §0.3 | **LAN-wide DNS gap while the Pi is off**, not just the cluster | §0.3 checks + DNS checks pass |
+| **Move Pi** | §0.3 | `bnei.lan` names unresolvable while the Pi is off; LAN clients fall back to secondary resolvers for internet names | §0.3 checks + DNS checks pass |
 | **Move server1** | §0.3: switchover to pg02, move, **switch back to pg01** | short blip; leader moved twice | §0.3 checks pass |
 | **Speed** | `iperf3`, update `ARCHITECTURE.md` §3 | none | ~940 Mbit/s |
 | **Talos** | Power on the Esprimos; install (§1.5), add-ons (§1.6) | none | T1 passes |
@@ -124,8 +124,9 @@ part of this phase. Only the Pi's own cable leaves that room switch.
    rebuild knows where to apply.
 6. **IP-based access ready for the Pi move:** a kubeconfig pointing at
    `https://192.168.1.180:6443`, and SSH by IP to the hosts. While the Pi is
-   off, every DHCP client on the LAN, including the operator laptop, has no
-   DNS at all.
+   off, `*.bnei.lan` names don't resolve anywhere. LAN clients keep internet
+   names through their fallback resolvers, but those fallbacks don't know
+   `bnei.lan`.
 
 ### 0.2 Buy
 
@@ -146,8 +147,9 @@ run the checks.
 as **the** DNS server over DHCP (`bootstrap-test-notes.md`), so while it's
 off the network:
 
-- **Every DHCP client on the LAN has no DNS**, internet names included:
-  the operator laptop (so NetBird login fails too) and household devices.
+- **LAN clients** fall back to the secondary resolvers they're given
+  (owner, 2026-11-09), so internet names and NetBird login keep working.
+  Only `*.bnei.lan` names fail, because the fallbacks don't know them.
 - **Hosts with the Pi as their only nameserver** lose everything:
   - build-runner (`terraform/build-runner.tf`);
   - nfs-storage (`terraform/nfs.tf`);
@@ -261,6 +263,11 @@ only. It says explicitly:
   **without** flipping prod (ADR-0003 / ADR-0018 stay as they are);
 - nothing in it changes prod's locked decisions.
 
+**Drafted** in the same PR as this plan: [ADR-0070](adr/0070-talos-pilot.md)
+and [`talos/`](../talos/README.md) (schematic, patches, values, `render.sh`,
+`addons.sh`). Field shapes not yet checked against a real `talosctl
+validate` are marked `UNVERIFIED` there.
+
 ### 1.1 Decisions to fill in before starting
 
 | Item | Proposal | Owner |
@@ -273,7 +280,7 @@ only. It says explicitly:
 | Secrets | **A dedicated Infisical project `talos-pilot` with its own machine identity**, following ADR-0062's `fleet-github-app` pattern. Not a folder: `docs/secrets.md` says the main project has no folders, and the in-cluster operator identity can read that whole project (free plan, no custom roles). It holds the `talosctl gen secrets` bundle and the admin talosconfig | ☐ |
 | Where tools and credentials live | **The Pi only** (`pihole`), mode `0600`. Not the workstation: `ARCHITECTURE.md` §1 keeps cluster credentials off it. This makes the Pi a more valuable target, the same trade-off the k9s hub already makes | ☐ |
 | Terraform state (T22) | On the Pi, outside the repo. It contains the secrets bundle in plaintext. It can be thrown away, because the bundle is in Infisical | ☐ |
-| Repo layout | `talos/`: schematic, config patches (no secrets), add-on values, `addons.sh`, `terraform/`. `.gitignore` for `secrets.yaml`, `talosconfig`, `kubeconfig`, `*.tfstate*` in the same PR | ☐ |
+| Repo layout | `talos/`: schematic, config patches (no secrets), add-on values, `render.sh`, `addons.sh`, later `terraform/`. `.gitignore` for `secrets.yaml`, `talosconfig`, `kubeconfig`, `*.tfstate*` in the same PR | ☐ |
 
 ### 1.2 Hardware prep (operator, per Esprimo)
 
@@ -651,7 +658,7 @@ cluster as kubespray workers (bare-metal Ubuntu, or PVE nodes) instead.
 | --- | --- |
 | `reset` without `--reboot` shuts the node down; a full reset wipes the ESP; the stick is the recovery path; T13 isn't a rebuild | §1.2.6, §1.5, T13, T22 |
 | Full rebuilds come back on unknown DHCP addresses | Freebox reservations (§0.1.5, §4), T22 |
-| The Pi gap is **LAN-wide**: DHCP clients, Pi-only hosts (build-runner, nfs-storage, k9s hub), NFS mounts, backups to `garage.bnei.lan` | §0.3 *Move Pi*, §0.1.6, `crictl pull` check |
+| The Pi gap goes beyond the cluster: `bnei.lan` names everywhere, Pi-only hosts (build-runner, nfs-storage, k9s hub), NFS mounts, backups to `garage.bnei.lan`. The reviewer's "no DNS for the whole LAN" was corrected by the owner: LAN clients have fallback resolvers | §0.3 *Move Pi*, §0.1.6, `crictl pull` check |
 | No Kubernetes etcd / API check after moves | §0.3 checks table |
 | Switching back to pg01 was optional, leaving the leader on the gaming host | Mandatory, with re-check |
 | Esprimos plugged in early would sit in maintenance mode all of Phase 0 | Off mains power until *Talos* |
