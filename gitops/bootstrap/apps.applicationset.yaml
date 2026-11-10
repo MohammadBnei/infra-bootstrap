@@ -206,6 +206,15 @@ spec:
         valuesPath: [helm/public.yaml]
         targetRevision: main
         hostname: world.bnei.dev
+      # ukubi-realm (mountain plan/21, the shared world's server), see
+      # gitops/apps/registry.yaml's entry.
+      - name: ukubi-realm
+        namespace: ukubi-realm
+        syncWave: "10"
+        repoURL: https://github.com/MohammadBnei/ukubi-game.git
+        valuesPath: [helm/realm.yaml]
+        targetRevision: main
+        hostname: realm.bnei.dev
   template:
     metadata:
       name: '{{.name}}'
