@@ -370,6 +370,7 @@ jobs:
             gitops/platform/actions-runner/*.yaml \
             gitops/redirectors/*.yaml \
             gitops/platform/ukubi-game/*.yaml \
+            gitops/platform/ukubi-realm/*.yaml \
             gitops/bootstrap/*.yaml \
             "$RUNNER_TEMP/rendered.yaml"
 

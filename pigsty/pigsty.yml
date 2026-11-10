@@ -309,6 +309,18 @@ all:
             comment: ukubi-game — the game log (mountain plan/17)
             roles: [dbrole_readwrite]
 
+          # ukubi-realm — the shared world's server (mountain plan/21, phase 0b).
+          # mountain's shape: the plaintext is DBUSER_REALM_PASSWORD in Infisical
+          # and only its SCRAM-SHA-256 verifier is committed (2026-11-10).
+          # pgbouncer: false, the realm dials 5432 direct; connlimit 10, one
+          # replica with Recreate, mountain's reasoning.
+          - name: dbuser_realm
+            password: 'SCRAM-SHA-256$4096:XFTpwxkjhNTKhWzgFQ5/Rw==$/wrRw67BBWYS1BBAY4zAKPwgfhkspA1u1C/ct6uBrzk=:dvklay/pHPvc2dWzt4WMMIVSTmBDQ18OAColicOgS6k='
+            pgbouncer: false
+            connlimit: 10
+            comment: ukubi-realm — the shared world's event log (mountain plan/21)
+            roles: [dbrole_readwrite]
+
           # NetBird control plane (ADR-0054). hq's arrangement: the plaintext is
           # DBUSER_NETBIRD_PASSWORD in Infisical, only the verifier is here, and
           # netbird-server dials 5432 direct. It owns three databases because the
@@ -504,6 +516,15 @@ all:
           - name: gamedb
             comment: ukubi-game — the game log
             owner: dbuser_game
+            revokeconn: true
+            pgbouncer: false
+            register_datasource: false
+
+          # ukubi-realm (mountain plan/21), mountaindb's switches. Pieces,
+          # inventory and progression as events, folded on boot.
+          - name: realmdb
+            comment: ukubi-realm — the shared world's event log
+            owner: dbuser_realm
             revokeconn: true
             pgbouncer: false
             register_datasource: false
