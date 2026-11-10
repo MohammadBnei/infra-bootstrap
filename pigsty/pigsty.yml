@@ -74,8 +74,11 @@ all:
         # target for ADR-0052's wird_admin role.
         # FLIPPED BACK 2026-10-18: Patroni reports pg-proxmox-2 (.207) leader
         # and pg-proxmox-1 (.205) replica, checked before dbuser_bridge's run.
-        192.168.1.205: { pg_seq: 1, pg_role: replica } # <---- read only replica for read-only online traffic
-        192.168.1.207: { pg_seq: 2, pg_role: primary } # <---- primary instance with read-write capability
+        # FLIPPED AGAIN 2026-11-10: after the late-October power outages Patroni
+        # reports pg-proxmox-1 (.205) leader and pg-proxmox-2 (.207) replica,
+        # checked before dbuser_game's run.
+        192.168.1.205: { pg_seq: 1, pg_role: primary } # <---- primary instance with read-write capability
+        192.168.1.207: { pg_seq: 2, pg_role: replica } # <---- read only replica for read-only online traffic
       vars:
         pg_cluster: pg-proxmox
 
@@ -304,6 +307,19 @@ all:
             comment: ukubi-bridge — event log and subscriptions (ADR-0060)
             roles: [dbrole_readwrite]
 
+          # ukubi-game — the game's owner and public pods (mountain plan/17).
+          # mountain's shape: the SCRAM verifier is committed and the plaintext
+          # is DBUSER_GAME_PASSWORD in Infisical (root project), which
+          # gitops/bootstrap/ukubi-game-secret.yaml also reads for the DSN.
+          # pgbouncer: false because the game dials 5432 direct; connlimit 10,
+          # mountain's number.
+          - name: dbuser_game
+            password: 'SCRAM-SHA-256$4096:1L4l9mSt7T1FgoAcSKGhKA==$CZwk/aP8SdP+orzsoNaSs2PFHZShDBWi25Pfn+zVX9k=:meWWAcGQtHrNjJmn9uXn3JS5l3Ja88uiVO2oe+iImJA='
+            pgbouncer: false
+            connlimit: 10
+            comment: ukubi-game — the game log (mountain plan/17)
+            roles: [dbrole_readwrite]
+
           # NetBird control plane (ADR-0054). hq's arrangement: the plaintext is
           # DBUSER_NETBIRD_PASSWORD in Infisical, only the verifier is here, and
           # netbird-server dials 5432 direct. It owns three databases because the
@@ -494,6 +510,14 @@ all:
           - name: bridge
             comment: ukubi-bridge — event log and subscriptions
             owner: dbuser_bridge
+            revokeconn: true
+            pgbouncer: false
+            register_datasource: false
+
+          # ukubi-game (mountain plan/17), mountaindb's switches.
+          - name: gamedb
+            comment: ukubi-game — the game log
+            owner: dbuser_game
             revokeconn: true
             pgbouncer: false
             register_datasource: false
