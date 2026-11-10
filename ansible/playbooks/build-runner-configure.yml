@@ -117,6 +117,13 @@
       # identity's bound claims first, as above.
       - name: pi-lab
         url: https://github.com/MohammadBnei/pi-lab
+      # ukubi-game's image (owner and public pods, one image; mountain plan/17).
+      # Private repo. Its app.yml already declares `runs-on: [self-hosted,
+      # ukubi-build]`; until this instance registered, the image was pushed by
+      # hand as `:unreleased` (2026-11-10). PAT repo list and the CI identity's
+      # bound claims first, as above.
+      - name: ukubi-game
+        url: https://github.com/MohammadBnei/ukubi-game
     # NOT `ukubi` — that label belongs to the in-cluster runner holding a
     # ServiceAccount token with `create jobs` in vos/vos-dev. Builds must
     # not land there and cluster jobs must not land here.
