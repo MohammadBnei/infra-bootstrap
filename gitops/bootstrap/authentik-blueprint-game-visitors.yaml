@@ -28,8 +28,10 @@
 #   reads a visitor's `email` claim;
 # - the local sign-up flow `ukubi-world-enrollment`: username, email,
 #   password + repeat (Wird's password policy), then the user is written
-#   INACTIVE (external, in `visitors`) and activated only by the emailed link,
-#   then logged in. A taken username is refused by the prompt's `username`
+#   INACTIVE (external, in `visitors`). The emailed link proves the address
+#   (attribute `ukubi_world/email_verified`) but does NOT activate: the flow
+#   ends on "the owner approves new accounts", and platform-admins get a
+#   notification. No login stage. A taken username is refused by the prompt's `username`
 #   type and a case variant, a reserved prefix (service accounts, `gh-`,
 #   `google-`) or an already-used email by `ukubi-world-username`;
 #   `always_create` never updates an existing user. It is a separate flow on
@@ -53,13 +55,23 @@
 #   world.bnei.dev. The owner pod (`ukubi-game`, game.bnei.dev) is unchanged
 #   and stays platform-admins only.
 #
+# APPROVING A SIGN-UP (the owner, one action): authentik admin > Directory >
+# Users > the user > Activate. Group and type are already right. Only a user
+# with `ukubi_world/email_verified` should be activated; one without it never
+# proved the address. Rejecting: Delete. Banning later: Deactivate; nothing
+# here re-activates (recovery has activate_user_on_success false, sign-in and
+# recovery admit active visitors only). GitHub/Google visitors stay
+# auto-approved through `game-visitor-enrollment`. Unverified sign-ups are
+# deleted after 24h by gitops/bootstrap/ukubi-world-signup-cleanup.yaml.
+#
 # HARD DEPENDENCY: SMTP (AUTHENTIK_EMAIL__* in authentik-secret.yaml). Without
 # it the verification and reset mails are silently dropped: a sign-up stays
-# inactive at "check your email", which is the safe direction.
+# inactive and unverified at "check your email" (the cleanup deletes it).
 #
 # ponytail: open sign-up, no captcha or invitation (mountain moved to
 # invitations, ADR-0065). Each attempt costs one mail from the shared SMTP
-# quota and leaves an inactive user. Add a captcha or invitation stage at
+# quota; an unverified one is deleted after 24h, a verified one waits for
+# the owner (a natural brake: nothing opens without an Activate). Add a captcha or invitation stage at
 # order 5 if strangers start using it.
 #
 # A local visitor's password also works at authentik's default login, like a
@@ -85,8 +97,9 @@
 # Verify after the apply (the DB is the honest answer, never `cat` the mount):
 #   psql -d authentik -tAc "SELECT slug, user_matching_mode FROM authentik_core_source"
 #   curl -s https://authentik.bnei.dev/application/o/ukubi-world/.well-known/openid-configuration | head -c 300
-# then one real sign-in per source and one local sign-up (verify the mail),
-# check each new user's only group is `visitors`, and run one password reset.
+# then one real sign-in per source and one local sign-up (mail link, the
+# approval message, the bell, Activate, then sign-in works), check each new
+# user's only group is `visitors`, and run one password reset.
 apiVersion: secrets.infisical.com/v1alpha1
 kind: InfisicalSecret
 metadata:
@@ -271,12 +284,14 @@ spec:
                 deny_message: >-
                   This page is for world visitors. Sign in to authentik
                   directly with any other account.
-            # The deny stage is the message; this is the lock. A policy that
-            # errors does not pass (PolicyProcess.run returns False whatever
-            # failure_result says), so a broken `not-visitor` would DROP the
-            # deny stage and fail open. `is-visitor` is bound to the stages
-            # that do harm (login, the recovery password write): an error
-            # here drops them instead, and no session or password exists.
+            # The deny stage is the message; this is the lock. An expression
+            # that raises returns its binding's failure_result
+            # (policies/process.py execute; `true` on the deny bindings, so it
+            # still denies), but an error outside the expression (the process
+            # wrapper's own `except`, a timeout) is a plain False, which would
+            # DROP the deny stage. `is-visitor` is bound to the stages that do
+            # harm (login, the recovery password write), so any failure there
+            # drops them instead and no session or password exists.
             - model: authentik_policies_expression.expressionpolicy
               id: is-visitor
               identifiers:
@@ -426,9 +441,10 @@ spec:
                   - !KeyOf password-policy
                   - !KeyOf username-policy
 
-            # Inactive until the email is proven (create_users_as_inactive +
-            # the email stage's activate_user_on_success are one mechanism),
-            # external like the OAuth visitors, in `visitors` only.
+            # Inactive until the OWNER activates it: the email stage proves the
+            # address but activate_user_on_success is false, so the mail link
+            # never opens the account. External like the OAuth visitors, in
+            # `visitors` only.
             # always_create: a racing duplicate username fails the save
             # (IntegrityError, stages/user_write/stage.py), never updates.
             - model: authentik_stages_user_write.userwritestage
@@ -447,7 +463,7 @@ spec:
               attrs:
                 use_global_settings: true
                 template: email/account_confirmation.html
-                activate_user_on_success: true
+                activate_user_on_success: false
             - model: authentik_stages_user_login.userloginstage
               id: local-login
               identifiers:
@@ -468,11 +484,89 @@ spec:
                 target: !KeyOf local-enrollment-flow
                 stage: !KeyOf local-enrollment-email
                 order: 30
+            # The end of a sign-up: no login stage. Reached only past the
+            # email stage, which moves on solely from its own mailed link for
+            # this same pending user (stages/email/stage.py get(): restore
+            # token, user match; a POST just resends the mail). The policy on
+            # this binding marks the address verified, which keeps the user
+            # out of the cleanup CronJob (ukubi-world-signup-cleanup.yaml),
+            # and raises the event the owner is notified by. It never touches
+            # is_active and always passes, so the message always shows.
+            - model: authentik_policies_expression.expressionpolicy
+              id: mark-verified
+              identifiers:
+                name: ukubi-world-mark-verified
+              attrs:
+                name: ukubi-world-mark-verified
+                expression: |
+                  user = request.user
+                  key = "ukubi_world/email_verified"
+                  if user.pk and not user.is_active and not user.attributes.get(key):
+                      user.attributes[key] = True
+                      user.save(update_fields=["attributes"])
+                      ak_create_event("ukubi_world_signup_pending", username=user.username)
+                  return True
+            - model: authentik_stages_deny.denystage
+              id: awaiting-approval
+              identifiers:
+                name: ukubi-world-awaiting-approval
+              attrs:
+                deny_message: >-
+                  Email confirmed. The owner approves new accounts; you can
+                  sign in once approved.
             - model: authentik_flows.flowstagebinding
+              id: awaiting-approval-binding
               identifiers:
                 target: !KeyOf local-enrollment-flow
-                stage: !KeyOf local-login
-                order: 100
+                stage: !KeyOf awaiting-approval
+                order: 40
+              attrs:
+                evaluate_on_plan: false
+                re_evaluate_policies: true
+            - model: authentik_policies.policybinding
+              identifiers:
+                target: !KeyOf awaiting-approval-binding
+                policy: !KeyOf mark-verified
+                order: 0
+              attrs:
+                failure_result: true
+
+            # --- owner notification ---------------------------------------------
+            # The bell in the admin UI for every platform-admin when a sign-up
+            # is verified. Its own local transport (a rule with no transport
+            # sends nothing, events/tasks.py). ponytail: platform-admins by
+            # `!Find`; a miss only silences the bell, the queue is still
+            # Directory > Users filtered on inactive.
+            - model: authentik_events.notificationtransport
+              id: owner-bell
+              identifiers:
+                name: ukubi-world-local
+              attrs:
+                name: ukubi-world-local
+                mode: local
+            - model: authentik_policies_expression.expressionpolicy
+              id: signup-event
+              identifiers:
+                name: ukubi-world-signup-pending-event
+              attrs:
+                name: ukubi-world-signup-pending-event
+                expression: |
+                  return request.context["event"].action == "custom_ukubi_world_signup_pending"
+            - model: authentik_events.notificationrule
+              id: signup-rule
+              identifiers:
+                name: ukubi-world-signup-pending
+              attrs:
+                name: ukubi-world-signup-pending
+                severity: notice
+                destination_group: !Find [authentik_core.group, [name, platform-admins]]
+                transports:
+                  - !KeyOf owner-bell
+            - model: authentik_policies.policybinding
+              identifiers:
+                target: !KeyOf signup-rule
+                policy: !KeyOf signup-event
+                order: 0
 
             # --- password recovery ------------------------------------------------
             # Upstream's flows-recovery-email-verification.yaml, with two
