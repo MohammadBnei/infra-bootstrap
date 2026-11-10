@@ -42,7 +42,11 @@
 #   "Forgot password" links to the two flows above, set as the `ukubi-world`
 #   provider's authentication_flow. A correct password for a non-visitor
 #   (an admin) is denied before login, so this page is never a second login
-#   for platform accounts. Only that application's sign-in page changes; the
+#   for platform accounts (deny stage for the message, plus a fail-closed
+#   `ukubi-world-is-visitor` on the login and recovery-write stages: a policy
+#   error drops the login, it never skips the deny). A visitor later added to
+#   any other group is refused here too and signs in through authentik
+#   directly. Only that application's sign-in page changes; the
 #   default login every other app uses is untouched and the brand's
 #   enrollment/recovery flows stay unset (wird header: the brand is shared);
 # - the `ukubi-world` provider and application, for the public pod at
@@ -57,6 +61,11 @@
 # invitations, ADR-0065). Each attempt costs one mail from the shared SMTP
 # quota and leaves an inactive user. Add a captcha or invitation stage at
 # order 5 if strangers start using it.
+#
+# A local visitor's password also works at authentik's default login, like a
+# Wird or mountain user's: that session reaches only `ukubi-world`, because
+# core_default_app_access is false (authentik-flags-job.yaml) and every app
+# carries a binding (check-authentik-bindings.py). Both stay hard gates.
 #
 # A SECRET, not a ConfigMap: the sources carry their OAuth client secrets and
 # the provider its own. Field shapes checked against authentik 2026.8.0's
@@ -262,6 +271,24 @@ spec:
                 deny_message: >-
                   This page is for world visitors. Sign in to authentik
                   directly with any other account.
+            # The deny stage is the message; this is the lock. A policy that
+            # errors does not pass (PolicyProcess.run returns False whatever
+            # failure_result says), so a broken `not-visitor` would DROP the
+            # deny stage and fail open. `is-visitor` is bound to the stages
+            # that do harm (login, the recovery password write): an error
+            # here drops them instead, and no session or password exists.
+            - model: authentik_policies_expression.expressionpolicy
+              id: is-visitor
+              identifiers:
+                name: ukubi-world-is-visitor
+              attrs:
+                name: ukubi-world-is-visitor
+                expression: |
+                  user = request.user
+                  if not user.pk or not user.is_active:
+                      return False
+                  groups = set(user.all_groups().values_list("name", flat=True))
+                  return groups == {"visitors"}
 
             # --- local sign-up ------------------------------------------------
             # Shapes from authentik-blueprint-wird-enrollment.yaml (upstream's
@@ -374,7 +401,7 @@ spec:
                   if not re.fullmatch(r"[a-z0-9_-]{3,20}", username):
                       ak_message("Username: 3 to 20 characters, a-z, 0-9, _ or -.")
                       return False
-                  reserved = ("atlas-", "bridge-", "netbird-", "ak-", "gh-", "google-")
+                  reserved = ("atlas-", "bridge-", "netbird-", "ak-", "wird-", "gh-", "google-")
                   parts = ("admin", "authentik", "ukubi", "bnei")
                   if (username.startswith(reserved) or any(p in username for p in parts)
                           or ak_user_by(username__iexact=username)):
@@ -482,7 +509,7 @@ spec:
               attrs:
                 use_global_settings: true
                 template: email/password_reset.html
-                token_expiry: minutes=30
+                token_expiry: minutes=15
                 activate_user_on_success: false
             - model: authentik_stages_prompt.promptstage
               id: recovery-prompt
@@ -527,21 +554,50 @@ spec:
                 target: !KeyOf recovery-gate-binding
                 policy: !KeyOf not-visitor
                 order: 0
+              attrs:
+                failure_result: true
             - model: authentik_flows.flowstagebinding
+              id: recovery-prompt-binding
               identifiers:
                 target: !KeyOf recovery-flow
                 stage: !KeyOf recovery-prompt
                 order: 30
+              attrs:
+                evaluate_on_plan: false
+                re_evaluate_policies: true
+            - model: authentik_policies.policybinding
+              identifiers:
+                target: !KeyOf recovery-prompt-binding
+                policy: !KeyOf is-visitor
+                order: 0
             - model: authentik_flows.flowstagebinding
+              id: recovery-write-binding
               identifiers:
                 target: !KeyOf recovery-flow
                 stage: !KeyOf recovery-write
                 order: 40
+              attrs:
+                evaluate_on_plan: false
+                re_evaluate_policies: true
+            - model: authentik_policies.policybinding
+              identifiers:
+                target: !KeyOf recovery-write-binding
+                policy: !KeyOf is-visitor
+                order: 0
             - model: authentik_flows.flowstagebinding
+              id: recovery-login-binding
               identifiers:
                 target: !KeyOf recovery-flow
                 stage: !KeyOf local-login
                 order: 100
+              attrs:
+                evaluate_on_plan: false
+                re_evaluate_policies: true
+            - model: authentik_policies.policybinding
+              identifiers:
+                target: !KeyOf recovery-login-binding
+                policy: !KeyOf is-visitor
+                order: 0
 
             # --- the world's sign-in page --------------------------------------
             # Inbuilt backend only: no app-password tokens, no LDAP/Kerberos on
@@ -603,11 +659,22 @@ spec:
                 target: !KeyOf world-gate-binding
                 policy: !KeyOf not-visitor
                 order: 0
+              attrs:
+                failure_result: true
             - model: authentik_flows.flowstagebinding
+              id: world-login-binding
               identifiers:
                 target: !KeyOf world-authentication
                 stage: !KeyOf local-login
                 order: 100
+              attrs:
+                evaluate_on_plan: false
+                re_evaluate_policies: true
+            - model: authentik_policies.policybinding
+              identifiers:
+                target: !KeyOf world-login-binding
+                policy: !KeyOf is-visitor
+                order: 0
 
             # --- the public world's client ---------------------------------------
             - model: authentik_providers_oauth2.oauth2provider
