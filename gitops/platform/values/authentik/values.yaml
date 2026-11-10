@@ -219,8 +219,8 @@ worker:
   - name: blueprints-secret-authentik-blueprint-ukubi-game
     secret: {secretName: authentik-blueprint-ukubi-game, optional: true}
   # Visitor sign-in for the public world (world.bnei.dev): the GitHub and
-  # Google sources, the `visitors` group and its enrollment, and the
-  # `ukubi-world` provider.
+  # Google sources, the `visitors` group, its source and local (email-verified)
+  # enrollments, password recovery, and the `ukubi-world` provider.
   - name: blueprints-secret-authentik-blueprint-game-visitors
     secret: {secretName: authentik-blueprint-game-visitors, optional: true}
   volumeMounts:

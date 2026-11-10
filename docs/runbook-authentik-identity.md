@@ -152,9 +152,31 @@ Current files:
 | `gitops/bootstrap/authentik-blueprint-platform-apps-policy.yaml` | binds `argocd` and `grafana` to `platform-admins` — the last two applications with no binding (ADR-0050 Decision 11) |
 | `gitops/bootstrap/authentik-blueprint-hermes-policy.yaml` | hermes' `platform-admins` binding plus its own `hermes-require-pkce` expression policy (plain ConfigMap). Its own file because a blueprint applies as one transaction and `PolicyBinding.target` is a required FK, so a `!Find` miss here must not be able to roll back argocd's and grafana's bindings (ADR-0051) |
 | `gitops/bootstrap/authentik-blueprint-hermes.yaml` | the Hermes dashboard's provider + application — the second **public** client, public because upstream's self-hosted OIDC plugin refuses confidential ones, not because a secret would ship in a binary (ADR-0051). Plain ConfigMap, provider+application only |
+| `gitops/bootstrap/authentik-blueprint-game-visitors.yaml` | the public world's sign-in (InfisicalSecret): the `visitors` group, GitHub/Google sources and their source-only enrollment, the local sign-up `ukubi-world-enrollment` (email-verified, then **owner-approved**: see "Approving a ukubi-world sign-up" below) and recovery `ukubi-world-recovery`, the `ukubi-world` sign-in page (visitor accounts only) and provider. Mail needs `AUTHENTIK_EMAIL__*`. `authentik-blueprint-ukubi-world-policy.yaml` binds `visitors` to `ukubi-world` and nowhere else |
 | `gitops/bootstrap/authentik-blueprint-mountain-enrollment.yaml` | invitation-only enrollment into `mountain-visitors` (ADR-0057, invitation-only since ADR-0065): an invitation stage first (no token, no flow), handle policy, email verification; the Turnstile captcha is deleted (`state: absent`). Invitations are created by the owner in authentik (Directory > Invitations, flow `mountain-enrollment`, single use). `authentik-blueprint-mountain-policy.yaml` binds that group to `mountain` |
 | `gitops/bootstrap/authentik-blueprint-mountain-gate-policy.yaml` | binds `platform-admins` and `mountain-visitors` to `mountain-gate`, the forwardAuth application in front of all of mountain.bnei.dev (ADR-0065). Its provider lives in `authentik-blueprint-forwardauth.yaml`; `Middleware/mountain-forwardauth` and `mountain-outpost-route.yaml` are drop's shape |
+| `gitops/bootstrap/ukubi-world-signup-cleanup.yaml` | hourly CronJob (`ak shell`, the flags Job's pattern) deleting ukubi-world sign-ups that never verified their email: in `visitors` only, external, inactive, never logged in, no `ukubi_world/email_verified`, no source connection, older than 24h; at most 200 per run, counts-only log, `DRY_RUN=true` deletes nothing |
 | `gitops/bootstrap/authentik-flags-job.yaml` | PostSync hook asserting `core_default_app_access=false` — not a blueprint, because `Tenant` is internally managed (ADR-0050 Decision 12) |
+
+### Approving a ukubi-world sign-up
+
+A local sign-up on world.bnei.dev (`ukubi-world-enrollment`) ends inactive,
+even after the email link: the owner approves each one. Every platform-admin
+gets an authentik notification (the bell, rule `ukubi-world-signup-pending`)
+when a sign-up has verified its address.
+
+- **Approve:** authentik admin > Directory > Users > the user > **Activate**.
+  Nothing else: the user is already external and in `visitors` only. Check
+  the user carries the attribute `ukubi_world/email_verified: true` first;
+  without it the address was never proven.
+- **Reject:** Delete the user. An unverified one is deleted after 24h anyway by
+  `ukubi-world-signup-cleanup`.
+- **Ban later:** Deactivate. Nothing re-activates a user: recovery has
+  `activate_user_on_success: false`, and the world sign-in and recovery
+  admit active `visitors`-only accounts.
+
+GitHub and Google visitors are not queued; they stay auto-approved through
+`game-visitor-enrollment`.
 
 The **same credential pair is consumed twice**, from opposite ends of the
 exchange: authentik registers it on the provider via the blueprint, the app

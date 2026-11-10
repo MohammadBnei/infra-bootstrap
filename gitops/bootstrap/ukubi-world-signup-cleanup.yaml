@@ -1,0 +1,91 @@
+# Deletes ukubi-world local sign-ups that never proved their email
+# (authentik-blueprint-game-visitors.yaml, `ukubi-world-enrollment`). Without
+# it every abandoned or spam sign-up holds its username and email forever
+# (the sign-up refuses a taken email), and the owner's approval queue,
+# Directory > Users filtered on inactive, fills with noise.
+#
+# WHO IS DELETED: every condition at once, re-checked in the DELETE itself so
+# a user verified or activated between the two queries is kept:
+# - in `visitors` and in no other group;
+# - type external (never a service account, never an internal operator);
+# - is_active false AND last_login null: never signed in. A banned visitor
+#   signed in at least once (or was verified, below), so is never matched;
+# - no `ukubi_world/email_verified` attribute: a verified sign-up is the
+#   owner's approval queue and stays until the owner activates or deletes it;
+# - no source connection: GitHub/Google visitors are never touched;
+# - joined more than 24h ago (the verification link lasts 30 minutes by
+#   default, so 24h is generous).
+# At most 200 per run (bounded); the next hour takes the rest. Idempotent:
+# a second run finds nothing new.
+#
+# DRY RUN: the log line always carries the counts; with DRY_RUN=true nothing
+# is deleted. One by hand, before trusting it:
+#   kubectl -n authentik create job signup-cleanup-dry \
+#     --from=cronjob/ukubi-world-signup-cleanup --dry-run=client -o yaml \
+#     | sed 's/value: "false"/value: "true"/' | kubectl apply -f -
+#   kubectl -n authentik logs job/signup-cleanup-dry -c cleanup
+#   kubectl -n authentik delete job signup-cleanup-dry
+#
+# HOW IT REACHES AUTHENTIK: as authentik-flags-job.yaml does, `ak shell -c`
+# in the server image with the `authentik-config` Secret (Postgres
+# coordinates, AUTHENTIK_SECRET_KEY). No new credential; it prints counts
+# only. THE IMAGE TAG MUST MOVE WITH THE CHART, same as that Job.
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: ukubi-world-signup-cleanup
+  namespace: authentik
+spec:
+  schedule: "17 * * * *"
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 1
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 2
+      activeDeadlineSeconds: 600
+      template:
+        spec:
+          restartPolicy: Never
+          containers:
+            - name: cleanup
+              image: ghcr.io/goauthentik/server:2026.8.4
+              env:
+                - name: DRY_RUN
+                  value: "false"
+              args:
+                - shell
+                - -c
+                - |
+                  import os
+                  from datetime import timedelta
+                  from django.utils.timezone import now
+                  from authentik.core.models import Group, User, UserTypes
+                  dry = os.environ.get("DRY_RUN", "true").lower() != "false"
+                  def unverified():
+                      return (
+                          User.objects.filter(
+                              type=UserTypes.EXTERNAL,
+                              is_active=False,
+                              last_login__isnull=True,
+                              date_joined__lt=now() - timedelta(hours=24),
+                              groups__name="visitors",
+                              usersourceconnection__isnull=True,
+                          )
+                          .exclude(groups__in=Group.objects.exclude(name="visitors"))
+                          .exclude(attributes__has_key="ukubi_world/email_verified")
+                      )
+                  ids = list(unverified().values_list("pk", flat=True)[:200])
+                  deleted = 0
+                  if ids and not dry:
+                      deleted = unverified().filter(pk__in=ids).delete()[1].get("authentik_core.User", 0)
+                  print(f"ukubi-world-signup-cleanup: matched={len(ids)} deleted={deleted} dry_run={dry}")
+              envFrom:
+                - secretRef:
+                    name: authentik-config
+              resources:
+                requests:
+                  cpu: 50m
+                  memory: 256Mi
+                limits:
+                  memory: 512Mi
