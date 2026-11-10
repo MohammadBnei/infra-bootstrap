@@ -30,10 +30,6 @@ data:
       MohammadBnei/infra-bootstrap:
         id: 1259577926
         clusterAccess: true
-      # The fleet has always called it `wedding`; sessions reference that name.
-      MohammadBnei/wedding-2026:
-        id: 1340904445
-        name: wedding
       # agent-fleet's opus-workspace definition names its repo `opus-workspace`;
       # GitHub's bare name `workspace` is too generic for a fleet name.
       opus-tech-hq/workspace:

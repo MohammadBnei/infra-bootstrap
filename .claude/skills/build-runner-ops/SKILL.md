@@ -85,8 +85,7 @@ playbook is idempotent and this keeps the box reproducible.
    ```
 3. Name the repo in the shared CI machine identity's bound claims. The
    registry password is **not** a per-repo GitHub secret any more — every build
-   repo but `wedding-2026` (which still uses `secrets.REGISTRY_PASSWORD` in its
-   `docker.yml` and predates this) reads `REGISTRY_USERNAME`/`REGISTRY_PASSWORD`
+   repo reads `REGISTRY_USERNAME`/`REGISTRY_PASSWORD`
    out of the `platform-commons-76pb` Infisical project over GitHub OIDC
    (ADR-0049), and
    that identity (`19807471-d73a-48d4-9e58-1dc34255ef77`) gates on a

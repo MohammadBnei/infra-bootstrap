@@ -174,8 +174,8 @@ updated.
   and policy is a **blueprint in git** — an `InfisicalSecret` whose template is
   the blueprint when it carries an OAuth2 client secret, a plain `ConfigMap`
   when it does not. Four tiers; Native OIDC (ArgoCD, Grafana, agent-fleet
-  `core`) and forwardAuth (e2e previews, `wedding.bnei.dev/admin`) are live, the
-  WebAuthn critical tier is not. **One group, `platform-admins`**, read by both
+  `core`) and forwardAuth (e2e previews, `blog.bnei.dev/linkedin`, `hermes`)
+  are live, the WebAuthn critical tier is not. **One group, `platform-admins`**, read by both
   ArgoCD and Grafana, deliberately not authentik's own `authentik Admins`.
   **The local admins on ArgoCD and Grafana stay** — ArgoCD is what deploys
   authentik, so routing its only login through authentik would make an
