@@ -1,12 +1,14 @@
 # Visitor sign-in for the game's public world (mountain plan/18-villages.md,
-# "Owner decisions" 1): GitHub and Google OAuth sources, no local passwords, one
-# click. A first sign-in enrolls the person into `visitors` and nothing else;
+# "Owner decisions" 1): GitHub and Google OAuth sources, one click, and since
+# the owner asked for sign-up not tied to an OAuth account, a local sign-up
+# (username + email + password, email-verified) and a password reset beside
+# them. Every path enrolls the person into `visitors` and nothing else;
 # `visitors` is bound to the `ukubi-world` application only
 # (authentik-blueprint-ukubi-world-policy.yaml), and
 # gitops/scripts/check-authentik-bindings.py fails CI if it is ever bound to
 # anything else.
 #
-# What this file declares, all new, nothing existing is edited:
+# What this file declares:
 # - the `visitors` group (declared here and taken with `!KeyOf`, never `!Find`:
 #   see authentik-blueprint-wird-enrollment.yaml for why a `!Find` miss on
 #   create_users_group silently drops every user enrolled in that window);
@@ -24,13 +26,37 @@
 #   Its gate refuses anyone not arriving through one of the two sources (the
 #   flow cannot be opened by hand) and anyone without an email, since the game
 #   reads a visitor's `email` claim;
+# - the local sign-up flow `ukubi-world-enrollment`: username, email,
+#   password + repeat (Wird's password policy), then the user is written
+#   INACTIVE (external, in `visitors`) and activated only by the emailed link,
+#   then logged in. A taken username is refused by the prompt's `username`
+#   type and a case variant, a reserved prefix (service accounts, `gh-`,
+#   `google-`) or an already-used email by `ukubi-world-username`;
+#   `always_create` never updates an existing user. It is a separate flow on
+#   purpose: the source gate on `game-visitor-enrollment` stays source-only;
+# - the recovery flow `ukubi-world-recovery`: username or email, a mailed
+#   link, a new password. It never re-activates a user, and past the mail
+#   link it admits only an active visitor (`ukubi-world-not-visitor`);
 # - the authentication flow `ukubi-world-authentication`: an identification
-#   stage showing the two sources and no username field, set as the
-#   `ukubi-world` provider's authentication_flow. Only that application's
-#   sign-in page changes; the default login every other app uses is untouched;
+#   stage with username/email + password, the two sources, and "Sign up" /
+#   "Forgot password" links to the two flows above, set as the `ukubi-world`
+#   provider's authentication_flow. A correct password for a non-visitor
+#   (an admin) is denied before login, so this page is never a second login
+#   for platform accounts. Only that application's sign-in page changes; the
+#   default login every other app uses is untouched and the brand's
+#   enrollment/recovery flows stay unset (wird header: the brand is shared);
 # - the `ukubi-world` provider and application, for the public pod at
 #   world.bnei.dev. The owner pod (`ukubi-game`, game.bnei.dev) is unchanged
 #   and stays platform-admins only.
+#
+# HARD DEPENDENCY: SMTP (AUTHENTIK_EMAIL__* in authentik-secret.yaml). Without
+# it the verification and reset mails are silently dropped: a sign-up stays
+# inactive at "check your email", which is the safe direction.
+#
+# ponytail: open sign-up, no captcha or invitation (mountain moved to
+# invitations, ADR-0065). Each attempt costs one mail from the shared SMTP
+# quota and leaves an inactive user. Add a captcha or invitation stage at
+# order 5 if strangers start using it.
 #
 # A SECRET, not a ConfigMap: the sources carry their OAuth client secrets and
 # the provider its own. Field shapes checked against authentik 2026.8.0's
@@ -50,8 +76,8 @@
 # Verify after the apply (the DB is the honest answer, never `cat` the mount):
 #   psql -d authentik -tAc "SELECT slug, user_matching_mode FROM authentik_core_source"
 #   curl -s https://authentik.bnei.dev/application/o/ukubi-world/.well-known/openid-configuration | head -c 300
-# then one real sign-in per source, and check the new user's only group is
-# `visitors`.
+# then one real sign-in per source and one local sign-up (verify the mail),
+# check each new user's only group is `visitors`, and run one password reset.
 apiVersion: secrets.infisical.com/v1alpha1
 kind: InfisicalSecret
 metadata:
@@ -208,14 +234,339 @@ spec:
                 user_property_mappings:
                   - !KeyOf google-username
 
+            # --- visitors-only gate (sign-in and recovery) ---------------------
+            # True = "this is NOT a visitor account", and a deny stage runs.
+            # Bound with evaluate_on_plan false, re_evaluate_policies true, so
+            # it is read when the stage comes up, against the pending user
+            # (flows/markers.py ReevaluateMarker). An unsaved user (no pk) is
+            # the identification stage's stand-in for an unknown identifier.
+            # Inactive covers both a deactivated (banned) visitor and one who
+            # never clicked the verification mail.
+            - model: authentik_policies_expression.expressionpolicy
+              id: not-visitor
+              identifiers:
+                name: ukubi-world-not-visitor
+              attrs:
+                name: ukubi-world-not-visitor
+                expression: |
+                  user = request.user
+                  if not user.pk or not user.is_active:
+                      return True
+                  groups = set(user.all_groups().values_list("name", flat=True))
+                  return groups != {"visitors"}
+            - model: authentik_stages_deny.denystage
+              id: not-visitor-deny
+              identifiers:
+                name: ukubi-world-not-visitor-deny
+              attrs:
+                deny_message: >-
+                  This page is for world visitors. Sign in to authentik
+                  directly with any other account.
+
+            # --- local sign-up ------------------------------------------------
+            # Shapes from authentik-blueprint-wird-enrollment.yaml (upstream's
+            # flows-enrollment-email-verification.yaml), minus the name field
+            # (mountain's reason: unmoderated text in the profile claims).
+            - model: authentik_flows.flow
+              id: local-enrollment-flow
+              identifiers:
+                slug: ukubi-world-enrollment
+              attrs:
+                name: ukubi world sign-up
+                title: Join the world
+                designation: enrollment
+                authentication: require_unauthenticated
+
+            - model: authentik_stages_prompt.prompt
+              id: prompt-username
+              identifiers:
+                name: ukubi-world-enrollment-field-username
+              attrs:
+                field_key: username
+                label: Username
+                # type username: the prompt stage refuses a name any user
+                # already has (stages/prompt/stage.py, case-sensitive; the
+                # policy below adds the case-insensitive check).
+                type: username
+                required: true
+                placeholder: 3-20 of a-z 0-9 _ -
+                placeholder_expression: false
+                order: 0
+            - model: authentik_stages_prompt.prompt
+              id: prompt-email
+              identifiers:
+                name: ukubi-world-enrollment-field-email
+              attrs:
+                field_key: email
+                label: Email
+                type: email
+                required: true
+                placeholder: Email
+                placeholder_expression: false
+                order: 1
+            - model: authentik_stages_prompt.prompt
+              id: prompt-password
+              identifiers:
+                name: ukubi-world-field-password
+              attrs:
+                field_key: password
+                label: Password
+                type: password
+                required: true
+                placeholder: Password
+                placeholder_expression: false
+                order: 2
+            - model: authentik_stages_prompt.prompt
+              id: prompt-password-repeat
+              identifiers:
+                name: ukubi-world-field-password-repeat
+              attrs:
+                field_key: password_repeat
+                label: Password (repeat)
+                type: password
+                required: true
+                placeholder: Password (repeat)
+                placeholder_expression: false
+                order: 3
+
+            # Wird's rules (its file), declared again rather than `!Find`-ed.
+            - model: authentik_policies_password.passwordpolicy
+              id: password-policy
+              identifiers:
+                name: ukubi-world-password-strength
+              attrs:
+                name: ukubi-world-password-strength
+                password_field: password
+                check_static_rules: true
+                length_min: 8
+                amount_digits: 0
+                amount_uppercase: 0
+                amount_lowercase: 0
+                amount_symbols: 0
+                check_have_i_been_pwned: true
+                hibp_allowed_count: 0
+                error_message: >-
+                  Use at least 8 characters, and a password that has not
+                  appeared in a known data breach.
+
+            # A username is never taken over: the prompt type refuses an exact
+            # match, this refuses a case variant (`Moha` next to `moha`) and
+            # the reserved prefixes. Service accounts (ADR-0066, ADR-0068) are
+            # matched by username, so an enrolled `atlas-game` would be taken
+            # over when its blueprint lands; `gh-`/`google-` are the OAuth
+            # visitors' names (header), squatting one would break that
+            # person's first GitHub/Google sign-in. An email already on any
+            # account is refused too: the sign-in and recovery pages look a
+            # user up by email and take the first match.
+            # ponytail: no profanity list (mountain-handle has one); copy it
+            # if strangers, not friends, start signing up.
+            - model: authentik_policies_expression.expressionpolicy
+              id: username-policy
+              identifiers:
+                name: ukubi-world-username
+              attrs:
+                name: ukubi-world-username
+                expression: |
+                  import re
+                  data = request.context.get("prompt_data", {})
+                  username = data.get("username", "")
+                  email = data.get("email", "")
+                  if not re.fullmatch(r"[a-z0-9_-]{3,20}", username):
+                      ak_message("Username: 3 to 20 characters, a-z, 0-9, _ or -.")
+                      return False
+                  reserved = ("atlas-", "bridge-", "netbird-", "ak-", "gh-", "google-")
+                  parts = ("admin", "authentik", "ukubi", "bnei")
+                  if (username.startswith(reserved) or any(p in username for p in parts)
+                          or ak_user_by(username__iexact=username)):
+                      ak_message("That username is not available.")
+                      return False
+                  if not email or ak_user_by(email__iexact=email):
+                      ak_message("That email is already used. Sign in, or reset your password.")
+                      return False
+                  return True
+
+            - model: authentik_stages_prompt.promptstage
+              id: enrollment-prompt
+              identifiers:
+                name: ukubi-world-enrollment-prompt
+              attrs:
+                fields:
+                  - !KeyOf prompt-username
+                  - !KeyOf prompt-email
+                  - !KeyOf prompt-password
+                  - !KeyOf prompt-password-repeat
+                validation_policies:
+                  - !KeyOf password-policy
+                  - !KeyOf username-policy
+
+            # Inactive until the email is proven (create_users_as_inactive +
+            # the email stage's activate_user_on_success are one mechanism),
+            # external like the OAuth visitors, in `visitors` only.
+            # always_create: a racing duplicate username fails the save
+            # (IntegrityError, stages/user_write/stage.py), never updates.
+            - model: authentik_stages_user_write.userwritestage
+              id: local-enrollment-write
+              identifiers:
+                name: ukubi-world-enrollment-write
+              attrs:
+                user_creation_mode: always_create
+                create_users_as_inactive: true
+                create_users_group: !KeyOf visitors
+                user_type: external
+            - model: authentik_stages_email.emailstage
+              id: local-enrollment-email
+              identifiers:
+                name: ukubi-world-enrollment-email-verification
+              attrs:
+                use_global_settings: true
+                template: email/account_confirmation.html
+                activate_user_on_success: true
+            - model: authentik_stages_user_login.userloginstage
+              id: local-login
+              identifiers:
+                name: ukubi-world-user-login
+
+            - model: authentik_flows.flowstagebinding
+              identifiers:
+                target: !KeyOf local-enrollment-flow
+                stage: !KeyOf enrollment-prompt
+                order: 10
+            - model: authentik_flows.flowstagebinding
+              identifiers:
+                target: !KeyOf local-enrollment-flow
+                stage: !KeyOf local-enrollment-write
+                order: 20
+            - model: authentik_flows.flowstagebinding
+              identifiers:
+                target: !KeyOf local-enrollment-flow
+                stage: !KeyOf local-enrollment-email
+                order: 30
+            - model: authentik_flows.flowstagebinding
+              identifiers:
+                target: !KeyOf local-enrollment-flow
+                stage: !KeyOf local-login
+                order: 100
+
+            # --- password recovery ------------------------------------------------
+            # Upstream's flows-recovery-email-verification.yaml, with two
+            # changes. activate_user_on_success is FALSE: a mail click must not
+            # re-enable a visitor the owner deactivated (an unverified sign-up
+            # stays unverified too; it signs up again). And the visitors-only
+            # gate sits AFTER the mail stage, so it is only reachable by
+            # whoever holds the mailbox: before it, "unknown address", "admin"
+            # and "visitor" all look the same (pretend_user_exists; the email
+            # stage sends nothing for an unknown address in a recovery flow).
+            # An admin's address still gets the mail, whose link then denies.
+            - model: authentik_flows.flow
+              id: recovery-flow
+              identifiers:
+                slug: ukubi-world-recovery
+              attrs:
+                name: ukubi world password reset
+                title: Reset your password
+                designation: recovery
+                authentication: require_unauthenticated
+            - model: authentik_stages_identification.identificationstage
+              id: recovery-identification
+              identifiers:
+                name: ukubi-world-recovery-identification
+              attrs:
+                user_fields:
+                  - email
+                  - username
+                pretend_user_exists: true
+            - model: authentik_stages_email.emailstage
+              id: recovery-email
+              identifiers:
+                name: ukubi-world-recovery-email
+              attrs:
+                use_global_settings: true
+                template: email/password_reset.html
+                token_expiry: minutes=30
+                activate_user_on_success: false
+            - model: authentik_stages_prompt.promptstage
+              id: recovery-prompt
+              identifiers:
+                name: ukubi-world-recovery-prompt
+              attrs:
+                fields:
+                  - !KeyOf prompt-password
+                  - !KeyOf prompt-password-repeat
+                validation_policies:
+                  - !KeyOf password-policy
+            # never_create: only the mail-proven pending user is written, and
+            # only its password (the prompt's only fields).
+            - model: authentik_stages_user_write.userwritestage
+              id: recovery-write
+              identifiers:
+                name: ukubi-world-recovery-write
+              attrs:
+                user_creation_mode: never_create
+
+            - model: authentik_flows.flowstagebinding
+              identifiers:
+                target: !KeyOf recovery-flow
+                stage: !KeyOf recovery-identification
+                order: 10
+            - model: authentik_flows.flowstagebinding
+              identifiers:
+                target: !KeyOf recovery-flow
+                stage: !KeyOf recovery-email
+                order: 20
+            - model: authentik_flows.flowstagebinding
+              id: recovery-gate-binding
+              identifiers:
+                target: !KeyOf recovery-flow
+                stage: !KeyOf not-visitor-deny
+                order: 25
+              attrs:
+                evaluate_on_plan: false
+                re_evaluate_policies: true
+            - model: authentik_policies.policybinding
+              identifiers:
+                target: !KeyOf recovery-gate-binding
+                policy: !KeyOf not-visitor
+                order: 0
+            - model: authentik_flows.flowstagebinding
+              identifiers:
+                target: !KeyOf recovery-flow
+                stage: !KeyOf recovery-prompt
+                order: 30
+            - model: authentik_flows.flowstagebinding
+              identifiers:
+                target: !KeyOf recovery-flow
+                stage: !KeyOf recovery-write
+                order: 40
+            - model: authentik_flows.flowstagebinding
+              identifiers:
+                target: !KeyOf recovery-flow
+                stage: !KeyOf local-login
+                order: 100
+
             # --- the world's sign-in page --------------------------------------
+            # Inbuilt backend only: no app-password tokens, no LDAP/Kerberos on
+            # a public page.
+            - model: authentik_stages_password.passwordstage
+              id: world-password
+              identifiers:
+                name: ukubi-world-password
+              attrs:
+                backends:
+                  - authentik.core.auth.InbuiltBackend
+                failed_attempts_before_cancel: 5
             - model: authentik_stages_identification.identificationstage
               id: world-identification
               identifiers:
                 name: ukubi-world-identification
               attrs:
-                # No username field: a visitor has no password to type.
-                user_fields: []
+                # Username or email + password, beside the two sources.
+                user_fields:
+                  - username
+                  - email
+                password_stage: !KeyOf world-password
+                pretend_user_exists: true
+                enrollment_flow: !KeyOf local-enrollment-flow
+                recovery_flow: !KeyOf recovery-flow
                 sources:
                   - !KeyOf github
                   - !KeyOf google
@@ -235,6 +586,28 @@ spec:
                 target: !KeyOf world-authentication
                 stage: !KeyOf world-identification
                 order: 10
+            # A password that works here but is not a visitor's (an admin's)
+            # is refused before any session exists: this page never becomes
+            # a second, weaker login for the platform accounts.
+            - model: authentik_flows.flowstagebinding
+              id: world-gate-binding
+              identifiers:
+                target: !KeyOf world-authentication
+                stage: !KeyOf not-visitor-deny
+                order: 15
+              attrs:
+                evaluate_on_plan: false
+                re_evaluate_policies: true
+            - model: authentik_policies.policybinding
+              identifiers:
+                target: !KeyOf world-gate-binding
+                policy: !KeyOf not-visitor
+                order: 0
+            - model: authentik_flows.flowstagebinding
+              identifiers:
+                target: !KeyOf world-authentication
+                stage: !KeyOf local-login
+                order: 100
 
             # --- the public world's client ---------------------------------------
             - model: authentik_providers_oauth2.oauth2provider
