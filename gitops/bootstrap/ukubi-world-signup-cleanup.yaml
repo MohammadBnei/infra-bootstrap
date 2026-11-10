@@ -4,8 +4,9 @@
 # (the sign-up refuses a taken email), and the owner's approval queue,
 # Directory > Users filtered on inactive, fills with noise.
 #
-# WHO IS DELETED: every condition at once, re-checked in the DELETE itself so
-# a user verified or activated between the two queries is kept:
+# WHO IS DELETED: every condition at once, re-checked under a row lock
+# (SELECT ... FOR UPDATE in one transaction) right before the DELETE, so a user
+# verified or activated meanwhile is kept:
 # - in `visitors` and in no other group;
 # - type external (never a service account, never an internal operator);
 # - is_active false AND last_login null: never signed in. A banned visitor
@@ -15,8 +16,10 @@
 # - no source connection: GitHub/Google visitors are never touched;
 # - joined more than 24h ago (the verification link lasts 30 minutes by
 #   default, so 24h is generous).
-# At most 200 per run (bounded); the next hour takes the rest. Idempotent:
-# a second run finds nothing new.
+# At most 200 per run, oldest first (bounded); the next hour takes the rest.
+# Idempotent: a second run finds nothing new. Verified-but-unapproved users
+# are never pruned: that queue is the owner's (ponytail: add a 30-day prune
+# if it ever fills with throwaway-mailbox sign-ups).
 #
 # DRY RUN: the log line always carries the counts; with DRY_RUN=true nothing
 # is deleted. One by hand, before trusting it:
@@ -47,6 +50,11 @@ spec:
       template:
         spec:
           restartPolicy: Never
+          automountServiceAccountToken: false
+          securityContext:
+            runAsNonRoot: true
+            seccompProfile:
+              type: RuntimeDefault
           containers:
             - name: cleanup
               image: ghcr.io/goauthentik/server:2026.8.4
@@ -59,6 +67,7 @@ spec:
                 - |
                   import os
                   from datetime import timedelta
+                  from django.db import transaction
                   from django.utils.timezone import now
                   from authentik.core.models import Group, User, UserTypes
                   dry = os.environ.get("DRY_RUN", "true").lower() != "false"
@@ -75,11 +84,21 @@ spec:
                           .exclude(groups__in=Group.objects.exclude(name="visitors"))
                           .exclude(attributes__has_key="ukubi_world/email_verified")
                       )
-                  ids = list(unverified().values_list("pk", flat=True)[:200])
+                  ids = list(unverified().order_by("date_joined").values_list("pk", flat=True)[:200])
                   deleted = 0
                   if ids and not dry:
-                      deleted = unverified().filter(pk__in=ids).delete()[1].get("authentik_core.User", 0)
+                      with transaction.atomic():
+                          locked = list(
+                              unverified().filter(pk__in=ids)
+                              .select_for_update(of=("self",))
+                              .values_list("pk", flat=True)
+                          )
+                          deleted = User.objects.filter(pk__in=locked).delete()[1].get("authentik_core.User", 0)
                   print(f"ukubi-world-signup-cleanup: matched={len(ids)} deleted={deleted} dry_run={dry}")
+              securityContext:
+                allowPrivilegeEscalation: false
+                capabilities:
+                  drop: ["ALL"]
               envFrom:
                 - secretRef:
                     name: authentik-config

@@ -271,8 +271,12 @@ spec:
               attrs:
                 name: ukubi-world-not-visitor
                 expression: |
-                  user = request.user
-                  if not user.pk or not user.is_active:
+                  # Re-read from the DB: the pending user in a mail-restored
+                  # plan is a snapshot from when the mail was sent, and an
+                  # owner's Deactivate since then must win.
+                  from authentik.core.models import User
+                  user = User.objects.filter(pk=request.user.pk, is_active=True).first()
+                  if user is None:
                       return True
                   groups = set(user.all_groups().values_list("name", flat=True))
                   return groups != {"visitors"}
@@ -299,8 +303,12 @@ spec:
               attrs:
                 name: ukubi-world-is-visitor
                 expression: |
-                  user = request.user
-                  if not user.pk or not user.is_active:
+                  # Fresh from the DB, as in not-visitor: the recovery write
+                  # does a full save of the plan's user, so a stale
+                  # is_active=True must never get that far.
+                  from authentik.core.models import User
+                  user = User.objects.filter(pk=request.user.pk, is_active=True).first()
+                  if user is None:
                       return False
                   groups = set(user.all_groups().values_list("name", flat=True))
                   return groups == {"visitors"}
@@ -491,7 +499,10 @@ spec:
             # this binding marks the address verified, which keeps the user
             # out of the cleanup CronJob (ukubi-world-signup-cleanup.yaml),
             # and raises the event the owner is notified by. It never touches
-            # is_active and always passes, so the message always shows.
+            # is_active and always passes, so the message always shows. If it
+            # errors the message still shows but the user is unmarked and the
+            # cleanup deletes it after 24h: safe for approval, the person signs
+            # up again.
             - model: authentik_policies_expression.expressionpolicy
               id: mark-verified
               identifiers:
@@ -504,7 +515,14 @@ spec:
                   if user.pk and not user.is_active and not user.attributes.get(key):
                       user.attributes[key] = True
                       user.save(update_fields=["attributes"])
-                      ak_create_event("ukubi_world_signup_pending", username=user.username)
+                      # `message` keeps the bell's text short (Event.summary
+                      # is the whole context otherwise; passwords in it are
+                      # masked by key name, events/utils.py cleanse_dict).
+                      ak_create_event(
+                          "ukubi_world_signup_pending",
+                          message=f"Sign-up verified, awaiting approval: {user.username}",
+                          username=user.username,
+                      )
                   return True
             - model: authentik_stages_deny.denystage
               id: awaiting-approval
