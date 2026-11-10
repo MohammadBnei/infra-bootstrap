@@ -64,6 +64,10 @@ spec:
                 client_id: atlas-api
                 grant_types:
                   - client_credentials
+                # Required by authentik 2026.8's serializer even with no browser
+                # flow: absent, the whole blueprint fails validation and the
+                # game's atlas token is refused (400 invalid_client).
+                redirect_uris: []
                 # Required on every OAuth2 provider, even with no browser.
                 authorization_flow: !Find [authentik_flows.flow, [slug, default-provider-authorization-implicit-consent]]
                 invalidation_flow: !Find [authentik_flows.flow, [slug, default-provider-invalidation-flow]]
