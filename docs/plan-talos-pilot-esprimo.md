@@ -533,6 +533,12 @@ here. **G** marks a go-critical test (§5).
 | T21 **G** | NIC soak | 7 days with `iperf3` load between the Esprimos (`hostNetwork` pods: there's no shell on Talos), **started after** T7, T9–T14 and T23 so reboots don't interrupt it and the load doesn't skew their numbers: no "Hardware Unit Hang" or link resets in `talosctl dmesg` |
 | T22 **G** | Full rebuild from code | Both nodes `talosctl reset --reboot` (full wipe) → back in maintenance mode from the stick, on their DHCP reservations. Rebuild with the **`siderolabs/talos` Terraform provider** (`talos/terraform/`, secrets from the `talos-pilot` Infisical project), then `addons.sh`. Time it end to end. Fits in an evening |
 | T23 | RAM | Idle footprint per node with the add-ons and nothing else (`talosctl memory`, `kubectl top node`), plus Longhorn's share alone. Run the prod measurement queries from the evaluation §3 at the same time. Together they give the real RAM-gain number |
+| T24 **G** | CNPG with prod's extensions | A custom image (built on build-runner, pushed to zot) with timescaledb, postgis and pgvector. A 2-instance `Cluster` comes up; `CREATE EXTENSION` works for all three; timescaledb is first in `shared_preload_libraries`. Then a PG major upgrade on a copy with a timescaledb hypertable: record the steps and downtime. Feeds the CNPG vs Pigsty decision (ADR-0071 M5) |
+| T25 **G** | CNPG failover | Hard-cut the primary's node: the replica is promoted; when the node returns, the old primary rejoins by `pg_rewind` with no hand step. Then `kubectl drain` the primary's node: record the switchover time |
+| T26 **G** | Rootless BuildKit | A runner-shaped pod builds a real app Dockerfile with rootless BuildKit, no `privileged`, under Talos's user-namespace and seccomp settings, and pushes to zot. T19 tests buildah; this one tests the tool ADR-0071 picks. Record every Talos setting it needed |
+| T26b | Forgejo runner on k8s | A Forgejo Actions runner in a pod picks up a job and hands the build to T26's BuildKit |
+| T27 | Garage, 3 zones | Three Garage nodes (two Esprimos + one pod as the third zone is enough), `replication_factor` 3. Stop one: reads and writes keep working. Record RAM per node |
+| T28 | Registry entry, end to end | One `gitops/apps/registry/<app>.yaml`-shaped entry, rendered by a draft `common-app-chart` v2 and applied by hand (no prod ArgoCD): DB + roles, bucket, route come up. Delete the entry: database, bucket and volume are retained |
 
 T22 runs last: everything learned by hand has to survive being rebuilt
 from code.
