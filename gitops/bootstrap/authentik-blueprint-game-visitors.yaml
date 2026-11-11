@@ -39,18 +39,27 @@
 # - the recovery flow `ukubi-world-recovery`: username or email, a mailed
 #   link, a new password. It never re-activates a user, and past the mail
 #   link it admits only an active visitor (`ukubi-world-not-visitor`);
-# - the authentication flow `ukubi-world-authentication`: an identification
-#   stage with username/email + password, the two sources, and "Sign up" /
-#   "Forgot password" links to the two flows above, set as the `ukubi-world`
-#   provider's authentication_flow. A correct password for a non-visitor
-#   (an admin) is denied before login, so this page is never a second login
-#   for platform accounts (deny stage for the message, plus a fail-closed
-#   `ukubi-world-is-visitor` on the login and recovery-write stages: a policy
-#   error drops the login, it never skips the deny). A visitor later added to
-#   any other group is refused here too and signs in through authentik
-#   directly. Only that application's sign-in page changes; the
-#   default login every other app uses is untouched and the brand's
-#   enrollment/recovery flows stay unset (wird header: the brand is shared);
+# - the authentication flow `ukubi-world-authentication`, set as the
+#   `ukubi-world` provider's authentication_flow: an identification stage
+#   (username/email, the two sources, "Sign up" / "Forgot password" links to
+#   the two flows above), then, decided on the identified account BEFORE any
+#   password is asked:
+#   - a non-visitor (an admin, or a visitor later added to another group) is
+#     handed to `default-authentication-flow` by a redirect stage: password
+#     and the MFA validation stage there, then back to the world's /authorize
+#     (the `next` the provider put on this flow's URL survives the switch,
+#     stages/redirect/stage.py switch_flow_with_context reuses the session's
+#     query) and `ukubi-world` admits platform-admins
+#     (authentik-blueprint-ukubi-world-policy.yaml). This page never checks an
+#     admin's password, so it is neither a password oracle nor a second,
+#     weaker login: a session for a platform account only ever comes from the
+#     default flow;
+#   - anyone else (a visitor, and an unknown name, which looks exactly like
+#     a visitor: pretend_user_exists) gets this page's password stage, then
+#     the login stage, which a fail-closed `ukubi-world-is-visitor` guards.
+#   Only that application's sign-in page changes; the default login every
+#   other app uses is untouched and the brand's enrollment/recovery flows
+#   stay unset (wird header: the brand is shared);
 # - the `ukubi-world` provider and application, for the public pod at
 #   world.bnei.dev. The owner pod (`ukubi-game`, game.bnei.dev) is unchanged
 #   and stays platform-admins only.
@@ -82,7 +91,9 @@
 # A SECRET, not a ConfigMap: the sources carry their OAuth client secrets and
 # the provider its own. Field shapes checked against authentik 2026.8.0's
 # source (core/models.py Provider.authentication_flow, Source.user_matching_mode,
-# sources/oauth/models.py, stages/identification, stages/user_write); the
+# sources/oauth/models.py, stages/identification, stages/user_write; the
+# admin redirect against 2026.8.4's stages/redirect, flows/views/executor.py,
+# policies/process.py and policies/views.py); the
 # GitHub type itself asks for `read:user user:email` and reads the primary
 # address from /user/emails when the profile hides it.
 #
@@ -99,7 +110,9 @@
 #   curl -s https://authentik.bnei.dev/application/o/ukubi-world/.well-known/openid-configuration | head -c 300
 # then one real sign-in per source and one local sign-up (mail link, the
 # approval message, the bell, Activate, then sign-in works), check each new
-# user's only group is `visitors`, and run one password reset.
+# user's only group is `visitors`, and run one password reset. Then the
+# admin path: open world.bnei.dev signed out, type an admin's name, expect the
+# default login (password, then the MFA step) and to land back in the world.
 apiVersion: secrets.infisical.com/v1alpha1
 kind: InfisicalSecret
 metadata:
@@ -256,7 +269,7 @@ spec:
                 user_property_mappings:
                   - !KeyOf google-username
 
-            # --- visitors-only gate (sign-in and recovery) ---------------------
+            # --- visitors-only gate (recovery; is-visitor guards sign-in too) ---
             # True = "this is NOT a visitor account", and a deny stage runs.
             # Bound with evaluate_on_plan false, re_evaluate_policies true, so
             # it is read when the stage comes up, against the pending user
@@ -727,11 +740,19 @@ spec:
               identifiers:
                 name: ukubi-world-identification
               attrs:
-                # Username or email + password, beside the two sources.
+                # Username or email beside the two sources; the password is
+                # its own stage (order 20) so the admin/visitor choice is made
+                # before any password is checked. NEVER set password_stage
+                # here: the combined stage authenticates inside validate()
+                # (stages/identification/stage.py), before the redirect, and
+                # the page turns into a password oracle for admin accounts.
+                # pretend_user_exists without a password_stage: an unknown
+                # name continues as an unsaved User (no pk), which the
+                # bindings below treat as a visitor.
                 user_fields:
                   - username
                   - email
-                password_stage: !KeyOf world-password
+                password_stage: null
                 pretend_user_exists: true
                 enrollment_flow: !KeyOf local-enrollment-flow
                 recovery_flow: !KeyOf recovery-flow
@@ -754,25 +775,110 @@ spec:
                 target: !KeyOf world-authentication
                 stage: !KeyOf world-identification
                 order: 10
-            # A password that works here but is not a visitor's (an admin's)
-            # is refused before any session exists: this page never becomes
-            # a second, weaker login for the platform accounts.
+            # True = an active, saved account that is not visitors-only: an
+            # admin, or a visitor since added to another group. An unknown
+            # name (unsaved stand-in, no pk) and an inactive account are
+            # False, so they take the visitor path and fail at the password
+            # (InbuiltBackend refuses inactive users with the same "Failed to
+            # authenticate" as a wrong password): no new enumeration beyond
+            # "this name is a platform account", which the redirect itself
+            # has to show.
+            - model: authentik_policies_expression.expressionpolicy
+              id: is-platform-user
+              identifiers:
+                name: ukubi-world-is-platform-user
+              attrs:
+                name: ukubi-world-is-platform-user
+                expression: |
+                  from authentik.core.models import User
+                  user = User.objects.filter(pk=request.user.pk, is_active=True).first()
+                  if user is None:
+                      return False
+                  groups = set(user.all_groups().values_list("name", flat=True))
+                  return groups != {"visitors"}
+            # Flow mode switches this session to a fresh plan of the default
+            # flow and sends the browser to
+            # /if/flow/default-authentication-flow/?next=<the /authorize URL>
+            # (stages/redirect/stage.py switch_flow_with_context:
+            # reverse_with_qs with SESSION_KEY_GET, the query this flow was
+            # opened with, whose `next` the provider set in
+            # policies/views.py handle_no_permission). That flow's end
+            # follows `next` only when it is relative (flows/views/executor.py
+            # _flow_done, is_url_absolute), so no open redirect.
+            # keep_context FALSE: the default flow must start from nothing.
+            # Carrying this plan would hand it our pending_user, and its
+            # password stage is skipped for a pending_user with a `backend`
+            # (upstream flow-default-authentication-flow.yaml,
+            # default-authentication-flow-password-stage). The return does not
+            # need the context: it rides on `next`. The admin types the name
+            # once more on the default page.
+            - model: authentik_stages_redirect.redirectstage
+              id: admin-redirect
+              identifiers:
+                name: ukubi-world-admin-redirect
+              attrs:
+                mode: flow
+                target_flow: !Find [authentik_flows.flow, [slug, default-authentication-flow]]
+                target_static: ""
+                keep_context: false
+            # Two bindings of the one policy, both deciding at stage time
+            # against the pending user (flows/markers.py ReevaluateMarker).
+            # An expression error returns the binding's failure_result
+            # un-negated (policies/process.py execute): the redirect then
+            # runs (true) and the password stage is dropped (false), so an
+            # error can never check an admin's password here. An error
+            # outside the expression is a plain False on both, which drops
+            # the redirect AND keeps the password stage: then the login's
+            # fail-closed is-visitor still refuses any non-visitor session.
+            # A `!Find` miss on target_flow fails the serializer (mode flow
+            # needs a target, stages/redirect/api.py), so the blueprint does
+            # not apply at all; a target deleted later (SET_NULL) makes the
+            # stage raise and the flow stops, never falls through to the
+            # password.
+            #
+            # The deny binding PRs #406/#407 put at order 15 is removed
+            # explicitly: a blueprint never deletes what a file stops
+            # declaring, and left in the DB it would still deny every admin
+            # (its policy binding goes with it, cascade).
             - model: authentik_flows.flowstagebinding
-              id: world-gate-binding
+              state: absent
               identifiers:
                 target: !KeyOf world-authentication
                 stage: !KeyOf not-visitor-deny
+                order: 15
+            - model: authentik_flows.flowstagebinding
+              id: world-redirect-binding
+              identifiers:
+                target: !KeyOf world-authentication
+                stage: !KeyOf admin-redirect
                 order: 15
               attrs:
                 evaluate_on_plan: false
                 re_evaluate_policies: true
             - model: authentik_policies.policybinding
               identifiers:
-                target: !KeyOf world-gate-binding
-                policy: !KeyOf not-visitor
+                target: !KeyOf world-redirect-binding
+                policy: !KeyOf is-platform-user
                 order: 0
               attrs:
                 failure_result: true
+            - model: authentik_flows.flowstagebinding
+              id: world-password-binding
+              identifiers:
+                target: !KeyOf world-authentication
+                stage: !KeyOf world-password
+                order: 20
+              attrs:
+                evaluate_on_plan: false
+                re_evaluate_policies: true
+            - model: authentik_policies.policybinding
+              identifiers:
+                target: !KeyOf world-password-binding
+                policy: !KeyOf is-platform-user
+                order: 0
+              attrs:
+                negate: true
+                failure_result: false
             - model: authentik_flows.flowstagebinding
               id: world-login-binding
               identifiers:
