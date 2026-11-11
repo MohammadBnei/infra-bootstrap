@@ -67,6 +67,8 @@
           - 192.168.1.165
           - 192.168.1.200
           - 192.168.1.161
+          - 192.168.1.20 # pve-mini-01
+          - 192.168.1.21 # pve-mini-02
       # K8s nodes only, by `bnei.lan` name rather than IP (ADR-0036) — same
       # reasoning as registry.bnei.lan in every node's containerd config
       # (ADR-0034): the name is the contract, the address can move. Requires
@@ -81,6 +83,8 @@
           - k8s-cp-03.bnei.lan
           - k8s-worker-01.bnei.lan
           - k8s-worker-02.bnei.lan
+          - k8s-worker-03.bnei.lan
+          - k8s-worker-04.bnei.lan
 
   handlers:
     - name: Reload exports
