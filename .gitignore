@@ -71,3 +71,11 @@ Thumbs.db
 # have been rewritten makes every Secret in etcd undecryptable. It must be
 # backed up to Infisical, not to git. See docs/secrets.md.
 *.creds
+
+# Talos pilot (ADR-0070): generated on the Pi, these hold cluster secrets
+talos/rendered/
+talos/**/secrets.yaml
+talos/**/talosconfig
+talos/**/kubeconfig
+talos/**/*.tfstate*
+talos/**/.terraform/

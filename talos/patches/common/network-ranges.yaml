@@ -1,0 +1,13 @@
+# Same pod and service ranges as prod: they are hardcoded in
+# common-app-chart, the Cloudflare origin-lock middleware, the NetBird
+# config and ukubi-game's policy. Overlay addresses never leave the nodes,
+# so prod and the pilot using the same ranges don't collide on the LAN.
+#
+# UNVERIFIED field names for 1.14's KubeNetworkConfig: check the rendered
+# output with `talosctl validate` (render.sh does) before the first apply.
+apiVersion: v1alpha1
+kind: KubeNetworkConfig
+podSubnets:
+  - 10.233.64.0/18
+serviceSubnets:
+  - 10.233.0.0/18

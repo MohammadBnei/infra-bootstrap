@@ -1,0 +1,32 @@
+# Control plane only (Esprimo 1).
+#
+# 1. The control plane runs workloads, and MetalLB must be able to announce
+#    from it: drop the control-plane taint and the
+#    node.kubernetes.io/exclude-from-external-load-balancers label that
+#    1.14's gen config writes into KubeNodeConfig.
+# 2. Metrics on the same ports prod scrapes: etcd on 2381 (1.14 defaults to
+#    2383), controller-manager and scheduler on all addresses.
+#
+# UNVERIFIED: the `$patch: delete` form on KubeNodeConfig map keys, and the
+# v1alpha1 extraArgs coexisting with 1.14 documents. Check the rendered
+# controlplane config: if the label or taint is still there, delete it from
+# the rendered file by hand and record the right form here.
+apiVersion: v1alpha1
+kind: KubeNodeConfig
+labels:
+  node.kubernetes.io/exclude-from-external-load-balancers:
+    $patch: delete
+taints:
+  node-role.kubernetes.io/control-plane:
+    $patch: delete
+---
+cluster:
+  etcd:
+    extraArgs:
+      listen-metrics-urls: http://0.0.0.0:2381
+  controllerManager:
+    extraArgs:
+      bind-address: 0.0.0.0
+  scheduler:
+    extraArgs:
+      bind-address: 0.0.0.0

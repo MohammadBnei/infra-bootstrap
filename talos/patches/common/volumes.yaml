@@ -1,0 +1,21 @@
+# Single-SSD machines: cap EPHEMERAL, give the rest to Longhorn.
+#
+# maxSize only takes effect when EPHEMERAL is first provisioned, so it must
+# be in the very first apply (and in Terraform for T22).
+apiVersion: v1alpha1
+kind: VolumeConfig
+name: EPHEMERAL
+provisioning:
+  maxSize: 200GiB
+---
+# Talos mounts this at /var/mnt/longhorn and passes it to the kubelet
+# itself: no extraMounts. Longhorn's defaultDataPath points there
+# (values/longhorn.yaml).
+apiVersion: v1alpha1
+kind: UserVolumeConfig
+name: longhorn
+provisioning:
+  diskSelector:
+    match: system_disk
+  minSize: 100GiB
+  grow: true
