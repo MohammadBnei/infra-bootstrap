@@ -46,7 +46,9 @@
 #   password is asked:
 #   - a non-visitor (an admin, or a visitor later added to another group) is
 #     handed to `default-authentication-flow` by a redirect stage: password
-#     and the MFA validation stage there, then back to the world's /authorize
+#     and the MFA validation stage there (upstream's, not_configured_action
+#     `skip`: it asks a second factor only of an account that has a device,
+#     exactly as on authentik's own login), then back to the world's /authorize
 #     (the `next` the provider put on this flow's URL survives the switch,
 #     stages/redirect/stage.py switch_flow_with_context reuses the session's
 #     query) and `ukubi-world` admits platform-admins
@@ -56,7 +58,8 @@
 #     default flow;
 #   - anyone else (a visitor, and an unknown name, which looks exactly like
 #     a visitor: pretend_user_exists) gets this page's password stage, then
-#     the login stage, which a fail-closed `ukubi-world-is-visitor` guards.
+#     the login stage, which a fail-closed `ukubi-world-is-visitor-authenticated`
+#     guards (visitors-only AND this page's password stage authenticated).
 #   Only that application's sign-in page changes; the default login every
 #   other app uses is untouched and the brand's enrollment/recovery flows
 #   stay unset (wird header: the brand is shared);
@@ -269,7 +272,7 @@ spec:
                 user_property_mappings:
                   - !KeyOf google-username
 
-            # --- visitors-only gate (recovery; is-visitor guards sign-in too) ---
+            # --- visitors-only gate (recovery; sign-in has its own, below) ------
             # True = "this is NOT a visitor account", and a deny stage runs.
             # Bound with evaluate_on_plan false, re_evaluate_policies true, so
             # it is read when the stage comes up, against the pending user
@@ -307,7 +310,8 @@ spec:
             # still denies), but an error outside the expression (the process
             # wrapper's own `except`, a timeout) is a plain False, which would
             # DROP the deny stage. `is-visitor` is bound to the stages that do
-            # harm (login, the recovery password write), so any failure there
+            # harm (the recovery prompt, write and login; the sign-in login has
+            # is-visitor-authenticated, below), so any failure there
             # drops them instead and no session or password exists.
             - model: authentik_policies_expression.expressionpolicy
               id: is-visitor
@@ -805,13 +809,12 @@ spec:
             # policies/views.py handle_no_permission). That flow's end
             # follows `next` only when it is relative (flows/views/executor.py
             # _flow_done, is_url_absolute), so no open redirect.
-            # keep_context FALSE: the default flow must start from nothing.
-            # Carrying this plan would hand it our pending_user, and its
-            # password stage is skipped for a pending_user with a `backend`
-            # (upstream flow-default-authentication-flow.yaml,
-            # default-authentication-flow-password-stage). The return does not
-            # need the context: it rides on `next`. The admin types the name
-            # once more on the default page.
+            # keep_context FALSE: the default flow starts from a fresh plan
+            # (context {} plus is_redirected, no pending user). Carrying this
+            # plan would hand it our pending_user and everything else a
+            # public page gathered, for no gain: the return rides on `next`,
+            # not on the context. The admin types the name once more on the
+            # default page.
             - model: authentik_stages_redirect.redirectstage
               id: admin-redirect
               identifiers:
@@ -827,9 +830,10 @@ spec:
             # un-negated (policies/process.py execute): the redirect then
             # runs (true) and the password stage is dropped (false), so an
             # error can never check an admin's password here. An error
-            # outside the expression is a plain False on both, which drops
-            # the redirect AND keeps the password stage: then the login's
-            # fail-closed is-visitor still refuses any non-visitor session.
+            # outside the expression (policies/process.py run) is a plain
+            # False, never negated, on both: redirect and password stage both
+            # drop, and the login's is-visitor-authenticated then refuses (no
+            # password stage ran), so the flow ends with no session.
             # A `!Find` miss on target_flow fails the serializer (mode flow
             # needs a target, stages/redirect/api.py), so the blueprint does
             # not apply at all; a target deleted later (SET_NULL) makes the
@@ -888,7 +892,43 @@ spec:
               attrs:
                 evaluate_on_plan: false
                 re_evaluate_policies: true
+            # The login demands proof of THIS page's password in the same
+            # expression as the visitors-only check. The password stage is
+            # conditional now (order 20), so a policy error that drops it
+            # (an outer error is a plain False, never negated:
+            # policies/process.py run) while this binding evaluates fine would
+            # otherwise log a visitor in on the username alone: user_login
+            # signs in any saved, active pending user and defaults the backend
+            # (stages/user_login/stage.py). `user_backend` is set only by a
+            # password stage that authenticated (stages/password/stage.py) and
+            # reaches `context` through flows/markers.py ReevaluateMarker.
+            # One policy on purpose: a binding's policy_engine_mode defaults
+            # to `any`, so a second policy here would be ORed in.
+            - model: authentik_policies_expression.expressionpolicy
+              id: is-visitor-authenticated
+              identifiers:
+                name: ukubi-world-is-visitor-authenticated
+              attrs:
+                name: ukubi-world-is-visitor-authenticated
+                expression: |
+                  if context.get("user_backend") != "authentik.core.auth.InbuiltBackend":
+                      return False
+                  from authentik.core.models import User
+                  user = User.objects.filter(pk=request.user.pk, is_active=True).first()
+                  if user is None:
+                      return False
+                  groups = set(user.all_groups().values_list("name", flat=True))
+                  return groups == {"visitors"}
             - model: authentik_policies.policybinding
+              identifiers:
+                target: !KeyOf world-login-binding
+                policy: !KeyOf is-visitor-authenticated
+                order: 0
+            # The previous binding (plain is-visitor) removed explicitly, or it
+            # would stay in the DB and, ORed with the one above (mode `any`),
+            # undo it. Recovery keeps its own is-visitor bindings.
+            - model: authentik_policies.policybinding
+              state: absent
               identifiers:
                 target: !KeyOf world-login-binding
                 policy: !KeyOf is-visitor
