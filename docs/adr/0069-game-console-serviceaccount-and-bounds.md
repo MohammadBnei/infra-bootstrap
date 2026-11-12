@@ -120,7 +120,7 @@ This ADR prepares the identity that deployment runs as.
      working `rules.dns` is the DNS proxy, not Envoy), so it is untested too; if it does not hold, the read fails
      closed;
    - HTTPS (443) to the world, RFC 1918 excepted: GitHub's API, and the sign-in's OIDC calls, since
-     `authentik.bnei.dev` resolves to Cloudflare from a pod.
+     `authentik.bnei.dev` resolves to Cloudflare from a pod. (Superseded by amendment 2: named hosts only.)
 
    Nothing else. Loki, Patroni, Postgres and ArgoCD's API are added by the slices that use them.
 7. **Where it lives:** `gitops/platform/ukubi-game/` (the ServiceAccount, the RBAC and the policy), applied by the
@@ -175,8 +175,10 @@ egress to Patroni and Postgres.
   matchName `api.github.com`, `authentik.bnei.dev` and `api.anthropic.com`, port 443 only. The DNS rules keep
   `rules.dns: matchPattern "*"`, which the DNS proxy needs.
 - Why: a review of the cluster's exposure found the world rule lets a compromised game pod reach any host on 443.
-  A 30-minute hubble watch of `ukubi-game` on 2026-11-12 saw no world traffic and no external DNS lookup while idle;
-  the game reaches authentik and mountain by in-cluster names. The sign-in and the voice were not exercised.
+  The list comes from the code: the OIDC issuer `https://authentik.bnei.dev/application/o/ukubi-game/` (discovery,
+  JWKS and the code exchange on one host), `--github` (api.github.com; tarballs go through atlas, not this pod) and
+  the voice endpoint (api.anthropic.com). A 30-minute hubble watch on 2026-11-12 saw no world traffic while the game
+  was idle, which says nothing about these on-demand calls: the sign-in, GitHub and the voice were not exercised.
 - This supersedes the rejected option "`toFQDNs` for GitHub and authentik" below, on one condition: the check. After
   the sync, sign in to the owner page and talk to a resident while running
   `hubble observe --namespace ukubi-game --verdict DROPPED`. A dropped flow to a needed host means revert this
@@ -203,7 +205,7 @@ egress to Patroni and Postgres.
 - **The shared `universal-auth-credentials` identity** for the game's secrets: it reads every project it is granted.
 - **A plain NetworkPolicy:** it cannot carry DNS here (`host` identity), nor name the API server.
 - **`toFQDNs` for GitHub and authentik.** Untested on this cluster. The searxng notes record DNS-rule pitfalls, so
-  it stays out until it is proven; the world rule is port 443 only.
+  it stays out until it is proven; the world rule is port 443 only. (Superseded by amendment 2.)
 
 ## Consequences
 
