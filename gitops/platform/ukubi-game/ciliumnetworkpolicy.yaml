@@ -135,29 +135,20 @@ spec:
         - ports:
             - port: "4318"
               protocol: TCP
-    # GitHub's API, and the sign-in's OIDC discovery and code exchange
-    # (authentik.bnei.dev resolves to Cloudflare from a pod, silverbullet's
-    # note). HTTPS only; the LAN and the pod and Service CIDRs are excepted.
-    - toCIDRSet:
-        - cidr: 0.0.0.0/0
-          except:
-            - 10.0.0.0/8
-            - 172.16.0.0/12
-            - 192.168.0.0/16
-      toPorts:
-        - ports:
-            - port: "443"
-              protocol: TCP
-    # The owner pod's voice: Anthropic's API, HTTPS only. toFQDNs needs the DNS
-    # proxy to see the lookup, hence rules.dns on both DNS rules above. It is
-    # matchPattern "*", never a matchName: bootstrap-test-notes.md (2026-10-18)
-    # records that a matchName-only rule on host:53 REFUSES every other name,
-    # which would break GitHub, authentik and the in-cluster lookups.
-    # No precedent here (ADR-0069 kept toFQDNs out as untested).
-    # UNVERIFIED: while the world rule above exists this line grants nothing
-    # new; it pins the intent for the day that rule narrows. Verify with
-    # hubble observe --namespace ukubi-game, and that GitHub still resolves.
+    # The world, by name only (ADR-0069 amendment 2): GitHub's API, the
+    # sign-in's OIDC discovery and code exchange (authentik.bnei.dev resolves
+    # to Cloudflare from a pod, silverbullet's note), and the owner pod's
+    # voice (Anthropic's API). HTTPS only. It replaces the 0.0.0.0/0:443 rule.
+    # toFQDNs needs the DNS proxy to see the lookup, hence rules.dns on both
+    # DNS rules above. It is matchPattern "*", never a matchName:
+    # bootstrap-test-notes.md (2026-10-18) records that a matchName-only rule
+    # on host:53 REFUSES every other name, which would break the in-cluster
+    # lookups. UNVERIFIED until the amendment's check passes: after the sync,
+    # sign in to the owner page and talk to a resident while running
+    # hubble observe --namespace ukubi-game --verdict DROPPED.
     - toFQDNs:
+        - matchName: api.github.com
+        - matchName: authentik.bnei.dev
         - matchName: api.anthropic.com
       toPorts:
         - ports:

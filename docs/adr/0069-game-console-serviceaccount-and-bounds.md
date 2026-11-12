@@ -170,6 +170,18 @@ egress to Patroni and Postgres.
   OTLP/HTTP 4318 to namespace `monitoring`, for the traces receiver stacked on this change.
 - Patroni's credential in the game's project is still undecided: 8008's `/health` and `/cluster` reads need none.
 
+**Amendment 2 (2026-11-12, narrowing the world rule), proposed with infra-bootstrap PR `security/game-egress-fqdn`:**
+- Egress (`ukubi-game-egress-lock`): the `0.0.0.0/0:443` world rule (RFC 1918 excepted) is replaced by `toFQDNs`
+  matchName `api.github.com`, `authentik.bnei.dev` and `api.anthropic.com`, port 443 only. The DNS rules keep
+  `rules.dns: matchPattern "*"`, which the DNS proxy needs.
+- Why: a review of the cluster's exposure found the world rule lets a compromised game pod reach any host on 443.
+  A 30-minute hubble watch of `ukubi-game` on 2026-11-12 saw no world traffic and no external DNS lookup while idle;
+  the game reaches authentik and mountain by in-cluster names. The sign-in and the voice were not exercised.
+- This supersedes the rejected option "`toFQDNs` for GitHub and authentik" below, on one condition: the check. After
+  the sync, sign in to the owner page and talk to a resident while running
+  `hubble observe --namespace ukubi-game --verdict DROPPED`. A dropped flow to a needed host means revert this
+  amendment's policy change, not widen the list by guess.
+
 ## Rejected options
 
 - **cluster-admin**, or any write verb in part 1. Writes are parts 2 to 4, each bounded on its own.
