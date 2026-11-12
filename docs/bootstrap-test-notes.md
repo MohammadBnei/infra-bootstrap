@@ -5048,3 +5048,55 @@ answered with empty output while pg01 was fine; use the LAN IPs.
 **Takeaway.** Pigsty's vendored code and this cluster have drifted; any
 `pgsql.yml` run against `pg-proxmox` needs a render-to-temp diff first
 (the guard used here: render, mask secrets, diff against `/pg/conf`).
+
+## 2026-11-12 — Prometheus TSDB corrupt again, now on `k8s-worker-02`
+
+**Symptom.** `PrometheusTSDBCompactionsFailing` fired: 7 failed compactions
+since 03:00 UTC (`prometheus_tsdb_compactions_failed_total`,
+`checkpoint_creations_failed_total` = 6). Each 2h head block still writes, then
+WAL truncation fails:
+
+    WAL truncation in Compact: create checkpoint: read segments: corruption in
+    segment /prometheus/wal/00000643 at 45252608: unexpected checksum ...
+
+and at 11:00 the merge of the last three blocks failed with
+`cannot populate chunk 7022246 from block 01M778WRFCNF8N4K8RTDC467B9: checksum
+mismatch`. That block was written at 07:00 the same day. Ingestion and queries
+still work, but the WAL is no longer truncated, and the larger blocks are never
+built.
+
+**Cause: unproven, but it fits the known `.165` RAM fault.** Since #315,
+Prometheus has run on `k8s-worker-02` (server1), and it still does. Its PVC is
+`longhorn` with 2 replicas, though. The instance-manager log from the
+2026-11-10 21:41 rebuild, after `k8s-worker-02` rebooted, shows the second
+replica at `10.233.65.2`, which is `k8s-worker-01`'s pod CIDR, on `.165`. The
+v1 engine reads round-robin across healthy replicas, and every write passes
+through the replica process's memory on that host. So #315 moved the process
+off `.165`, but not its data.
+
+Two things point at a replica serving bad data rather than damage left on disk
+by the reboot:
+
+- The same segment fails at different offsets on different reads: `00000643`
+  failed at offset 26577526 at 03:00, then read past that offset and failed at
+  45252608 at 07:00 and 09:00. Bytes on disk don't change between reads; reads
+  served by different replicas can differ.
+- The damage is new. Segments `00000645`/`00000647` and block `01M778WR…` were
+  all written after the reboot.
+
+Not verified: the executor SA cannot read `volumes`/`replicas.longhorn.io` or
+exec into the pod, so replica placement and state were not read directly.
+
+**Unrelated, seen during triage.** On `k8s-cp-03`, `engine-image-ei-27581b25`
+had 1867 restarts and `longhorn-csi-plugin` 1604. Longhorn metrics are not
+scraped at all (no `longhorn_*` series), so a degraded volume would not alert.
+
+**Open.**
+1. memtest86+ on a drained `.165`. This is still the real fix, and the
+   workaround below is the third one that leans on it.
+2. Recovery (human): read the volume's replicas in the Longhorn UI. Delete the
+   `k8s-worker-01` replica so it rebuilds elsewhere, or set node scheduling off
+   for `k8s-worker-01`/`k8s-cp-01`. Then move `wal/`, `chunks_head/` and block
+   `01M778WRFCNF8N4K8RTDC467B9` aside (as on 2026-10-16) and delete the pod.
+3. Decide whether Longhorn should place any replica on `.165` until the RAM is
+   cleared. That choice covers every volume, not only Prometheus.
