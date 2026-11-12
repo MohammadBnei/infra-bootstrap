@@ -16,6 +16,10 @@
 # hosts.yaml itself is terraform-generated and must not be hand-edited, which
 # is why this lives in host_vars — see its header.
 node_labels:
+  # The physical PVE host this VM runs on. Longhorn reads it as the replica zone,
+  # so replica-zone anti-affinity (gitops/platform/values/longhorn/values.yaml)
+  # spreads copies across machines, not just VMs (#414).
+  topology.kubernetes.io/zone: bnei
   agent-fleet.dev/session-node: "true"
   # Satisfies the nvidia-device-plugin chart's OWN default nodeAffinity, which
   # requires one of three NFD-style labels

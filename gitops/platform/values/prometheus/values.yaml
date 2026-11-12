@@ -224,3 +224,83 @@ nodeExporter:
 # kube-state-metrics
 kubeStateMetrics:
   enabled: true
+
+# Longhorn's alerts, on the metrics its chart's ServiceMonitor now exposes
+# (gitops/platform/values/longhorn/values.yaml, metrics.serviceMonitor). Here,
+# not in the Longhorn chart: 1.9 ships no PrometheusRule template.
+# longhorn_volume_robustness: 0 unknown, 1 healthy, 2 degraded, 3 faulted.
+additionalPrometheusRulesMap:
+  longhorn:
+    groups:
+      - name: longhorn
+        rules:
+          - alert: LonghornVolumeDegraded
+            # 30m rides out the rebuild queue after a node reboot (2 per node);
+            # the Prometheus volume sat degraded for days unnoticed (#414).
+            expr: max by (volume, pvc, pvc_namespace) (longhorn_volume_robustness) == 2
+            for: 30m
+            labels:
+              severity: warning
+            annotations:
+              summary: "Longhorn volume {{ $labels.volume }} ({{ $labels.pvc_namespace }}/{{ $labels.pvc }}) degraded for 30m"
+              description: >-
+                Fewer healthy replicas than the volume wants. Check
+                `kubectl -n longhorn-system get replicas.longhorn.io -l longhornvolume={{ $labels.volume }}`
+                and the engine's rebuildStatus; a rebuild looping over a slow
+                link shows as repeated FailedRebuilding events.
+          - alert: LonghornVolumeFaulted
+            expr: max by (volume, pvc, pvc_namespace) (longhorn_volume_robustness) == 3
+            for: 2m
+            labels:
+              severity: critical
+            annotations:
+              summary: "Longhorn volume {{ $labels.volume }} ({{ $labels.pvc_namespace }}/{{ $labels.pvc }}) faulted"
+              description: >-
+                No usable replica: the workload on this volume is down. Restore
+                from the Garage backup (s3://k8s-longhorn-backup) if no replica
+                can be salvaged.
+          - alert: LonghornNodeNotReady
+            # Each longhorn-manager exports only its own node's status, so this
+            # catches a live manager reporting its node unready. A dead node
+            # takes its manager with it: LonghornManagerDown covers that.
+            expr: max by (node) (longhorn_node_status{condition="ready"}) == 0
+            for: 10m
+            labels:
+              severity: warning
+            annotations:
+              summary: "Longhorn node {{ $labels.node }} not ready for 10m"
+              description: >-
+                Its replicas are unavailable, so every volume with a copy there is
+                degraded. Check the node and its longhorn-manager pod.
+          - alert: LonghornDiskAlmostFull
+            # Longhorn stops scheduling at 25% free (storage-minimal-available-
+            # percentage); warn before that. local-path's Prometheus volume
+            # shares worker-02's disk and shows here too.
+            expr: max by (node, disk) (longhorn_disk_usage_bytes / longhorn_disk_capacity_bytes) > 0.7
+            for: 30m
+            labels:
+              severity: warning
+            annotations:
+              summary: "Longhorn disk {{ $labels.disk }} on {{ $labels.node }} is {{ $value | humanizePercentage }} full"
+          - alert: LonghornManagerDown
+            # A manager that is not scraped drops its node's volume, node and disk
+            # series, so every alert above goes silent for that node.
+            expr: up{job="longhorn-backend"} == 0
+            for: 10m
+            labels:
+              severity: warning
+            annotations:
+              summary: "longhorn-manager {{ $labels.pod }} not scraped for 10m"
+              description: >-
+                Its node is likely down or cut off. Its volumes' alerts are blind
+                until it is back; check the node and `kubectl -n longhorn-system get pods -o wide`.
+          - alert: LonghornMetricsAbsent
+            # Without this, losing the whole scrape looks the same as every
+            # volume being healthy.
+            expr: absent(up{job="longhorn-backend"})
+            for: 15m
+            labels:
+              severity: warning
+            annotations:
+              summary: "No Longhorn scrape target for 15m"
+              description: The longhorn-manager ServiceMonitor is gone or matches nothing; Longhorn alerts are blind.

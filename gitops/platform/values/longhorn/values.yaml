@@ -30,6 +30,15 @@
 # LONGHORN_S3_ACCESS_KEY/_SECRET in docs/secrets.md). Configured either way —
 # backups just won't succeed until the Garage LXC bring-up phase is done.
 
+# Longhorn's own metrics, scraped by kube-prometheus-stack (its
+# serviceMonitorSelectorNilUsesHelmValues: false adopts this ServiceMonitor).
+# The alerts on them are in gitops/platform/values/prometheus/values.yaml
+# (additionalPrometheusRulesMap.longhorn). Before this, a degraded volume never
+# alerted: the Prometheus volume sat degraded for days in November 2026.
+metrics:
+  serviceMonitor:
+    enabled: true
+
 persistence:
   defaultClass: true
   defaultClassReplicaCount: 3
@@ -47,6 +56,41 @@ defaultSettings:
   # time. At 0 (the old value) every hop leaves the volumes on the previous
   # engine image until each one is upgraded by hand.
   concurrentAutomaticEngineUpgradePerNodeLimit: 1
+  # The settings below are tuned to this cluster's hardware (#414, 2026-11-12):
+  # 3 PVE hosts, 5 VMs, two VMs each on `.165` and server1, non-ECC RAM on
+  # `.165`, and links that have dropped to 100Mb.
+  #
+  # A dead node used to keep its pods' RWO volumes attached, so their
+  # replacements sat on `Multi-Attach error` until a human force-detached them
+  # (Traefik, 2026-11-10, 30+ min of no ingress). This deletes those pods so
+  # Longhorn detaches the volume and the replacement can attach elsewhere. It
+  # fires after ~6 min of continuous NotReady (40s grace + the 300s eviction
+  # toleration), so it assumes a node that long gone is dead, not partitioned:
+  # a partitioned node's old engine could still be writing. Shorter flaps do
+  # nothing.
+  nodeDownPodDeletionPolicy: delete-both-statefulset-and-deployment-pod
+  # Two rebuilds per node at a time, down from five: five in parallel over a slow
+  # or flaky link all time out together and restart (the loop on 2026-11-10).
+  # Not one: cp-01 holds a copy of every volume, and one at a time keeps several
+  # degraded for well over LonghornVolumeDegraded's window after a reboot.
+  concurrentReplicaRebuildPerNodeLimit: 2
+  # Full checksums of every snapshot file, weekly, so a replica holding flipped
+  # bits is found and rebuilt at the next check. fast-check only rehashes files
+  # whose mtime changed, which misses corruption at rest. Limits: the volume-head
+  # (writes since the last snapshot) is never hashed, and a flip in engine memory
+  # corrupts every replica alike, which no cross-replica check can see. Weekly,
+  # not daily: a full pass re-reads ~60G on `.165`'s one disk. Sunday 05:00 UTC
+  # stays clear of the 03:00 daily backup.
+  snapshotDataIntegrity: enabled
+  snapshotDataIntegrityCronjob: "0 5 * * 0"
+  # Zones are the physical hosts (topology.kubernetes.io/zone, set from
+  # inventory/ukubi/host_vars). Soft, because `.161` (k8s-cp-03) has only 41G of
+  # Longhorn disk against about 65G of volumes, so one copy per host does not fit
+  # yet. Soft still prefers distinct hosts for every new or rebuilt replica.
+  # replicaAutoBalance stays disabled: turned on now it would push ~50G of
+  # rebalancing into cp-03, which has ~20G to give, in no controlled order.
+  # Grow cp-03's Longhorn disk (terraform/k8s-vms.tf) first.
+  replicaZoneSoftAntiAffinity: true
 
 # Moved out of defaultSettings at chart 1.8 (2026-10-16): 1.8 replaced the
 # backup-target global settings with the default BackupTarget CR, which this

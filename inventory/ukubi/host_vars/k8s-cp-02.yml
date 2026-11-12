@@ -1,0 +1,7 @@
+# hosts.yaml is terraform-generated and must not be hand-edited, so node
+# labels live here (see k8s-worker-01.yml). This VM runs on the PVE host .200.
+node_labels:
+  # The physical PVE host this VM runs on. Longhorn reads it as the replica zone,
+  # so replica-zone anti-affinity (gitops/platform/values/longhorn/values.yaml)
+  # spreads copies across machines, not just VMs (#414).
+  topology.kubernetes.io/zone: server1
