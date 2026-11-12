@@ -147,6 +147,8 @@ grafana:
 prometheus:
   prometheusSpec:
     retention: 7d
+    # local-path enforces no quota on the 20Gi below, so cap the TSDB itself.
+    retentionSize: 18GB
     # Chart default only watches ServiceMonitors carrying this release's own
     # label, so externally-created ones (e.g. argo-cd's own chart, enabled in
     # argocd-application.yaml) are invisible otherwise. Single-tenant homelab
@@ -163,9 +165,14 @@ prometheus:
     # is still gated by a PR, but it is no longer gated by a label — read the
     # rules a chart ships before flipping its switch.
     ruleSelectorNilUsesHelmValues: false
+    # On worker-02's local disk, not Longhorn (#414): a Longhorn replica on
+    # `.165` fed it corrupt reads three times (2026-10-11, 10-16, 11-12), and
+    # metrics do not need three network copies. The volume pins the pod to
+    # k8s-worker-02; if server1 is down, Prometheus waits for it.
     storageSpec:
       volumeClaimTemplate:
         spec:
+          storageClassName: local-path
           accessModes: ["ReadWriteOnce"]
           resources:
             requests:
@@ -199,21 +206,13 @@ prometheus:
     # pages, points at one faulty data lane in `.165`'s non-ECC RAM, not at
     # random flips. The 2026-09-22 head-chunk `checksum mismatch` above was on
     # the same node. This keeps Prometheus off `.165`; it does not fix the RAM.
-    # Run memtest86+ on a drained `.165`, and drop this once that host is clean.
-    # Preferred, not required, toward k8s-worker-02: the control planes have
-    # only ~3GB, but still beat not scheduling at all if server1 is down.
+    # Run memtest86+ on a drained `.165`. Now required on k8s-worker-02, where
+    # its local-path volume lives (storageSpec above).
     affinity:
       nodeAffinity:
         requiredDuringSchedulingIgnoredDuringExecution:
           nodeSelectorTerms:
             - matchExpressions:
-                - key: kubernetes.io/hostname
-                  operator: NotIn
-                  values: [k8s-cp-01, k8s-worker-01]
-        preferredDuringSchedulingIgnoredDuringExecution:
-          - weight: 100
-            preference:
-              matchExpressions:
                 - key: kubernetes.io/hostname
                   operator: In
                   values: [k8s-worker-02]

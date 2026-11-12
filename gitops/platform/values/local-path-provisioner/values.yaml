@@ -2,10 +2,10 @@
 # Chart: https://charts.containeroo.ch  name: local-path-provisioner
 #
 # No longer the default StorageClass — Longhorn took that role over
-# (ADR-0002, gitops/platform/values/longhorn/values.yaml). Left
-# installed, non-default, as a fallback: whether to remove it outright
-# once Longhorn is verified healthy is still open (ADR-0019,
-# docs/adr/0019-longhorn-rollout-specifics.md).
+# (ADR-0002, gitops/platform/values/longhorn/values.yaml). Left installed,
+# non-default (ADR-0019, docs/adr/0019-longhorn-rollout-specifics.md), and
+# no longer only a fallback: Prometheus's TSDB lives on it (#414), so
+# removing it would orphan that volume.
 # hostPath-backed, per-node, not shared across nodes.
 
 storageClass:
@@ -15,6 +15,14 @@ storageClass:
   reclaimPolicy: Delete
 
 nodePathMap:
+  # Prometheus lives here (#414): on worker-02's Longhorn disk, since its 61G root
+  # disk has ~16G free. Longhorn does not count this as scheduled storage, but its
+  # storage-minimal-available-percentage (25%) check reads real free space, so it
+  # still sees it. Known gap: if the scsi1 mount is missing at boot, the hostPath
+  # (DirectoryOrCreate) lands on the root disk and Prometheus starts empty there.
+  - node: k8s-worker-02
+    paths:
+      - /var/lib/longhorn/local-path-provisioner
   - node: DEFAULT_PATH_FOR_NON_LISTED_NODES
     paths:
       - /opt/local-path-provisioner
