@@ -15,6 +15,12 @@ storageClass:
   reclaimPolicy: Delete
 
 nodePathMap:
+  # Prometheus lives here (#414): on worker-02's Longhorn disk, since its 61G root
+  # disk has ~16G free. Longhorn does not count this usage when it schedules
+  # replicas; its storage-minimal-available-percentage (25%) still guards the disk.
+  - node: k8s-worker-02
+    paths:
+      - /var/lib/longhorn/local-path-provisioner
   - node: DEFAULT_PATH_FOR_NON_LISTED_NODES
     paths:
       - /opt/local-path-provisioner
