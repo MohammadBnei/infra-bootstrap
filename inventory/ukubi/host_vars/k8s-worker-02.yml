@@ -2,4 +2,8 @@
 # allocatable — the smaller of the two, and the one that carries every session
 # alone whenever `.165` is booted into Windows (k8s-worker-01 lives there).
 node_labels:
+  # The physical PVE host this VM runs on. Longhorn reads it as the replica zone,
+  # so replica-zone anti-affinity (gitops/platform/values/longhorn/values.yaml)
+  # spreads copies across machines, not just VMs (#414).
+  topology.kubernetes.io/zone: server1
   agent-fleet.dev/session-node: "true"
